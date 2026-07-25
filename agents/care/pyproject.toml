@@ -1,0 +1,23 @@
+[project]
+name = "neura-agent-care"
+version = "0.1.0"
+description = "NEURA-CARE — customer experience agent (order status, product Q&A, policy)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "neura-agent-core",
+    "neura-commerce",
+    "neura-domain",
+    "neura-core",
+]
+
+# How the system discovers this agent at startup. No central registry file to
+# edit — see docs/architecture/tenancy-and-packaging.md §2.5.
+[project.entry-points."neura.agents"]
+care = "neura_agent_care:MANIFEST"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neura_agent_care"]

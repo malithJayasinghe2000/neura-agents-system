@@ -1,0 +1,168 @@
+[project]
+name = "neura-workspace"
+version = "0.1.0"
+description = "Neura Agents — platform-agnostic AI agents for commerce (workspace root)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "neura-core",
+    "neura-domain",
+    "neura-llm",
+    "neura-commerce",
+    "neura-adapters",
+    "neura-agent-core",
+    "neura-agent-care",
+    "neura-api",
+]
+
+[tool.uv.workspace]
+members = ["packages/*", "apps/*", "agents/*"]
+
+[tool.uv.sources]
+neura-core = { workspace = true }
+neura-domain = { workspace = true }
+neura-llm = { workspace = true }
+neura-commerce = { workspace = true }
+neura-adapters = { workspace = true }
+neura-agent-core = { workspace = true }
+neura-agent-care = { workspace = true }
+neura-api = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+    "mypy>=1.14",
+    "import-linter>=2.1",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "httpx>=0.28",
+    "pre-commit>=4.0",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ruff — lint + format
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["packages/*/src", "apps/*/src", "agents/*/src"]
+# Documentation contains illustrative code blocks that are deliberately not
+# runnable (placeholder model names, elided bodies). Formatting them adds churn
+# and would imply they are real code.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "TID",       # tidy-imports
+    "RUF",       # ruff-specific
+    "ASYNC",     # async correctness
+    "S",         # bandit (security)
+    "DTZ",       # naive datetimes — see AGENTS.md, timestamps are always UTC-aware
+]
+ignore = [
+    "E501",      # line length is handled by the formatter
+    "B008",      # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is the point of a test; S105/S106 flag the fake secrets tests need in
+# order to prove that real ones are redacted and rejected.
+"tests/**" = ["S101", "S105", "S106"]
+"evals/**" = ["S101", "S105", "S106"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "neura_core", "neura_domain", "neura_llm", "neura_commerce",
+    "neura_adapters", "neura_agent_core", "neura_agent_care", "neura_api",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# mypy — strict on packages/, the boundaries are only real if they typecheck
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+mypy_path = [
+    "packages/neura-core/src", "packages/neura-domain/src",
+    "packages/neura-llm/src", "packages/neura-commerce/src",
+    "packages/neura-adapters/src", "packages/neura-agent-core/src",
+    "agents/care/src", "apps/neura-api/src",
+]
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "evals.*"]
+strict = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# pytest
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+markers = [
+    "integration: requires Postgres/Redis (docker compose up)",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# import-linter — enforces the layering in docs/architecture/overview.md §4.1.
+# The boundaries are only real because this runs in CI.
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.importlinter]
+root_packages = [
+    "neura_core", "neura_domain", "neura_llm", "neura_commerce",
+    "neura_adapters", "neura_agent_core", "neura_agent_care", "neura_api",
+]
+# Required so the domain-purity contract can forbid third-party packages
+# (sqlalchemy, httpx, fastapi, ...) and not only our own.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers point downward only"
+type = "layers"
+layers = [
+    "neura_api",
+    "neura_agent_care",
+    "neura_agent_core : neura_commerce : neura_adapters",
+    "neura_llm",
+    "neura_domain",
+    "neura_core",
+]
+
+[[tool.importlinter.contracts]]
+name = "neura_domain is pure (no I/O, no infrastructure)"
+type = "forbidden"
+source_modules = ["neura_domain"]
+forbidden_modules = [
+    "neura_core", "neura_llm", "neura_commerce", "neura_adapters",
+    "neura_agent_core", "neura_api",
+    "sqlalchemy", "httpx", "redis", "fastapi", "asyncpg",
+]
+
+[[tool.importlinter.contracts]]
+name = "neura_commerce must not know any adapter exists"
+type = "forbidden"
+source_modules = ["neura_commerce"]
+forbidden_modules = ["neura_adapters"]
+
+[[tool.importlinter.contracts]]
+name = "neura_agent_core must never learn an agent's name"
+type = "forbidden"
+source_modules = ["neura_agent_core"]
+forbidden_modules = ["neura_agent_care"]
+
+[[tool.importlinter.contracts]]
+name = "Agents are independent — they never import each other"
+type = "independence"
+modules = ["neura_agent_care"]

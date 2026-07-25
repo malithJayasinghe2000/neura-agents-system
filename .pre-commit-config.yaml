@@ -1,0 +1,35 @@
+# Fast checks only. Anything slow belongs in CI — a slow pre-commit hook is a
+# hook people learn to skip with --no-verify.
+#
+#   uv run pre-commit install
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      # Committing a real .env would leak credentials irreversibly — git history
+      # is forever, even after a delete.
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: platform-independence
+        name: platform independence (no platform names outside adapters)
+        entry: uv run python scripts/check_platform_independence.py
+        language: system
+        pass_filenames: false
+        types: [python]

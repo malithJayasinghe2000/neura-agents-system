@@ -1,0 +1,20 @@
+[project]
+name = "neura-commerce"
+version = "0.1.0"
+description = "Commerce adapter contract, capability negotiation, and sync engine"
+requires-python = ">=3.12,<3.13"
+
+# Must NOT depend on neura-adapters. The core must never know which platforms
+# exist — that is the entire platform-independence claim. Enforced by CI.
+dependencies = [
+    "neura-core",
+    "neura-domain",
+    "httpx>=0.28",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neura_commerce"]

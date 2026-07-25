@@ -1,0 +1,52 @@
+# Local development stack.
+#
+# Two datastores, matching docs/architecture/overview.md §3. Vectors live inside
+# PostgreSQL via pgvector rather than in a separate service (ADR-0005), which is
+# one fewer thing to run, back up and secure — and it matters for sovereign
+# deployments where every extra service is a support burden.
+#
+#   make dev    starts these and runs the API with reload
+
+name: neura
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: neura-postgres
+    environment:
+      POSTGRES_USER: neura
+      POSTGRES_PASSWORD: neura
+      POSTGRES_DB: neura
+    ports:
+      # Deliberately NOT the default 5432 — developers commonly already run a
+      # Postgres, and a dev stack that fights the host for a port is a bad
+      # first-run experience. Override with POSTGRES_PORT if 5433 is taken too.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/docker/init-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neura -d neura"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: neura-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:

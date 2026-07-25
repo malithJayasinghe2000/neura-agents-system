@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.11.32"
+
+jobs:
+  quality:
+    name: Lint · Types · Architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - run: uv sync --frozen
+        name: Install dependencies
+
+      - run: uv run ruff check .
+        name: Lint
+
+      - run: uv run ruff format --check .
+        name: Format check
+
+      - run: uv run mypy packages apps agents
+        name: Typecheck (strict)
+
+      # The two checks that keep the architecture honest. Boundaries that are
+      # not mechanically enforced erode within weeks.
+      - run: uv run lint-imports
+        name: Layering contracts
+
+      - run: uv run python scripts/check_platform_independence.py
+        name: Platform independence
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: neura
+          POSTGRES_PASSWORD: neura
+          POSTGRES_DB: neura
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U neura"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - run: uv sync --frozen
+        name: Install dependencies
+
+      - run: uv run pytest tests/unit -v
+        name: Unit tests
+
+      - run: uv run pytest tests/integration -v -m integration
+        name: Integration tests
+        if: hashFiles('tests/integration/test_*.py') != ''
+        env:
+          DATABASE_URL: postgresql+asyncpg://neura:neura@localhost:5432/neura
+          REDIS_URL: redis://localhost:6379/0
+
+  # Agent evaluations gate behaviour changes: prompts, graph nodes, tools and
+  # model config. Wired up in Phase 1 milestone 1.4.
+  # See docs/architecture/evaluation-strategy.md §4.
+  evaluate:
+    name: Agent evaluations
+    runs-on: ubuntu-latest
+    if: false # enable with milestone 1.4
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "make eval"
