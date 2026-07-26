@@ -1,22 +1,85 @@
 """neura-llm — LLM provider abstraction by model role.
 
-NOT YET IMPLEMENTED. Phase 1 milestone 1.3 — see docs/roadmap.md.
+Callers ask for a **role**, never a model:
 
-Design is settled in docs/architecture/llm-abstraction.md and
-docs/architecture/adr/0006-llm-model-roles.md. When implementing, the shape is:
+    client = LLMClient.from_role_map_name("ollama-dev")
+    response = await client.chat(ModelRole.REASONER, request)
 
-* ``LLMProvider`` protocol: ``chat``, ``chat_stream``, ``chat_structured``, ``embed``
-* Roles — ROUTER, REASONER, GUARD, EMBEDDER, SUMMARIZER — bound to
-  ``(provider, model, params)`` in config. Application code names roles, never models.
-* Every provider driven through the OpenAI-compatible surface (Ollama exposes /v1),
-  so there is one code path rather than a branch per vendor.
-* Capability-tiered structured output with a bounded repair loop.
-* Usage and cost metered on every call, including local calls at cost 0.
+Model identifiers live in exactly one place: the role map. Swapping the map
+swaps every model at once — development on local Ollama, production on a cloud
+API, or a hybrid keeping the cheap high-volume roles local — with no code change
+(docs/architecture/adr/0006-llm-model-roles.md).
 
-Two traps that must be handled, not discovered:
-* local 8-9B models are materially worse at multi-step tool calling;
-* embedding dimensions differ between models and are NOT interchangeable —
-  mixing them degrades retrieval silently. Namespace by (tenant, embedding_model).
+Every provider is driven through the OpenAI-compatible interface, which Ollama
+also exposes, so there is one code path rather than a branch per vendor. A
+provider we never planned for plugs in as a base URL and a model name.
 """
 
-__all__: list[str] = []
+from neura_llm.capabilities import LLMCapability, capabilities_for
+from neura_llm.client import LLMClient
+from neura_llm.errors import (
+    EmbeddingDimensionMismatchError,
+    LLMError,
+    ProviderRateLimitedError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+    RoleNotConfiguredError,
+    StructuredOutputError,
+)
+from neura_llm.pricing import PriceTable
+from neura_llm.provider import LLMProvider, OpenAICompatibleProvider
+from neura_llm.roles import (
+    BUILTIN_ROLE_MAPS,
+    ModelRole,
+    ProviderConfig,
+    RoleConfig,
+    RoleMap,
+    load_role_map,
+)
+from neura_llm.structured import StructuredResult, generate_structured
+from neura_llm.types import (
+    ChatChunk,
+    ChatRequest,
+    ChatResponse,
+    EmbeddingResult,
+    FinishReason,
+    Message,
+    Role,
+    ToolCall,
+    ToolSpec,
+    Usage,
+)
+
+__all__ = [
+    "BUILTIN_ROLE_MAPS",
+    "ChatChunk",
+    "ChatRequest",
+    "ChatResponse",
+    "EmbeddingDimensionMismatchError",
+    "EmbeddingResult",
+    "FinishReason",
+    "LLMCapability",
+    "LLMClient",
+    "LLMError",
+    "LLMProvider",
+    "Message",
+    "ModelRole",
+    "OpenAICompatibleProvider",
+    "PriceTable",
+    "ProviderConfig",
+    "ProviderRateLimitedError",
+    "ProviderTimeoutError",
+    "ProviderUnavailableError",
+    "Role",
+    "RoleConfig",
+    "RoleMap",
+    "RoleNotConfiguredError",
+    "StructuredOutputError",
+    "StructuredResult",
+    "ToolCall",
+    "ToolSpec",
+    "Usage",
+    "capabilities_for",
+    "generate_structured",
+    "load_role_map",
+]

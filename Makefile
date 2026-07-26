@@ -64,6 +64,9 @@ test-integration:  ## Integration tests (requires: make up)
 
 test: test-unit  ## Alias for the fast test suite
 
+llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
+	uv run python scripts/llm_smoke_test.py
+
 eval:  ## Agent evaluation suite (needs EVAL_JUDGE_* for trustworthy scores)
 	uv run neura-eval
 

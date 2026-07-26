@@ -5,8 +5,10 @@
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
 **Last updated:** 2026-07-26
-**Current phase:** Phase 1 — milestones 1.1, 1.2 and 1.4 complete
-**Next action:** Milestone 1.3 (`neura-llm` provider abstraction)
+**Current phase:** Phase 1 — milestones 1.1, 1.2, 1.3, 1.4 complete
+**Next action:** Milestone 1.5 (`neura-commerce` adapter contract) → 1.6 Generic Commerce Interface
+
+> New here? Read [GETTING_STARTED.md](GETTING_STARTED.md) — set up and run everything in ~15 minutes.
 
 ---
 
@@ -25,9 +27,11 @@
 | Guardrails | ✅ ruff · mypy strict · 5 import-linter contracts · platform-independence check |
 | Eval harness | ✅ datasets · judge · metrics · runner · reports · CLI (`make eval`) |
 | Golden datasets | ⚠️ 19 cases across 3 datasets — **all synthetic**, so not validation |
-| Tests | ✅ 63 unit tests passing |
+| `neura-llm` | ✅ roles · 4 role maps · provider · structured output + repair · cost metering |
+| LLM verified live | ✅ `make llm-check` green against real Ollama — chat, schema, embeddings, tool calling |
+| Tests | ✅ 92 unit tests passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
-| `neura-llm` / `neura-commerce` / `neura-agent-core` / adapters | ❌ documented stubs only |
+| `neura-commerce` / `neura-agent-core` / adapters | ❌ documented stubs only |
 | Migrations | ❌ Alembic declared, not configured |
 | Design partner | ❌ None — top project risk |
 
@@ -42,9 +46,9 @@
 ```
 1.1  Workspace bootstrap        ✅ done
 1.2  neura-domain + neura-core  ✅ done
-1.3  neura-llm                  ⬜   ← NEXT
+1.3  neura-llm                  ✅ done  (verified live against Ollama)
 1.4  Eval harness               ✅ done  (deliberately before the agent)
-1.5  neura-commerce             ⬜
+1.5  neura-commerce             ⬜   ← NEXT
 1.6  Generic Commerce Interface ⬜
 1.7  Bagisto bridge             ⬜
 1.8  Sync engine                ⬜
@@ -123,6 +127,16 @@ Verified 2026-07-25 on this machine:
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-26 — LLM layer (milestone 1.3) + setup guide
+- **`neura-llm` built**: `ModelRole` (router/reasoner/guard/embedder/summarizer), four role maps (`ollama-dev`, `cloud-prod`, `hybrid`, `sovereign`), one OpenAI-compatible provider covering local and cloud alike, capability-tiered structured output with a bounded repair loop, per-call usage and cost metering.
+- **Verified live against real Ollama** (`make llm-check`): chat ✔ · structured output ✔ (first attempt) · embeddings ✔ 768-dim, similarity 0.651 · tool calling ✔ (`qwen3.5:9b` correctly called `get_order_status(order_ref="1001")`).
+- **Confirmed:** Ollama's constrained decoding puts local models on the *strongest* structured-output tier. That is what makes the zero-budget development path genuinely viable rather than a compromise.
+- Observation worth keeping: `llama3.2:3b` extracted the order reference as `"Order 1001"` rather than `"1001"`. Harmless here, but exactly the sort of small-model sloppiness the eval suite exists to quantify.
+- Embedding dimension mismatch now **raises** rather than degrading silently — the trap that otherwise produces no error, only worse answers.
+- **Wrote [GETTING_STARTED.md](GETTING_STARTED.md)** — full setup and verification walkthrough, plus exactly what shop data will be needed at milestone 1.7.
+- 92 tests pass; lint, mypy strict (36 files), 5 contracts, platform check all green.
+- **Next:** milestone 1.5 (`neura-commerce` adapter contract), then 1.6 (Generic Commerce Interface + conformance CLI).
 
 ### 2026-07-26 — Eval harness (milestone 1.4, built before the agent)
 - **`evals/` package**: YAML dataset schema, judge, metrics, runner, reports, `neura-eval` CLI. `make eval`, `make eval-fast`, `make eval-one D=<name>`.
