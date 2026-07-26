@@ -118,6 +118,36 @@ class TestRoleMaps:
         with pytest.raises(RoleNotConfiguredError, match="unknown provider"):
             role_map.resolve(ModelRole.ROUTER)
 
+    def test_unconfigured_provider_names_the_missing_env_vars(self) -> None:
+        """A missing setting must read as a setup problem, not a network failure.
+
+        Without this, an unset CLOUD_LLM_BASE_URL surfaced much later as
+        "could not reach cloud at ." — technically true, useless to act on.
+        """
+        role_map = RoleMap(
+            name="cloud-ish",
+            providers={"cloud": ProviderConfig(name="cloud", base_url="")},
+            roles={ModelRole.REASONER: RoleConfig(provider="cloud", model="")},
+        )
+        with pytest.raises(RoleNotConfiguredError) as exc:
+            role_map.resolve(ModelRole.REASONER)
+
+        missing = exc.value.details["missing_env_vars"]
+        assert "CLOUD_LLM_BASE_URL" in missing
+        assert "CLOUD_MODEL_REASONER" in missing
+        # And it must point somewhere useful.
+        assert "ollama-dev" in exc.value.message
+
+    def test_fully_configured_provider_resolves(self) -> None:
+        role_map = RoleMap(
+            name="ok",
+            providers={"cloud": ProviderConfig(name="cloud", base_url="https://x/v1")},
+            roles={ModelRole.REASONER: RoleConfig(provider="cloud", model="a-model")},
+        )
+        provider, config = role_map.resolve(ModelRole.REASONER)
+        assert provider.base_url == "https://x/v1"
+        assert config.model == "a-model"
+
 
 class TestCapabilities:
     def test_ollama_declares_schema_mode(self) -> None:

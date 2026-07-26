@@ -67,6 +67,9 @@ test: test-unit  ## Alias for the fast test suite
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py
 
+judge-check:  ## Verify the eval judge is reachable AND catches a hallucination
+	uv run neura-eval --check-judge
+
 eval:  ## Agent evaluation suite (needs EVAL_JUDGE_* for trustworthy scores)
 	uv run neura-eval
 

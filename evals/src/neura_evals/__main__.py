@@ -46,10 +46,72 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit non-zero if any gate is not met. Used by CI.",
     )
+    parser.add_argument(
+        "--check-judge",
+        action="store_true",
+        help="Verify the judge is reachable and actually catches a hallucination, then exit.",
+    )
     return parser
 
 
+async def _check_judge() -> int:
+    """Prove the judge works before trusting a single score from it.
+
+    Deliberately tests both directions. A judge that passes everything looks
+    identical to a working one until it silently approves a hallucination.
+    """
+    from rich.console import Console
+
+    console = Console()
+    config = judge_from_env()
+    judge = Judge(config)
+
+    console.print()
+    console.print(f"  model   {config.model}")
+    console.print(f"  trust   {config.trust.value}")
+    if not config.is_trusted:
+        console.print(
+            "\n  [yellow]⚠ This judge is not trusted. Scores from it are directional at best.[/]"
+            "\n    Set EVAL_JUDGE_BASE_URL / EVAL_JUDGE_API_KEY / EVAL_JUDGE_MODEL.[/]"
+        )
+    console.print()
+
+    evidence = "Order 1001: status=shipped, shipped_at=2026-07-22, tracking=TRK123456"
+
+    grounded = await judge.grounded(
+        reply="Your order #1001 shipped on 22 July, tracking TRK123456.", evidence=evidence
+    )
+    hallucinated = await judge.grounded(
+        reply="Your order arrived yesterday and your neighbour signed for it.", evidence=evidence
+    )
+
+    ok_true = grounded.passed
+    ok_false = not hallucinated.passed
+
+    console.print(
+        f"  {'[green]✔[/]' if ok_true else '[red]✘[/]'} accepts a grounded reply    "
+        f"score={grounded.score}"
+    )
+    console.print(
+        f"  {'[green]✔[/]' if ok_false else '[red]✘[/]'} rejects a hallucination     "
+        f"score={hallucinated.score}"
+    )
+    if hallucinated.unsupported_claims:
+        for claim in hallucinated.unsupported_claims:
+            console.print(f"        caught: {claim!r}")
+
+    console.print()
+    if ok_true and ok_false:
+        console.print("[green]  Judge is working.[/]\n")
+        return 0
+    console.print("[red]  Judge is not behaving correctly — do not trust its scores.[/]\n")
+    return 1
+
+
 async def _run(args: argparse.Namespace) -> int:
+    if args.check_judge:
+        return await _check_judge()
+
     directory = args.datasets_dir or dataset_dir()
     if not directory.exists():
         print(f"No dataset directory at {directory}", file=sys.stderr)

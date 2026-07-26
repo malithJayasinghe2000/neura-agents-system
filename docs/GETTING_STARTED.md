@@ -267,7 +267,7 @@ make test              # unit tests
 
 `make eval` uses an AI to grade the agent's answers. By default it falls back to a local model and **labels every score untrustworthy** — because a weak model grading a weak model produces numbers that look real and aren't.
 
-To fix that, get a free Gemini key at **https://aistudio.google.com/apikey** and uncomment three lines in `.env`:
+To fix that, get a free Gemini key at **https://aistudio.google.com/apikey** and uncomment **exactly these three lines** in `.env` — nothing else is needed:
 
 ```bash
 EVAL_JUDGE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
@@ -275,7 +275,47 @@ EVAL_JUDGE_API_KEY=your-key-here
 EVAL_JUDGE_MODEL=gemini-2.5-flash
 ```
 
+Then check it actually works:
+
+```bash
+make judge-check
+```
+
+```
+  model   gemini-2.5-flash
+  trust   trusted
+
+  ✔ accepts a grounded reply    score=1.0
+  ✔ rejects a hallucination     score=0.0
+        caught: 'Your order arrived yesterday'
+        caught: 'your neighbour signed for it'
+
+  Judge is working.
+```
+
+It deliberately tests **both directions**. A judge that approves everything looks identical to a working one — right up until it silently passes a hallucination.
+
 > ⚠ Free tiers may use what you send them to improve their products. That's fine now — every test case is invented. It stops being fine once real customer conversations are in the test data. Move to a paid tier before that day.
+
+### The `CLOUD_*` variables are a different thing
+
+Easy to confuse, so to be clear:
+
+| Setting | What it's for | Needed now? |
+|:--|:--|:--|
+| `EVAL_JUDGE_*` | The AI that **grades** answers during testing | Optional, recommended |
+| `CLOUD_LLM_*` and `CLOUD_MODEL_*` | The AI that **runs the agent** in production | No — only for `hybrid` or `cloud-prod` |
+
+If you switch `NEURA_ROLE_MAP` to `hybrid` without setting the `CLOUD_*` variables, you'll see this — which is correct behaviour, not a bug:
+
+```
+  reasoner    not configured    CLOUD_LLM_BASE_URL, CLOUD_MODEL_REASONER
+
+  2 role(s) not configured: reasoner, summarizer
+  Set the variables above in .env, or use --role-map ollama-dev to stay fully local.
+```
+
+Your same Gemini key works for those too, if you want to try `hybrid` later.
 
 ---
 

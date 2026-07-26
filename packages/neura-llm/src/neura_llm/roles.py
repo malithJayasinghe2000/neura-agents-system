@@ -102,6 +102,31 @@ class RoleMap(BaseModel):
                 f"{role_config.provider!r} in role map {self.name!r}.",
                 details={"provider": role_config.provider, "role_map": self.name},
             )
+
+        # Catch an unconfigured provider HERE, with an actionable message, rather
+        # than letting it surface later as a confusing "could not reach cloud at ."
+        # network error. A missing environment variable is a setup problem, and
+        # should read like one.
+        missing = [
+            name
+            for name, value in (
+                (f"{role_config.provider.upper()}_LLM_BASE_URL", provider.base_url),
+                (f"CLOUD_MODEL_{role.value.upper()}", role_config.model),
+            )
+            if not value
+        ]
+        if missing:
+            raise RoleNotConfiguredError(
+                f"Role map {self.name!r} needs configuration for role {role.value!r}: "
+                f"{', '.join(missing)} not set. "
+                f"See .env.example, or use NEURA_ROLE_MAP=ollama-dev to stay fully local.",
+                details={
+                    "role": role.value,
+                    "role_map": self.name,
+                    "missing_env_vars": missing,
+                },
+            )
+
         return provider, role_config
 
     def capabilities(self, role: ModelRole) -> frozenset[LLMCapability]:

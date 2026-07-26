@@ -27,6 +27,7 @@ from neura_llm import (
     LLMClient,
     Message,
     ModelRole,
+    RoleNotConfiguredError,
     ToolSpec,
 )
 
@@ -135,11 +136,28 @@ async def run(role_map: str) -> int:
     table.add_column("role")
     table.add_column("model")
     table.add_column("capabilities")
+
+    unconfigured: list[str] = []
     for role in ModelRole:
-        caps = sorted(c.value for c in client.capabilities(role))
-        table.add_row(role.value, client.model_for(role), ", ".join(caps) or "—")
+        try:
+            caps = sorted(c.value for c in client.capabilities(role))
+            table.add_row(role.value, client.model_for(role), ", ".join(caps) or "—")
+        except RoleNotConfiguredError as exc:
+            unconfigured.append(role.value)
+            missing = ", ".join(exc.details.get("missing_env_vars", []))
+            table.add_row(role.value, "[red]not configured[/]", f"[red]{missing or exc.message}[/]")
+
     console.print()
     console.print(table)
+
+    if unconfigured:
+        console.print(
+            f"\n[yellow]  {len(unconfigured)} role(s) not configured: "
+            f"{', '.join(unconfigured)}[/]"
+            "\n  Set the variables above in .env, or use --role-map ollama-dev "
+            "to stay fully local.\n"
+        )
+        return 1
     console.print(
         f"\n  fully local: {'yes' if client.is_fully_local else 'no'}"
         f"  ·  embedding namespace: {client.embedding_model}\n"
