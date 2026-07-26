@@ -224,6 +224,13 @@ Not in the MVP, because writing three native adapters before the abstraction has
 
 ### 4.2 Tier 2 — The Generic Commerce Interface *(the MVP path)*
 
+> **Built (milestone 1.6).** The specification is published at
+> [docs/spec/generic-commerce-interface-v1.md](../spec/generic-commerce-interface-v1.md)
+> with a generated [OpenAPI 3.1 document](../spec/openapi.json). `GenericAdapter`
+> and the `neura-conformance` CLI live in `packages/neura-adapters/generic/`.
+> Where this section and the spec differ, **the spec is current** — it is
+> generated from the code.
+
 **A published specification any store can implement.** This is the answer to *"and newly created systems too"* — a developer building a store today implements nine endpoints and is integrated, with no adapter written by us and no waiting for us.
 
 **The contract:**

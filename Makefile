@@ -5,7 +5,8 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration eval check migrate revision clean reset
+        test-integration eval check migrate revision clean reset \
+        spec conformance conformance-self-test llm-check judge-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -63,6 +64,15 @@ test-integration:  ## Integration tests (requires: make up)
 	uv run pytest tests/integration -m integration
 
 test: test-unit  ## Alias for the fast test suite
+
+spec:  ## Regenerate the published OpenAPI document from the canonical models
+	uv run python scripts/generate_spec.py
+
+conformance:  ## Check a store: make conformance URL=https://shop/neura/v1 TOKEN=xxx
+	uv run neura-conformance --url $(URL) --token $(TOKEN)
+
+conformance-self-test:  ## Verify the conformance tool itself against a built-in store
+	uv run neura-conformance --self-test
 
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py

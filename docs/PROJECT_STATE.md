@@ -5,8 +5,8 @@
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
 **Last updated:** 2026-07-26
-**Current phase:** Phase 1 — milestones 1.1, 1.2, 1.3, 1.4, 1.5 complete
-**Next action:** Milestone 1.6 (Generic Commerce Interface spec + `GenericAdapter` + conformance CLI)
+**Current phase:** Phase 1 — milestones 1.1–1.6 complete, 1.7 complete
+**Next action:** Milestone 1.8 (sync engine: backfill, incremental, event-driven, reconciliation)
 
 > New here? Read [GETTING_STARTED.md](GETTING_STARTED.md) — set up and run everything in ~15 minutes.
 
@@ -16,7 +16,7 @@
 
 | | Status |
 |:--|:--|
-| Documentation | ✅ Complete — 29 files |
+| Documentation | ✅ Complete — 29 files, plus the published interface spec in `docs/spec/` |
 | Git repository | ✅ Initialised, branch `main` |
 | Workspace | ✅ uv workspace, Python 3.12.13, 8 packages |
 | `neura-core` | ✅ config · logging+redaction · errors · context · telemetry · crypto · ids |
@@ -24,16 +24,20 @@
 | `neura-api` | ✅ boots; `/v1/health`, `/v1/health/ready`, `/v1/agents`; error contract |
 | Agent discovery | ✅ entry points working — `care` manifest discovered at startup |
 | Infrastructure | ✅ docker-compose: Postgres 16 + pgvector, Redis 7 — both healthy |
-| Guardrails | ✅ ruff · mypy strict · 5 import-linter contracts · platform-independence check |
+| Guardrails | ✅ ruff · mypy strict · 6 import-linter contracts · platform-independence check |
 | Eval harness | ✅ datasets · judge · metrics · runner · reports · CLI (`make eval`) |
 | Golden datasets | ⚠️ 19 cases across 3 datasets — **all synthetic**, so not validation |
 | `neura-llm` | ✅ roles · 4 role maps · provider · structured output + repair · cost metering |
 | LLM verified live | ✅ `make llm-check` green against real Ollama — chat, schema, embeddings, tool calling |
 | `neura-commerce` | ✅ adapter Protocol · capability negotiation · cursor pagination · identity map · registry · conformance suite |
+| `neura-adapters` | ✅ `GenericAdapter` (Tier 2) · signed webhooks · reference store · `neura-conformance` CLI |
+| Published spec | ✅ [docs/spec/](spec/) — OpenAPI 3.1 **generated** from the canonical models; drift fails a test |
+| Real platform conformed | ✅ **the abstraction is proven** — a real commerce platform passes conformance with 0 failures, 0 warnings, via a bridge in its own repo. Zero core changes here. |
+| Signed webhooks | ✅ verified end to end over Redis: shop signs → client verifies; forged, unsigned and replayed requests all rejected |
 | Platform independence | ✅ proved: a fictional platform integrates with **zero** core changes |
-| Tests | ✅ 137 unit tests passing |
+| Tests | ✅ 191 unit tests passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
-| `neura-agent-core` / adapters | ❌ documented stubs only |
+| `neura-agent-core` | ❌ documented stub only |
 | Sync engine | ❌ milestone 1.8 |
 | Migrations | ❌ Alembic declared, not configured |
 | Design partner | ❌ None — top project risk |
@@ -52,9 +56,9 @@
 1.3  neura-llm                  ✅ done  (verified live against Ollama)
 1.4  Eval harness               ✅ done  (deliberately before the agent)
 1.5  neura-commerce             ✅ done
-1.6  Generic Commerce Interface ⬜   ← NEXT
-1.7  Bagisto bridge             ⬜
-1.8  Sync engine                ⬜
+1.6  Generic Commerce Interface ✅ done
+1.7  Bagisto bridge             ✅ done
+1.8  Sync engine                ⬜   ← NEXT
 1.9  RAG                        ⬜
 1.10 Agent runtime              ⬜
 1.11 CARE agent                 ⬜
@@ -66,7 +70,7 @@
 1.17 Deploy                     ⬜
 ```
 
-**Exit criteria (none met):** conformance passes · zero platform names outside adapters · evals green on both role maps · injection resistance 1.00 · cross-tenant isolation passes · end-to-end conversation working · shadow mode producing graded conversations.
+**Exit criteria (two met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅. Remaining: conformance passes · zero platform names outside adapters · evals green on both role maps · injection resistance 1.00 · cross-tenant isolation passes · end-to-end conversation working · shadow mode producing graded conversations.
 
 ---
 
@@ -130,6 +134,39 @@ Verified 2026-07-25 on this machine:
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-26 — The bridge, and the abstraction proven (milestone 1.7)
+
+- **A real commerce platform now conforms to the published spec** — `neura-conformance` reports 20 passed, 0 failed, 0 warnings against `http://bagisto.test/neura/v1`. Everything Phase 1 has claimed so far rested on this being possible; it is no longer a claim.
+- **Zero changes to any package here.** The bridge is ~700 lines of PHP living in the shop's own repository (`packages/Webkul/NeuraBridge/`), modifying no core file of the shop either. The generic client read the real catalogue, real orders, real customers and real policy text without knowing what platform it was talking to.
+- **Webhooks verified end to end**, over a real Redis queue with a worker: the shop signs, our client verifies. A forged signature, a missing signature and a correctly-signed two-hour-old replay were all rejected. Dispatch cost the shopper's request 41ms — the queue exists precisely so it is not the HTTP call.
+- **The shop's `QUEUE_CONNECTION` moved `sync` → `redis`.** On `sync`, a webhook would have been sent inside the shopper's checkout request, so a slow response from us would stall a purchase. Deliberately done at the *end* of this milestone, once a worker existed to drain the queue.
+
+**Three findings, each a decision that will recur on every platform:**
+
+- **A canonical status a real platform cannot produce.** The shop records dispatch and never hears back from the carrier, so nothing it sends can honestly mean `delivered`. Its bridge maps a completed order to `shipped` and stops. This is the canonical model being *right* — it has a state this platform lacks — and the bridge admitting a gap rather than the vocabulary bending to fit. `docs/spec/…-v1.md §9` records it for the next implementer.
+- **The PHP empty-map trap.** `json_encode([])` emits a JSON array whether a list or a map was meant, so `options: {}` arrives as `options: []`. Most commerce platforms are PHP, so refusing it would fail a majority of correct implementations over a field nobody set. The client now accepts an empty list where a map belongs — an empty one only; a non-empty list is still a mapping error. Spec §4 warns implementers.
+- **Placeholder policy text is worse than none.** The platform ships CMS pages reading literally "Return Policy Page Content". The bridge served them correctly and the agent would have quoted them at customers. Real returns, refund, shipping, payment and customer-service text now seeded — a bug in the *data* that no amount of correct code would have caught.
+
+- Two bugs the real platform found immediately: `$page->locale` throws on this platform's translatable models (its `locale` is a relationship), and an order line's `product_type` holds a model class, not the product's type string — the latter 500'd the shop's own admin until fixed.
+- **Decided: the bridge is not an authorisation boundary.** Filtering orders by email returns that email's orders to any caller holding the shop token. Proving the person in the chat window *is* that customer stays in the policy engine, where it is written once and can be audited, rather than separately in every shop's bridge.
+- 193 tests pass; mypy strict on 54 files; 6 contracts kept; platform check green.
+- **Next:** milestone 1.8 — the sync engine. There is now a real store to sync *from*, so backfill, incremental polling, webhook-driven refresh and nightly reconciliation can all be tested against data that was not written to make them pass.
+
+### 2026-07-26 — Generic Commerce Interface (milestone 1.6)
+
+- **The spec is published and machine-readable**: [docs/spec/generic-commerce-interface-v1.md](spec/generic-commerce-interface-v1.md) plus an OpenAPI 3.1 document **generated from the canonical Pydantic models** (`make spec`). A unit test fails if the committed document and the models disagree — a published contract that drifts is worse than none, because a merchant's developer implements the stale version and finds out in production.
+- **`GenericAdapter` built** in `neura-adapters`: the nine read endpoints, opaque cursors, `updated_since`, error translation, and identity-map-backed stable ids.
+- **`neura-conformance` CLI ships**: the shared adapter suite plus HTTP-level checks the adapter abstraction necessarily hides — anonymous access, wrong-token access, 404 semantics, `spec_version`, `limit`, and raw status vocabulary.
+- **The check that matters most is a security one.** `auth.required` asks a store what it serves to a caller with no token; a `200` there means its customer list is public. No agent behaviour is involved, and nothing else in the suite could see it.
+- **Decided: the spec is the canonical model minus provenance.** A store cannot know its `tenant_id` or our `neura_id`, and must not be trusted to assert `platform` — those five fields are stripped from anything received and filled in by us. A test proves a store claiming another tenant's id cannot make it stick.
+- **Decided: tolerate, then report.** Unknown fields are dropped (kept in `raw`), unknown capabilities ignored, unknown statuses degraded to `UNKNOWN` — but each is a conformance warning. A contract that breaks when the other side adds a field cannot be evolved; one that silently absorbs bad data produces "unknown" answers to customers. So the runtime is lenient and the tool is loud. `additionalProperties: false` is stripped from the published schemas to match.
+- **A design defect in 1.5 surfaced, as ADR-0009 predicted it would.** `CommerceAdapter.capabilities` was a `ClassVar`; one `GenericAdapter` class serves many stores that implement different subsets, so capabilities are per *store* and are read from `/health`. The protocol now declares an instance attribute — a class attribute still satisfies it, so native adapters are unaffected.
+- **A real bug the fixtures caught:** an entity payload with no `external_id` made the identity map raise a bare `ValueError` out of the adapter. Now an `AdapterMappingError`. Nothing but an `AdapterError` may escape an adapter, or every caller above has to know which exceptions each integration can throw.
+- Two more from writing the checks: `--self-test` runs the tool against a correct store **and** a deliberately broken one, and the status-vocabulary checks stay silent rather than green when the endpoint 500s — a check that passes because the endpoint is broken reads as reassurance.
+- **Import contracts strengthened:** adapters now sit in their own layer above `neura_commerce`, and a new contract forbids every other package from importing `neura_adapters` at all. Six contracts, all kept.
+- 191 tests pass; mypy strict on 54 files; platform check green.
+- **Next:** milestone 1.7 — the bridge that makes the test store conform to this spec. That is the first time the spec meets a real platform, and the first honest test of whether the canonical model is right.
 
 ### 2026-07-26 — Commerce adapter layer (milestone 1.5)
 - **`neura-commerce` built**: `CommerceAdapter` Protocol, capability negotiation, cursor pagination, identity map, adapter registry, and a shared conformance suite.

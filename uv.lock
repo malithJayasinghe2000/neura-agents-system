@@ -584,6 +584,7 @@ dependencies = [
     { name = "neura-commerce" },
     { name = "neura-core" },
     { name = "neura-domain" },
+    { name = "rich" },
 ]
 
 [package.metadata]
@@ -592,6 +593,7 @@ requires-dist = [
     { name = "neura-commerce", editable = "packages/neura-commerce" },
     { name = "neura-core", editable = "packages/neura-core" },
     { name = "neura-domain", editable = "packages/neura-domain" },
+    { name = "rich", specifier = ">=13.9" },
 ]
 
 [[package]]

@@ -50,10 +50,17 @@ class CommerceAdapter(Protocol):
     #: Platform identifier, e.g. "generic". Appears on every entity's provenance.
     platform: ClassVar[str]
 
-    #: What this platform can do. Drives which tools the agent is given, so an
+    #: What this store can do. Drives which tools the agent is given, so an
     #: unsupported operation becomes structurally impossible rather than merely
     #: discouraged.
-    capabilities: ClassVar[frozenset[Capability]]
+    #:
+    #: Per *instance*, not per class. A native adapter knows its platform's
+    #: capabilities at import time and can declare them on the class, but one
+    #: adapter class also serves many stores that implement different subsets of
+    #: a published interface — those are discovered from the store itself, by
+    #: ``health()``. A class attribute satisfies this either way; an instance
+    #: attribute is what makes the second case expressible at all.
+    capabilities: frozenset[Capability]
 
     # ── Connectivity ─────────────────────────────────────────────────────────
 

@@ -22,8 +22,8 @@ Estimates below are in **focused work-weeks** (≈30 productive hours). Part-tim
 | 1.3 | **LLM layer** | `neura-llm`: provider abstraction, model roles, capability tiers, structured output + repair loop, usage metering | 1.5w |
 | 1.4 | **Eval harness** | `evals/` runner, first golden dataset, `make eval`, `make eval-compare` | 1w |
 | 1.5 | **Commerce layer** | `neura-commerce`: adapter Protocol, capabilities, registry, entity mapping | 1w |
-| 1.6 | **Generic Interface** | OpenAPI spec + `GenericAdapter` + `neura-conformance` CLI | 1.5w |
-| 1.7 | **Bagisto bridge** | Laravel package in the Bagisto install conforming to the spec; Redis queue; webhooks | 1.5w |
+| 1.6 | **Generic Interface** ✅ | OpenAPI spec + `GenericAdapter` + `neura-conformance` CLI | 1.5w |
+| 1.7 | **Bagisto bridge** ✅ | Laravel package in the Bagisto install conforming to the spec; Redis queue; webhooks | 1.5w |
 | 1.8 | **Sync engine** | Backfill, incremental, event-driven, reconciliation, per-tenant rate limiting | 1.5w |
 | 1.9 | **RAG** | Chunking, embedding, pgvector with `(tenant, model)` namespacing, retrieval, reindex path | 1w |
 | 1.10 | **Agent runtime** | `neura-agent-core`: graph, tool registry, policy engine, memory tiers | 2w |

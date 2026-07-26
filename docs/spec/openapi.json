@@ -1,0 +1,1768 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Neura Generic Commerce Interface",
+    "version": "1.0",
+    "summary": "Read-only commerce data, in one canonical vocabulary.",
+    "description": "The read-only interface a store implements to be served by a Neura agent.\n\nNine GET endpoints and one outbound webhook. No writes, no state, no OAuth\nflow — a bearer token issued per store and JSON that matches these schemas.\n\nThree rules worth reading before implementing:\n\n* **Cursor pagination, never offsets.** `next_cursor` is opaque to us; encode\n  whatever you like in it. `null` means the last page. Offsets skip and repeat\n  rows while a merchant edits the catalogue mid-crawl.\n* **`updated_since` is optional.** If you cannot filter by timestamp, omit\n  `sync.incremental` from the capabilities in `/health` and you will be\n  full-synced instead. Declaring it and ignoring it is the one failure mode\n  that is worse than not supporting it.\n* **Status fields use the canonical vocabulary in these schemas**, not your\n  platform's. An unrecognised value is read as `unknown`, which is a worse\n  answer for your customers than a mapped one.\n\nRun `neura-conformance --url <your endpoint> --token <token>` to check an\nimplementation. It reports exactly what is wrong and where."
+  },
+  "servers": [
+    {
+      "url": "https://{store}/neura/v1",
+      "variables": {
+        "store": {
+          "default": "store.example.com"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "connectivity"
+    },
+    {
+      "name": "catalogue"
+    },
+    {
+      "name": "orders"
+    },
+    {
+      "name": "customers"
+    },
+    {
+      "name": "content"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": [
+          "connectivity"
+        ],
+        "summary": "Reachability and declared capabilities",
+        "description": "The only endpoint that may be served without a token, so a merchant can verify their deployment before credentials exist.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "operationId": "listProducts",
+        "tags": [
+          "catalogue"
+        ],
+        "summary": "List or search products",
+        "description": "With ?q= this is search (capability product.search); without it, the bulk crawl used for catalogue sync (product.read). An empty result is an empty page, never an error.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from a previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "updated_since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "ISO-8601, UTC. Only entities changed at or after this instant. Honour it or do not declare sync.incremental."
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "BCP-47. Ignore it if your store is single-locale."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category_ids",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated category ids."
+          },
+          {
+            "name": "in_stock_only",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/{id}": {
+      "get": {
+        "operationId": "getProduct",
+        "tags": [
+          "catalogue"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The store's own id, as a string. Ids are never integers on the wire."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such entity. Required, not optional: a 200 with an empty body is indistinguishable from a real record and produces confident wrong answers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories": {
+      "get": {
+        "operationId": "listCategories",
+        "tags": [
+          "catalogue"
+        ],
+        "summary": "The full category tree",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Category"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inventory": {
+      "get": {
+        "operationId": "getInventory",
+        "tags": [
+          "catalogue"
+        ],
+        "parameters": [
+          {
+            "name": "variant_ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated variant ids. Unknown ids are omitted from the response rather than erroring."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InventoryLevel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "tags": [
+          "orders"
+        ],
+        "summary": "List, sync or look up orders",
+        "description": "Filtered by email, phone, customer_id or order_number this answers 'where is my order' (capability order.search); unfiltered it is the sync crawl (order.read).\n\nThis endpoint returns whatever matches the filter. It is **not** an authorisation boundary — verifying that the person asking owns the order happens on our side, before the question is ever asked.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from a previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "updated_since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "ISO-8601, UTC. Only entities changed at or after this instant. Honour it or do not declare sync.incremental."
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "BCP-47. Ignore it if your store is single-locale."
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "phone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order_number",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{id}": {
+      "get": {
+        "operationId": "getOrder",
+        "tags": [
+          "orders"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The store's own id, as a string. Ids are never integers on the wire."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such entity. Required, not optional: a 200 with an empty body is indistinguishable from a real record and produces confident wrong answers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/customers/{id}": {
+      "get": {
+        "operationId": "getCustomer",
+        "tags": [
+          "customers"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The store's own id, as a string. Ids are never integers on the wire."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such entity. Required, not optional: a 200 with an empty body is indistinguishable from a real record and produces confident wrong answers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/policies": {
+      "get": {
+        "operationId": "listPolicies",
+        "tags": [
+          "content"
+        ],
+        "summary": "Returns, shipping and warranty text",
+        "description": "The text the agent grounds answers in. Without it, every returns question becomes an escalation to a human.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Policy"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "entityChanged": {
+      "post": {
+        "operationId": "entityChanged",
+        "summary": "Tell us something changed (capability events.realtime)",
+        "description": "Send the notification, not the data — we fetch the entity ourselves. A notification carrying no customer data cannot leak one if it is mis-delivered, and we always read the current state rather than a payload that may have arrived out of order.\n\nSign `<timestamp>.<raw body>` with HMAC-SHA256 and the shared secret. Send the hex digest as `X-Neura-Signature: sha256=<digest>` and the same unix timestamp as `X-Neura-Timestamp`. Requests older than five minutes are rejected, so an intercepted request cannot be replayed indefinitely.\n\nDeliver at least once and expect us to be idempotent; duplicates are safe, silence is not.",
+        "parameters": [
+          {
+            "name": "X-Neura-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^sha256=[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "X-Neura-Timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEvent"
+              },
+              "examples": {
+                "customer_updated": {
+                  "value": {
+                    "event": "customer.updated",
+                    "external_id": "1001",
+                    "occurred_at": "2026-07-26T10:00:00Z"
+                  }
+                },
+                "order_created": {
+                  "value": {
+                    "event": "order.created",
+                    "external_id": "1001",
+                    "occurred_at": "2026-07-26T10:00:00Z"
+                  }
+                },
+                "order_updated": {
+                  "value": {
+                    "event": "order.updated",
+                    "external_id": "1001",
+                    "occurred_at": "2026-07-26T10:00:00Z"
+                  }
+                },
+                "policy_updated": {
+                  "value": {
+                    "event": "policy.updated",
+                    "external_id": "1001",
+                    "occurred_at": "2026-07-26T10:00:00Z"
+                  }
+                },
+                "product_created": {
+                  "value": {
+                    "event": "product.created",
+                    "external_id": "1001",
+                    "occurred_at": "2026-07-26T10:00:00Z"
+                  }
+                },
+                "product_deleted": {
+                  "value": {
+                    "event": "product.deleted",
+                    "external_id": "1001",
+                    "occurred_at": "2026-07-26T10:00:00Z"
+                  }
+                },
+                "product_updated": {
+                  "value": {
+                    "event": "product.updated",
+                    "external_id": "1001",
+                    "occurred_at": "2026-07-26T10:00:00Z"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted. Retry on any other status."
+          },
+          "401": {
+            "description": "Signature missing, wrong, or too old."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A token we issue per store. Every endpoint except /health must reject a request without it — these endpoints expose customer and order data."
+      }
+    },
+    "schemas": {
+      "Money": {
+        "description": "An amount in a single currency.",
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "Money",
+        "type": "object"
+      },
+      "ProductStatus": {
+        "enum": [
+          "active",
+          "draft",
+          "archived",
+          "unknown"
+        ],
+        "title": "ProductStatus",
+        "type": "string"
+      },
+      "ProductVariant": {
+        "description": "A specific buyable configuration — the SKU level.",
+        "properties": {
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sku"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "compare_at_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "options": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "e.g. {\"size\": \"L\", \"colour\": \"blue\"}",
+            "title": "Options",
+            "type": "object"
+          },
+          "in_stock": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "In Stock"
+          },
+          "stock_quantity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stock Quantity"
+          },
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Barcode"
+          }
+        },
+        "required": [
+          "external_id"
+        ],
+        "title": "ProductVariant",
+        "type": "object"
+      },
+      "Product": {
+        "properties": {
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProductStatus",
+            "default": "unknown"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Image Urls",
+            "type": "array"
+          },
+          "category_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Category Ids",
+            "type": "array"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/ProductVariant"
+            },
+            "title": "Variants",
+            "type": "array"
+          },
+          "price_range_min": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "price_range_max": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Locale"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "external_id",
+          "title"
+        ],
+        "title": "Product",
+        "type": "object"
+      },
+      "Address": {
+        "properties": {
+          "line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Line1"
+          },
+          "line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Line2"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "City"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Region"
+          },
+          "postcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Postcode"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-3166 alpha-2 where known",
+            "title": "Country"
+          }
+        },
+        "title": "Address",
+        "type": "object"
+      },
+      "Fulfillment": {
+        "properties": {
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "External Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FulfillmentStatus",
+            "default": "unknown"
+          },
+          "carrier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Carrier"
+          },
+          "tracking_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tracking Number"
+          },
+          "tracking_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tracking Url"
+          },
+          "shipped_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shipped At"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Delivered At"
+          },
+          "estimated_delivery": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Estimated Delivery"
+          }
+        },
+        "title": "Fulfillment",
+        "type": "object"
+      },
+      "FulfillmentStatus": {
+        "enum": [
+          "unfulfilled",
+          "partial",
+          "fulfilled",
+          "returned",
+          "unknown"
+        ],
+        "title": "FulfillmentStatus",
+        "type": "string"
+      },
+      "OrderLine": {
+        "properties": {
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "External Id"
+          },
+          "product_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product External Id"
+          },
+          "variant_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Variant External Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sku"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "title",
+          "quantity"
+        ],
+        "title": "OrderLine",
+        "type": "object"
+      },
+      "OrderStatus": {
+        "enum": [
+          "pending",
+          "processing",
+          "shipped",
+          "delivered",
+          "cancelled",
+          "refunded",
+          "unknown"
+        ],
+        "title": "OrderStatus",
+        "type": "string"
+      },
+      "PaymentStatus": {
+        "enum": [
+          "pending",
+          "authorized",
+          "paid",
+          "partially_refunded",
+          "refunded",
+          "failed",
+          "unknown"
+        ],
+        "title": "PaymentStatus",
+        "type": "string"
+      },
+      "Order": {
+        "properties": {
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "order_number": {
+            "description": "What the customer calls it, e.g. '1001'",
+            "title": "Order Number",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus",
+            "default": "unknown"
+          },
+          "payment_status": {
+            "$ref": "#/components/schemas/PaymentStatus",
+            "default": "unknown"
+          },
+          "fulfillment_status": {
+            "$ref": "#/components/schemas/FulfillmentStatus",
+            "default": "unknown"
+          },
+          "customer_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Customer External Id"
+          },
+          "customer_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Customer Email"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "fulfillments": {
+            "items": {
+              "$ref": "#/components/schemas/Fulfillment"
+            },
+            "title": "Fulfillments",
+            "type": "array"
+          },
+          "subtotal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "shipping_total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "tax_total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "shipping_address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "billing_address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "placed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Placed At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Updated At"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cancelled At"
+          }
+        },
+        "required": [
+          "external_id",
+          "order_number"
+        ],
+        "title": "Order",
+        "type": "object"
+      },
+      "Customer": {
+        "properties": {
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phone"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Name"
+          },
+          "default_address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "order_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Order Count"
+          },
+          "total_spent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Created At"
+          }
+        },
+        "required": [
+          "external_id"
+        ],
+        "title": "Customer",
+        "type": "object"
+      },
+      "Category": {
+        "properties": {
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent External Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          }
+        },
+        "required": [
+          "external_id",
+          "name"
+        ],
+        "title": "Category",
+        "type": "object"
+      },
+      "PolicyKind": {
+        "enum": [
+          "returns",
+          "shipping",
+          "warranty",
+          "privacy",
+          "terms",
+          "other"
+        ],
+        "title": "PolicyKind",
+        "type": "string"
+      },
+      "Policy": {
+        "description": "A returns/shipping/warranty policy, as text the agent can ground answers in.",
+        "properties": {
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PolicyKind"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Locale"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "external_id",
+          "kind",
+          "title",
+          "body"
+        ],
+        "title": "Policy",
+        "type": "object"
+      },
+      "InventoryLevel": {
+        "properties": {
+          "variant_external_id": {
+            "title": "Variant External Id",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "in_stock": {
+            "title": "In Stock",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "variant_external_id",
+          "quantity",
+          "in_stock"
+        ],
+        "title": "InventoryLevel",
+        "type": "object"
+      },
+      "WebhookEvent": {
+        "description": "What a store sends. No entity data — only what changed.",
+        "properties": {
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Occurred At"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          }
+        },
+        "required": [
+          "event",
+          "external_id"
+        ],
+        "title": "WebhookEvent",
+        "type": "object"
+      },
+      "Health": {
+        "type": "object",
+        "required": [
+          "status",
+          "spec_version",
+          "platform",
+          "capabilities"
+        ],
+        "properties": {
+          "status": {
+            "const": "ok",
+            "description": "Anything else is read as unhealthy."
+          },
+          "spec_version": {
+            "type": "string",
+            "examples": [
+              "1.0"
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "description": "Your store's own name. Informational."
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "cart.read",
+                "cart.write",
+                "category.read",
+                "customer.read",
+                "events.realtime",
+                "inventory.read",
+                "order.read",
+                "order.search",
+                "order.write",
+                "policy.read",
+                "product.read",
+                "product.search",
+                "sync.incremental"
+              ]
+            },
+            "description": "What this store supports. This single field decides which tools the agent is given, so under-declaring costs a feature while over-declaring produces tools that fail in front of a customer. Declare only what you have implemented."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque. Pass it back as ?cursor= to get the next page; null on the last page. It must advance — a cursor that repeats makes sync loop forever."
+          }
+        }
+      },
+      "OrderPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Order"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque. Pass it back as ?cursor= to get the next page; null on the last page. It must advance — a cursor that repeats makes sync loop forever."
+          }
+        }
+      }
+    }
+  }
+}

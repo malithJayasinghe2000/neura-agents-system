@@ -136,11 +136,25 @@ type = "layers"
 layers = [
     "neura_api",
     "neura_agent_care",
-    "neura_agent_core : neura_commerce : neura_adapters",
+    "neura_agent_core",
+    "neura_adapters",
+    "neura_commerce",
     "neura_llm",
     "neura_domain",
     "neura_core",
 ]
+
+# An adapter sits ABOVE the contract it implements: it imports the protocol,
+# never the reverse. The two contracts below make that one-way, so "the core
+# does not know which platforms exist" is a build failure rather than a habit.
+[[tool.importlinter.contracts]]
+name = "Only the adapter package knows a commerce platform exists"
+type = "forbidden"
+source_modules = [
+    "neura_core", "neura_domain", "neura_llm", "neura_commerce",
+    "neura_agent_core", "neura_agent_care", "neura_api",
+]
+forbidden_modules = ["neura_adapters"]
 
 [[tool.importlinter.contracts]]
 name = "neura_domain is pure (no I/O, no infrastructure)"

@@ -8,7 +8,18 @@ dependencies = [
     "neura-domain",
     "neura-commerce",
     "httpx>=0.28",
+    "rich>=13.9",
 ]
+
+# The tool a merchant's developer runs against their own store. Shipped from
+# this package because it checks one specific integration tier, not the
+# platform-neutral adapter contract.
+[project.scripts]
+neura-conformance = "neura_adapters.generic.cli:main"
+
+# How the core finds adapters without importing them (neura_commerce.registry).
+[project.entry-points."neura.adapters"]
+generic = "neura_adapters.generic:GenericAdapter"
 
 [build-system]
 requires = ["hatchling"]
