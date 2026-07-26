@@ -175,6 +175,16 @@ The one thing that must not happen is declaring `sync.incremental` and ignoring
 the parameter: we would then sync only what we already had and silently never
 notice the rest. The conformance tool checks for exactly this.
 
+**Verify your timestamp against a real edit before declaring this.** On many
+platforms an entity's `updated_at` column does not move when the thing a
+customer cares about changes — a product's name, description or price often
+lives in a separate table, leaving the product row untouched. A timestamp that
+looks correct in the schema and is never bumped in practice is worse than no
+timestamp at all: we would poll faithfully, see nothing, and serve stale answers
+with no error anywhere. Rename a product in your admin panel, then check that
+the `updated_at` you return actually moved. The first implementation of this
+spec had exactly this bug.
+
 ---
 
 ## 6. Webhooks (optional — capability `events.realtime`)

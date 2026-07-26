@@ -5,8 +5,15 @@
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
 **Last updated:** 2026-07-26
-**Current phase:** Phase 1 — milestones 1.1–1.6 complete, 1.7 complete
-**Next action:** Milestone 1.8 (sync engine: backfill, incremental, event-driven, reconciliation)
+**Current phase:** Phase 1 — milestones 1.1–1.8 complete
+**Next action:** Milestone 1.9 — RAG. Chunk and embed the synced catalogue, store vectors in pgvector namespaced by `(tenant_id, embedding_model)`, and build retrieval + the reindex path.
+
+> **Starting 1.9 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then
+> [llm-abstraction.md §5](architecture/llm-abstraction.md) — the embedding-namespace trap is
+> documented there and it is the one that degrades retrieval *silently*, with no error.
+> There is a real synced catalogue to embed (see §6) and `neura-llm` already speaks to a live
+> embedder (`make llm-check`). Postgres+pgvector is running on port 5433 and has been idle
+> since 1.1; **Alembic is still not configured**, so the first migration is part of this work.
 
 > New here? Read [GETTING_STARTED.md](GETTING_STARTED.md) — set up and run everything in ~15 minutes.
 
@@ -34,11 +41,12 @@
 | Published spec | ✅ [docs/spec/](spec/) — OpenAPI 3.1 **generated** from the canonical models; drift fails a test |
 | Real platform conformed | ✅ **the abstraction is proven** — a real commerce platform passes conformance with 0 failures, 0 warnings, via a bridge in its own repo. Zero core changes here. |
 | Signed webhooks | ✅ verified end to end over Redis: shop signs → client verifies; forged, unsigned and replayed requests all rejected |
+| Sync engine | ✅ backfill (resumable) · incremental · webhook refresh · reconciliation · per-tenant rate limiting. Verified against the real shop (`make sync-check`) |
+| Sync persistence | ⚠️ in-memory — the seam (`EntityStore`, `SyncStateStore`) is defined and tested; PostgreSQL lands with the database work |
 | Platform independence | ✅ proved: a fictional platform integrates with **zero** core changes |
-| Tests | ✅ 191 unit tests passing |
+| Tests | ✅ 218 unit tests passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
 | `neura-agent-core` | ❌ documented stub only |
-| Sync engine | ❌ milestone 1.8 |
 | Migrations | ❌ Alembic declared, not configured |
 | Design partner | ❌ None — top project risk |
 
@@ -58,8 +66,8 @@
 1.5  neura-commerce             ✅ done
 1.6  Generic Commerce Interface ✅ done
 1.7  Bagisto bridge             ✅ done
-1.8  Sync engine                ⬜   ← NEXT
-1.9  RAG                        ⬜
+1.8  Sync engine                ✅ done
+1.9  RAG                        ⬜   ← NEXT
 1.10 Agent runtime              ⬜
 1.11 CARE agent                 ⬜
 1.12 Guard (injection + PII)    ⬜
@@ -124,16 +132,45 @@ Verified 2026-07-25 on this machine:
 |:--|:--|
 | Ollama | 0.31.1, running. Models: `llama3.2:3b`, `llama3.1:8b`, `qwen3.5:9b`, `nomic-embed-text`, `qwen2.5-coder:7b/32b`, `deepseek-r1:14b` |
 | Python | 3.14.6 installed — **we pin 3.12 via uv**, do not use the system interpreter |
-| uv | **Not installed** — setup step |
-| Docker | CLI 29.4.3 installed, **daemon not running** — must be started before `make dev` |
+| uv | Installed at `~/.local/bin` — not always on a non-interactive PATH |
+| Docker | `neura-postgres` (pgvector) on **5433** and `neura-redis` on **6379**, both running |
 | Node | v24.15.0 |
-| Bagisto | `/Users/malithjayasinghe/Developer/bagisto` — 2.4.x-dev, Laravel 12, MySQL on port **3307**, `QUEUE_CONNECTION=sync` (must move to Redis before webhooks) |
+| Test shop | `/Users/malithjayasinghe/Developer/bagisto` — 2.4.x-dev, Laravel 12, MySQL on **3307**, `QUEUE_CONNECTION=redis` (moved in 1.7), served at `http://bagisto.test` |
+
+### The live test shop
+
+A real platform conformed to the spec in milestone 1.7. It is reachable **now**, with real data:
+
+```bash
+make conformance URL=http://bagisto.test/neura/v1 TOKEN=<NEURA_API_TOKEN from the shop's .env>
+make sync-check  URL=http://bagisto.test/neura/v1 TOKEN=<same>
+make sync-watch  URL=... TOKEN=...   # remembers between runs; edit the shop and re-run
+```
+
+The token lives in the shop's `.env` as `NEURA_API_TOKEN` (gitignored, local dev only). Contents: **29 products with real written descriptions**, 6 categories, 8 customers, 26 orders across every status with tracking numbers, and 11 policy pages with real text.
+
+**Use it.** Anything that touches commerce data can be tested against a real shop rather than a fixture, and every bug worth finding so far has been found that way.
+
+The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge/` — not here, deliberately. Webhooks need `php artisan queue:work redis` running in that directory.
 
 ---
 
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-26 — Sync engine (milestone 1.8)
+
+- **`neura_commerce.sync` built**: resumable backfill, incremental polling, webhook-driven refresh of one entity, and a reconciliation pass — plus a per-tenant token bucket that honours `Retry-After`.
+- **Verified against the real shop**, not only against fakes (`make sync-check URL=… TOKEN=…`): 31 products, 6 categories and 11 policies backfilled in 4 pages; a second identical crawl wrote **nothing** (31 unchanged), proving the upsert key; a deliberately corrupted local copy was detected and repaired by reconcile; a second reconcile found nothing left to fix.
+- **Decided: orders and customers are not synced.** Only catalogue, categories and policy text are kept locally. An order's status changes fast, and "out for delivery" being an hour stale is a worse failure than a 400ms lookup — so those are read live through the adapter ([commerce-integration §6.1](architecture/commerce-integration.md)). `SYNCED_TYPES` encodes it and a test asserts orders are absent from a routine run.
+- **Decided: content fingerprints, not timestamps, decide what changed.** `updated_at` is a claim a platform makes and not every platform updates it on every edit. A hash over the canonical fields — excluding `synced_at` and `raw` — means a reconcile reports real drift only, and a shop upgrading its software does not trigger a full re-embed.
+- **Every degradation is reported, never silent.** A shop without `INCREMENTAL_SYNC` gets a full backfill *and a note saying so*; a shop lacking a capability syncs nothing *and says which*; a crawl that will not terminate stops at `MAX_PAGES` and reports it. Syncing nothing quietly looks identical to a shop where nothing changed.
+- **A test exposed a real property of incremental sync**: the fake shop edited a product without bumping `updated_at`, and incremental correctly did not see it. That is not a bug to fix but the reason reconciliation exists — recorded in the fixture's comment and covered by its own test.
+- **A bug only a real platform could show, found by running the demo by hand.** The bridge published `products.updated_at` as "when this product changed" — but on this platform a product's name, description and price live in attribute tables, so renaming a product leaves that column untouched. Incremental sync therefore missed ordinary edits and only the nightly reconcile caught them, turning a minutes-fresh answer into a day-stale one. The bridge now reports and filters on the later of the product row and its denormalised row. Confirmed: the same edit that produced `~0` now produces `~1`, with reconcile finding nothing left to repair. **The general lesson for any future adapter: a platform's `updated_at` is a claim, and it must be verified against a real edit before `sync.incremental` is declared.**
+- **Persistence is deliberately deferred.** `EntityStore` and `SyncStateStore` are Protocols with in-memory implementations, as `EntityMap` was in 1.5. The engine is fully exercised; PostgreSQL replaces two classes and nothing else.
+- 218 tests pass; mypy strict on 59 files; 6 contracts kept; platform check green.
+- **Next:** milestone 1.9 — RAG. There is now a real, synced catalogue with genuine product descriptions to embed, and `(tenant, embedding_model)` namespacing is the trap to get right.
 
 ### 2026-07-26 — The bridge, and the abstraction proven (milestone 1.7)
 

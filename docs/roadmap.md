@@ -24,7 +24,7 @@ Estimates below are in **focused work-weeks** (≈30 productive hours). Part-tim
 | 1.5 | **Commerce layer** | `neura-commerce`: adapter Protocol, capabilities, registry, entity mapping | 1w |
 | 1.6 | **Generic Interface** ✅ | OpenAPI spec + `GenericAdapter` + `neura-conformance` CLI | 1.5w |
 | 1.7 | **Bagisto bridge** ✅ | Laravel package in the Bagisto install conforming to the spec; Redis queue; webhooks | 1.5w |
-| 1.8 | **Sync engine** | Backfill, incremental, event-driven, reconciliation, per-tenant rate limiting | 1.5w |
+| 1.8 | **Sync engine** ✅ | Backfill, incremental, event-driven, reconciliation, per-tenant rate limiting | 1.5w |
 | 1.9 | **RAG** | Chunking, embedding, pgvector with `(tenant, model)` namespacing, retrieval, reindex path | 1w |
 | 1.10 | **Agent runtime** | `neura-agent-core`: graph, tool registry, policy engine, memory tiers | 2w |
 | 1.11 | **CARE agent** | 3 intents, 7 tools, prompts, escalation handoff | 1.5w |

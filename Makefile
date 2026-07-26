@@ -6,7 +6,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
         test-integration eval check migrate revision clean reset \
-        spec conformance conformance-self-test llm-check judge-check
+        spec conformance conformance-self-test sync-check sync-watch llm-check judge-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -73,6 +73,12 @@ conformance:  ## Check a store: make conformance URL=https://shop/neura/v1 TOKEN
 
 conformance-self-test:  ## Verify the conformance tool itself against a built-in store
 	uv run neura-conformance --self-test
+
+sync-check:  ## Run the sync engine against a REAL shop: make sync-check URL=... TOKEN=...
+	uv run python scripts/sync_smoke_test.py --url $(URL) --token $(TOKEN)
+
+sync-watch:  ## Sync, then edit the shop and re-run to see exactly what changed
+	uv run python scripts/sync_watch.py --url $(URL) --token $(TOKEN)
 
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py

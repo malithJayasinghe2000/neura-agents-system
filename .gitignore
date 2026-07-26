@@ -39,3 +39,6 @@ dist/
 .DS_Store
 .idea/
 *.swp
+
+# Local state for the sync demo (scripts/sync_watch.py)
+.sync-demo-state.json
