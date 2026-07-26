@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.table import Table
 
+from neura_core import load_env
 from neura_llm import (
     ChatRequest,
     LLMCapability,
@@ -189,6 +190,9 @@ async def run(role_map: str) -> int:
 
 
 def main() -> None:
+    # Role maps read OLLAMA_* and CLOUD_* with os.getenv, which cannot see a
+    # .env file nobody loaded.
+    load_env()
     parser = argparse.ArgumentParser(description="Verify the LLM layer against real models.")
     parser.add_argument(
         "--role-map",

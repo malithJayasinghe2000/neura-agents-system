@@ -7,6 +7,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+from neura_core import load_env
 from neura_evals.config import judge_from_env
 from neura_evals.dataset import load_all, load_dataset
 from neura_evals.judge import Judge
@@ -71,8 +72,8 @@ async def _check_judge() -> int:
     console.print(f"  trust   {config.trust.value}")
     if not config.is_trusted:
         console.print(
-            "\n  [yellow]⚠ This judge is not trusted. Scores from it are directional at best.[/]"
-            "\n    Set EVAL_JUDGE_BASE_URL / EVAL_JUDGE_API_KEY / EVAL_JUDGE_MODEL.[/]"
+            "\n[yellow]  ⚠ This judge is not trusted. Its scores are directional at best."
+            "\n    Set EVAL_JUDGE_BASE_URL / EVAL_JUDGE_API_KEY / EVAL_JUDGE_MODEL in .env.[/]"
         )
     console.print()
 
@@ -151,6 +152,9 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    # Before anything reads configuration: judge settings live in .env, and
+    # os.getenv cannot see a file nobody loaded.
+    load_env()
     args = _build_parser().parse_args()
     raise SystemExit(asyncio.run(_run(args)))
 

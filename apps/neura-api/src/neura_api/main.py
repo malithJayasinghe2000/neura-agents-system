@@ -16,7 +16,14 @@ from neura_api.errors import register_error_handlers
 from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.registry import discover_agents
 from neura_api.routes import health
-from neura_core import Environment, configure_logging, configure_telemetry, get_logger, get_settings
+from neura_core import (
+    Environment,
+    configure_logging,
+    configure_telemetry,
+    get_logger,
+    get_settings,
+    load_env,
+)
 
 log = get_logger(__name__)
 
@@ -46,6 +53,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    # First, before anything reads configuration. Settings loads .env itself via
+    # pydantic-settings, but role maps and pricing use os.getenv and would
+    # otherwise never see the file.
+    load_env()
+
     settings = get_settings()
 
     configure_logging(

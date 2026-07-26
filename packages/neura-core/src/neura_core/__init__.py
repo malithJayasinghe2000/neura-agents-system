@@ -13,6 +13,7 @@ from neura_core.context import (
     get_tenant_id,
     get_trace_id,
 )
+from neura_core.env import find_env_file, load_env
 from neura_core.errors import (
     AgentNotEnabledError,
     AuthenticationError,
@@ -51,11 +52,13 @@ __all__ = [
     "configure_telemetry",
     "current_context",
     "current_trace_id",
+    "find_env_file",
     "get_conversation_id",
     "get_logger",
     "get_settings",
     "get_tenant_id",
     "get_trace_id",
     "get_tracer",
+    "load_env",
     "new_id",
 ]
