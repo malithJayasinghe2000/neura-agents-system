@@ -5,8 +5,8 @@
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
 **Last updated:** 2026-07-26
-**Current phase:** Phase 1 — milestones 1.1, 1.2, 1.3, 1.4 complete
-**Next action:** Milestone 1.5 (`neura-commerce` adapter contract) → 1.6 Generic Commerce Interface
+**Current phase:** Phase 1 — milestones 1.1, 1.2, 1.3, 1.4, 1.5 complete
+**Next action:** Milestone 1.6 (Generic Commerce Interface spec + `GenericAdapter` + conformance CLI)
 
 > New here? Read [GETTING_STARTED.md](GETTING_STARTED.md) — set up and run everything in ~15 minutes.
 
@@ -29,9 +29,12 @@
 | Golden datasets | ⚠️ 19 cases across 3 datasets — **all synthetic**, so not validation |
 | `neura-llm` | ✅ roles · 4 role maps · provider · structured output + repair · cost metering |
 | LLM verified live | ✅ `make llm-check` green against real Ollama — chat, schema, embeddings, tool calling |
-| Tests | ✅ 92 unit tests passing |
+| `neura-commerce` | ✅ adapter Protocol · capability negotiation · cursor pagination · identity map · registry · conformance suite |
+| Platform independence | ✅ proved: a fictional platform integrates with **zero** core changes |
+| Tests | ✅ 137 unit tests passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
-| `neura-commerce` / `neura-agent-core` / adapters | ❌ documented stubs only |
+| `neura-agent-core` / adapters | ❌ documented stubs only |
+| Sync engine | ❌ milestone 1.8 |
 | Migrations | ❌ Alembic declared, not configured |
 | Design partner | ❌ None — top project risk |
 
@@ -48,8 +51,8 @@
 1.2  neura-domain + neura-core  ✅ done
 1.3  neura-llm                  ✅ done  (verified live against Ollama)
 1.4  Eval harness               ✅ done  (deliberately before the agent)
-1.5  neura-commerce             ⬜   ← NEXT
-1.6  Generic Commerce Interface ⬜
+1.5  neura-commerce             ✅ done
+1.6  Generic Commerce Interface ⬜   ← NEXT
 1.7  Bagisto bridge             ⬜
 1.8  Sync engine                ⬜
 1.9  RAG                        ⬜
@@ -127,6 +130,16 @@ Verified 2026-07-25 on this machine:
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-26 — Commerce adapter layer (milestone 1.5)
+- **`neura-commerce` built**: `CommerceAdapter` Protocol, capability negotiation, cursor pagination, identity map, adapter registry, and a shared conformance suite.
+- **The product claim is now a passing test.** A fictional platform ("acme") satisfies the protocol structurally, passes conformance unmodified, and is reachable through the registry — with **zero** changes to any core package. `neura_commerce` contains no import of `neura_adapters`; verified.
+- **Decided:** `Protocol`, not a base class. Structural matching means a third party can conform to the published spec without importing our package — which matters, since needing it would undercut the point of publishing a spec.
+- **Decided:** the adapter is explicitly **not** an authorisation boundary. `get_order()` returns data regardless of who asks; ownership verification lives in the policy engine. Putting it in adapters would scatter a security control across every integration.
+- Seven tests confirm the conformance suite **rejects** broken adapters (raising instead of returning `None`, erroring on empty search, declaring no capabilities, claiming `INCREMENTAL_SYNC` without honouring it, a cursor that never advances). A suite that passes everything is worse than none.
+- Removed `Page.__iter__` — it shadowed Pydantic's own and would have broken `dict(page)` in ways surfacing far from the cause.
+- 137 tests pass; mypy strict on 45 files; 5 contracts kept.
+- **Next:** milestone 1.6 — the Generic Commerce Interface spec, `GenericAdapter`, and the `neura-conformance` CLI a merchant's developer runs against their own store.
 
 ### 2026-07-26 — LLM layer (milestone 1.3) + setup guide
 - **`neura-llm` built**: `ModelRole` (router/reasoner/guard/embedder/summarizer), four role maps (`ollama-dev`, `cloud-prod`, `hybrid`, `sovereign`), one OpenAI-compatible provider covering local and cloud alike, capability-tiered structured output with a bounded repair loop, per-call usage and cost metering.
