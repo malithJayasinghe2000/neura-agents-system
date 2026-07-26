@@ -1,21 +1,93 @@
-"""neura-commerce — adapter contract, capability negotiation, sync engine.
+"""neura-commerce — the adapter contract and capability negotiation.
 
-NOT YET IMPLEMENTED. Phase 1 milestones 1.5-1.8 — see docs/roadmap.md.
+The layer that makes "works with any commerce platform" true. Everything above
+speaks only the canonical domain model; adapters translate.
 
-Design is settled in docs/architecture/commerce-integration.md and
-docs/architecture/adr/0003-canonical-domain-model.md. The shape:
+Two mechanisms carry the design:
 
-* ``CommerceAdapter`` protocol (a typing.Protocol, not an ABC — so a third party
-  can implement one without importing from us), returning canonical models.
-* Each adapter declares ``capabilities: frozenset[Capability]``; the agent's tool
-  set is computed from that declaration, which is both the integration mechanism
-  and a security control.
-* ``AdapterError`` hierarchy so retry and escalation logic is written once.
-* Sync engine: backfill -> incremental -> event-driven -> nightly reconcile.
-  Idempotent, resumable, per-tenant rate limited.
+1. **The CommerceAdapter protocol** — one interface, implemented per platform.
+   A Protocol rather than a base class, so a third party can conform without
+   importing anything from us.
 
-HARD RULE: this package must never import neura_adapters. The core must not know
-which platforms exist. Enforced by an import-linter contract in CI.
+2. **Capability negotiation** — adapters declare what their platform can do, and
+   the agent's tool set is computed from that declaration. A store that cannot
+   cancel orders never gets a cancel tool, which is both the integration
+   mechanism and a security control: the best defence against tool abuse is not
+   registering the tool.
+
+HARD RULE: this package must never import ``neura_adapters``. The core must not
+know which platforms exist. Enforced by an import-linter contract and by a CI
+check that greps for platform names.
 """
 
-__all__: list[str] = []
+from neura_commerce.conformance import (
+    ConformanceReport,
+    Finding,
+    Severity,
+    run_conformance,
+)
+from neura_commerce.errors import (
+    AdapterAuthError,
+    AdapterError,
+    AdapterMappingError,
+    AdapterRateLimitedError,
+    AdapterTimeoutError,
+    AdapterUnavailableError,
+    CapabilityNotSupportedError,
+    EntityNotFoundError,
+)
+from neura_commerce.identity import EntityKey, EntityMap, EntityMapping, EntityType
+from neura_commerce.negotiation import (
+    NegotiationResult,
+    Requirement,
+    describe_gap,
+    filter_by_capability,
+    negotiate,
+)
+from neura_commerce.pagination import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    Cursor,
+    Page,
+    clamp_page_size,
+)
+from neura_commerce.protocol import CommerceAdapter, WritableCommerceAdapter
+from neura_commerce.queries import HealthStatus, ProductQuery, SyncQuery
+from neura_commerce.registry import AdapterRegistry, RegisteredAdapter, registry
+
+__all__ = [
+    "DEFAULT_PAGE_SIZE",
+    "MAX_PAGE_SIZE",
+    "AdapterAuthError",
+    "AdapterError",
+    "AdapterMappingError",
+    "AdapterRateLimitedError",
+    "AdapterRegistry",
+    "AdapterTimeoutError",
+    "AdapterUnavailableError",
+    "CapabilityNotSupportedError",
+    "CommerceAdapter",
+    "ConformanceReport",
+    "Cursor",
+    "EntityKey",
+    "EntityMap",
+    "EntityMapping",
+    "EntityNotFoundError",
+    "EntityType",
+    "Finding",
+    "HealthStatus",
+    "NegotiationResult",
+    "Page",
+    "ProductQuery",
+    "RegisteredAdapter",
+    "Requirement",
+    "Severity",
+    "SyncQuery",
+    "WritableCommerceAdapter",
+    "clamp_page_size",
+    "describe_gap",
+    "filter_by_capability",
+    "negotiate",
+    "registry",
+    "run_conformance",
+]
