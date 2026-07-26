@@ -94,6 +94,31 @@ Everything below "agent evals" is ordinary software testing with real Postgres/R
 
 Groundedness is scored by an LLM judge, which is itself fallible. Three controls: the judge is **always a strong model** (never the local `REASONER`, even in dev — this is the one place we spend), judge prompts are versioned like any other prompt, and **10% of judgements are human-verified** with judge-vs-human agreement tracked as its own metric. A judge that drifts from human agreement is retired.
 
+The judge is reached over the same OpenAI-compatible interface as every other provider ([ADR-0006](adr/0006-llm-model-roles.md)), so it is a config change, not code — Gemini, another cloud provider, or local Ollama all plug in identically.
+
+**Trust is reported, never assumed.** Every run states its judge and a trust level, and the harness refuses to present untrusted numbers as measurements:
+
+| Trust | When | Consequence |
+|:--|:--|:--|
+| `trusted` | A strong model, distinct from the model under test | Scores may be quoted |
+| `untrusted:weak-model` | A small local model — the zero-budget fallback | Report carries a warning banner; scores are directional only |
+| `untrusted:self-judging` | Judge is the model being evaluated | Marking its own homework |
+| *(skipped)* | `--no-judge` | Mechanical checks stand alone; groundedness simply unmeasured |
+
+This exists because an untrusted score looks exactly like a real one. Without the label, a project quotes its own guesses back to itself within a month.
+
+> ### ⚠ Free judge tiers and customer data
+>
+> A free API tier generally reserves the right to use submitted content to improve the provider's products. Paid tiers generally do not.
+>
+> **Today this is fine** — every eval case is invented test data with no real person in it.
+>
+> **It stops being fine** the moment real customer conversations enter the datasets, which is exactly what [§2](#2-golden-datasets) says should happen once a design partner exists. Sending a merchant's customers' messages to a free tier would breach our own [processor commitments](../business/blueprint-v2.md#9-legal-compliance--risk).
+>
+> **The rule: real conversations in the datasets → move the judge to a paid tier first.** Tracked as [E2](../open-questions.md).
+>
+> Free tiers also rate-limit, so eval concurrency defaults to 4 and full runs are nightly rather than per-commit.
+
 ---
 
 ## 4. Running Evals

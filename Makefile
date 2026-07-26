@@ -64,11 +64,16 @@ test-integration:  ## Integration tests (requires: make up)
 
 test: test-unit  ## Alias for the fast test suite
 
-eval:  ## Agent evaluation suite
-	@echo "Not implemented — Phase 1 milestone 1.4. See docs/architecture/evaluation-strategy.md"
-	@exit 1
+eval:  ## Agent evaluation suite (needs EVAL_JUDGE_* for trustworthy scores)
+	uv run neura-eval
 
-check: lint typecheck arch test  ## Everything CI runs. Run before every push.
+eval-fast:  ## Evals without the judge — mechanical checks only, no API calls, no cost
+	uv run neura-eval --no-judge
+
+eval-one:  ## One dataset: make eval-one D=injection
+	uv run neura-eval --dataset $(D)
+
+check: lint typecheck arch test eval-fast  ## Everything CI runs. Run before every push.
 
 # ── Database ─────────────────────────────────────────────────────────────────
 

@@ -60,7 +60,7 @@ Every unresolved question from across the documentation, consolidated. Scattered
 | # | Question | Impact | Source |
 |:--|:--|:--|:--|
 | E1 🔴 | **Seeding golden datasets without a design partner.** Real tickets need a real merchant. Interim: synthesize from the Bagisto store, marked `synthetic: true` — **and never counted as validation.** | Eval validity | [eval §8.1](architecture/evaluation-strategy.md) |
-| E2 🟠 | **Judge cost.** The judge is always a strong cloud model. Full-suite nightly judging has real cost against a zero budget. May need sampling. | Budget | [eval §8.2](architecture/evaluation-strategy.md) |
+| E2 🟠 | **Judge tier vs. real customer data.** Currently a Gemini free tier, which is correct while every case is invented. Free tiers may train on submitted content, so the judge **must move to a paid tier before real conversations enter the datasets**. Also: free-tier rate limits keep full runs nightly rather than per-commit. | Compliance + budget | [eval §3.1](architecture/evaluation-strategy.md) |
 | E3 🟡 | **Threshold calibration** — the gates are informed guesses. Recalibrate after ~100 real conversations. | Quality gates | [eval §8.3](architecture/evaluation-strategy.md) |
 | E4 🟡 | **Multilingual evaluation** — grading Sinhala needs a Sinhala-capable judge or a human. Blocks any multilingual claim. | Product claims | [eval §8.4](architecture/evaluation-strategy.md) |
 

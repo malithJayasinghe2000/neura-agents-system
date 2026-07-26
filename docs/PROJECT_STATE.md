@@ -5,8 +5,8 @@
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
 **Last updated:** 2026-07-26
-**Current phase:** Phase 1 — foundation built, milestones 1.1 and 1.2 complete
-**Next action:** Milestone 1.3 (`neura-llm` provider abstraction) or 1.4 (eval harness)
+**Current phase:** Phase 1 — milestones 1.1, 1.2 and 1.4 complete
+**Next action:** Milestone 1.3 (`neura-llm` provider abstraction)
 
 ---
 
@@ -23,14 +23,15 @@
 | Agent discovery | ✅ entry points working — `care` manifest discovered at startup |
 | Infrastructure | ✅ docker-compose: Postgres 16 + pgvector, Redis 7 — both healthy |
 | Guardrails | ✅ ruff · mypy strict · 5 import-linter contracts · platform-independence check |
-| Tests | ✅ 42 unit tests passing |
+| Eval harness | ✅ datasets · judge · metrics · runner · reports · CLI (`make eval`) |
+| Golden datasets | ⚠️ 19 cases across 3 datasets — **all synthetic**, so not validation |
+| Tests | ✅ 63 unit tests passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
 | `neura-llm` / `neura-commerce` / `neura-agent-core` / adapters | ❌ documented stubs only |
 | Migrations | ❌ Alembic declared, not configured |
-| Evals | ❌ none — milestone 1.4 |
 | Design partner | ❌ None — top project risk |
 
-**The agent does not exist yet.** The foundation runs; no conversation has ever been handled.
+**The agent does not exist yet.** The foundation runs and can be measured; no conversation has ever been handled. Every eval case currently reports "no agent wired up", which is correct.
 
 ---
 
@@ -41,8 +42,8 @@
 ```
 1.1  Workspace bootstrap        ✅ done
 1.2  neura-domain + neura-core  ✅ done
-1.3  neura-llm                  ⬜   ← NEXT (or 1.4 first)
-1.4  Eval harness               ⬜   (deliberately before the agent)
+1.3  neura-llm                  ⬜   ← NEXT
+1.4  Eval harness               ✅ done  (deliberately before the agent)
 1.5  neura-commerce             ⬜
 1.6  Generic Commerce Interface ⬜
 1.7  Bagisto bridge             ⬜
@@ -122,6 +123,18 @@ Verified 2026-07-25 on this machine:
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-26 — Eval harness (milestone 1.4, built before the agent)
+- **`evals/` package**: YAML dataset schema, judge, metrics, runner, reports, `neura-eval` CLI. `make eval`, `make eval-fast`, `make eval-one D=<name>`.
+- **19 synthetic cases** across `order_status`, `injection`, `out_of_scope`. All marked `synthetic: true` — the harness refuses to call a fully-synthetic run "validation".
+- **Judge**: any OpenAI-compatible endpoint. Decided to use **Gemini's free tier** — it needs no special code, since that interface is what the whole system already speaks.
+- **Trust is reported, never assumed.** Every run states its judge and a trust level; untrusted or judge-free runs print a warning banner. Reason: an untrusted score looks identical to a real one, and that resemblance is how a project ends up quoting its own guesses.
+- **`EvalTarget` protocol** is the seam — the agent plugs in at 1.11 with no change to the harness. Until then a `NotImplementedTarget` returns an explicit error rather than a plausible empty response.
+- Two schema rules enforced in code: an adversarial case **must** assert `unauthorised_tool_calls` (a reply can sound like a refusal while a tool was invoked, so text matching is not a safety test), and duplicate case ids are rejected.
+- **The platform-independence checker caught my own YAML** naming a platform in a dataset description. Reworded — eval datasets must be platform-neutral, or they quietly undo the abstraction.
+- **Documented, important:** free judge tiers may train on submitted content. Fine now (invented data); **must move to a paid tier before real customer conversations enter the datasets**. Tracked as open question E2.
+- 63 tests pass; lint, mypy strict, 5 layering contracts, platform check all green.
+- **Next:** milestone 1.3 (`neura-llm`) — and it now lands with measurement already in place.
 
 ### 2026-07-26 — Foundation built (milestones 1.1 + 1.2)
 - Installed `uv` 0.11.32, pinned Python 3.12.13, `git init` on `main`, started Docker.

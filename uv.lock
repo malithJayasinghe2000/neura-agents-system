@@ -11,6 +11,7 @@ members = [
     "neura-commerce",
     "neura-core",
     "neura-domain",
+    "neura-evals",
     "neura-llm",
     "neura-workspace",
 ]
@@ -724,6 +725,27 @@ dependencies = [
 requires-dist = [{ name = "pydantic", specifier = ">=2.10" }]
 
 [[package]]
+name = "neura-evals"
+version = "0.1.0"
+source = { editable = "evals" }
+dependencies = [
+    { name = "neura-core" },
+    { name = "neura-domain" },
+    { name = "openai" },
+    { name = "pyyaml" },
+    { name = "rich" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "neura-core", editable = "packages/neura-core" },
+    { name = "neura-domain", editable = "packages/neura-domain" },
+    { name = "openai", specifier = ">=1.60" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=13.9" },
+]
+
+[[package]]
 name = "neura-llm"
 version = "0.1.0"
 source = { editable = "packages/neura-llm" }
@@ -754,6 +776,7 @@ dependencies = [
     { name = "neura-commerce" },
     { name = "neura-core" },
     { name = "neura-domain" },
+    { name = "neura-evals" },
     { name = "neura-llm" },
 ]
 
@@ -778,6 +801,7 @@ requires-dist = [
     { name = "neura-commerce", editable = "packages/neura-commerce" },
     { name = "neura-core", editable = "packages/neura-core" },
     { name = "neura-domain", editable = "packages/neura-domain" },
+    { name = "neura-evals", editable = "evals" },
     { name = "neura-llm", editable = "packages/neura-llm" },
 ]
 

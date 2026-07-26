@@ -87,12 +87,28 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
 
   # Agent evaluations gate behaviour changes: prompts, graph nodes, tools and
-  # model config. Wired up in Phase 1 milestone 1.4.
-  # See docs/architecture/evaluation-strategy.md §4.
+  # model config. See docs/architecture/evaluation-strategy.md §4.
+  #
+  # On every PR we run the JUDGE-FREE subset: dataset validation plus mechanical
+  # checks. It is fast, free, and needs no secret. Judged metrics (groundedness)
+  # need a strong model and cost money, so they belong in a nightly run once
+  # EVAL_JUDGE_API_KEY exists as a repository secret.
   evaluate:
     name: Agent evaluations
     runs-on: ubuntu-latest
-    if: false # enable with milestone 1.4
     steps:
       - uses: actions/checkout@v4
-      - run: echo "make eval"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - run: uv sync --frozen
+        name: Install dependencies
+
+      - run: uv run neura-eval --no-judge
+        name: Evals (mechanical checks only)
+        # Not --fail-on-gate yet: no agent is wired up, so every case reports
+        # "not implemented" by design. Turn the gate on with milestone 1.11.
+        continue-on-error: true

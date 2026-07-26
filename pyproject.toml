@@ -12,10 +12,11 @@ dependencies = [
     "neura-agent-core",
     "neura-agent-care",
     "neura-api",
+    "neura-evals",
 ]
 
 [tool.uv.workspace]
-members = ["packages/*", "apps/*", "agents/*"]
+members = ["packages/*", "apps/*", "agents/*", "evals"]
 
 [tool.uv.sources]
 neura-core = { workspace = true }
@@ -26,6 +27,7 @@ neura-adapters = { workspace = true }
 neura-agent-core = { workspace = true }
 neura-agent-care = { workspace = true }
 neura-api = { workspace = true }
+neura-evals = { workspace = true }
 
 [dependency-groups]
 dev = [
