@@ -4,16 +4,20 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-07-26
-**Current phase:** Phase 1 — milestones 1.1–1.8 complete
-**Next action:** Milestone 1.9 — RAG. Chunk and embed the synced catalogue, store vectors in pgvector namespaced by `(tenant_id, embedding_model)`, and build retrieval + the reindex path.
+**Last updated:** 2026-07-27
+**Current phase:** Phase 1 — milestones 1.1–1.9 complete
+**Next action:** Milestone 1.10 — the agent runtime. LangGraph explicit state machine with a
+PostgreSQL checkpointer, the tool registry, and the policy engine.
 
-> **Starting 1.9 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then
-> [llm-abstraction.md §5](architecture/llm-abstraction.md) — the embedding-namespace trap is
-> documented there and it is the one that degrades retrieval *silently*, with no error.
-> There is a real synced catalogue to embed (see §6) and `neura-llm` already speaks to a live
-> embedder (`make llm-check`). Postgres+pgvector is running on port 5433 and has been idle
-> since 1.1; **Alembic is still not configured**, so the first migration is part of this work.
+> **Starting 1.10 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then
+> [agent-runtime.md](architecture/agent-runtime.md) — the graph, the tool declaration, and the
+> eight-check policy engine are all specified there. Rule 3 is the one that bites: authorisation
+> is code, never a prompt.
+>
+> The `retrieve` node has something real to call now — `neura_agent_core.rag` is built and proved
+> against the live catalogue (`make rag-check`). The database is no longer idle: Alembic is
+> configured, one migration is applied, and **the app now connects as `neura_app`, not `neura`**
+> (see the 1.9 log entry — connecting as the owner silently disabled RLS).
 
 > New here? Read [GETTING_STARTED.md](GETTING_STARTED.md) — set up and run everything in ~15 minutes.
 
@@ -26,7 +30,7 @@
 | Documentation | ✅ Complete — 29 files, plus the published interface spec in `docs/spec/` |
 | Git repository | ✅ Initialised, branch `main` |
 | Workspace | ✅ uv workspace, Python 3.12.13, 8 packages |
-| `neura-core` | ✅ config · logging+redaction · errors · context · telemetry · crypto · ids |
+| `neura-core` | ✅ config · logging+redaction · errors · context · telemetry · crypto · ids · db |
 | `neura-domain` | ✅ canonical models · enums · events (pure, verified) |
 | `neura-api` | ✅ boots; `/v1/health`, `/v1/health/ready`, `/v1/agents`; error contract |
 | Agent discovery | ✅ entry points working — `care` manifest discovered at startup |
@@ -42,15 +46,20 @@
 | Real platform conformed | ✅ **the abstraction is proven** — a real commerce platform passes conformance with 0 failures, 0 warnings, via a bridge in its own repo. Zero core changes here. |
 | Signed webhooks | ✅ verified end to end over Redis: shop signs → client verifies; forged, unsigned and replayed requests all rejected |
 | Sync engine | ✅ backfill (resumable) · incremental · webhook refresh · reconciliation · per-tenant rate limiting. Verified against the real shop (`make sync-check`) |
-| Sync persistence | ⚠️ in-memory — the seam (`EntityStore`, `SyncStateStore`) is defined and tested; PostgreSQL lands with the database work |
+| Sync persistence | ⚠️ still in-memory — the seam (`EntityStore`, `SyncStateStore`) is defined and tested. **Not** done in 1.9: that milestone persisted *vectors*, not entities |
 | Platform independence | ✅ proved: a fictional platform integrates with **zero** core changes |
-| Tests | ✅ 218 unit tests passing |
+| Migrations | ✅ Alembic configured; `document_chunks` applied, reversible, no model drift (`alembic check`) |
+| Database seam | ✅ `neura_core.db` — pooled async engine, `tenant_session()` setting `app.tenant_id` per transaction |
+| Multi-tenant isolation | ✅ **RLS live and verified** — forced on `document_chunks`; cross-tenant read returns nothing, cross-tenant write is rejected. A test fails if any `tenant_id` table lacks a forced policy |
+| `neura-agent-core` | ⚠️ `rag` built; graph runtime, tools and policy engine are 1.10 |
+| RAG | ✅ render · chunk (skipping records with nothing to index, and naming them) · embed · pgvector namespaced by `(tenant_id, embedding_model)` · retrieval · reindex path. Verified against the real shop (`make rag-check`) |
+| Tests | ✅ 263 unit + 13 integration passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
-| `neura-agent-core` | ❌ documented stub only |
-| Migrations | ❌ Alembic declared, not configured |
 | Design partner | ❌ None — top project risk |
 
 **The agent does not exist yet.** The foundation runs and can be measured; no conversation has ever been handled. Every eval case currently reports "no agent wired up", which is correct.
+
+**Retrieval, however, does exist and has been measured** — see the 1.9 log entry. It answers real questions about a real catalogue, which is the first time any part of this system has produced an answer rather than a passing test.
 
 ---
 
@@ -67,8 +76,8 @@
 1.6  Generic Commerce Interface ✅ done
 1.7  Bagisto bridge             ✅ done
 1.8  Sync engine                ✅ done
-1.9  RAG                        ⬜   ← NEXT
-1.10 Agent runtime              ⬜
+1.9  RAG                        ✅ done  (verified against the real catalogue)
+1.10 Agent runtime              ⬜   ← NEXT
 1.11 CARE agent                 ⬜
 1.12 Guard (injection + PII)    ⬜
 1.13 Multi-tenancy              ⬜
@@ -78,7 +87,7 @@
 1.17 Deploy                     ⬜
 ```
 
-**Exit criteria (two met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅. Remaining: conformance passes · zero platform names outside adapters · evals green on both role maps · injection resistance 1.00 · cross-tenant isolation passes · end-to-end conversation working · shadow mode producing graded conversations.
+**Exit criteria (three met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for the one table that exists; each new table is covered by the same test). Remaining: evals green on both role maps · injection resistance 1.00 · end-to-end conversation working · shadow mode producing graded conversations.
 
 ---
 
@@ -134,6 +143,8 @@ Verified 2026-07-25 on this machine:
 | Python | 3.14.6 installed — **we pin 3.12 via uv**, do not use the system interpreter |
 | uv | Installed at `~/.local/bin` — not always on a non-interactive PATH |
 | Docker | `neura-postgres` (pgvector) on **5433** and `neura-redis` on **6379**, both running |
+| Postgres roles | App connects as **`neura_app`** (no superuser, no BYPASSRLS — RLS applies). Migrations connect as the owner `neura` via `DATABASE_MIGRATION_URL`. Getting this wrong disables tenant isolation silently |
+| Schema | One migration applied: `document_chunks`, with forced RLS. `make migrate` · `make revision M="…"` |
 | Node | v24.15.0 |
 | Test shop | `/Users/malithjayasinghe/Developer/bagisto` — 2.4.x-dev, Laravel 12, MySQL on **3307**, `QUEUE_CONNECTION=redis` (moved in 1.7), served at `http://bagisto.test` |
 
@@ -158,6 +169,56 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-27 — RAG, and the database's first real use (milestone 1.9)
+
+- **`neura_agent_core.rag` built**: render → chunk → embed → pgvector, retrieval, and the reindex path from [llm-abstraction §5.2](architecture/llm-abstraction.md). The `VectorStore` interface ADR-0005 promised now exists, with a PostgreSQL implementation and an in-memory one.
+- **Alembic is configured** and the first migration is applied — `document_chunks`, reversible, with `alembic check` reporting no drift between the SQLAlchemy tables and the migration. `neura_core.db` is the new seam: a pooled async engine and `tenant_session()`, which is the *only* way to get a session and sets `app.tenant_id` per transaction.
+- **Verified against the real shop** (`make rag-check URL=… TOKEN=…`): 48 entities → 48 chunks, embedded by real `nomic-embed-text`, written to real pgvector. A second identical run embedded **nothing** (48 unchanged), proving the content hash. Retrieval answered real questions — "what is your returns policy?" → Refund Policy @ 0.746; "how much does delivery cost?" → Shipping Policy @ 0.680; "I need something waterproof for hiking" → the Waterproof Hiking Shoe @ 0.750.
+
+**A real bug, and the most expensive one found so far:**
+
+- **The shipped `DATABASE_URL` pointed at the database *owner*, so Row-Level Security did not apply at all.** PostgreSQL exempts superusers and `BYPASSRLS` roles from every policy — so the first cross-tenant test wrote one tenant's row from another tenant's session and *succeeded*. `init-db.sql` had created the unprivileged `neura_app` role back in 1.1 and documented exactly why; nothing ever connected as it. Every "isolation works" test would have passed while isolating nothing.
+  - Fixed: `DATABASE_URL` is now `neura_app`; a second `DATABASE_MIGRATION_URL` holds the owner, because `CREATE TABLE` and `CREATE POLICY` are precisely the privileges the serving process must not have.
+  - `Database.ping()` now **refuses** a connection whose role is superuser or `BYPASSRLS`, so `/v1/health/ready` fails rather than a deployment quietly serving traffic with isolation off. The integration fixture treats that as a failure and never a skip.
+  - **The general lesson: an RLS policy that exists is not an RLS policy that applies.** Any future table inherits this; a test now fails if any table carrying a `tenant_id` lacks RLS *enabled, forced and policied*.
+- **Decided: `FORCE ROW LEVEL SECURITY`, not merely `ENABLE`.** Without `FORCE` the table owner is exempt — so isolation would be off in development, where it is written and tested, and on only in production, where discovering a bug in it is expensive.
+
+**Decisions worth not relitigating:**
+
+- **The namespace is an argument, not a filter.** Every `VectorStore` method takes `Namespace(tenant_id, embedding_model)`; there is no method that does not. A filter callers must remember to add is a hope, not a rule.
+- **An empty retrieval is diagnosed, never returned bare.** If the namespace is empty but the tenant has vectors under another model, the result says so and names the model. This is the AGENTS.md gotcha — "retrieval returns nothing → namespace mismatch" — turned from a week of "the agent got worse" into one line of output. Proved in the smoke run by deliberately querying a namespace nothing was written to.
+- **The rendered text is the contract**, and it is content-hashed. Editing a renderer therefore re-embeds on the next run rather than leaving half an index produced by the old version — the failure that has no symptom.
+- **Chunks are pruned when an entity shrinks.** A description cut in half leaves an orphaned tail that keeps being retrieved: text the merchant deleted, quoted back at their customers.
+- **Orders and customers are refused by the indexer, not merely omitted.** A comment saying "don't pass orders here" is not a control.
+- **The `vector` column is deliberately dimensionless**, which forgoes HNSW/IVFFlat indexes. That is the price of letting 768- and 1536-dimensional vectors coexist during a reindex, which §5.2 requires. Fine at ADR-0005's stated scale; the fix when a tenant outgrows it is a per-namespace partial index, not a change to the interface.
+- **`retire_namespace` refuses to drop the live one.** Dropping the serving namespace is a one-command outage whose only symptom is an agent that has forgotten the catalogue.
+
+**A bug found by inspecting the stored rows by hand, which no test would have caught:**
+
+- **Two products in the shop have no title**, and the indexer embedded them anyway. `product_flat.name` is `NULL` for ids 1 and 1300 — abandoned demo records. They rendered to a structurally valid, semantically empty document (`Product:` / `Availability: out of stock` / `Status: active`), whose vector carries no meaning, sits near the origin, and can therefore surface for queries it has nothing to do with. Had the agent retrieved one, it would have recommended a nameless product to a shopper.
+  - Fixed: `missing_content()` refuses to index a product with no title, a category with no name, or a policy with an empty body — and the outcome **names the records** (`product:1 (no title)`) so the merchant can fix them. Counted as `blank`, separately from `skipped`, because it is their data problem rather than our policy.
+  - **The nastier half:** an entity that *becomes* blank must also lose the chunks a previous run wrote for it, or the old version stays retrievable forever, described by text the shop no longer has. `index()` deletes them.
+  - **Deliberately not clever:** placeholder *prose* is still indexed. No rule reliably separates "Return Policy Page Content" from terse real prose, and a heuristic that guessed would drop genuine content. Emptiness is unambiguous; vagueness is the merchant's call.
+  - **The general lesson: look at the rows.** Every count was green — 48 entities, 48 chunks, 48 embedded, idempotent on re-run. Only reading the actual stored text showed two of them were empty. The same lesson as 1.7's placeholder policy text, found the same way.
+
+**Decided: a product that is not on sale is not indexed — but an *unmappable* status still is.**
+
+Prompted by the two title-less products above, which the shop's admin showed as disabled while the bridge published `active`. `DRAFT` and `ARCHIVED` are now withheld from the index: the merchant has explicitly taken that product off sale, and an agent that recommends it wastes a shopper's time and leaves the merchant explaining a product they unpublished. Unpublishing also *removes* any chunks a previous run wrote, or the withdrawn product stays retrievable forever.
+
+`UNKNOWN` is deliberately **still indexed**. It means the shop sent a status word we could not map — not that the product is unavailable. Excluding it would empty the index for any shop whose vocabulary we have not seen, and the only symptom would be an agent answering "I don't know" to everything. That is far worse than occasionally describing a product that turns out to be unavailable. Same call, same reasoning, as the adapter layer's "tolerate, then report" in 1.6. Every withheld product is counted and named, because "why can't the agent find my product?" is a support question that needs an answer.
+
+**Open, not decided: whether a platform may be trusted about status at all.** On the test shop, a product with *no attribute data whatsoever* is reported `active`, because the platform's model falls back to a default of `1` when nothing is stored. The admin, reading its denormalised table, shows the same product as disabled. Two views of one shop disagreeing, and the bridge happens to ask the one that guesses. Nothing is broken today — the affected records had no title and were skipped for that reason first — but the general question ("is this platform's status claim load-bearing?") belongs with the same family as the `updated_at` lesson from 1.8, and should be verified against a real edit for every new adapter.
+
+**Two honest findings from the real run, both for milestone 1.10/1.11:**
+
+- **A pronoun cannot be embedded into a match.** "what colours does it come in?" retrieved the Payment Policy at 0.502 — "it" has no referent without the previous turn. Retrieval cannot fix this; the agent must rewrite the query from conversation history before calling it. The probe is kept in the smoke test *as a failing case* rather than deleted.
+- **Similarity does not cleanly separate relevant from irrelevant on this embedder.** A correct match (payment question → Payment Policy) scored 0.583 and a meaningless one scored 0.502. So `DEFAULT_MIN_SCORE = 0.3` is left as an informed starting point and **not** tuned against seven probes; the `verify` node, not a threshold, is the real defence against ungrounded answers. Recalibrate on a labelled set.
+- **`/v1/health/ready` now really checks Postgres**, having reported `not_implemented` since 1.1. A privileged database role is reported as `down` with the reason rather than raised — a 503 an orchestrator can act on beats a 500 nobody can. Serving traffic with tenant isolation silently off is worse than not serving at all.
+- **Two smaller things the API tests were hiding.** The test client was built without its context manager, so the app's lifespan never ran — startup validation and agent discovery were untested, and the connection pool the readiness probe opens was never closed, which surfaced as an intermittent `make check` failure and a stray "coroutine was never awaited". The fixture now runs the lifespan, and the lifespan disposes the pool.
+- **Not done, deliberately:** entity persistence. 1.9 persisted *vectors*; `EntityStore`/`SyncStateStore` are still in-memory, so `make rag-check` syncs and indexes in one process. Whichever milestone needs a sync that survives a restart replaces those two classes and nothing else.
+- 263 unit + 13 integration tests pass; mypy strict on 68 files; 6 contracts kept; platform check green; `make check` exits 0 five runs in a row.
+- **Next:** milestone 1.10 — the agent runtime. The `retrieve` node now has something real to call.
 
 ### 2026-07-26 — Sync engine (milestone 1.8)
 

@@ -59,8 +59,10 @@ Shared vocabulary. Words here mean exactly one thing across code, docs and conve
 | **LLM capability** | What a provider supports: `NATIVE_TOOL_CALLING`, `JSON_SCHEMA_MODE`, … Declared, never assumed. |
 | **Structured output** | A schema-validated model response. Three fallback tiers by provider capability. |
 | **Repair loop** | Bounded retry (max 3) feeding a validation error back to the model. |
-| **Embedding namespace** | `(tenant_id, embedding_model)`. Vectors from different models are **not** comparable. |
-| **Chunk** | A retrievable unit of text with its embedding and metadata. |
+| **Embedding namespace** | `(tenant_id, embedding_model)`. Vectors from different models are **not** comparable. Every `VectorStore` method takes one; there is no un-namespaced read or write. |
+| **Chunk** | A retrievable unit of text with its embedding and metadata. Identified by `(namespace, source_type, source_id, chunk_index)`. |
+| **Rendering** | Turning a canonical entity into the text that gets embedded. Content-hashed, so editing a renderer re-embeds rather than leaving a half-stale index. |
+| **Reindex** | Moving to a new embedding model. A migration, not a config edit — [llm-abstraction §5.2](architecture/llm-abstraction.md). Both namespaces coexist until the new one is promoted. |
 
 ## Security
 

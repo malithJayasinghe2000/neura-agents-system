@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
-from neura_core import get_settings
+from neura_core import ConfigurationError, get_database, get_settings
 
 router = APIRouter(tags=["health"])
 
@@ -62,18 +62,13 @@ async def health() -> HealthResponse:
 )
 async def readiness(response: Response) -> ReadinessResponse:
     components: list[ComponentStatus] = [
-        # Real checks land with milestone 1.13 (Postgres) and the Redis-backed
-        # session/rate-limit work. Reported explicitly rather than omitted, so
+        await _postgres_status(),
+        # Nothing uses Redis yet. Reported explicitly rather than omitted, so
         # readiness never looks green for a reason that does not exist yet.
-        ComponentStatus(
-            name="postgres",
-            status="not_implemented",
-            detail="Wired in Phase 1 milestone 1.13",
-        ),
         ComponentStatus(
             name="redis",
             status="not_implemented",
-            detail="Wired in Phase 1 milestone 1.13",
+            detail="Wired with the session and rate-limit work",
         ),
     ]
 
@@ -86,6 +81,23 @@ async def readiness(response: Response) -> ReadinessResponse:
         components=components,
         timestamp=datetime.now(UTC),
     )
+
+
+async def _postgres_status() -> ComponentStatus:
+    """Reachable, and — just as important — connected as a role RLS applies to.
+
+    A misconfigured role is reported as ``down`` rather than raised. A 503 with
+    a readable reason is what an orchestrator and an on-call engineer can both
+    act on; a 500 with a stack trace is neither. And serving traffic with tenant
+    isolation silently switched off is worse than not serving traffic at all
+    (docs/architecture/adr/0008-multi-tenancy-rls.md).
+    """
+    try:
+        if await get_database().ping():
+            return ComponentStatus(name="postgres", status="ok")
+        return ComponentStatus(name="postgres", status="down", detail="unreachable")
+    except ConfigurationError as exc:
+        return ComponentStatus(name="postgres", status="down", detail=exc.message)
 
 
 @router.get("/agents", summary="Agents installed in this deployment")

@@ -20,6 +20,7 @@ from neura_core import (
     Environment,
     configure_logging,
     configure_telemetry,
+    get_database,
     get_logger,
     get_settings,
     load_env,
@@ -48,8 +49,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         role_map=settings.role_map,
         agents=sorted(app.state.agents),
     )
-    yield
-    log.info("api_stopped")
+    try:
+        yield
+    finally:
+        # The connection pool is process-wide and lazily created, so it outlives
+        # any single request. Closing it here means a shutdown returns its
+        # connections rather than leaving PostgreSQL to time them out — and, in
+        # tests, that an event loop does not end with live sockets attached to
+        # it. `get_database` is cached, so a restart simply builds a new pool.
+        await get_database().dispose()
+        get_database.cache_clear()
+        log.info("api_stopped")
 
 
 def create_app() -> FastAPI:

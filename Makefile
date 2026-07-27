@@ -6,7 +6,8 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
         test-integration eval check migrate revision clean reset \
-        spec conformance conformance-self-test sync-check sync-watch llm-check judge-check
+        spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask \
+        llm-check judge-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -79,6 +80,12 @@ sync-check:  ## Run the sync engine against a REAL shop: make sync-check URL=...
 
 sync-watch:  ## Sync, then edit the shop and re-run to see exactly what changed
 	uv run python scripts/sync_watch.py --url $(URL) --token $(TOKEN)
+
+rag-check:  ## Index a REAL shop with REAL embeddings: make rag-check URL=... TOKEN=... [KEEP=1]
+	uv run python scripts/rag_smoke_test.py --url $(URL) --token $(TOKEN) $(if $(KEEP),--keep,)
+
+rag-ask:  ## Search what is indexed: make rag-ask Q="do you sell my data?" [SHOW=1]
+	uv run python scripts/rag_ask.py $(if $(SHOW),--show,) -- "$(Q)"
 
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py

@@ -12,6 +12,10 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.29",
     "cryptography>=44.0",
     "python-ulid>=3.0",
+    # The database seam (neura_core.db) lives here because every persistence
+    # layer above needs the same engine and the same tenant-scoped transaction.
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
 ]
 
 [build-system]

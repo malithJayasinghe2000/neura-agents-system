@@ -47,9 +47,22 @@ class Settings(BaseSettings):
     # ── Datastores ───────────────────────────────────────────────────────────
     # Port 5433, not 5432: the dev stack deliberately avoids colliding with a
     # Postgres the developer may already run. See docker-compose.yml.
+    #
+    # The user is `neura_app`, NOT the owner `neura`. PostgreSQL exempts
+    # superusers and BYPASSRLS roles from Row-Level Security, so connecting as
+    # the owner would switch tenant isolation off with no error anywhere —
+    # every query would simply start working across tenants. `Database.ping`
+    # checks the connected role for exactly this (ADR-0008).
     database_url: PostgresDsn = Field(
-        default=PostgresDsn("postgresql+asyncpg://neura:neura@localhost:5433/neura"),
+        default=PostgresDsn("postgresql+asyncpg://neura_app:neura_app@localhost:5433/neura"),
         alias="DATABASE_URL",
+    )
+    #: Migrations need to CREATE TABLE and ALTER POLICY, which the application
+    #: role deliberately cannot do. A separate URL keeps that privilege out of
+    #: the process that serves requests.
+    database_migration_url: PostgresDsn = Field(
+        default=PostgresDsn("postgresql+asyncpg://neura:neura@localhost:5433/neura"),
+        alias="DATABASE_MIGRATION_URL",
     )
     database_pool_size: int = Field(default=10, alias="DATABASE_POOL_SIZE")
     database_max_overflow: int = Field(default=5, alias="DATABASE_MAX_OVERFLOW")

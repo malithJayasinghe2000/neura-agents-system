@@ -25,11 +25,11 @@ Estimates below are in **focused work-weeks** (≈30 productive hours). Part-tim
 | 1.6 | **Generic Interface** ✅ | OpenAPI spec + `GenericAdapter` + `neura-conformance` CLI | 1.5w |
 | 1.7 | **Bagisto bridge** ✅ | Laravel package in the Bagisto install conforming to the spec; Redis queue; webhooks | 1.5w |
 | 1.8 | **Sync engine** ✅ | Backfill, incremental, event-driven, reconciliation, per-tenant rate limiting | 1.5w |
-| 1.9 | **RAG** | Chunking, embedding, pgvector with `(tenant, model)` namespacing, retrieval, reindex path | 1w |
+| 1.9 | **RAG** ✅ | Chunking, embedding, pgvector with `(tenant, model)` namespacing, retrieval, reindex path — plus Alembic, the first migration, and RLS proved live | 1w |
 | 1.10 | **Agent runtime** | `neura-agent-core`: graph, tool registry, policy engine, memory tiers | 2w |
 | 1.11 | **CARE agent** | 3 intents, 7 tools, prompts, escalation handoff | 1.5w |
 | 1.12 | **Guard** | Injection detection, PII redaction/rehydration, output filtering | 1w |
-| 1.13 | **Multi-tenancy** | Tenants, API keys, RLS, per-tenant config, budgets, usage metering | 1.5w |
+| 1.13 | **Multi-tenancy** | Tenants, API keys, per-tenant config, budgets, usage metering. *RLS itself landed in 1.9 with the first migration and is enforced by a test* | 1.5w |
 | 1.14 | **API** | REST `/v1/*`, WebSocket, webhooks, OpenAPI, error contract, idempotency | 1.5w |
 | 1.15 | **Shadow mode** | Parallel execution, review queue, scorecard | 1w |
 | 1.16 | **Widget** | Embeddable chat, client-side rendered, AI disclosure, origin-locked keys | 1w |

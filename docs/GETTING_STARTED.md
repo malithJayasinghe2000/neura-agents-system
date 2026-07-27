@@ -17,7 +17,8 @@ Everything built so far runs with **Ollama only**. There is no connection to any
 | 1.1 Workspace · 1.2 Core + domain | ❌ no |
 | 1.3 LLM layer · 1.4 Eval harness | ❌ no |
 | **1.5–1.8 Commerce layer + sync** | ✅ **yes — first time it's needed** |
-| 1.9+ RAG, agent, API | ✅ yes |
+| 1.9 RAG | ✅ yes — `make rag-check` needs a real catalogue to index |
+| 1.10+ agent, API | ✅ yes |
 
 [§7](#7-what-you-will-need-later) lists exactly what data that shop will need, so you can prepare it in advance if you want to.
 
@@ -78,16 +79,30 @@ cp .env.example .env           # your local settings
 ## 3. Start the database
 
 ```bash
-make up
+make up          # start Postgres + Redis
+make migrate     # create the tables
 ```
 
-Waits until both containers are genuinely healthy, then prints `✔ datastores ready`.
+`make up` waits until both containers are genuinely healthy, then prints `✔ datastores ready`.
 
 ```bash
 docker compose ps      # both should say "healthy"
 ```
 
 > **Note:** Postgres runs on port **5433**, not the usual 5432 — something else on this machine was already using 5432. If 5433 is also taken: `POSTGRES_PORT=5434 make up`.
+
+### Why there are two database usernames
+
+Your `.env` has both:
+
+```
+DATABASE_URL=postgresql+asyncpg://neura_app:neura_app@localhost:5433/neura
+DATABASE_MIGRATION_URL=postgresql+asyncpg://neura:neura@localhost:5433/neura
+```
+
+This is not clutter. Each merchant's data is kept separate by a PostgreSQL feature called Row-Level Security — the database itself refuses to return another merchant's rows, so a mistake in our code returns *nothing* rather than someone else's data.
+
+**That feature does not apply to database owners.** Connect as `neura` and every merchant's data becomes visible to every query, with no error and no warning. So the application connects as `neura_app`, which has no such exemption, and only migrations use the owner. The app refuses to report itself healthy if it ever finds itself connected as a privileged role.
 
 ---
 
@@ -246,6 +261,7 @@ make help              # list every command
 
 # running
 make up                # start database + redis
+make migrate           # create/update the tables
 make down              # stop them
 make api               # run the web service
 make dev               # both at once
@@ -255,6 +271,11 @@ make llm-check         # ← test the AI against real models
 make eval-fast         # scoring system, no API calls
 make eval              # scoring with an AI grader
 make check             # everything CI runs
+
+# checking against a real shop (needs URL= and TOKEN=)
+make conformance URL=… TOKEN=…   # does the shop implement our spec?
+make sync-check   URL=… TOKEN=…   # can we copy its catalogue?
+make rag-check    URL=… TOKEN=…   # can we search that catalogue by meaning?
 
 # individual checks
 make lint              # code style
@@ -362,6 +383,9 @@ Bagisto ships a sample-data generator that produces most of this.
 | `make up` → "port already in use" | Something else uses that port. `POSTGRES_PORT=5434 make up` |
 | `make up` → "Cannot connect to Docker daemon" | Docker Desktop isn't running. Open it and wait for the whale icon |
 | `make llm-check` very slow | Normal on first run — the model loads into memory. Later runs are faster. |
+| `relation "document_chunks" does not exist` | You skipped `make migrate` |
+| "the database role is a superuser, so Row-Level Security does not apply" | `DATABASE_URL` is pointing at `neura` instead of `neura_app`. See §3 — this refusal is deliberate and must not be worked around |
+| Search finds nothing that should match | The catalogue was indexed with a different embedding model than the one now configured. The error message names both |
 | Tests fail after you edit something | Read the failure message; the tests are written to say what broke and why |
 
 Still stuck? `docker compose logs` and `make check` usually say what's wrong.
@@ -376,13 +400,14 @@ neura-agents/
 ├── packages/          ← shared building blocks
 │   ├── neura-core/       settings, logging, security basics
 │   ├── neura-domain/     what "an Order" and "a Product" mean
-│   ├── neura-llm/        talking to AI models          ← just built
-│   ├── neura-commerce/   talking to shops              ← not built yet
-│   ├── neura-agent-core/ the agent engine              ← not built yet
-│   └── neura-adapters/   shop connectors               ← not built yet
+│   ├── neura-llm/        talking to AI models          ← built
+│   ├── neura-commerce/   talking to shops + sync       ← built
+│   ├── neura-agent-core/ search over a catalogue       ← rag built; engine not yet
+│   └── neura-adapters/   shop connectors               ← built
 ├── agents/care/       ← NEURA-CARE                     ← manifest only
 ├── apps/neura-api/    ← the web service
 ├── evals/             ← the scoring system
+├── infra/migrations/  ← database schema, applied by `make migrate`
 └── scripts/           ← check tools
 ```
 
@@ -394,10 +419,10 @@ neura-agents/
 
 ## 10. Honest status
 
-**Working now:** the foundation, the AI connection, the scoring system, the web service, the architecture guardrails.
+**Working now:** the foundation, the AI connection, the scoring system, the web service, the architecture guardrails — and, since milestone 1.9, **the ability to read a real shop's catalogue and search it by meaning**. `make rag-check` copies a live shop's products and policies, turns them into vectors with a local model, and answers questions like "how much does delivery cost?" with the right policy page.
 
-**Not built yet:** the agent itself. It cannot answer a customer question, because nothing connects it to a shop and no conversation logic exists.
+**Not built yet:** the agent itself. Nothing holds a conversation. Retrieval can find the returns policy; nothing yet decides *when* to look it up, what to say, or when to hand over to a human.
 
-That's milestones 1.5 through 1.11 — the commerce layer, then search, then the agent.
+That's milestones 1.10 through 1.12 — the agent engine, then NEURA-CARE, then the safety layer.
 
 Everything you can run today is the machinery that makes the agent possible, plus the measuring tools to tell whether it's any good once it exists. That order is deliberate: measurement first, so we never have to guess.

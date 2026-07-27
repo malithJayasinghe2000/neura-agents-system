@@ -45,11 +45,11 @@ Three categories: **libraries**, **products**, **deployables**.
 
 ```
 packages/                   LIBRARIES — shared, no product identity
-  neura-core/               config · logging · OTel · errors · auth · crypto
+  neura-core/               config · logging · OTel · errors · auth · crypto · db
   neura-domain/             canonical models + events   (PURE — no I/O)
   neura-llm/                provider abstraction · roles · structured output
   neura-commerce/           adapter Protocol · capabilities · sync engine
-  neura-agent-core/         graph engine · shared nodes · tools · policy · memory
+  neura-agent-core/         graph engine · shared nodes · tools · policy · memory · rag
   neura-adapters/           the only place platform names live
 
 agents/                     PRODUCTS — one folder per sellable agent
@@ -77,8 +77,15 @@ make lint           # ruff + mypy
 make eval           # full eval suite, current role map
 make eval-compare A=ollama-dev B=cloud-prod
 make migrate        # alembic upgrade head
+make rag-check URL=… TOKEN=…   # index a real shop with real embeddings (KEEP=1 to leave the data)
+make rag-ask Q="…" [SHOW=1]    # search what is indexed — answers "why did it retrieve that?"
 make check          # everything CI runs
 ```
+
+**Two database URLs, on purpose.** `DATABASE_URL` is the unprivileged app role;
+`DATABASE_MIGRATION_URL` is the owner. Row-Level Security does not apply to
+superusers, so pointing the app at the owner disables tenant isolation with no
+error anywhere. `Database.ping()` refuses to report ready if it detects that.
 
 ---
 
@@ -94,7 +101,7 @@ make check          # everything CI runs
 
 **Prompts.** Files under `prompts/`, never inline strings. Content-hashed; the hash is recorded per conversation so any past answer can be traced to the exact prompt that produced it.
 
-**Tests.** Real Postgres and Redis via testcontainers; stub the LLM. If a test needs a live model, it is an eval, not a test.
+**Tests.** Real Postgres and Redis; stub the LLM. If a test needs a live model, it is an eval or a `*-check` smoke script, not a test. Integration tests currently use the `docker compose` stack (`make up` + `make migrate`) and **skip** if it is not reachable — but never skip on a misconfiguration, only on an absent database. A suite that skips its own security checks reports green for the wrong reason.
 
 ---
 
@@ -146,14 +153,26 @@ Everything else — policy engine, audit log, memory, budgets, shadow mode, tena
 
 **Do not just edit the config.** Follow the reindex procedure in [llm-abstraction §5.2](docs/architecture/llm-abstraction.md) — dimensions differ between models and mixing them degrades retrieval *silently*, with no error to alert you.
 
+`neura_agent_core.rag.reindex` implements steps 2, 3 and 5; steps 1 and 4 are role-map edits.
+
+```python
+await backfill_namespace(store, candidate_llm, tenant_id=..., entities=...)  # 2
+report = await compare(store, live_llm, candidate_llm, tenant_id=..., queries=[...])  # 3
+await retire_namespace(store, tenant_id=..., embedding_model="old", live=promoted_llm)  # 5
+```
+
+`retire_namespace` refuses to drop the namespace currently configured, and `compare` refuses to run against an unpopulated candidate. Both refusals exist because the mistake they prevent produces no error, only worse answers.
+
 ---
 
 ## Gotchas
 
 | Symptom | Likely cause |
 |:--|:--|
-| Query returns nothing that should return rows | RLS — `app.tenant_id` not set on the transaction |
-| Retrieval returns nothing | Embedding-model namespace mismatch |
+| Query returns nothing that should return rows | RLS — `app.tenant_id` not set on the transaction. Use `Database.tenant_session()`; it is the only way to get one |
+| Cross-tenant reads *succeed* | Worse than the above. `DATABASE_URL` points at a superuser or `BYPASSRLS` role, so no policy applies. `Database.ping()` refuses this — if you bypassed it, don't |
+| Retrieval returns nothing | Embedding-model namespace mismatch. `RetrievalResult.diagnosis` says which model the content *is* indexed under |
+| `alembic` wants to drop a table you just added | Its module is not imported in `infra/migrations/env.py`, so it is absent from `neura_core.metadata` |
 | Tool "exists" but the agent never calls it | Adapter does not declare the required capability |
 | Ollama slow or thrashing | Too many distinct models loaded — check `OLLAMA_NUM_PARALLEL`, `OLLAMA_KEEP_ALIVE` |
 | Structured output failing often | Provider lacks `JSON_SCHEMA_MODE`; check the repair-rate metric |

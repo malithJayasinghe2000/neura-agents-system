@@ -103,11 +103,11 @@ neura-agents/
 ├── docs/
 │
 ├── packages/                   # LIBRARIES — shared machinery, no product identity
-│   ├── neura-core/             #   config · logging · OTel · errors · auth · crypto
+│   ├── neura-core/             #   config · logging · OTel · errors · auth · crypto · db
 │   ├── neura-domain/           #   canonical models + event schemas  (PURE — no I/O)
 │   ├── neura-llm/              #   provider abstraction · model roles · structured output
 │   ├── neura-commerce/         #   adapter Protocol · capabilities · registry · sync engine
-│   ├── neura-agent-core/       #   graph engine · shared nodes · tool registry · policy · memory
+│   ├── neura-agent-core/       #   graph engine · shared nodes · tool registry · policy · rag
 │   └── neura-adapters/         #   generic/ (Tier 2) · shopify/, woocommerce/ (Phase 2+)
 │
 ├── agents/                     # PRODUCTS — one folder per sellable agent
