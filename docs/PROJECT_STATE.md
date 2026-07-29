@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 **Current phase:** Phase 1 — milestones 1.1–1.10 complete
 **Next action:** Milestone 1.11 — NEURA-CARE. Three intents, seven tools, prompts as files,
 and the first golden dataset that measures a real agent.
