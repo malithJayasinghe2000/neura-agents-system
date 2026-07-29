@@ -81,11 +81,13 @@ sync-check:  ## Run the sync engine against a REAL shop: make sync-check URL=...
 sync-watch:  ## Sync, then edit the shop and re-run to see exactly what changed
 	uv run python scripts/sync_watch.py --url $(URL) --token $(TOKEN)
 
-rag-check:  ## Index a REAL shop with REAL embeddings: make rag-check URL=... TOKEN=... [KEEP=1]
-	uv run python scripts/rag_smoke_test.py --url $(URL) --token $(TOKEN) $(if $(KEEP),--keep,)
+rag-check:  ## Index a REAL shop with REAL embeddings: make rag-check URL=... TOKEN=... [KEEP=1] [TENANT=...]
+	uv run python scripts/rag_smoke_test.py --url $(URL) --token $(TOKEN) \
+	  $(if $(TENANT),--tenant-id $(TENANT),) $(if $(KEEP),--keep,)
 
-rag-ask:  ## Search what is indexed: make rag-ask Q="do you sell my data?" [SHOW=1]
-	uv run python scripts/rag_ask.py $(if $(SHOW),--show,) -- "$(Q)"
+rag-ask:  ## Search what is indexed: make rag-ask Q="do you sell my data?" [SHOW=1] [TENANT=...]
+	uv run python scripts/rag_ask.py $(if $(SHOW),--show,) \
+	  $(if $(TENANT),--tenant-id $(TENANT),) -- "$(Q)"
 
 agent-check:  ## Run the agent runtime end to end against REAL models + Postgres
 	uv run python scripts/agent_smoke_test.py
