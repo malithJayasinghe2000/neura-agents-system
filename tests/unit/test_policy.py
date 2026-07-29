@@ -58,8 +58,24 @@ ALL_SCOPES = frozenset({"care:order:read", "care:product:read", "care:policy:rea
     scopes=["care:order:read"],
     pii_output=True,
     requires_ownership="order_ref",
+    # Mirrors the real CARE tool, which does filter its result by customer.
+    scoped_to_session=True,
 )
 async def get_order_status(order_ref: str, ctx: ToolContext) -> str:
+    return f"order {order_ref}: shipped"
+
+
+@tool(
+    name="get_unscoped_order",
+    description="Look up one order without constraining the result to a customer.",
+    requires=[Capability.ORDER_READ],
+    scopes=["care:order:read"],
+    pii_output=True,
+    requires_ownership="order_ref",
+    # Deliberately omits `scoped_to_session` — this stands for the tool somebody
+    # adds later without thinking about ownership. It must fail closed.
+)
+async def get_unscoped_order(order_ref: str, ctx: ToolContext) -> str:
     return f"order {order_ref}: shipped"
 
 
@@ -79,7 +95,7 @@ async def escalate_to_human(reason: str, ctx: ToolContext) -> str:
 
 
 def registry() -> ToolRegistry:
-    return ToolRegistry([get_order_status, search_products, escalate_to_human])
+    return ToolRegistry([get_order_status, get_unscoped_order, search_products, escalate_to_human])
 
 
 def context(**overrides: object) -> ToolContext:
@@ -197,7 +213,7 @@ class TestCapabilityFiltering:
 
     def test_no_tenant_preference_is_not_an_empty_allow_list(self) -> None:
         """`None` means "unspecified", not "nothing permitted"."""
-        assert len(registry().available_for(context(allowed_tools=None))) == 3
+        assert len(registry().available_for(context(allowed_tools=None))) == len(registry())
 
 
 # ── The eight checks ─────────────────────────────────────────────────────────
@@ -305,13 +321,40 @@ class TestOwnership:
         assert decision.outcome is Outcome.ESCALATE
         assert decision.check is Check.OWNERSHIP
 
-    def test_an_authenticated_customer_is_trusted_for_their_own_data(self) -> None:
-        ctx = context(identity=SessionIdentity(customer_external_id="cust_88"))
-        decision = PolicyEngine(registry()).authorise(
-            "get_order_status", {"order_ref": "1001"}, ctx
-        )
+    def test_an_authenticated_customer_is_trusted_only_by_a_scoped_tool(self) -> None:
+        """Being signed in is not, by itself, permission to read any order.
 
-        assert decision.outcome is Outcome.ALLOW
+        This is the A6 fix. The engine used to trust an authenticated session
+        with an arbitrary reference, on the assumption that the tool filtered by
+        customer id — a true assumption for the tool that existed, enforced by
+        nothing. A signed-in shopper typing a stranger's order number passed all
+        eight checks.
+
+        Now the assumption is a declaration and the default is deny.
+        """
+        ctx = context(identity=SessionIdentity(customer_external_id="cust_88"))
+        engine = PolicyEngine(registry())
+
+        declared = engine.authorise("get_order_status", {"order_ref": "1001"}, ctx)
+        undeclared = engine.authorise("get_unscoped_order", {"order_ref": "1001"}, ctx)
+
+        assert declared.outcome is Outcome.ALLOW
+        assert undeclared.outcome is Outcome.ESCALATE
+        assert undeclared.check is Check.OWNERSHIP
+
+    def test_a_tool_that_forgets_to_declare_scoping_fails_closed(self) -> None:
+        """The direction of the failure is the entire point.
+
+        "Every tool remembers" is a control that holds until someone adds a tool.
+        Forgetting the declaration must cost that tool access for authenticated
+        sessions — visible, and safe — rather than silently granting a stranger's
+        order to anyone signed in.
+        """
+        assert not get_unscoped_order.scoped_to_session
+        ctx = context(identity=SessionIdentity(customer_external_id="cust_88"))
+
+        assert not ctx.identity.may_see("1001", tool_scopes_to_session=False)
+        assert ctx.identity.may_see("1001", tool_scopes_to_session=True)
 
     def test_the_refusal_is_uniform(self) -> None:
         """A different message for "wrong owner" and "no such order" turns the

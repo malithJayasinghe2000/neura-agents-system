@@ -80,14 +80,34 @@ class SessionIdentity:
     def is_authenticated(self) -> bool:
         return self.customer_external_id is not None
 
-    def may_see(self, reference: str) -> bool:
+    def may_see(self, reference: str, *, tool_scopes_to_session: bool = False) -> bool:
         """Has this session proven it may see this specific resource?
 
-        An authenticated customer is trusted for their own data; the adapter
-        query is scoped to their id, so the reference is theirs by construction.
-        An anonymous session must have verified each reference individually.
+        Two independent grounds, and the second is narrower than it used to be:
+
+        * The session **proved this exact reference**. Verifying one order grants
+          nothing about any other, so this is per-reference and always sufficient.
+        * The session is authenticated **and the tool constrains its result to
+          that customer** (``scoped_to_session``). Then the reference is theirs
+          by construction, because a tool that filters by their id cannot return
+          anyone else's row.
+
+        Being authenticated is, on its own, **not** enough. It used to be, on the
+        stated assumption that a tool scoping its query to the customer's id made
+        the reference theirs — a true assumption that nothing enforced. A signed-in
+        shopper could type a stranger's order number and pass all eight policy
+        checks, because the engine had no way to know whether the tool actually
+        did the filtering it was assumed to do.
+
+        So the assumption is now a declaration, and the default is deny. A tool
+        that forgets to declare ``scoped_to_session`` loses access for
+        authenticated sessions — it fails visibly and safely, rather than
+        silently and permissively, which is the only acceptable direction for an
+        access control to fail (security-model.md §3, open question A6).
         """
-        return self.is_authenticated or reference in self.verified_order_refs
+        if reference in self.verified_order_refs:
+            return True
+        return self.is_authenticated and tool_scopes_to_session
 
     def with_verified(self, reference: str) -> SessionIdentity:
         return SessionIdentity(
@@ -132,6 +152,12 @@ class ToolSpec:
     scopes: frozenset[str] = frozenset()
     pii_output: bool = False
     requires_ownership: str | None = None
+    #: This tool constrains what it returns to the session's own customer — it
+    #: filters by ``ctx.identity.customer_external_id`` and returns nothing that
+    #: fails that check. Only a tool that genuinely does this may declare it;
+    #: without it an authenticated session gets no blanket trust (see
+    #: :meth:`SessionIdentity.may_see`).
+    scoped_to_session: bool = False
     timeout_s: float = DEFAULT_TIMEOUT_S
 
     @property
@@ -174,6 +200,7 @@ def tool(
     scopes: Sequence[str] = (),
     pii_output: bool = False,
     requires_ownership: str | None = None,
+    scoped_to_session: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> Callable[[Callable[..., Awaitable[Any]]], ToolSpec]:
     """Declare a tool.
@@ -207,6 +234,7 @@ def tool(
             scopes=frozenset(scopes),
             pii_output=pii_output,
             requires_ownership=requires_ownership,
+            scoped_to_session=scoped_to_session,
             timeout_s=timeout_s,
         )
 

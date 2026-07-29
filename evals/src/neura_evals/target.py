@@ -51,6 +51,16 @@ class AgentResponse(BaseModel):
         default=0, description="JSON repair retries — the early warning that a model is unsuitable"
     )
     error: str | None = None
+    not_run: bool = Field(
+        default=False,
+        description=(
+            "True when no agent was executed at all (`--no-agent`). **Not a failure** — "
+            "the case is unmeasured, and it is skipped rather than scored.\n\n"
+            "The distinction matters because `--no-agent` is part of `make check`, which "
+            "runs before every push. Thirty-five red crosses that are not failures teach "
+            "the reader to skim past red, and the next time they are real nobody looks."
+        ),
+    )
 
     @property
     def unauthorised_tool_calls(self) -> int:
@@ -80,16 +90,29 @@ class EvalTarget(Protocol):
 
 
 class NotImplementedTarget:
-    """Placeholder until the agent exists.
+    """No agent. Used by ``--no-agent``, and when none is installed.
 
-    Returns an explicit error rather than a plausible-looking empty response, so
-    a run against it cannot be mistaken for a real result.
+    Returns an explicit non-result rather than a plausible-looking empty
+    response, so a run against it cannot be mistaken for a real one. ``--no-agent``
+    is how the datasets and the scoring logic are validated with no model call
+    and no cost.
+
+    Every case is **skipped**, not failed. Marking them failed was the first
+    version and it was wrong for the same reason a rate-limited judge must not be
+    scored as a hallucination: it states an outcome that was never measured. It
+    also put thirty-five red crosses in ``make check``, which runs before every
+    push — and a command that is always partly red is a command whose red stops
+    meaning anything.
     """
 
-    name = "not-implemented"
+    name = "no-agent"
 
     async def run(self, case: EvalCase) -> AgentResponse:
         return AgentResponse(
             reply="",
-            error="No agent is wired up yet — Phase 1 milestone 1.11. See docs/roadmap.md",
+            not_run=True,
+            error=(
+                "No agent was run (--no-agent, or no installed agent advertises a "
+                "'neura.eval_targets' entry point). This is not a result."
+            ),
         )

@@ -17,13 +17,15 @@
 
 | Agent | Folder | Product scope | Technical design | Built | Notes |
 |:--|:--|:--|:--|:--|:--|
-| **NEURA-CARE** | `agents/care/` | ✅ [blueprint §5.1](../business/blueprint-v2.md) | ✅ [agent-runtime.md](../architecture/agent-runtime.md) | ❌ Phase 1 | 3 intents, 7 tools, read-only |
+| **NEURA-CARE** | `agents/care/` | ✅ [blueprint §5.1](../business/blueprint-v2.md) | ✅ [agent-runtime.md](../architecture/agent-runtime.md) | ✅ **milestone 1.11** | 3 intents, 7 tools, read-only. `guard`/`blocked` land in 1.12 |
 | **NEURA-SELL** | `agents/sell/` | ⚠️ tiers only | ❌ **none** | ❌ | Candidate for agent #2 |
 | **NEURA-MIND** | `agents/mind/` | ⚠️ tiers only | ❌ **none** | ❌ | Candidate for agent #2 |
 | **NEURA-GROW** | `agents/grow/` | ⚠️ tiers only | ❌ **none** | ❌ | Phase 4+ |
 | **NEURA-GUARD** | `agents/guard/` | ⚠️ tiers only | ❌ **none** | ❌ | MVP portion is *platform infrastructure*, not an agent — see below |
 
-Folder structure, manifests, entitlements and how agents are sold individually: [tenancy-and-packaging.md](../architecture/tenancy-and-packaging.md). None of these folders exists yet — nothing has been built.
+Folder structure, manifests, entitlements and how agents are sold individually: [tenancy-and-packaging.md](../architecture/tenancy-and-packaging.md). Only `agents/care/` exists; the other four folders have not been created, because creating them would imply a design that does not exist.
+
+**CARE is the worked example of what the five parts cost.** It supplies a graph, five nodes, seven tools, five prompt files and a golden dataset — and inherits the policy engine, audit log, checkpointer, capability filtering and ownership enforcement without writing any of them. Read `agents/care/` before designing agent #2; the shape of the work is more useful than any description of it.
 
 ---
 

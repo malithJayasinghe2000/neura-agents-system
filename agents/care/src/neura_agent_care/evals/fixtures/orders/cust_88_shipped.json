@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "Order 1001, shipped, belonging to cust_88.",
+    "",
+    "Note that external_id ('o_5001') is NOT the order number ('1001'). That is",
+    "deliberate: on real platforms the customer-facing number and the internal",
+    "key are often different strings, and a lookup that assumes they are the same",
+    "works perfectly against a fixture that pretends otherwise, then returns 'no",
+    "such order' for every shopper in production.",
+    "",
+    "The fulfillment carries a tracking number and NO delivery estimate — the",
+    "combination that tempts a model into 'it should be with you tomorrow'."
+  ],
+
+  "customers": [
+    {
+      "external_id": "cust_88",
+      "email": "jane@example.com",
+      "first_name": "Jane",
+      "last_name": "Okafor",
+      "order_count": 4
+    }
+  ],
+
+  "orders": [
+    {
+      "external_id": "o_5001",
+      "order_number": "1001",
+      "status": "shipped",
+      "payment_status": "paid",
+      "fulfillment_status": "fulfilled",
+      "customer_external_id": "cust_88",
+      "customer_email": "jane@example.com",
+      "placed_at": "2026-07-20T09:15:00Z",
+      "updated_at": "2026-07-21T16:40:00Z",
+      "subtotal": { "amount": "137.00", "currency": "GBP" },
+      "shipping_total": { "amount": "0.00", "currency": "GBP" },
+      "total": { "amount": "137.00", "currency": "GBP" },
+      "lines": [
+        {
+          "external_id": "ol_1",
+          "product_external_id": "p_100",
+          "variant_external_id": "v_100_8",
+          "title": "Waterproof Hiking Shoe — UK 8 / Brown",
+          "sku": "WHS-8-BRN",
+          "quantity": 1,
+          "unit_price": { "amount": "119.00", "currency": "GBP" },
+          "total": { "amount": "119.00", "currency": "GBP" }
+        },
+        {
+          "external_id": "ol_2",
+          "product_external_id": "p_200",
+          "variant_external_id": "v_200_m",
+          "title": "Merino Wool Walking Socks — Medium",
+          "sku": "MWS-M",
+          "quantity": 1,
+          "unit_price": { "amount": "18.00", "currency": "GBP" },
+          "total": { "amount": "18.00", "currency": "GBP" }
+        }
+      ],
+      "fulfillments": [
+        {
+          "external_id": "f_1",
+          "status": "fulfilled",
+          "carrier": "ParcelCo",
+          "tracking_number": "TRK123456",
+          "shipped_at": "2026-07-21T16:40:00Z"
+        }
+      ]
+    }
+  ]
+}

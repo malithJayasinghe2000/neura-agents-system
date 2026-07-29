@@ -40,6 +40,16 @@ class AgentState(TypedDict, total=False):
     conversation_id: str
     message: str
 
+    #: Previous turns, oldest first, each ``{"role": ..., "content": ...}``.
+    #: Supplied by whatever starts the turn — an API request, an eval case.
+    #:
+    #: This is the *seam*, not a memory tier. The Redis session store and the
+    #: Postgres transcript of memory §4 do not exist yet; when they do, they fill
+    #: this key and nothing in any graph changes. Declared here because a node
+    #: cannot resolve "what colours does it come in?" without the turn that said
+    #: which product, and an undeclared key is dropped silently by LangGraph.
+    history: list[dict[str, str]]
+
     # ── guard ────────────────────────────────────────────────────────────────
     blocked: bool
     block_reason: str
@@ -48,6 +58,18 @@ class AgentState(TypedDict, total=False):
     intent: str
     intent_confidence: float
     entities: dict[str, str]
+
+    #: A **self-contained** restatement of what the shopper is asking, written by
+    #: the agent's routing step and used by `retrieve` in place of the raw
+    #: message.
+    #:
+    #: This exists because of a finding from milestone 1.9: "what colours does it
+    #: come in?" retrieved the Payment Policy at 0.502, because "it" has no
+    #: referent once the sentence leaves the conversation. Retrieval cannot fix
+    #: that — the pronoun must be resolved against the history *before* anything
+    #: is embedded. Optional: an agent that does not rewrite queries leaves this
+    #: unset and `retrieve` falls back to the message, as it always did.
+    search_query: str
 
     # ── retrieve ─────────────────────────────────────────────────────────────
     #: Already wrapped in `<untrusted>` delimiters, ready for a prompt.
@@ -80,6 +102,13 @@ class AgentState(TypedDict, total=False):
     escalated: bool
     escalation_reason: str
     handoff: str
+
+    #: The agent answered by declining — the question was outside its scope and
+    #: no person was needed. Distinct from ``escalated``, and the distinction is
+    #: the point: both end the turn without an answer, but only one occupies a
+    #: human. Conflating them makes escalation *precision* unreadable, since
+    #: every off-topic question would count against it.
+    refused: bool
 
     #: Cost and latency, accumulated for the budget and the merchant's bill.
     usage: dict[str, Any]
@@ -148,7 +177,13 @@ def runtime_of(config: RunnableConfig | dict[str, Any] | None) -> Runtime:
     return runtime
 
 
-def initial_state(*, tenant_id: str, conversation_id: str, message: str) -> AgentState:
+def initial_state(
+    *,
+    tenant_id: str,
+    conversation_id: str,
+    message: str,
+    history: list[dict[str, str]] | None = None,
+) -> AgentState:
     """A turn's starting state, with every accumulator empty.
 
     Defaults matter here: ``escalated`` and ``blocked`` start ``False``, and
@@ -159,6 +194,7 @@ def initial_state(*, tenant_id: str, conversation_id: str, message: str) -> Agen
         tenant_id=tenant_id,
         conversation_id=conversation_id,
         message=message,
+        history=list(history or []),
         blocked=False,
         escalated=False,
         invocations=[],

@@ -183,6 +183,10 @@ class OpenAICompatibleProvider:
             payload["stop"] = request.stop
         if request.seed is not None:
             payload["seed"] = request.seed
+        if request.reasoning_effort is not None:
+            # Sent only when asked for. Most models reject the parameter, and a
+            # default here would break every provider that has never heard of it.
+            payload["reasoning_effort"] = request.reasoning_effort
         if request.tools:
             payload["tools"] = [
                 {

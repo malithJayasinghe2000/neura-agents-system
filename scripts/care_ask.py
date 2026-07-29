@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""Ask CARE one question and watch every step it takes.
+
+    make care-ask Q="where is my order?" URL=http://your-shop/neura/v1 TOKEN=xxx
+    make care-ask Q="do you deliver to Ireland?" URL=... TOKEN=... CUSTOMER=385
+
+``make care-check`` runs a fixed script and tells you pass or fail. This is the
+other tool you want: **one question, and the whole pipeline printed as it
+happens** — what the router decided, what the planner asked for, what the policy
+engine allowed, what the store returned, what the model drafted, and whether the
+verifier let it through.
+
+It is a debugging and explanation tool, and it exists because "why did it say
+that?" is the question ADR-0004 chose an explicit graph in order to be able to
+answer. A graph you cannot watch is an agent loop with extra steps.
+
+Two things it shows that nothing else does:
+
+* **Where the time goes.** Each node is timed. On a local model the answer is
+  usually "the reasoner", and that is a product decision waiting to happen, not
+  a detail.
+* **Which tools the model was even offered.** A tool the store's capabilities do
+  not support is never put in front of the model, so "why didn't it check stock?"
+  is often answered by the OFFERED line rather than by anything about the model.
+
+``CUSTOMER=<id>`` runs the turn as an identified shopper. Without it you are
+anonymous, which is what a shopper in a chat window is until the store says
+otherwise — and it is the difference between an order lookup and a refusal.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+import time
+from typing import Any
+
+from neura_adapters.generic import GenericAdapter
+from neura_agent_care import build_runtime, compile_graph
+from neura_agent_care.tools import TOOL_SCOPES
+from neura_agent_core.graph import CONFIG_KEY, initial_state
+from neura_agent_core.tools import SessionIdentity
+from neura_core import configure_logging
+from neura_llm import LLMClient, ModelRole
+
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+OFF = "\033[0m"
+
+TENANT = "tn_care_ask"
+
+#: What each node is for, in one line, printed as it runs. This script is read
+#: by someone trying to understand the agent, and a node name alone assumes they
+#: already do.
+WHAT_IT_DOES = {
+    "route": "classify the question · resolve pronouns · pull out the order number",
+    "retrieve": "search the indexed catalogue and policies",
+    "plan": "choose which store lookups would answer this",
+    "act": "authorise each lookup in code, then run the allowed ones",
+    "triage": "is the turn still answerable?",
+    "compose": "draft a reply from the evidence, and only the evidence",
+    "verify": "a second model checks every claim against that evidence",
+    "respond": "send it",
+    "escalate": "hand to a person, with everything they need",
+}
+
+
+def _wrap(text: str, indent: str = "        ") -> str:
+    """Reflow for a terminal without importing anything."""
+    words, lines, current = text.split(), [], ""
+    for word in words:
+        if len(current) + len(word) + 1 > 76:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    lines.append(current)
+    return "\n".join(f"{indent}{line}" for line in lines)
+
+
+def _show(node: str, update: dict[str, Any], elapsed_ms: int, runtime: Any) -> None:
+    """Print what one node did."""
+    print(f"  {BOLD}{node.upper()}{OFF} {DIM}— {WHAT_IT_DOES.get(node, '')}  ({elapsed_ms}ms){OFF}")
+
+    if node == "route":
+        confidence = update.get("intent_confidence", 0.0)
+        print(f"      intent      {CYAN}{update.get('intent')}{OFF}  confidence {confidence:.2f}")
+        if resolved := update.get("search_query"):
+            print(f"      asking      {resolved!r}")
+        if entities := update.get("entities"):
+            print(f"      extracted   {entities}")
+
+    elif node == "retrieve":
+        sources = update.get("sources") or []
+        print(f"      found       {sources or 'nothing'}")
+        if note := update.get("retrieval_note"):
+            print(f"      {DIM}note: {note}{OFF}")
+
+    elif node == "plan":
+        offered = [s.name for s in runtime.registry.available_for(runtime.ctx)]
+        chosen = [c.get("name") for c in update.get("proposed_calls", [])]
+        print(f"      offered     {DIM}{', '.join(offered)}{OFF}")
+        print(f"      chose       {CYAN}{chosen or 'no lookup needed'}{OFF}")
+
+    elif node == "act":
+        for decision in update.get("decisions", []):
+            allowed = decision.outcome.value == "allow"
+            mark = f"{GREEN}allowed{OFF}" if allowed else f"{RED}{decision.outcome.value}{OFF}"
+            gate = f" at check '{decision.check.value}'" if decision.check else ""
+            print(f"      policy      {decision.tool_name} → {mark}{gate}")
+            if decision.reason:
+                print(f"      {DIM}            {decision.reason}{OFF}")
+        for invocation in update.get("invocations", []):
+            if invocation.ok:
+                print(f"      store said  {DIM}({invocation.latency_ms}ms){OFF}")
+                print(f"{DIM}{_wrap(str(invocation.value)[:600])}{OFF}")
+
+    elif node == "compose":
+        print(f"      draft       {DIM}(not sent yet — verify has not seen it){OFF}")
+        print(f"{_wrap(update.get('draft', ''))}")
+
+    elif node == "verify":
+        grounded = update.get("grounded")
+        mark = f"{GREEN}every claim supported{OFF}" if grounded else f"{RED}NOT grounded{OFF}"
+        print(f"      verdict     {mark}")
+        print(f"      {DIM}{update.get('verify_reason', '')}{OFF}")
+
+    elif node == "escalate":
+        print(f"      reason      {YELLOW}{update.get('escalation_reason')}{OFF}")
+
+    if node in ("route", "plan", "triage") and update.get("escalated"):
+        print(f"      {YELLOW}→ escalating: {update.get('escalation_reason')}{OFF}")
+
+    print()
+
+
+async def run(question: str, url: str, token: str, customer: str | None) -> int:
+    llm = LLMClient.from_role_map_name("ollama-dev")
+    adapter = GenericAdapter(base_url=url, tenant_id=TENANT, token=token)
+
+    health = await adapter.health()
+    if not health.ok:
+        print(f"\n  {RED}the shop is not reachable at {url}{OFF}\n")
+        return 1
+
+    who = f"customer {customer}" if customer else "an anonymous shopper (nothing proven)"
+    print(f"\n  {BOLD}shopper{OFF}   {question!r}")
+    print(f"  {DIM}asking as {who}")
+    print(
+        f"  router {llm.model_for(ModelRole.ROUTER)} · reasoner {llm.model_for(ModelRole.REASONER)}"
+        f" · guard {llm.model_for(ModelRole.GUARD)}{OFF}\n"
+    )
+
+    runtime = build_runtime(
+        tenant_id=TENANT,
+        conversation_id="cnv_ask",
+        adapter=adapter,
+        llm=llm,
+        # Read from the shop, not declared here. What the agent can do is decided
+        # by what the store says it supports.
+        capabilities=health.capabilities,
+        scopes=TOOL_SCOPES,
+        identity=SessionIdentity(customer_external_id=customer),
+    )
+
+    # No checkpointer: one question, one process, nothing to resume.
+    graph = compile_graph()
+
+    started = time.perf_counter()
+    last = started
+    final: dict[str, Any] = {}
+
+    # `updates` streaming gives one event per node — which is exactly the
+    # explanation this script exists to print.
+    async for event in graph.astream(
+        initial_state(tenant_id=TENANT, conversation_id="cnv_ask", message=question),
+        {"configurable": {CONFIG_KEY: runtime, "thread_id": "cnv_ask"}},
+        stream_mode="updates",
+    ):
+        for node, update in event.items():
+            now = time.perf_counter()
+            _show(node, update or {}, int((now - last) * 1000), runtime)
+            last = now
+            final.update(update or {})
+
+    total_ms = int((time.perf_counter() - started) * 1000)
+
+    print(f"  {BOLD}{'─' * 74}{OFF}")
+    if final.get("escalated"):
+        print(f"  {YELLOW}HANDED TO A PERSON{OFF} — {final.get('escalation_reason')}\n")
+        print("  the shopper sees:")
+    else:
+        print(f"  {GREEN}ANSWERED{OFF}\n")
+        print("  the shopper sees:")
+    print(f"{_wrap(str(final.get('reply', '')), indent='      ')}\n")
+
+    if handoff := final.get("handoff"):
+        print(f"  {DIM}and a person receives:{OFF}")
+        for line in str(handoff).splitlines():
+            print(f"  {DIM}    {line}{OFF}")
+        print()
+
+    print(
+        f"  {DIM}total {total_ms}ms · tool calls used {runtime.budget.calls_used}"
+        f"/{runtime.budget.max_tool_calls}{OFF}\n"
+    )
+
+    await adapter.aclose()
+    return 0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Ask CARE one question, and watch it think.")
+    parser.add_argument("--url", required=True, help="The shop's Generic Interface base URL")
+    parser.add_argument("--token", required=True, help="The shop's API token")
+    parser.add_argument("--as-customer", default=None, help="Run as an identified customer id")
+    parser.add_argument("question", help="What the shopper types")
+    args = parser.parse_args()
+
+    configure_logging(level="ERROR", json_output=False)
+    sys.exit(asyncio.run(run(args.question, args.url, args.token, args.as_customer)))
+
+
+if __name__ == "__main__":
+    main()

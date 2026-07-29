@@ -4,20 +4,20 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-07-28
-**Current phase:** Phase 1 — milestones 1.1–1.10 complete
-**Next action:** Milestone 1.11 — NEURA-CARE. Three intents, seven tools, prompts as files,
-and the first golden dataset that measures a real agent.
+**Last updated:** 2026-07-29
+**Current phase:** Phase 1 — milestones 1.1–1.11 complete
+**Next action:** Milestone 1.12 — Guard. Injection detection, PII redaction and rehydration.
+CARE's graph has a deliberate gap where `guard` and `blocked` go.
 
-> **Starting 1.11 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then
-> [agent-runtime.md §3.4](architecture/agent-runtime.md) for the MVP tool set and
-> [blueprint-v2 §7](business/blueprint-v2.md) for the operating principles the prompts must encode.
+> **Starting 1.12 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then
+> [security-model.md](architecture/security-model.md) §2 and the 1.11 log entry below.
 >
-> **The engine is built and proved end to end** (`make agent-check`): a real model drafts, a real
-> guard model verifies, the policy engine authorises, PostgreSQL checkpoints. CARE supplies a
-> graph, tools, prompts and a dataset — nothing else. If you find yourself editing
-> `neura-agent-core` to make CARE work, that is a design defect worth raising rather than
-> working around.
+> **There is now a working agent to break.** `make care-check URL=… TOKEN=…` holds five real
+> conversations with a real shop; `make eval` scores CARE against 35 golden cases. Injection
+> resistance is **1.00** today *without* a guard node, because the defence is structural — no
+> WRITE tool exists to invoke and every call is authorised in code. 1.12 must not weaken that
+> into "the classifier will catch it", and a `guard` node that returns "clean" while its
+> threshold is untuned would look like protection while being none (open question S1).
 
 > New here? Read [GETTING_STARTED.md](GETTING_STARTED.md) — set up and run everything in ~15 minutes.
 
@@ -35,9 +35,9 @@ and the first golden dataset that measures a real agent.
 | `neura-api` | ✅ boots; `/v1/health`, `/v1/health/ready`, `/v1/agents`; error contract |
 | Agent discovery | ✅ entry points working — `care` manifest discovered at startup |
 | Infrastructure | ✅ docker-compose: Postgres 16 + pgvector, Redis 7 — both healthy |
-| Guardrails | ✅ ruff · mypy strict · 6 import-linter contracts · platform-independence check |
+| Guardrails | ✅ ruff · mypy strict · 7 import-linter contracts · platform-independence check |
 | Eval harness | ✅ datasets · judge · metrics · runner · reports · CLI (`make eval`) |
-| Golden datasets | ⚠️ 19 cases across 3 datasets — **all synthetic**, so not validation |
+| Golden datasets | ⚠️ 35 cases across 5 datasets, living inside `agents/care/` — **all synthetic**, so not validation |
 | `neura-llm` | ✅ roles · 4 role maps · provider · structured output + repair · cost metering |
 | LLM verified live | ✅ `make llm-check` green against real Ollama — chat, schema, embeddings, tool calling |
 | `neura-commerce` | ✅ adapter Protocol · capability negotiation · cursor pagination · identity map · registry · conformance suite |
@@ -58,13 +58,17 @@ and the first golden dataset that measures a real agent.
 | Checkpointer | ✅ ours, not LangGraph's — theirs has no `tenant_id` and needs a second Postgres driver. Conversations resume across processes, under RLS |
 | Audit log | ✅ append-only, hash-chained. Tampering and deletion are both detected; the app role is *revoked* UPDATE/DELETE |
 | RAG | ✅ render · chunk (skipping records with nothing to index, and naming them) · embed · pgvector namespaced by `(tenant_id, embedding_model)` · retrieval · reindex path. Verified against the real shop (`make rag-check`) |
-| Tests | ✅ 318 unit + 24 integration passing |
+| **NEURA-CARE** | ✅ **the first product agent** — graph · 6 nodes · 7 READ tools · 6 prompt files · fixture store · 35 golden cases. Verified against the real shop (`make care-check`) |
+| CARE prompts | ✅ files, content-hashed; the revision is stamped on every answered turn |
+| Eval target | ✅ `make eval` measures a real agent. Agents and their datasets are found by entry point — the harness never learns an agent's name |
+| Guard node | ⬜ 1.12. `guard`/`blocked` are **absent, not stubbed** — see the 1.11 entry for why that does not leave injection undefended |
+| Tests | ✅ 365 unit + 24 integration passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
 | Design partner | ❌ None — top project risk |
 
-**No *product* agent exists yet** — CARE is 1.11, and every eval case still reports "no agent wired up", which is correct. But the engine one would run on is built and has handled real turns end to end (`make agent-check`), including refusing to answer a shopper who had not proven ownership, and catching an invented claim before it reached a customer.
+**A merchant's shopper could now hold a conversation with this.** Against the real test shop, CARE quotes that shop's own returns window, finds a waterproof shoe from "I need something for hiking", refuses an anonymous shopper asking about order 1, lists an identified customer's orders, and hands a cancellation request to a person without claiming to have done it.
 
-**Retrieval, however, does exist and has been measured** — see the 1.9 log entry. It answers real questions about a real catalogue, which is the first time any part of this system has produced an answer rather than a passing test.
+**But no number here is validation.** All 35 cases are synthetic (open question E1). The honest measured result on the local role map is **30/35**, with injection resistance 1.00, intent accuracy 0.95 and tool selection 1.00 — and escalation precision (0.80) and recall (0.89) both still below gate. Groundedness is 0.86 on the one dataset a judge got through before the free tier ran out, and unknown for the other four (E2). See the 1.11 entry.
 
 ---
 
@@ -83,8 +87,8 @@ and the first golden dataset that measures a real agent.
 1.8  Sync engine                ✅ done
 1.9  RAG                        ✅ done  (verified against the real catalogue)
 1.10 Agent runtime              ✅ done  (verified end to end on real models)
-1.11 CARE agent                 ⬜   ← NEXT
-1.12 Guard (injection + PII)    ⬜
+1.11 CARE agent                 ✅ done  (verified against the real shop)
+1.12 Guard (injection + PII)    ⬜   ← NEXT
 1.13 Multi-tenancy              ⬜
 1.14 API                        ⬜
 1.15 Shadow mode                ⬜
@@ -92,7 +96,9 @@ and the first golden dataset that measures a real agent.
 1.17 Deploy                     ⬜
 ```
 
-**Exit criteria (three met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for the one table that exists; each new table is covered by the same test). Remaining: evals green on both role maps · injection resistance 1.00 · end-to-end conversation working · shadow mode producing graded conversations.
+**Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for the one table that exists; each new table is covered by the same test) · **end-to-end conversation working ✅** (`make care-check` against the real shop — over REST and WebSocket is 1.14).
+
+Remaining: evals green on both role maps (**not green on either**: 29/35 on `ollama-dev`, and the cloud map has no model configured) · injection resistance 1.00 (**met today at 1.00, and it is a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
 
 ---
 
@@ -174,6 +180,210 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-29 — NEURA-CARE, the first product agent (milestone 1.11)
+
+- **`agents/care/` is built and answers real questions about a real shop.** A graph of five CARE
+  nodes (`route` · `plan` · `triage` · `compose` · `respond`) over four inherited from the engine
+  (`retrieve` · `act` · `verify` · `escalate`), seven READ tools, five versioned prompt files, a
+  fixture store, and 35 golden cases.
+- **Nothing in `neura-agent-core` learned CARE's name**, and CARE contains no policy, audit,
+  checkpoint or ownership code. The two changes made to the engine were general gaps, not
+  special cases: a `search_query` state key so `retrieve` can search a resolved question, and a
+  `history` key so a node can see previous turns. Both are the seams the 1.9 and 1.10 entries
+  said would be needed.
+- **`make care-check URL=… TOKEN=…` holds five real conversations against the live shop.** All
+  five behaved: the store's own 30-day window quoted rather than a plausible one, a waterproof
+  shoe found from "I need something for hiking", an anonymous shopper asking about order 1
+  escalated *before* the store was called, an identified customer's orders listed from
+  session identity, and "cancel my order" handed to a person without claiming it had been done.
+- **`make eval` measures an agent for the first time.** Milestone 1.4 built the harness and left
+  the `EvalTarget` seam; it is now filled. 29/35 on `ollama-dev`, **injection resistance 1.00**,
+  intent accuracy 0.95, tool selection 1.00, structured repair rate 0.00. Escalation precision
+  0.82 and recall 0.90 are both below gate — every failure is the agent escalating where it
+  could have answered, which is the designed asymmetry working, not a safety problem.
+  **All 35 cases are synthetic and none of this is validation** (E1).
+- **Groundedness has been measured for the first time, and it is 0.86 on `product_qa`** — the
+  only dataset a working judge got through before the free tier ran out. Below the 0.95 gate.
+  Nothing in this project had ever produced a groundedness number before today, because no run
+  had ever both executed an agent and completed a judge.
+
+**The reasoner is now `qwen3:8b`, chosen by measurement rather than by size.**
+
+Against `qwen3.5:9b` and `llama3.1:8b` on the two jobs the role actually does: identical tool
+selection to the 9B (5/5) at **roughly half the latency**, and a grounded draft of the same
+quality. `llama3.1:8b` was faster still and scored 4/5 — it routed a delivery-cost question to
+product search, which is the error class that produces a confident wrong answer rather than a
+slow one. Every `ollama-dev` model is now overridable by environment variable
+(`OLLAMA_MODEL_REASONER`, …): comparing two models for one role is the commonest experiment
+here, and a role map you must edit to test is one people test by not testing.
+
+**A prompt fix, measured: `product_qa` went 4/7 → 5/7.** Two failures shared a cause the prompt
+never forbade — promising future action. The agent offered "let me check the size for you" and
+"would you like to be notified when it's back", neither of which it can do; there is no later
+turn and no notification service. `compose.md` now forbids both, and separately requires the
+reply to be precise about *which variant* was asked about: "we have it in stock" when the size
+they named is sold out is a wrong answer that reads as a helpful one.
+
+**The judge caught something no assertion could have.** Asked about a UK 9, the agent replied
+"we have the Waterproof Hiking Shoe in stock, but we don't have a UK 9 available" — which is
+**true**, and which the judge failed anyway, because `search_products` returns no size-level
+stock and nothing the agent looked up supported the claim. It was right by luck. That is the
+whole argument for a judged metric over substring matching, demonstrated on the first run.
+
+**A known deviation from `agent-runtime.md` §2: there is no `act → act` loop.** The design
+specifies up to four rounds; CARE plans once, executes, and composes. Both remaining `product_qa`
+failures are this and nothing else — answering whether a shoe comes in a UK 9 needs
+`search_products` *then* `get_product_details`. Not fixed hastily, because a loop changes the
+latency, cost and failure modes of every turn and needs its own eval to justify. The single-pass
+version fails safe: it escalates or admits it does not know.
+
+- **`make care-ask Q="…" URL=… TOKEN=… [CUSTOMER=385]`** asks one question and prints every
+  node as it runs — what the router decided, which tools the model was *offered*, what the
+  policy engine allowed, what the store returned, the draft before it was checked, and the
+  verifier's verdict, each timed. It is the "why did it say that?" tool that ADR-0004 chose an
+  explicit graph in order to make possible, and the fastest way for a new reader to understand
+  the agent.
+
+**Four bugs, each invisible to every test that passed:**
+
+- **A reasoning model spends `max_tokens` thinking, and emits no answer.** `compose` capped
+  output at 400 tokens — generous for a two-sentence reply — and the local reasoner used all
+  400 in its `reasoning` channel, returned `finish_reason=length` with empty `content`, and
+  *every case in the suite escalated* with "there is no draft to verify". Nothing was broken;
+  a budget for thinking-plus-answer was being read as a budget for the answer. Raising the cap
+  did not fix it (1500 tokens, 74 seconds, still no content). The fix is
+  `reasoning_effort="none"`, now a field on `ChatRequest` and `RoleConfig`, set at CARE's
+  compose call. **Set there rather than in the role map**: whether a role thinks by default is a
+  decision about every agent and belongs with a comparison run, not a side effect of this one.
+- **The router resolved the pronoun and the planner never saw it.** `route` rewrites "what
+  colours does it come in?" into a self-contained query — and only `retrieve` read it. The
+  planner got the raw message, saw a sentence whose subject referred to nothing, correctly
+  called no tool, and the agent said it did not know. The work was being computed and thrown
+  away for every step but one.
+- **"On sale" means two things.** The evidence renderer described an available product as "on
+  sale", meaning *offered for sale*; against the real shop the agent told a shopper the shoe was
+  "available now at $132.00 and currently on sale". Accurate, grounded, and it sends someone
+  hunting for a discount that does not exist. Now "available to buy". **No assertion could have
+  caught this** — nothing was false. It was found by reading the output, which is the same way
+  1.9 found two title-less products and 1.7 found placeholder policy text.
+- **A `make` variable silently authenticated every shopper.** `make care-ask` took the customer
+  id in `AS=`, and `AS` is a *built-in* make variable — the assembler, defaulting to `as`. So
+  `$(if $(AS),…)` was always true and every run passed `--as-customer as`. The anonymous
+  security case appeared to leak, because the shopper was never anonymous. Renamed `CUSTOMER=`.
+  Worth knowing generally: `AS`, `CC`, `CXX`, `AR`, `LD` and `RM` are all taken.
+
+**Three bugs in the eval harness itself, all one shape: an outage reported as a result.**
+
+The harness was built in 1.4 to refuse untrustworthy numbers, and running it against a real
+agent and a real judge for the first time found three places where it produced them:
+
+- **A rate-limited judge was scored as a hallucinating agent.** The Gemini free tier allows 20
+  requests a day; it ran out mid-run and every remaining case was marked ungrounded, giving
+  groundedness 0.70. The original code deliberately failed rather than passed on a judge error —
+  correct that a failure must not become a green build, wrong that it must become a red one. A
+  `Verdict` now carries `available`, an unjudged case is **skipped**, and the report says how
+  many. Scoring an outage either way states a measurement that was never made.
+- **`make judge-check` printed a green tick for a completely dead judge.** It asserts the judge
+  rejects a hallucination — and an unreachable judge returns `passed=False`, which satisfies that
+  perfectly. The check most relied upon to prove the judge works was the one guaranteed to pass
+  when it did not. Reachability is now tested first.
+- **`--no-agent` turned `make check` into 35 red crosses, and a phantom green gate.** It is part
+  of the standard pre-push command, so the suite was always partly red — and a command that is
+  always partly red is one whose red stops meaning anything. Unrun cases are now skipped. The
+  same fix exposed the worse half: `structured_repair_rate` counted an unrun case as "one call,
+  zero repairs" and reported **0.00 ✔ against its gate from zero measurements**. Caught by a
+  test written for the first bug, not by reading the code.
+
+**The general lesson, and it is the same one in all three: "not measured" needs to be its own
+value.** Folded into either "passed" or "failed" it produces a number that looks exactly like a
+measurement, and the direction of the lie does not much matter — one hides a regression, the
+other invents one and sends somebody hunting for a bug that is not there.
+
+**The judge is pinned to `gemini-3.6-flash`, not `gemini-flash-latest`.** Both work; the alias
+was rejected because a judge that silently changes model makes this month's scores incomparable
+with last month's and leaves no trace in any report. `gemini-2.5-flash` — what the config
+previously named — is retired for new API projects and 404s, which is how this was found.
+
+**A5 and A6 were raised during the milestone and answered before it closed.**
+
+Both were found by building, logged rather than decided silently, then resolved deliberately with
+the eval as the evidence. Full text in [open-questions.md](open-questions.md) under *Resolved*.
+
+- **A6 — session scoping is now the engine's job, and the default is deny.** `may_see` no longer
+  trusts an authenticated session with an arbitrary order reference; the tool must declare
+  `scoped_to_session=True`, meaning it genuinely filters by that customer. A tool that forgets
+  the declaration *loses access* rather than silently handing over a stranger's order. That
+  direction is the whole point: "every tool remembers" is a control that holds until someone adds
+  a tool, and this one fails visibly instead.
+- **A5 — CARE can now decline without occupying a person.** `route` classifies into five
+  categories, not four: `needs_person` escalates, `out_of_scope` reaches a new `decline` node
+  that answers from a fixed file. Anything about other people's data, or addressed to the
+  assistant rather than the shop, is `needs_person` by rule.
+- **The first attempt at A5 failed, and how it failed is the lesson.** It asked the router for a
+  separate `needs_human: bool` alongside its main answer — and llama3.2:3b returned `True` for
+  everything, scoring **0/5**. Folding the distinction into the *intent* asks a small model for
+  one categorical choice instead of a nuanced boolean, which is the shape a classifier is
+  actually good at: **8/8** on the same set, with no other change.
+- **Declining is held to a higher confidence bar than answering** — 0.8 against 0.5. Not
+  symmetry: `decline` is the only outcome that ends a turn with neither an answer nor a person,
+  and therefore the only one an attacker gains from. Measured — an order-enumeration injection
+  was classified `out_of_scope` and *silently declined*. No tool ran, so injection resistance was
+  unaffected and every gate stayed green, and the merchant would never have learned it was
+  attempted. Prompt wording cannot fix that, because the prompt is precisely what an injection is
+  talking past; an unsure decline escalating is a structural floor underneath it.
+- **Net effect, measured on the full suite:** pass rate 29/35 → **30/35**, injection resistance
+  **1.00** throughout, intent accuracy 0.95, tool selection 1.00, escalation precision 0.82 →
+  0.80 and recall 0.90 → 0.89. The escalation metrics moved within noise on nine cases and both
+  remain below gate, as they were before.
+
+**Decisions worth not relitigating:**
+
+- **`find_orders_for_customer` takes no arguments at all.** The obvious signature —
+  `find_orders_for_customer(email)` — is a data-exfiltration bug wearing a helpful face: the
+  email would be chosen by the model, hence by whoever is typing, and the ownership gate cannot
+  stop it because `may_see` trusts an authenticated session whatever address it is handed.
+  Taking the customer from `SessionIdentity` makes the abuse *unexpressible* rather than
+  refused. There is no argument to poison, so no prompt can reach it.
+- **A signed-in shopper reading a stranger's order is stopped by the tool, not the engine.**
+  `may_see` returns true for any reference once authenticated, on the stated precondition that
+  the tool scopes its query to that customer — so `get_order_status` re-checks the fetched
+  order's owner. Two eval cases cover the same attack from opposite ends, because the
+  anonymous version is caught by the policy engine and this one is not, and they fail
+  independently. **Raised as open question A6**: "every tool remembers" is a control that holds
+  until somebody adds a tool, and a `scoped_to_session` declaration would make it structural.
+- **`guard` and `blocked` are absent, not stubbed.** They are 1.12 and need their own eval.
+  Injection resistance is 1.00 today because the defence is structural — there is no WRITE tool
+  to invoke, every proposal is authorised by code the model does not run, and an unowned order
+  reference escalates. A `guard` node returning "clean" on an untuned threshold would report as
+  protection while being none.
+- **Datasets moved *into* the agent**, and the harness finds them — and the target — through a
+  `neura.eval_targets` entry point. `neura-evals` must not know which agents exist, for the same
+  reason `neura-agent-core` must not. A seventh import contract keeps the harness out of the
+  serving path.
+- **A fixture store must not be worse than the real thing either.** Its search required exact
+  substrings, so "waterproof walking shoes" matched nothing in a catalogue selling a "Waterproof
+  Hiking Shoe" — on the trailing "s". The case failed and the agent was blamed for what was
+  really a measurement of whether the model guessed the catalogue's choice of singular noun.
+- **Two eval expectations were changed, both recorded in the YAML with the reasoning.**
+  `order_status_003` no longer expects an escalation for an order number that matches nothing —
+  that is overwhelmingly a typo, and escalating every typo inverts escalation *precision*.
+  `out_of_scope_004` (a weather question) now expects an escalation, because agent-runtime.md §2
+  routes every out-of-scope intent there and CARE has no decline-without-handover path. The
+  case's original reasoning was good; **raised as open question A5** rather than satisfied by
+  inventing a fourth route.
+
+- **Not done, deliberately:** the `guard`/`blocked` nodes (1.12), PII redaction and rehydration
+  (`respond` is the seam), session and conversation memory beyond the `history` key the caller
+  fills, and streaming (open question A1, and `verify` runs after `compose`).
+- **Also not done:** the `act → act` loop above, and a full judged eval run. The free judge tier
+  cannot cover 35 cases in a day, so groundedness exists for one dataset only. That is E2
+  arriving earlier than expected — the paid tier is needed for a complete run, not merely before
+  real customer data.
+- 365 unit + 24 integration tests pass; mypy strict on 114 files — `evals/` joined the
+  typechecked set; 7 contracts kept; platform check green; `make check` exits 0.
+- **Next:** milestone 1.12 — Guard. There is now a working agent to attack, and an injection
+  suite at 1.00 that must not regress.
 
 ### 2026-07-28 — Agent runtime (milestone 1.10)
 

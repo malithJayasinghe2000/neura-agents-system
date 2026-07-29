@@ -13,7 +13,7 @@ import pytest
 from neura_evals.dataset import Dataset, EvalCase, Expectation, Intent, load_all
 from neura_evals.judge import JudgeTrust
 from neura_evals.metrics import CheckStatus, score_case, summarise
-from neura_evals.runner import dataset_dir, run_eval
+from neura_evals.runner import dataset_dirs, run_eval
 from neura_evals.target import AgentResponse, ToolInvocation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,23 +31,32 @@ class FakeTarget:
         return self._responses.get(case.id, AgentResponse(reply="", error="no scripted response"))
 
 
+def _shipped() -> list[Dataset]:
+    """Every dataset shipped by every installed agent.
+
+    Discovered rather than read from a fixed path: datasets moved into the agents
+    in milestone 1.11, and this package must not know which agents exist.
+    """
+    return [d for directory in dataset_dirs() for d in load_all(directory)]
+
+
 def _case(case_id: str, expect: Expectation, intent: Intent = Intent.ORDER_STATUS) -> EvalCase:
     return EvalCase(id=case_id, intent=intent, input="test", expect=expect, synthetic=True)
 
 
 class TestShippedDatasets:
     def test_all_datasets_parse(self) -> None:
-        datasets = load_all(dataset_dir())
+        datasets = _shipped()
         assert datasets, "no datasets found"
         assert sum(len(d.cases) for d in datasets) > 0
 
     def test_every_shipped_case_is_marked_synthetic(self) -> None:
         """None of these came from a real conversation, and the reports say so."""
-        for dataset in load_all(dataset_dir()):
+        for dataset in _shipped():
             assert dataset.is_fully_synthetic, f"{dataset.name} claims non-synthetic cases"
 
     def test_case_ids_are_unique_within_a_dataset(self) -> None:
-        for dataset in load_all(dataset_dir()):
+        for dataset in _shipped():
             ids = [c.id for c in dataset.cases]
             assert len(ids) == len(set(ids))
 
@@ -56,7 +65,7 @@ class TestShippedDatasets:
 
         A reply can sound like a refusal while a tool was quietly invoked.
         """
-        injection = next(d for d in load_all(dataset_dir()) if d.name == "injection")
+        injection = next(d for d in _shipped() if d.name == "injection")
         for case in injection.cases:
             assert case.expect.unauthorised_tool_calls == 0, case.id
 
@@ -134,6 +143,48 @@ class TestScoring:
         )
         check = next(c for c in result.checks if c.name == "groundedness")
         assert check.status is CheckStatus.SKIP
+
+    async def test_no_agent_is_skipped_not_failed(self) -> None:
+        """`--no-agent` is part of `make check`. It must not look like 35 failures."""
+        from neura_evals.target import NotImplementedTarget
+
+        response = await NotImplementedTarget().run(_case("c1", Expectation(grounded=True)))
+        result = await score_case(_case("c1", Expectation(grounded=True)), response, judge=None)
+
+        assert all(c.status is CheckStatus.SKIP for c in result.checks)
+        assert result.passed, "an unrun case is unmeasured, not failed"
+        assert not summarise([result]).metrics, "no metric may be reported from an unrun suite"
+
+    async def test_an_unreachable_judge_is_skipped_not_failed(self) -> None:
+        """A rate-limited judge must not be reported as a hallucinating agent.
+
+        Found for real: the Gemini free tier allows 20 requests a day, ran out
+        mid-run, and every remaining case was scored as ungrounded. The number
+        looked exactly like a serious regression, and the agent was fine.
+        """
+        from neura_evals.judge import Verdict
+
+        class DownJudge:
+            model = "down"
+            trust = JudgeTrust.TRUSTED
+
+            async def grounded(self, *, reply: str, evidence: str) -> Verdict:
+                return Verdict(
+                    passed=False,
+                    score=0.0,
+                    reasoning="judge unavailable: 429",
+                    available=False,
+                )
+
+        result = await score_case(
+            _case("c1", Expectation(grounded=True)),
+            AgentResponse(reply="Your order shipped."),
+            judge=DownJudge(),  # type: ignore[arg-type]
+        )
+        check = next(c for c in result.checks if c.name == "groundedness")
+        assert check.status is CheckStatus.SKIP
+        assert result.passed, "an unmeasured case must not count against the agent"
+        assert summarise([result]).unjudged == 1, "the report must say the run was incomplete"
 
     async def test_must_contain_is_case_insensitive(self) -> None:
         result = await score_case(

@@ -46,6 +46,7 @@ Every unresolved question from across the documentation, consolidated. Scattered
 | A2 🟡 | **Multi-turn ownership persistence.** How long does verified order ownership last? Proposed: session lifetime, re-verified per new order reference. | Security | [runtime §9.2](architecture/agent-runtime.md) |
 | A3 🟡 | **`act` tool-call cap of 4** — a guess, not a measurement. Tune from eval data. | Quality/cost | [runtime §9.3](architecture/agent-runtime.md) |
 | A4 🟠 | **Shadow-mode review capacity.** Grading is human time. How much is realistically available, and what sampling rate does that imply? | Phase 1 design | [runtime §9.4](architecture/agent-runtime.md) |
+| A7 🟠 | **Should CARE loop `act → act`?** [runtime §2](architecture/agent-runtime.md) specifies up to four rounds; CARE plans once, executes, composes. **Measured cost, 1.11:** both remaining `product_qa` failures are this — a size question needs `search_products` then `get_product_details`, and one of them produced an answer that was *correct but ungrounded*, which the judge caught. Not built hastily because a loop changes latency, cost and failure modes on every turn; it needs its own eval run, and the single-pass version fails safe. Relates to A3 (the cap of 4 is a guess too). | Quality | [runtime §2](architecture/agent-runtime.md), `agents/care/graph.py` |
 
 ## Security
 
@@ -60,7 +61,7 @@ Every unresolved question from across the documentation, consolidated. Scattered
 | # | Question | Impact | Source |
 |:--|:--|:--|:--|
 | E1 🔴 | **Seeding golden datasets without a design partner.** Real tickets need a real merchant. Interim: synthesize from the Bagisto store, marked `synthetic: true` — **and never counted as validation.** | Eval validity | [eval §8.1](architecture/evaluation-strategy.md) |
-| E2 🟠 | **Judge tier vs. real customer data.** Currently a Gemini free tier, which is correct while every case is invented. Free tiers may train on submitted content, so the judge **must move to a paid tier before real conversations enter the datasets**. Also: free-tier rate limits keep full runs nightly rather than per-commit. | Compliance + budget | [eval §3.1](architecture/evaluation-strategy.md) |
+| E2 🔴 | **Judge tier — now blocking, not merely upcoming.** Free tiers may train on submitted content, so the judge must move to a paid tier before real conversations enter the datasets. **Escalated to 🔴 in 1.11 for a nearer reason: the free tier cannot complete a single run.** Measured 2026-07-29 — 20 requests/day on `gemini-2.5-flash`, exhausted partway through 35 cases, so groundedness exists for one dataset and is unknown for the other four. A gated metric that cannot be measured is not a gate. Also found: models are retired for new API projects without notice (`gemini-2.5-flash` now 404s), so the model is **pinned**, never `-latest` — an alias that changes silently makes runs incomparable across months. | Compliance + budget + **measurability** | [eval §3.1](architecture/evaluation-strategy.md) |
 | E3 🟡 | **Threshold calibration** — the gates are informed guesses. Recalibrate after ~100 real conversations. | Quality gates | [eval §8.3](architecture/evaluation-strategy.md) |
 | E4 🟡 | **Multilingual evaluation** — grading Sinhala needs a Sinhala-capable judge or a human. Blocks any multilingual claim. | Product claims | [eval §8.4](architecture/evaluation-strategy.md) |
 
@@ -85,4 +86,10 @@ Every unresolved question from across the documentation, consolidated. Scattered
 
 ## Resolved
 
-*(Move entries here with the date and the ADR that settled them. Nothing yet.)*
+| # | Question | Resolved | How |
+|:--|:--|:--|:--|
+| **A5** | Should CARE decline without handing over? | 2026-07-29 | **Yes, and it is held to a higher bar than answering.** `route` now classifies into five categories rather than four: `needs_person` escalates, `out_of_scope` reaches a new `decline` node that replies from a fixed file and occupies nobody. Anything about other people's data, or addressed to the assistant rather than the shop, is `needs_person` by rule. Declining additionally requires `confidence >= 0.8` (`DECLINE_MIN_CONFIDENCE`) against 0.5 for answering — an unsure decline escalates. Measured: escalation precision 0.82 → 0.80, recall 0.90 → 0.89, pass rate 29/35 → 30/35, injection resistance unchanged at 1.00. See `nodes/decline.py`. |
+| **A6** | Should the engine enforce session-scoping structurally? | 2026-07-29 | **Yes, and the default is now deny.** `SessionIdentity.may_see` no longer trusts an authenticated session with an arbitrary reference; it requires the tool to have declared `scoped_to_session=True`, meaning it genuinely filters its result by the session's customer. A tool that forgets the declaration loses access rather than silently granting a stranger's order — the failure direction an access control must have. `get_order_status` declares it and enforces it in `_belongs_to_session`. Covered by `test_a_tool_that_forgets_to_declare_scoping_fails_closed`. |
+
+*(A5 and A6 were both raised and resolved inside milestone 1.11 — raised rather than
+decided silently, then answered deliberately with the eval as the evidence.)*

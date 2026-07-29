@@ -1,0 +1,125 @@
+{
+  "_comment": [
+    "The catalogue and policy pages every eval case sees. Cases overlay orders",
+    "and customers on top of this by naming a file in their `fixtures:` list.",
+    "",
+    "Provenance fields (neura_id, tenant_id, platform, synced_at) are filled in",
+    "by the loader and must not appear here — a store cannot know them, and the",
+    "published spec strips them for exactly that reason.",
+    "",
+    "Money amounts are STRINGS. Money.amount refuses a float: by the time a",
+    "float arrives the precision is already gone, and JSON has no other way to",
+    "write 89.99 than as one."
+  ],
+
+  "categories": [
+    { "external_id": "c_10", "name": "Footwear" },
+    { "external_id": "c_20", "name": "Accessories" }
+  ],
+
+  "products": [
+    {
+      "external_id": "p_100",
+      "title": "Waterproof Hiking Shoe",
+      "description": "A fully waterproof walking shoe with a breathable membrane and a Vibram outsole. Rated for three-season hill walking. Runs slightly narrow; consider a half size up if you have wide feet.",
+      "status": "active",
+      "category_ids": ["c_10"],
+      "url": "https://example-store.test/products/waterproof-hiking-shoe",
+      "price_range_min": { "amount": "119.00", "currency": "GBP" },
+      "price_range_max": { "amount": "119.00", "currency": "GBP" },
+      "variants": [
+        {
+          "external_id": "v_100_8",
+          "sku": "WHS-8-BRN",
+          "title": "UK 8 / Brown",
+          "options": { "size": "UK 8", "colour": "Brown" },
+          "price": { "amount": "119.00", "currency": "GBP" },
+          "in_stock": true,
+          "stock_quantity": 12
+        },
+        {
+          "external_id": "v_100_9",
+          "sku": "WHS-9-BRN",
+          "title": "UK 9 / Brown",
+          "options": { "size": "UK 9", "colour": "Brown" },
+          "price": { "amount": "119.00", "currency": "GBP" },
+          "in_stock": false,
+          "stock_quantity": 0
+        }
+      ]
+    },
+    {
+      "external_id": "p_200",
+      "title": "Merino Wool Walking Socks",
+      "description": "Two-pack of cushioned merino walking socks. Machine washable at 30 degrees.",
+      "status": "active",
+      "category_ids": ["c_20"],
+      "price_range_min": { "amount": "18.00", "currency": "GBP" },
+      "price_range_max": { "amount": "18.00", "currency": "GBP" },
+      "variants": [
+        {
+          "external_id": "v_200_m",
+          "sku": "MWS-M",
+          "title": "Medium",
+          "options": { "size": "Medium" },
+          "in_stock": true,
+          "stock_quantity": 40
+        }
+      ]
+    },
+    {
+      "external_id": "p_300",
+      "title": "Trail Backpack 30L",
+      "description": "A 30-litre daypack with a hydration sleeve and a rain cover.",
+      "status": "archived",
+      "category_ids": ["c_20"],
+      "price_range_min": { "amount": "74.00", "currency": "GBP" },
+      "price_range_max": { "amount": "74.00", "currency": "GBP" },
+      "variants": []
+    }
+  ],
+
+  "inventory": [
+    { "variant_external_id": "v_100_8", "quantity": 12, "in_stock": true },
+    { "variant_external_id": "v_100_9", "quantity": 0, "in_stock": false },
+    { "variant_external_id": "v_200_m", "quantity": 40, "in_stock": true }
+  ],
+
+  "policies": [
+    {
+      "external_id": "pol_returns",
+      "kind": "returns",
+      "title": "Returns and Refunds",
+      "url": "https://example-store.test/policies/returns",
+      "body": "You may return any unworn item within 30 days of delivery for a full refund. Items must be returned in their original packaging with tags attached. Return postage is paid by the customer unless the item is faulty or was sent in error. Once we receive your return we process the refund within 5 working days, to the original payment method. Sale items may be returned on the same terms. Underwear and swimwear cannot be returned for hygiene reasons."
+    },
+    {
+      "external_id": "pol_shipping",
+      "kind": "shipping",
+      "title": "Delivery",
+      "url": "https://example-store.test/policies/delivery",
+      "body": "Standard delivery costs 3.95 GBP and arrives within 3 to 5 working days. Orders over 50 GBP are delivered free. Express delivery costs 7.95 GBP and arrives the next working day if ordered before 2pm. We deliver to mainland UK addresses only. Orders are dispatched Monday to Friday, excluding bank holidays."
+    },
+    {
+      "external_id": "pol_warranty",
+      "kind": "warranty",
+      "title": "Warranty",
+      "url": "https://example-store.test/policies/warranty",
+      "body": "All footwear carries a 12 month warranty against manufacturing defects. The warranty does not cover ordinary wear, damage from misuse, or products that have been repaired elsewhere. To make a claim, contact us with your order number and photographs of the fault."
+    },
+    {
+      "external_id": "pol_payment",
+      "kind": "terms",
+      "title": "Payment Methods",
+      "url": "https://example-store.test/policies/payment",
+      "body": "We accept Visa, Mastercard, American Express, Apple Pay and Google Pay. Payment is taken when your order is dispatched, not when it is placed. We do not store card details. We do not currently offer payment in instalments."
+    },
+    {
+      "external_id": "pol_privacy",
+      "kind": "privacy",
+      "title": "Privacy",
+      "url": "https://example-store.test/policies/privacy",
+      "body": "We keep your name, address, email and order history to fulfil your orders and to handle returns. We do not sell your personal data to anyone. You can ask us to delete your account and order history by contacting us, and we will do so within 30 days unless we are required to keep records for tax purposes."
+    }
+  ]
+}

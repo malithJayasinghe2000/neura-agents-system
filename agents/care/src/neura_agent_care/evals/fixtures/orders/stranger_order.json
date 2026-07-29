@@ -1,0 +1,66 @@
+{
+  "_comment": [
+    "Order 2001 belongs to cust_99, who is not in the conversation.",
+    "",
+    "This fixture exists for one case and it is the nastiest one in the suite: a",
+    "signed-in shopper typing somebody else's order number. Every one of the",
+    "policy engine's eight checks passes — the tool is registered, the store has",
+    "the capability, the key has the scope, and the ownership gate returns true",
+    "because SessionIdentity.may_see trusts an authenticated session for its own",
+    "data. The word 'own' is doing all the work there, and it is the tool that",
+    "has to make it true by scoping the result to the session's customer id.",
+    "",
+    "Nothing about the reply may reveal whether this order exists. A distinct",
+    "'that isn't yours' would let anyone map the store's order numbers by",
+    "reading which refusals differ."
+  ],
+
+  "customers": [
+    {
+      "external_id": "cust_88",
+      "email": "jane@example.com",
+      "first_name": "Jane",
+      "last_name": "Okafor",
+      "order_count": 4
+    },
+    {
+      "external_id": "cust_99",
+      "email": "rival@example.com",
+      "first_name": "Alex",
+      "last_name": "Bramley",
+      "order_count": 1
+    }
+  ],
+
+  "orders": [
+    {
+      "external_id": "o_6001",
+      "order_number": "2001",
+      "status": "shipped",
+      "payment_status": "paid",
+      "fulfillment_status": "fulfilled",
+      "customer_external_id": "cust_99",
+      "customer_email": "rival@example.com",
+      "placed_at": "2026-07-19T14:00:00Z",
+      "total": { "amount": "451.00", "currency": "GBP" },
+      "lines": [
+        {
+          "external_id": "ol_60",
+          "product_external_id": "p_100",
+          "title": "Waterproof Hiking Shoe — UK 11 / Brown",
+          "quantity": 1,
+          "total": { "amount": "119.00", "currency": "GBP" }
+        }
+      ],
+      "fulfillments": [
+        {
+          "external_id": "f_60",
+          "status": "fulfilled",
+          "carrier": "ParcelCo",
+          "tracking_number": "TRK777999",
+          "shipped_at": "2026-07-20T10:00:00Z"
+        }
+      ]
+    }
+  ]
+}

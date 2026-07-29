@@ -58,7 +58,8 @@ agents/                     PRODUCTS — one folder per sellable agent
 
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
 
-evals/                      eval runner (datasets live inside each agent)
+evals/                      eval runner — finds agents and their datasets by
+                            entry point, and never learns an agent's name
 infra/                      docker-compose · Dockerfiles · Alembic
 tests/                      integration + e2e
 ```
@@ -74,12 +75,16 @@ Full detail in [docs/architecture/tenancy-and-packaging.md](docs/architecture/te
 make dev            # docker compose up + API with reload
 make test           # unit + integration
 make lint           # ruff + mypy
-make eval           # full eval suite, current role map
+make eval           # run the agent against its golden datasets (needs Ollama)
+make eval-fast      # datasets + harness only — no agent, no models. In `make check`
 make eval-compare A=ollama-dev B=cloud-prod
 make migrate        # alembic upgrade head
 make rag-check URL=… TOKEN=…   # index a real shop with real embeddings (KEEP=1 to leave the data)
 make rag-ask Q="…" [SHOW=1]    # search what is indexed — answers "why did it retrieve that?"
 make agent-check               # run the agent runtime end to end on real models
+make care-check URL=… TOKEN=…  # hold real conversations with CARE against a real shop
+make care-ask Q="…" URL=… TOKEN=… [CUSTOMER=385]   # one question, every step printed —
+                                                   # the "why did it say that?" tool
 make check          # everything CI runs
 ```
 
@@ -137,14 +142,23 @@ Once designed, create `agents/<name>/` with the standard five parts:
 2. `graph.py` — reusing `guard`, `retrieve`, `verify`, `escalate` from `neura-agent-core`.
 3. `tools/` — declared as above.
 4. `prompts/` — files, never inline.
-5. `evals/datasets/` — no agent ships without one.
+5. `evals/datasets/` — no agent ships without one, plus the `EvalTarget` that runs them.
 
-Register it via entry points in its `pyproject.toml`:
+Register it via entry points in its `pyproject.toml` — two groups, both discovered
+rather than imported by name:
 
 ```toml
 [project.entry-points."neura.agents"]
-<name> = "neura_agent_<name>:MANIFEST"
+<name> = "neura_agent_<name>:MANIFEST"          # the API mounts it at startup
+
+[project.entry-points."neura.eval_targets"]
+<name> = "neura_agent_<name>.evals:build_target"  # `make eval` measures it
 ```
+
+**Copy `agents/care/` rather than this list.** It is the only built agent and it
+is deliberately the worked example: five nodes, seven tools, five prompt files, a
+fixture store and 35 golden cases, and not one line of policy, audit, checkpoint
+or ownership code.
 
 **Two hard rules:** `neura-agent-core` must not learn your agent's name, and your agent must not import another agent. Cross-agent communication goes through the event bus.
 
@@ -178,6 +192,9 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | Ollama slow or thrashing | Too many distinct models loaded — check `OLLAMA_NUM_PARALLEL`, `OLLAMA_KEEP_ALIVE` |
 | Structured output failing often | Provider lacks `JSON_SCHEMA_MODE`; check the repair-rate metric |
 | Agent loops | `act` node cap — investigate why, don't just raise the cap |
+| A security case "fails" because the shopper was never anonymous | A `make` variable name collided with a built-in. `AS` is the assembler and defaults to `as`, so `$(if $(AS),…)` is always true. Never name a make variable `AS`, `CC`, `CXX`, `AR`, `LD`, `RM` |
+| Agent escalates every turn with "no draft to verify" | A reasoning model spent `max_tokens` thinking and emitted no content. `max_tokens` budgets *thinking plus answer*; raise it, or set `reasoning_effort="none"` |
+| Retrieval or a tool search finds nothing a shopper would expect | The query still contains a pronoun. `route` writes a resolved `search_query`; anything reading `message` instead is asking about a subject that is not there |
 | Agent route returns 403 | Tenant's `enabled_agents` does not include it — an entitlement, not a bug |
 | New agent not mounted at startup | Missing `[project.entry-points."neura.agents"]`, or not installed in the workspace |
 

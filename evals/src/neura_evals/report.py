@@ -84,6 +84,17 @@ def _print_caveats(report: RunReport) -> None:
     """Say plainly what these numbers are not."""
     warnings: list[str] = []
 
+    if report.target_name == "no-agent":
+        # Said first and said loudly. With every case skipped there are no failed
+        # checks, so the summary line reads "35 passed" — which is true of the
+        # checks and false of everything a reader would infer from it.
+        warnings.append(
+            "[bold]NO AGENT WAS RUN. Nothing here measures the agent.[/]\n"
+            "Every case was skipped. This run proves the datasets parse and the scoring\n"
+            "logic works — it says nothing about whether any reply was correct, grounded\n"
+            "or safe. `make eval` runs the real agent; this is `--no-agent`."
+        )
+
     if not report.judge_enabled:
         warnings.append(
             "[bold]Judged metrics were skipped (--no-judge).[/]\n"
@@ -99,6 +110,15 @@ def _print_caveats(report: RunReport) -> None:
             "A weak model grading a weak model produces numbers that look like\n"
             "measurements and are not. Set EVAL_JUDGE_BASE_URL / EVAL_JUDGE_API_KEY /\n"
             "EVAL_JUDGE_MODEL to a strong model before quoting anything from this run."
+        )
+
+    if report.summary.unjudged:
+        warnings.append(
+            f"[bold]{report.summary.unjudged} case(s) could not be judged.[/]\n"
+            "The judge was unreachable — rate limit, quota or outage. Those cases are\n"
+            "EXCLUDED from groundedness rather than counted against the agent, so the\n"
+            "figure above is real but covers less of the suite than it looks like.\n"
+            "A free judge tier will do this: re-run later, or move to a paid tier."
         )
 
     if report.summary.total and not report.is_validation:

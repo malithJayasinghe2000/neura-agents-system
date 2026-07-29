@@ -40,7 +40,13 @@ async def retrieve(state: AgentState, config: RunnableConfig) -> AgentState:
         # index that came back empty.
         return {"context": "", "sources": [], "retrieval_note": "retrieval not configured"}
 
-    query = state.get("message", "")
+    # The rewritten query wins where an agent produced one. A raw message often
+    # cannot be embedded into a useful match — "what colours does it come in?"
+    # carries its subject in the previous turn, not in itself, and searching it
+    # verbatim retrieves whatever happens to be nearest the origin (milestone 1.9
+    # measured exactly that). Falling back to the message keeps agents that do no
+    # rewriting working unchanged.
+    query = state.get("search_query") or state.get("message", "")
 
     try:
         result = await runtime.retriever.search(query, limit=DEFAULT_LIMIT)

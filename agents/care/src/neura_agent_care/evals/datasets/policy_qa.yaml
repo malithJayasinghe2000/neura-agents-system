@@ -1,0 +1,109 @@
+name: policy_qa
+description: >-
+  Returns, refunds, shipping, warranty, payment and privacy — the third of CARE's
+  three intents, and the one where being wrong is quietest.
+
+  Nobody notices immediately when an agent states a 45-day returns window that
+  the merchant's page puts at 30. The shopper finds out at the point of return,
+  and by then it is the merchant explaining a promise they never made. So the
+  assertions here are mostly on exact figures copied from the store's own text.
+
+  ALL CASES ARE SYNTHETIC, written against the policy pages in
+  ../fixtures/store.json (docs/open-questions.md E1).
+
+cases:
+  - id: policy_qa_001
+    intent: policy_qa
+    synthetic: true
+    input: "What's your returns policy?"
+    expect:
+      intent: policy_qa
+      tools_called: [search_policies]
+      grounded: true
+      escalated: false
+      must_contain: ["30 days"]
+    notes: The straightforward lookup. The window is the fact that must survive.
+
+  - id: policy_qa_002
+    intent: policy_qa
+    synthetic: true
+    input: "How much is delivery?"
+    expect:
+      intent: policy_qa
+      grounded: true
+      escalated: false
+      must_contain: ["3.95"]
+    notes: >-
+      A figure copied verbatim. "Around four pounds" is a rounding a shopper
+      cannot check against anything, and it is how a price becomes a complaint.
+
+  - id: policy_qa_003
+    intent: policy_qa
+    synthetic: true
+    input: "Do I have to pay for return postage?"
+    expect:
+      intent: policy_qa
+      grounded: true
+      must_not_contain: ["free returns", "we cover", "no charge"]
+    notes: >-
+      The policy says the customer pays unless the item is faulty or was sent in
+      error. The tempting answer is the generous one, and the generous answer
+      costs the merchant money they never agreed to spend.
+
+  - id: policy_qa_004
+    intent: policy_qa
+    synthetic: true
+    input: "Can I pay in instalments?"
+    expect:
+      intent: policy_qa
+      grounded: true
+      escalated: false
+      must_not_contain: ["Klarna", "yes"]
+    notes: >-
+      The payment page says instalments are not offered. A named provider in the
+      reply is invention from general knowledge about how shops usually work —
+      the exact failure the tool's "do not answer from general knowledge" fallback
+      exists to prevent.
+
+  - id: policy_qa_005
+    intent: policy_qa
+    synthetic: true
+    input: "Do you sell my data to anyone?"
+    expect:
+      intent: policy_qa
+      grounded: true
+      escalated: false
+      must_contain: ["not"]
+    notes: >-
+      A privacy question, answerable from the store's own page. Included because
+      it is the question a merchant is most nervous about an AI answering, and
+      the right behaviour is to quote them rather than reassure on their behalf.
+
+  - id: policy_qa_006
+    intent: policy_qa
+    synthetic: true
+    input: "I bought these 40 days ago and they've fallen apart. Can I send them back?"
+    expect:
+      intent: policy_qa
+      grounded: true
+      must_not_contain: ["within 30 days, so no", "unfortunately not"]
+    notes: >-
+      Two policies collide: the 30-day return window has passed, but footwear
+      carries a 12-month warranty against manufacturing defects. An agent that
+      matches only on "send them back" quotes the returns window and tells a
+      customer with a valid warranty claim to go away.
+
+      This case is the reason search_policies returns up to two pages rather than
+      one.
+
+  - id: policy_qa_007
+    intent: policy_qa
+    synthetic: true
+    input: "Do you deliver to Ireland?"
+    expect:
+      intent: policy_qa
+      grounded: true
+      must_not_contain: ["yes"]
+    notes: >-
+      The delivery page says mainland UK only. The failure is answering the
+      question the shopper hoped for rather than the one the page answers.

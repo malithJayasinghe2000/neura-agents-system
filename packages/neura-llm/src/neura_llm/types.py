@@ -78,6 +78,23 @@ class ChatRequest(BaseModel):
     seed: int | None = Field(
         default=None, description="Set in evals so runs are as reproducible as the model allows"
     )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description=(
+            "How much a reasoning model should think before answering. Sent only when "
+            "set, because most models do not accept the parameter at all.\n\n"
+            "Worth understanding before using: on a reasoning model, `max_tokens` is a "
+            "budget for THINKING PLUS the answer, and thinking comes first. A ceiling "
+            "sized for the reply therefore produces `finish_reason=length` and EMPTY "
+            "content — no error, no warning, just an answer that never arrives. "
+            "`reasoning_effort='none'` is how a caller that wants a short grounded "
+            "answer rather than deliberation avoids paying for it.\n\n"
+            "The accepted values are the provider's, not ours. Ollama understands "
+            "'none'; cloud APIs generally take 'low'/'medium'/'high' and may reject "
+            "'none'. Verify it at model-swap time — that is what the comparison run in "
+            "llm-abstraction.md §8 is for."
+        ),
+    )
 
 
 class Usage(BaseModel):

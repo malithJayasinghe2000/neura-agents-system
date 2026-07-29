@@ -70,6 +70,14 @@ class RoleConfig(BaseModel):
     model: str
     temperature: float = 0.0
     max_tokens: int | None = None
+    reasoning_effort: str | None = Field(
+        default=None,
+        description=(
+            "Default thinking budget for this role. A per-request value overrides it, "
+            "so a node that genuinely wants deliberation can still ask. Values are the "
+            "provider's own — see ChatRequest.reasoning_effort."
+        ),
+    )
     dimensions: int | None = Field(
         default=None,
         description=(
@@ -166,24 +174,60 @@ def _ollama_provider() -> ProviderConfig:
 
 
 def ollama_dev() -> RoleMap:
-    """Development. Zero cost, everything on this machine.
+    """Development and the sovereign tier. Zero cost, everything on this machine.
 
     Model choices reflect what each role needs: a 3B model is plenty for
     classification and is far faster, while generation gets the largest model
-    that still responds acceptably.
+    that still answers in a time a shopper would tolerate.
+
+    **Every model is overridable by environment variable.** Comparing two models
+    for one role is the single most common experiment here, and it should not
+    require editing this file — a role map you have to edit to test is a role map
+    people test by not testing. Defaults are what the measurements below chose;
+    an override is how the next measurement gets made.
+
+    `REASONER` is `qwen3:8b`, measured against `qwen3.5:9b` and `llama3.1:8b`
+    on 2026-07-29: identical tool selection (5/5) at roughly **half** the
+    latency of the 9B, and a grounded draft of the same quality. `llama3.1:8b`
+    was faster still and got 4/5 — it routed a delivery-cost question to product
+    search, which is the kind of error that produces a confidently wrong answer
+    rather than a slow one.
+
+    Both Qwen models *think* by default, spending the token budget on reasoning
+    before emitting any content. Callers that want an answer rather than
+    deliberation pass `reasoning_effort="none"`; see `ChatRequest`.
     """
     return RoleMap(
         name="ollama-dev",
         providers={"ollama": _ollama_provider()},
         roles={
-            ModelRole.ROUTER: RoleConfig(provider="ollama", model="llama3.2:3b", temperature=0.0),
-            ModelRole.REASONER: RoleConfig(provider="ollama", model="qwen3.5:9b", temperature=0.3),
-            ModelRole.GUARD: RoleConfig(provider="ollama", model="llama3.2:3b", temperature=0.0),
+            ModelRole.ROUTER: RoleConfig(
+                provider="ollama",
+                model=os.getenv("OLLAMA_MODEL_ROUTER", "llama3.2:3b"),
+                temperature=0.0,
+            ),
+            ModelRole.REASONER: RoleConfig(
+                provider="ollama",
+                model=os.getenv("OLLAMA_MODEL_REASONER", "qwen3:8b"),
+                temperature=0.3,
+            ),
+            ModelRole.GUARD: RoleConfig(
+                provider="ollama",
+                model=os.getenv("OLLAMA_MODEL_GUARD", "llama3.2:3b"),
+                temperature=0.0,
+            ),
             ModelRole.EMBEDDER: RoleConfig(
-                provider="ollama", model="nomic-embed-text", dimensions=768
+                provider="ollama",
+                # Changing this is a REINDEX, not a config edit — vectors from
+                # two models are not comparable and mixing them degrades
+                # retrieval with no error (llm-abstraction.md §5.2).
+                model=os.getenv("OLLAMA_MODEL_EMBEDDER", "nomic-embed-text"),
+                dimensions=768,
             ),
             ModelRole.SUMMARIZER: RoleConfig(
-                provider="ollama", model="llama3.1:8b", temperature=0.3
+                provider="ollama",
+                model=os.getenv("OLLAMA_MODEL_SUMMARIZER", "llama3.1:8b"),
+                temperature=0.3,
             ),
         },
     )

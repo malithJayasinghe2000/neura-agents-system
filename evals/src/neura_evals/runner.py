@@ -108,6 +108,14 @@ def compare(baseline: RunReport, candidate: RunReport) -> list[tuple[str, float,
     ]
 
 
-def dataset_dir() -> Path:
-    """``evals/datasets`` — this file is at ``evals/src/neura_evals/runner.py``."""
-    return Path(__file__).resolve().parents[2] / "datasets"
+def dataset_dirs() -> list[Path]:
+    """Every installed agent's dataset directory.
+
+    Datasets moved *into* the agents in milestone 1.11. They are a statement
+    about one agent's behaviour, so they version and review with the code that
+    produces it — and this package must not know which agents exist, which rules
+    out a path constant here (AGENTS.md, "Add an agent").
+    """
+    from neura_evals.discovery import discover_agents
+
+    return [agent.dataset_dir for agent in discover_agents()]

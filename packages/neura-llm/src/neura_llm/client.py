@@ -74,16 +74,19 @@ class LLMClient:
             messages=[],
             temperature=role_config.temperature,
             max_tokens=role_config.max_tokens,
+            reasoning_effort=role_config.reasoning_effort,
         )
         return provider, role_config.model, defaults
 
     def _apply_defaults(self, request: ChatRequest, defaults: ChatRequest) -> ChatRequest:
         """Role defaults fill gaps; an explicit value on the request always wins."""
-        updates = {}
+        updates: dict[str, object] = {}
         if request.temperature is None:
             updates["temperature"] = defaults.temperature
         if request.max_tokens is None and defaults.max_tokens is not None:
             updates["max_tokens"] = defaults.max_tokens
+        if request.reasoning_effort is None and defaults.reasoning_effort is not None:
+            updates["reasoning_effort"] = defaults.reasoning_effort
         return request.model_copy(update=updates) if updates else request
 
     async def chat(self, role: ModelRole, request: ChatRequest) -> ChatResponse:

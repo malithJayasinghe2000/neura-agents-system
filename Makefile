@@ -5,9 +5,9 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration eval check migrate revision clean reset \
+        test-integration eval eval-fast eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
-        llm-check judge-check
+        care-check care-ask llm-check judge-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -51,8 +51,8 @@ format:  ## Apply formatting and safe fixes
 	uv run ruff format .
 	uv run ruff check --fix .
 
-typecheck:  ## mypy strict on packages/, agents/, apps/
-	uv run mypy packages apps agents
+typecheck:  ## mypy strict on packages/, apps/, agents/, evals/
+	uv run mypy packages apps agents evals
 
 arch:  ## Architecture guardrails — layering + platform independence
 	uv run lint-imports
@@ -90,20 +90,38 @@ rag-ask:  ## Search what is indexed: make rag-ask Q="do you sell my data?" [SHOW
 agent-check:  ## Run the agent runtime end to end against REAL models + Postgres
 	uv run python scripts/agent_smoke_test.py
 
+care-check:  ## Hold real conversations with CARE against a REAL shop: make care-check URL=... TOKEN=...
+	uv run python scripts/care_smoke_test.py --url $(URL) --token $(TOKEN)
+
+# CUSTOMER, not AS. `AS` is a BUILT-IN make variable — the assembler, defaulting
+# to `as` — so `$(if $(AS),...)` is always true and every run would silently
+# authenticate as a customer called "as". It cost an afternoon: the anonymous
+# security case appeared to fail because the shopper was never anonymous.
+care-ask:  ## Ask CARE one question and watch every step: make care-ask Q="..." URL=... TOKEN=... [CUSTOMER=385]
+	uv run python scripts/care_ask.py --url $(URL) --token $(TOKEN) \
+	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
+
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py
 
 judge-check:  ## Verify the eval judge is reachable AND catches a hallucination
 	uv run neura-eval --check-judge
 
-eval:  ## Agent evaluation suite (needs EVAL_JUDGE_* for trustworthy scores)
+eval:  ## Run the agent against its golden datasets (needs Ollama; EVAL_JUDGE_* for trustworthy scores)
 	uv run neura-eval
 
-eval-fast:  ## Evals without the judge — mechanical checks only, no API calls, no cost
-	uv run neura-eval --no-judge
+eval-fast:  ## Datasets + harness only — no agent, no judge, no models, no cost. Part of `make check`.
+	uv run neura-eval --no-judge --no-agent
 
-eval-one:  ## One dataset: make eval-one D=injection
+eval-one:  ## One dataset against the real agent: make eval-one D=injection
 	uv run neura-eval --dataset $(D)
+
+eval-agents:  ## Which installed agents can be evaluated
+	uv run neura-eval --list-agents
+
+eval-compare:  ## Same suite on two role maps: make eval-compare A=ollama-dev B=cloud-prod
+	uv run neura-eval --role-map $(A)
+	uv run neura-eval --role-map $(B)
 
 check: lint typecheck arch test eval-fast  ## Everything CI runs. Run before every push.
 

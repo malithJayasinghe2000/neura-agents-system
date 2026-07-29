@@ -74,6 +74,14 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
     checks: list[Check] = []
     expect = case.expect
 
+    if response.not_run:
+        # Deliberately unmeasured, not failed. `--no-agent` validates the
+        # datasets and this scoring logic without a model call; reporting that as
+        # a suite-wide failure would be a lie in the safe direction, which is
+        # still a lie and still trains a reader to ignore red.
+        checks.append(Check("execution", CheckStatus.SKIP, response.error or "no agent was run"))
+        return CaseResult(case.id, case.intent, case.synthetic, checks, response)
+
     if response.error:
         checks.append(Check("execution", CheckStatus.FAIL, response.error))
         return CaseResult(case.id, case.intent, case.synthetic, checks, response)
@@ -162,19 +170,27 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
             checks.append(Check("groundedness", CheckStatus.SKIP, "no judge configured"))
         else:
             verdict = await judge.grounded(reply=response.reply, evidence=response.evidence)
-            groundedness = verdict.score
-            checks.append(
-                Check(
-                    "groundedness",
-                    CheckStatus.PASS if verdict.passed == expect.grounded else CheckStatus.FAIL,
-                    verdict.reasoning
-                    + (
-                        f" | unsupported: {verdict.unsupported_claims}"
-                        if verdict.unsupported_claims
-                        else ""
-                    ),
+            if not verdict.available:
+                # SKIP, not FAIL. The judge was unreachable, so this case was
+                # never judged — and an unmeasured case counted against the agent
+                # is a false regression that sends someone hunting for a bug that
+                # does not exist. `_rate` excludes skips, so the groundedness
+                # figure stays honest about what it actually covers.
+                checks.append(Check("groundedness", CheckStatus.SKIP, verdict.reasoning))
+            else:
+                groundedness = verdict.score
+                checks.append(
+                    Check(
+                        "groundedness",
+                        CheckStatus.PASS if verdict.passed == expect.grounded else CheckStatus.FAIL,
+                        verdict.reasoning
+                        + (
+                            f" | unsupported: {verdict.unsupported_claims}"
+                            if verdict.unsupported_claims
+                            else ""
+                        ),
+                    )
                 )
-            )
 
     return CaseResult(case.id, case.intent, case.synthetic, checks, response, groundedness)
 
@@ -186,6 +202,10 @@ class RunSummary:
     total: int = 0
     passed: int = 0
     synthetic: int = 0
+    #: Cases that asserted on groundedness but the judge could not be reached for.
+    #: Reported, because a groundedness figure covering half the suite must not
+    #: look identical to one covering all of it.
+    unjudged: int = 0
     metrics: dict[str, float] = field(default_factory=dict)
     p50_latency_ms: int = 0
     p95_latency_ms: int = 0
@@ -234,6 +254,14 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         total=len(results),
         passed=sum(1 for r in results if r.passed),
         synthetic=sum(1 for r in results if r.synthetic),
+        unjudged=sum(
+            1
+            for r in results
+            for c in r.checks
+            if c.name == "groundedness"
+            and c.status is CheckStatus.SKIP
+            and "unavailable" in c.detail
+        ),
     )
 
     for metric_name, check_name in (
@@ -266,8 +294,13 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         if actual_pos:
             summary.metrics["escalation_recall"] = true_pos / actual_pos
 
-    total_llm_calls = sum(max(1, len(r.response.tools_called)) for r in results)
-    total_repairs = sum(r.response.structured_repairs for r in results)
+    # Only cases that actually ran. Counting an unrun case as "one call, zero
+    # repairs" reported a perfect 0.00 repair rate — a green gate derived from no
+    # measurement at all, which is the one number shape this harness exists to
+    # refuse. Caught by a test, not by reading the code.
+    ran = [r for r in results if not r.response.not_run]
+    total_llm_calls = sum(max(1, len(r.response.tools_called)) for r in ran)
+    total_repairs = sum(r.response.structured_repairs for r in ran)
     if total_llm_calls:
         summary.metrics["structured_repair_rate"] = total_repairs / total_llm_calls
 

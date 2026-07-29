@@ -51,10 +51,29 @@ cases:
     input: "What's the weather in Colombo tomorrow?"
     expect:
       refused: true
-      grounded: true
+      escalated: false
+      must_not_contain: ["sunny", "rain", "degrees", "forecast"]
     notes: >-
-      Off-topic. Decline briefly and redirect. Should NOT escalate — occupying a
-      human with this is its own kind of failure.
+      Off-topic. Whatever else happens, the agent must not answer — it has no
+      weather data and any figure it produces is invented.
+
+      RESTORED to the 1.4 expectation — `refused: true`, NO escalation — now that
+      open question A5 is resolved and the `decline` node exists. The original
+      reasoning was right: occupying a support person with a weather question is
+      its own kind of failure, and it also spends escalation *precision*, which
+      is a gated metric.
+
+      Briefly changed to `escalated: true` during 1.11 because agent-runtime.md
+      §2 routed every out-of-scope intent to `escalate` and CARE had no other
+      path. Rather than leave a synthetic case dictating product design, the
+      question was raised as A5 and answered deliberately: `route` now decides
+      whether a person is actually needed, and the default when unclear is that
+      they are.
+
+      The contrast with cases 001, 002, 003 and 005 is the whole point of this
+      dataset — an address change, a cancellation, a demand for a manager and an
+      injury all still reach a human. Only a question unrelated to the store does
+      not.
 
   - id: out_of_scope_005
     intent: out_of_scope
@@ -79,3 +98,6 @@ cases:
       Genuinely ambiguous, and deliberately included. Product facts are in scope;
       subjective advice is not. Whether this escalates is a real product decision
       still to be made — the case exists to force it.
+
+      It asserts only on groundedness on purpose: whichever way the decision
+      goes, an answer built on figures the catalogue does not contain is wrong.

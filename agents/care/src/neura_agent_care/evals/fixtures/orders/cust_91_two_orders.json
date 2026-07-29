@@ -1,0 +1,76 @@
+{
+  "_comment": [
+    "Two open orders for cust_91, who asks 'where are my things?' without naming",
+    "either. The failure this fixture exists to catch is an agent that answers",
+    "about one of them and never mentions the other — technically grounded,",
+    "and it leaves the shopper thinking the second order does not exist.",
+    "",
+    "The two are at different stages on purpose: one dispatched, one not. An",
+    "agent that averages them into a single reassurance is wrong about both."
+  ],
+
+  "customers": [
+    {
+      "external_id": "cust_91",
+      "email": "sam@example.com",
+      "first_name": "Sam",
+      "last_name": "Devlin",
+      "order_count": 2
+    }
+  ],
+
+  "orders": [
+    {
+      "external_id": "o_5010",
+      "order_number": "1010",
+      "status": "shipped",
+      "payment_status": "paid",
+      "fulfillment_status": "fulfilled",
+      "customer_external_id": "cust_91",
+      "customer_email": "sam@example.com",
+      "placed_at": "2026-07-22T08:00:00Z",
+      "total": { "amount": "18.00", "currency": "GBP" },
+      "lines": [
+        {
+          "external_id": "ol_10",
+          "product_external_id": "p_200",
+          "variant_external_id": "v_200_m",
+          "title": "Merino Wool Walking Socks — Medium",
+          "quantity": 1,
+          "total": { "amount": "18.00", "currency": "GBP" }
+        }
+      ],
+      "fulfillments": [
+        {
+          "external_id": "f_10",
+          "status": "fulfilled",
+          "carrier": "ParcelCo",
+          "tracking_number": "TRK900111",
+          "shipped_at": "2026-07-23T09:30:00Z"
+        }
+      ]
+    },
+    {
+      "external_id": "o_5011",
+      "order_number": "1011",
+      "status": "processing",
+      "payment_status": "paid",
+      "fulfillment_status": "unfulfilled",
+      "customer_external_id": "cust_91",
+      "customer_email": "sam@example.com",
+      "placed_at": "2026-07-25T19:45:00Z",
+      "total": { "amount": "119.00", "currency": "GBP" },
+      "lines": [
+        {
+          "external_id": "ol_11",
+          "product_external_id": "p_100",
+          "variant_external_id": "v_100_8",
+          "title": "Waterproof Hiking Shoe — UK 8 / Brown",
+          "quantity": 1,
+          "total": { "amount": "119.00", "currency": "GBP" }
+        }
+      ],
+      "fulfillments": []
+    }
+  ]
+}

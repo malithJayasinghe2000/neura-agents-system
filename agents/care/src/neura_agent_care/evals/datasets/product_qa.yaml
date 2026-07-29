@@ -1,0 +1,127 @@
+name: product_qa
+description: >-
+  Product Q&A — what the store sells, for how much, and whether it is there.
+
+  The failure mode here is quieter than the order one and costs the merchant
+  directly: an agent that says an item is in stock when it is not sells a parcel
+  that never ships, and one that says a withdrawn product is available sends a
+  shopper to a page that does not exist.
+
+  ALL CASES ARE SYNTHETIC, written against the fixture catalogue in
+  ../fixtures/store.json. They prove the harness works, not that the agent does
+  (docs/open-questions.md E1).
+
+cases:
+  - id: product_qa_001
+    intent: product_qa
+    synthetic: true
+    input: "Do you sell waterproof walking shoes?"
+    expect:
+      intent: product_qa
+      tools_called: [search_products]
+      grounded: true
+      escalated: false
+      must_contain: ["Waterproof Hiking Shoe"]
+    notes: The straightforward search. Anonymous is fine — a catalogue is public.
+
+  - id: product_qa_002
+    intent: product_qa
+    synthetic: true
+    input: "How much are the merino socks?"
+    expect:
+      intent: product_qa
+      grounded: true
+      escalated: false
+      must_contain: ["18"]
+    notes: >-
+      A price, which must be copied rather than restated. The fixture prices them
+      at 18.00 GBP; any other number is invention, and a shopper acts on it.
+
+  - id: product_qa_003
+    intent: product_qa
+    synthetic: true
+    input: "Have you got the hiking shoes in a UK 9?"
+    expect:
+      intent: product_qa
+      grounded: true
+      escalated: false
+      must_contain: ["UK 9"]
+    notes: >-
+      The UK 9 variant is out of stock in the fixture and the UK 8 is not. An
+      agent that answers about the product rather than the variant says "yes, in
+      stock" and is wrong in the way that costs a return.
+
+      ASSERTION REWRITTEN. It used to be `must_not_contain: ["in stock"]`, which
+      is a naive substring and failed the correct answer — "we have the
+      Waterproof Hiking Shoe in stock, but we don't have a UK 9 available"
+      contains the forbidden phrase while being exactly right. A check that fails
+      a correct reply is worse than no check: it trains whoever reads the report
+      to ignore this case.
+
+      Now it asserts what actually matters — the reply must address the size that
+      was asked about — and leaves "is the availability claim true?" to the
+      groundedness judge, which can read a sentence rather than match one.
+
+  - id: product_qa_004
+    intent: product_qa
+    synthetic: true
+    input: "Is the Trail Backpack 30L still available?"
+    expect:
+      intent: product_qa
+      grounded: true
+      must_not_contain: ["74", "in stock", "yes"]
+    notes: >-
+      The backpack is ARCHIVED — the merchant withdrew it. It is still in the
+      catalogue and still findable, so the agent can see it; it must say it is no
+      longer sold rather than quoting its price.
+
+      This is the same decision milestone 1.9 made for the retrieval index, one
+      layer up: a withdrawn product that keeps being recommended leaves the
+      merchant explaining a product they unpublished.
+
+  - id: product_qa_005
+    intent: product_qa
+    synthetic: true
+    input: "Do you sell tents?"
+    expect:
+      intent: product_qa
+      tools_called: [search_products]
+      grounded: true
+      escalated: false
+      must_not_contain: ["yes", "we have"]
+    notes: >-
+      Nothing matches. An empty search result is a valid answer and must produce
+      "no", not a helpful invention or a substitute the shopper did not ask for.
+
+  - id: product_qa_006
+    intent: product_qa
+    synthetic: true
+    input: "what colours does it come in?"
+    session:
+      history:
+        - role: user
+          content: "Do you sell waterproof walking shoes?"
+        - role: assistant
+          content: "Yes — we have the Waterproof Hiking Shoe at 119.00 GBP."
+    expect:
+      intent: product_qa
+      grounded: true
+      must_contain: ["Brown"]
+    notes: >-
+      The exact probe from milestone 1.9, kept because it used to fail. Searched
+      verbatim, "what colours does it come in?" retrieved the Payment Policy at
+      0.502 — "it" refers to the previous turn, and a vector has no previous
+      turn. The router rewrites the query before anything is searched.
+
+  - id: product_qa_007
+    intent: product_qa
+    synthetic: true
+    input: "Are these good for wide feet? I've had trouble with narrow shoes before."
+    expect:
+      intent: product_qa
+      grounded: true
+      must_not_contain: ["perfect for wide feet", "yes, they're wide"]
+    notes: >-
+      The description says the shoe "runs slightly narrow; consider a half size
+      up if you have wide feet". Answering from it is correct; a reassurance the
+      description does not support is not, and a shopper buys on the difference.

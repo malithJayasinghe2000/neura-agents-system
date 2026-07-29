@@ -55,11 +55,24 @@ MANIFEST = AgentManifest(
             Capability.CUSTOMER_READ,
         }
     ),
+    # Two kinds of scope, in one set on purpose.
+    #
+    # The first three are API-surface scopes: what a key may do to CARE's routes.
+    # The last four are the scopes CARE's *tools* declare, and the policy engine
+    # checks them at gate 3 of every call. They must be listed here or a key
+    # provisioned from this manifest would be refused by the engine while looking
+    # perfectly well configured — a test asserts the tools' scopes are a subset
+    # of this set, because the failure is silent and reads as "the agent never
+    # calls any tool".
     scopes=frozenset(
         {
             "care:chat:write",
             "care:conversations:read",
             "care:knowledge-base:write",
+            "care:order:read",
+            "care:catalogue:read",
+            "care:policies:read",
+            "care:escalate",
         }
     ),
     route_prefix="/v1/care",

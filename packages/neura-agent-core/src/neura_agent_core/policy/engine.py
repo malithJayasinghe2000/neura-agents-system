@@ -231,7 +231,13 @@ class PolicyEngine:
         # ── 7. Ownership ─────────────────────────────────────────────────────
         if spec.requires_ownership is not None:
             reference = str(getattr(validated, spec.requires_ownership))
-            if not ctx.identity.may_see(reference):
+            # `scoped_to_session` is passed, not assumed. An authenticated session
+            # is trusted with an arbitrary reference *only* for a tool that has
+            # declared it filters results by that customer — otherwise a signed-in
+            # shopper could read a stranger's order by typing its number, having
+            # satisfied every check above (open question A6). Default deny: a tool
+            # that omits the declaration simply does not get the blanket trust.
+            if not ctx.identity.may_see(reference, tool_scopes_to_session=spec.scoped_to_session):
                 # ESCALATE rather than REJECT. Rejecting invites the model to try
                 # again with a different reference, which is order enumeration
                 # with extra steps. A human takes it from here.

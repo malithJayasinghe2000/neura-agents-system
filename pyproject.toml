@@ -39,6 +39,9 @@ dev = [
     "pytest-cov>=6.0",
     "httpx>=0.28",
     "pre-commit>=4.0",
+    # `evals/` joined the typechecked set in milestone 1.11, when agents began
+    # depending on its dataset discovery.
+    "types-PyYAML>=6.0",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -182,3 +185,16 @@ forbidden_modules = ["neura_agent_care"]
 name = "Agents are independent — they never import each other"
 type = "independence"
 modules = ["neura_agent_care"]
+
+# An agent owns its golden dataset and the target that runs it, so `neura_evals`
+# is a legitimate dependency of `neura_agent_care.evals`. It must not become one
+# of anything that serves traffic: the harness pulls in a judge, dataset loading
+# and report rendering, none of which belongs in the path of a shopper's message.
+[[tool.importlinter.contracts]]
+name = "The eval harness stays out of the serving path"
+type = "forbidden"
+source_modules = [
+    "neura_core", "neura_domain", "neura_llm", "neura_commerce",
+    "neura_adapters", "neura_agent_core", "neura_api",
+]
+forbidden_modules = ["neura_evals"]

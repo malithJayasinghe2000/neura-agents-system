@@ -54,12 +54,24 @@ class JudgeTrust(StrEnum):
 
 
 class Verdict(BaseModel):
-    """One judgement."""
+    """One judgement — or the absence of one."""
 
     passed: bool
     score: float = Field(ge=0.0, le=1.0)
     reasoning: str
     unsupported_claims: list[str] = Field(default_factory=list)
+    available: bool = Field(
+        default=True,
+        description=(
+            "False when the judge could not be reached at all. **Neither a pass nor a "
+            "fail** — the case is unjudged, and it is excluded from the groundedness "
+            "metric rather than counted against the agent.\n\n"
+            "The distinction is not pedantic. A rate-limited judge scored as a failure "
+            "reports that the agent hallucinated, which is a false accusation that "
+            "looks exactly like a real regression — and the natural response to it is "
+            "to go looking for a bug in the agent that is not there."
+        ),
+    )
 
 
 GROUNDEDNESS_PROMPT = """\
@@ -164,14 +176,18 @@ class Judge:
             content = response.choices[0].message.content or "{}"
             return Verdict.model_validate(_extract_json(content))
         except Exception as exc:
-            # A judge failure must not be silently scored as a pass — that would
-            # turn an outage into a green build.
+            # Neither a pass nor a fail. Scoring an outage as a pass turns it into
+            # a green build; scoring it as a failure — which this did until a
+            # rate-limited free tier ran out mid-run — reports a hallucination
+            # that never happened. Both are wrong in the same way: they state a
+            # measurement that was not made.
             log.error("judge_call_failed", model=self._config.model, error=str(exc))
             return Verdict(
                 passed=False,
                 score=0.0,
                 reasoning=f"judge unavailable: {exc}",
                 unsupported_claims=[],
+                available=False,
             )
 
 

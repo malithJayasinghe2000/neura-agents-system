@@ -8,12 +8,25 @@ dependencies = [
     "neura-commerce",
     "neura-domain",
     "neura-core",
+    "neura-llm",
+    # The agent ships its own golden dataset and the target that runs it —
+    # "no agent ships without one" (AGENTS.md). That puts the dependency this
+    # way round: the agent knows how to be evaluated, and `neura-evals` stays
+    # ignorant of which agents exist. A contract in the root pyproject keeps the
+    # harness out of the serving path.
+    "neura-evals",
 ]
 
 # How the system discovers this agent at startup. No central registry file to
 # edit — see docs/architecture/tenancy-and-packaging.md §2.5.
 [project.entry-points."neura.agents"]
 care = "neura_agent_care:MANIFEST"
+
+# How `make eval` finds something real to measure. Same mechanism, same reason:
+# the eval CLI resolves targets and datasets by entry point rather than importing
+# an agent by name, so adding agent #2 needs no edit to the harness.
+[project.entry-points."neura.eval_targets"]
+care = "neura_agent_care.evals:build_target"
 
 [build-system]
 requires = ["hatchling"]
