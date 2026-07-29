@@ -15,6 +15,7 @@ dependencies = [
     # The engine and tenant-scoped sessions come from neura-core; this is for
     # the table definitions and queries in `rag`.
     "sqlalchemy[asyncio]>=2.0",
+    "langgraph>=0.2",
 ]
 
 [build-system]

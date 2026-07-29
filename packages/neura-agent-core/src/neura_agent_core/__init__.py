@@ -26,6 +26,6 @@ neura_agent_care or any other agent — same rule, same reason, as neura_commerc
 not knowing Shopify exists. Enforced by an import-linter contract in CI.
 """
 
-from neura_agent_core import rag
+from neura_agent_core import policy, rag, tools
 
-__all__ = ["rag"]
+__all__ = ["policy", "rag", "tools"]

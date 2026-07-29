@@ -49,7 +49,7 @@ packages/                   LIBRARIES — shared, no product identity
   neura-domain/             canonical models + events   (PURE — no I/O)
   neura-llm/                provider abstraction · roles · structured output
   neura-commerce/           adapter Protocol · capabilities · sync engine
-  neura-agent-core/         graph engine · shared nodes · tools · policy · memory · rag
+  neura-agent-core/         graph · shared nodes · tools · policy · checkpointer · audit · rag
   neura-adapters/           the only place platform names live
 
 agents/                     PRODUCTS — one folder per sellable agent
@@ -79,6 +79,7 @@ make eval-compare A=ollama-dev B=cloud-prod
 make migrate        # alembic upgrade head
 make rag-check URL=… TOKEN=…   # index a real shop with real embeddings (KEEP=1 to leave the data)
 make rag-ask Q="…" [SHOW=1]    # search what is indexed — answers "why did it retrieve that?"
+make agent-check               # run the agent runtime end to end on real models
 make check          # everything CI runs
 ```
 

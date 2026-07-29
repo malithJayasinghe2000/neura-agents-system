@@ -6,7 +6,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
         test-integration eval check migrate revision clean reset \
-        spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask \
+        spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
         llm-check judge-check
 
 help:  ## Show this help
@@ -86,6 +86,9 @@ rag-check:  ## Index a REAL shop with REAL embeddings: make rag-check URL=... TO
 
 rag-ask:  ## Search what is indexed: make rag-ask Q="do you sell my data?" [SHOW=1]
 	uv run python scripts/rag_ask.py $(if $(SHOW),--show,) -- "$(Q)"
+
+agent-check:  ## Run the agent runtime end to end against REAL models + Postgres
+	uv run python scripts/agent_smoke_test.py
 
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py

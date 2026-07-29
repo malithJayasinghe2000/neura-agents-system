@@ -5,19 +5,19 @@
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
 **Last updated:** 2026-07-27
-**Current phase:** Phase 1 — milestones 1.1–1.9 complete
-**Next action:** Milestone 1.10 — the agent runtime. LangGraph explicit state machine with a
-PostgreSQL checkpointer, the tool registry, and the policy engine.
+**Current phase:** Phase 1 — milestones 1.1–1.10 complete
+**Next action:** Milestone 1.11 — NEURA-CARE. Three intents, seven tools, prompts as files,
+and the first golden dataset that measures a real agent.
 
-> **Starting 1.10 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then
-> [agent-runtime.md](architecture/agent-runtime.md) — the graph, the tool declaration, and the
-> eight-check policy engine are all specified there. Rule 3 is the one that bites: authorisation
-> is code, never a prompt.
+> **Starting 1.11 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then
+> [agent-runtime.md §3.4](architecture/agent-runtime.md) for the MVP tool set and
+> [blueprint-v2 §7](business/blueprint-v2.md) for the operating principles the prompts must encode.
 >
-> The `retrieve` node has something real to call now — `neura_agent_core.rag` is built and proved
-> against the live catalogue (`make rag-check`). The database is no longer idle: Alembic is
-> configured, one migration is applied, and **the app now connects as `neura_app`, not `neura`**
-> (see the 1.9 log entry — connecting as the owner silently disabled RLS).
+> **The engine is built and proved end to end** (`make agent-check`): a real model drafts, a real
+> guard model verifies, the policy engine authorises, PostgreSQL checkpoints. CARE supplies a
+> graph, tools, prompts and a dataset — nothing else. If you find yourself editing
+> `neura-agent-core` to make CARE work, that is a design defect worth raising rather than
+> working around.
 
 > New here? Read [GETTING_STARTED.md](GETTING_STARTED.md) — set up and run everything in ~15 minutes.
 
@@ -51,13 +51,18 @@ PostgreSQL checkpointer, the tool registry, and the policy engine.
 | Migrations | ✅ Alembic configured; `document_chunks` applied, reversible, no model drift (`alembic check`) |
 | Database seam | ✅ `neura_core.db` — pooled async engine, `tenant_session()` setting `app.tenant_id` per transaction |
 | Multi-tenant isolation | ✅ **RLS live and verified** — forced on `document_chunks`; cross-tenant read returns nothing, cross-tenant write is rejected. A test fails if any `tenant_id` table lacks a forced policy |
-| `neura-agent-core` | ⚠️ `rag` built; graph runtime, tools and policy engine are 1.10 |
+| `neura-agent-core` | ✅ graph runtime · shared nodes · tool registry · policy engine · checkpointer · audit log · `rag` |
+| Tool layer | ✅ declaration (schema from the signature) · capability filtering · bounded execution. `WRITE` tools **cannot be registered** (ADR-0010, structural) |
+| Policy engine | ✅ all eight checks in code. Ownership failure escalates rather than rejects, and the refusal is uniform so it is not an enumeration oracle |
+| Graph runtime | ✅ LangGraph, explicit nodes. The builder **refuses to compile** a graph where `respond` is reachable without `verify`, or that has no `escalate` |
+| Checkpointer | ✅ ours, not LangGraph's — theirs has no `tenant_id` and needs a second Postgres driver. Conversations resume across processes, under RLS |
+| Audit log | ✅ append-only, hash-chained. Tampering and deletion are both detected; the app role is *revoked* UPDATE/DELETE |
 | RAG | ✅ render · chunk (skipping records with nothing to index, and naming them) · embed · pgvector namespaced by `(tenant_id, embedding_model)` · retrieval · reindex path. Verified against the real shop (`make rag-check`) |
-| Tests | ✅ 263 unit + 13 integration passing |
+| Tests | ✅ 318 unit + 24 integration passing |
 | CI | ✅ workflow written — **not yet run** (no remote) |
 | Design partner | ❌ None — top project risk |
 
-**The agent does not exist yet.** The foundation runs and can be measured; no conversation has ever been handled. Every eval case currently reports "no agent wired up", which is correct.
+**No *product* agent exists yet** — CARE is 1.11, and every eval case still reports "no agent wired up", which is correct. But the engine one would run on is built and has handled real turns end to end (`make agent-check`), including refusing to answer a shopper who had not proven ownership, and catching an invented claim before it reached a customer.
 
 **Retrieval, however, does exist and has been measured** — see the 1.9 log entry. It answers real questions about a real catalogue, which is the first time any part of this system has produced an answer rather than a passing test.
 
@@ -77,8 +82,8 @@ PostgreSQL checkpointer, the tool registry, and the policy engine.
 1.7  Bagisto bridge             ✅ done
 1.8  Sync engine                ✅ done
 1.9  RAG                        ✅ done  (verified against the real catalogue)
-1.10 Agent runtime              ⬜   ← NEXT
-1.11 CARE agent                 ⬜
+1.10 Agent runtime              ✅ done  (verified end to end on real models)
+1.11 CARE agent                 ⬜   ← NEXT
 1.12 Guard (injection + PII)    ⬜
 1.13 Multi-tenancy              ⬜
 1.14 API                        ⬜
@@ -169,6 +174,31 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-28 — Agent runtime (milestone 1.10)
+
+- **`neura_agent_core.tools` + `.policy` + `.graph` + `.audit` built.** The engine an agent runs on: tool declaration, capability filtering, the eight-check policy engine, a LangGraph state machine with a PostgreSQL checkpointer, and an append-only hash-chained audit log.
+- **Verified end to end on real models** (`make agent-check`), not just stubs: `qwen3.5:9b` drafted an answer from a tool result, `llama3.2:3b` verified it, and the state was checkpointed to Postgres and read back in a new session. All four scenarios pass — answer, refuse, catch, resume.
+- **A 3B guard model caught an invented claim.** Given a draft asserting "Your order was delivered last Tuesday and your refund of $42.00 has already been issued" against evidence saying only that it shipped, `verify` returned `grounded=false` and quoted the unsupported claim. That is the single most valuable node working on the cheapest model we ship, which is what makes the local tier viable.
+
+**Decisions worth not relitigating:**
+
+- **The builder enforces the graph contract.** ADR-0004 says `verify` is structural rather than an instruction — that is only true if a graph *cannot be compiled* without it. `AgentGraph.compile()` walks the graph from its entry node and refuses one where `respond` is reachable without crossing `verify`, or that has no `escalate`. The walk matters more than a local check: the dangerous version of this bug is not a `compose → respond` edge anyone would notice in review, it is a detour added months later that happens to route around.
+- **An ownership failure escalates; it does not reject.** Rejecting invites the model to retry with a different order number, which is enumeration with extra steps. And the refusal reason is *identical* for "someone else's order" and "no such order" — a different message turns the error into an oracle.
+- **`WRITE` tools cannot be registered at all.** ADR-0010 made structural. The approval queue does not exist, so a `WRITE` tool today would run with no approval; it raises at import, in front of the developer, rather than at runtime in front of a shopper. The engine rejects it too — two defences against different mistakes.
+- **Five policy outcomes, not two.** `ALLOW` / `REJECT` / `REPAIR` / `ESCALATE` / `DEGRADE`. Bad arguments are *repairable*, which is the model's commonest and most fixable mistake; an exhausted budget *degrades*, because a shopper must never see a hard error.
+- **`verify` fails closed.** If the guard model errors, times out or returns nonsense, the draft is not sent. A verification step that lets answers through when it breaks is worse than none, because it looks like protection. A long confident draft with *no* evidence at all is refused structurally, before any model call.
+- **We wrote our own checkpointer instead of LangGraph's.** Theirs is keyed by `thread_id` with no `tenant_id`, so conversation state — customer messages, tool results — would have been the only business data outside RLS, and the "every tenant table has a policy" test could not even see it, because the column it looks for would not exist. It also needs `psycopg` and a `libpq` binary while everything else here speaks `asyncpg`. Cost: five async methods against a stable documented interface.
+- **The audit log is append-only by privilege, not only by convention.** The hash chain makes tampering *detectable*; `REVOKE UPDATE, DELETE ON audit_log FROM neura_app` makes it require a role the serving process does not hold. Both, because either alone is weaker than it sounds. Integration tests confirm an edited row and a deleted row are each caught — and that the app role cannot perform either.
+
+**Two framework traps, both silent, both now encoded in comments:**
+
+- **LangGraph injects `config` only if the annotation matches a fixed set** — and because this package uses postponed annotation evaluation, the comparison is against the *string* `"RunnableConfig"`. `RunnableConfig | None` is not in that set, so writing the union silently stops the config being passed and the node runs with no runtime at all. It warns; the warning is easy to miss and the failure is not.
+- **LangGraph drops state keys the state does not declare.** The tool-call inbox was being written by one node and silently discarded before `act` read it, and the symptom was an agent that calmly never called a tool. `proposed_calls` is now a declared field.
+
+- **Not done, deliberately:** session and conversation memory (Redis/Postgres tiers) beyond the checkpointer, and the `guard` node's injection detection — that is milestone 1.12 and needs its own eval. The seams exist; nothing was stubbed and called finished.
+- 318 unit + 24 integration tests pass; mypy strict on 85 files; 6 contracts kept; platform check green; `make check` exits 0.
+- **Next:** milestone 1.11 — NEURA-CARE. The engine is proved; CARE supplies a graph, tools, prompts and a dataset.
 
 ### 2026-07-27 — RAG, and the database's first real use (milestone 1.9)
 
