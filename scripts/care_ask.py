@@ -40,8 +40,10 @@ from neura_adapters.generic import GenericAdapter
 from neura_agent_care import build_runtime, compile_graph
 from neura_agent_care.tools import TOOL_SCOPES
 from neura_agent_core.graph import CONFIG_KEY, initial_state
+from neura_agent_core.rag import PostgresVectorStore, Retriever
 from neura_agent_core.tools import SessionIdentity
-from neura_core import configure_logging
+from neura_commerce import AdapterError
+from neura_core import Database, configure_logging
 from neura_llm import LLMClient, ModelRole
 
 GREEN = "\033[32m"
@@ -53,6 +55,12 @@ DIM = "\033[2m"
 OFF = "\033[0m"
 
 TENANT = "tn_care_ask"
+
+#: Shown in every error this script prints. A shape to copy, not a real host —
+#: naming the store this happens to be developed against would put a platform
+#: name in code outside the adapter layer, which rule 1 forbids and the CI grep
+#: catches. Your shop's actual URL is whatever it serves the Generic Interface on.
+EXAMPLE_URL = "http://<your-shop>/neura/v1"
 
 #: What each node is for, in one line, printed as it runs. This script is read
 #: by someone trying to understand the agent, and a node name alone assumes they
@@ -139,11 +147,30 @@ def _show(node: str, update: dict[str, Any], elapsed_ms: int, runtime: Any) -> N
     print()
 
 
-async def run(question: str, url: str, token: str, customer: str | None) -> int:
+async def _ask(
+    question: str,
+    url: str,
+    token: str,
+    customer: str | None,
+    retriever: Retriever | None,
+) -> int:
     llm = LLMClient.from_role_map_name("ollama-dev")
     adapter = GenericAdapter(base_url=url, tenant_id=TENANT, token=token)
 
-    health = await adapter.health()
+    try:
+        health = await adapter.health()
+    except AdapterError as exc:
+        # Caught rather than allowed to propagate, because the traceback is not
+        # the useful part. The commonest way to arrive here is a mistyped or
+        # placeholder `URL=`, and the raw failure is forty lines of httpx frames
+        # ending in a chained exception whose one relevant sentence is at the
+        # very bottom. A developer running this by hand should be told what to
+        # type instead.
+        print(f"\n  {RED}could not reach the shop at {url!r}{OFF}")
+        print(f"  {DIM}{exc}{OFF}\n")
+        print(f'  {DIM}try:  make care-ask Q="..." URL={EXAMPLE_URL} TOKEN=$TOKEN{OFF}\n')
+        return 1
+
     if not health.ok:
         print(f"\n  {RED}the shop is not reachable at {url}{OFF}\n")
         return 1
@@ -166,6 +193,7 @@ async def run(question: str, url: str, token: str, customer: str | None) -> int:
         capabilities=health.capabilities,
         scopes=TOOL_SCOPES,
         identity=SessionIdentity(customer_external_id=customer),
+        retriever=retriever,
     )
 
     # No checkpointer: one question, one process, nothing to resume.
@@ -214,6 +242,47 @@ async def run(question: str, url: str, token: str, customer: str | None) -> int:
     return 0
 
 
+async def run(question: str, url: str, token: str, customer: str | None) -> int:
+    """Open a tenant-scoped session, build the retriever, then ask.
+
+    Retrieval is wired here rather than left out, because omitting it makes this
+    script disagree with the agent it claims to explain: the served graph has a
+    retriever, and a tools-only run answers some questions worse for a reason
+    that appears nowhere in the output except one dim "retrieval not configured".
+
+    **It degrades rather than refuses.** A shopper's question about an order
+    needs a tool, not the catalogue, and requiring Postgres to be up before you
+    can ask one would make this tool useless exactly when you are debugging
+    something else. If the database is unreachable the run continues and says so
+    — which is also what the `retrieve` node does at runtime.
+    """
+    database = Database.from_settings()
+    llm = LLMClient.from_role_map_name("ollama-dev")
+
+    try:
+        reachable = await database.ping()
+    except Exception:
+        reachable = False
+
+    if not reachable:
+        print(
+            f"\n  {YELLOW}no database — running without retrieval.{OFF}"
+            f"\n  {DIM}tools still work; indexed catalogue and policy text will not be"
+            f" searched.\n  start it with `make up && make migrate`.{OFF}"
+        )
+        try:
+            return await _ask(question, url, token, customer, None)
+        finally:
+            await database.dispose()
+
+    try:
+        async with database.tenant_session(TENANT) as session:
+            retriever = Retriever(PostgresVectorStore(session), llm, tenant_id=TENANT)
+            return await _ask(question, url, token, customer, retriever)
+    finally:
+        await database.dispose()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ask CARE one question, and watch it think.")
     parser.add_argument("--url", required=True, help="The shop's Generic Interface base URL")
@@ -221,6 +290,33 @@ def main() -> None:
     parser.add_argument("--as-customer", default=None, help="Run as an identified customer id")
     parser.add_argument("question", help="What the shopper types")
     args = parser.parse_args()
+
+    # Checked here, before anything opens a socket. `URL=...` copied verbatim
+    # out of a set of instructions is the commonest way to run this wrongly, and
+    # an argument fault should be reported as one rather than as a transport
+    # error thrown from four frames inside an HTTP library.
+    if not args.url.startswith(("http://", "https://")):
+        print(
+            f"\n  {RED}--url must start with http:// or https:// — got {args.url!r}{OFF}\n"
+            f'  {DIM}try:  make care-ask Q="..." URL={EXAMPLE_URL} TOKEN=$TOKEN{OFF}\n',
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if not args.token.strip():
+        print(
+            f"\n  {RED}--token is empty{OFF}\n"
+            # No path to a particular shop here, deliberately. Rule 1 caught the
+            # first version of this line: naming the test store in a help string
+            # is exactly how a platform name leaks out of the adapter layer, and
+            # a help message is no more exempt than a tool call is.
+            f"  {DIM}the shop issues this token; it lives in that shop's .env as"
+            f" NEURA_API_TOKEN.{OFF}\n"
+            f"  {DIM}  TOKEN=$(grep '^NEURA_API_TOKEN=' <shop>/.env "
+            f"| cut -d= -f2- | tr -d '\"'){OFF}\n",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     configure_logging(level="ERROR", json_output=False)
     sys.exit(asyncio.run(run(args.question, args.url, args.token, args.as_customer)))
