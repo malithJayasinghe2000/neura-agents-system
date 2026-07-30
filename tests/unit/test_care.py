@@ -42,7 +42,7 @@ from neura_agent_core.graph import CONFIG_KEY, GraphContractError, initial_state
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity, ToolContext
 from neura_commerce import CommerceAdapter
-from neura_domain import SideEffect
+from neura_domain import Policy, PolicyKind, SideEffect
 
 TENANT = "tn_care_test"
 
@@ -329,6 +329,114 @@ class TestEvidenceRendering:
             body="word " * (MAX_POLICY_CHARS),
         )
         assert "truncated" in policy_evidence(policy)
+
+
+class TestPolicySearch:
+    """Which page answers the question.
+
+    Every case here is a question a shopper actually asked the running agent on
+    2026-07-29, against a shop whose contact details, opening hours and payment
+    methods all live on pages the canonical model calls `other`.
+    """
+
+    @staticmethod
+    def _pages() -> list[Policy]:
+        def page(external_id: str, kind: PolicyKind, title: str, body: str) -> Policy:
+            return Policy(
+                neura_id=f"pol_{external_id}",
+                tenant_id=TENANT,
+                external_id=external_id,
+                platform="fixture",
+                synced_at=__import__("datetime").datetime.now(__import__("datetime").UTC),
+                kind=kind,
+                title=title,
+                body=body,
+            )
+
+        return [
+            page(
+                "2",
+                PolicyKind.RETURNS,
+                "Return Policy",
+                "You may return most items within 30 days of delivery for a full refund. "
+                "We will send a prepaid label.",
+            ),
+            page(
+                "9",
+                PolicyKind.SHIPPING,
+                "Shipping Policy",
+                "Standard delivery is 3 to 5 working days and costs $5.00. We ship "
+                "internationally to most countries; delivery there takes 7 to 14 working days.",
+            ),
+            page(
+                "8",
+                PolicyKind.OTHER,
+                "Payment Policy",
+                "We accept all major credit and debit cards, and cash on delivery. "
+                "Payment is taken when the order is placed.",
+            ),
+            page(
+                "6",
+                PolicyKind.OTHER,
+                "Customer Service",
+                "Our support team answers between 9am and 6pm on working days. Email is "
+                "usually answered within one working day.",
+            ),
+        ]
+
+    def _best(self, query: str) -> list[str]:
+        from neura_agent_care.tools.policies import MAX_POLICIES, _idf, _score
+
+        pages = self._pages()
+        idf = _idf(pages)
+        ranked = sorted(pages, key=lambda p: _score(p, query, idf), reverse=True)
+        return [p.title for p in ranked if _score(p, query, idf) > 0][:MAX_POLICIES]
+
+    def test_a_rare_word_beats_a_kind_term(self) -> None:
+        """The measured failure: "cash on delivery" returned the shipping page
+        and nothing else, because `delivery` is a shipping kind term and scored
+        10 flat. The only page in the store containing "cash" never appeared.
+        """
+        assert "Payment Policy" in self._best("do you take cash on delivery")
+
+    def test_a_page_of_kind_other_is_reachable_at_all(self) -> None:
+        """`other` has no kind terms and cannot have any — it is the catch-all.
+        Such a page is findable only by its own vocabulary.
+        """
+        assert "Payment Policy" in self._best("what cards do you accept")
+
+    def test_word_endings_do_not_decide_the_match(self) -> None:
+        """The shop writes "Email is usually answered"; the shopper types
+        "how quickly do you answer emails"."""
+        assert "Customer Service" in self._best("how quickly do you answer emails")
+
+    def test_a_multi_word_kind_term_need_not_be_contiguous(self) -> None:
+        """ "send back" is the kind term; "send these back" is what people say."""
+        assert "Return Policy" in self._best("can I send these back")
+
+    def test_the_obvious_matches_still_work(self) -> None:
+        assert "Shipping Policy" in self._best("how much is delivery")
+        assert "Return Policy" in self._best("how long do I have to return something")
+
+    def test_an_unmatched_topic_names_the_pages_that_exist(self) -> None:
+        """Kinds were listed before, which reads "other, other, returns" on a
+        real store and gives the composer nothing it can offer the shopper.
+        """
+        import asyncio as _asyncio
+
+        from neura_agent_care.tools.policies import search_policies
+
+        class Ctx:
+            tenant_id = TENANT
+
+            class adapter:  # noqa: N801
+                @staticmethod
+                async def get_policies() -> list[Policy]:
+                    return TestPolicySearch._pages()
+
+        result = _asyncio.run(search_policies.fn("quantum mechanics", Ctx()))  # type: ignore[arg-type]
+        assert "Customer Service" in result and "Payment Policy" in result
+        assert "Do not answer from general knowledge" in result
 
 
 # ── The graph ────────────────────────────────────────────────────────────────
