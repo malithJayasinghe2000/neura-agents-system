@@ -20,16 +20,44 @@ Two rules about what may live here:
 from __future__ import annotations
 
 import operator
+import os
 from dataclasses import dataclass, field
-from typing import Annotated, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 
+from neura_agent_core.guard.pii import PiiVault
 from neura_agent_core.policy.engine import ConversationBudget, Decision, PolicyEngine
 from neura_agent_core.rag.retrieval import Retriever
 from neura_agent_core.tools.executor import ToolInvocation
 from neura_agent_core.tools.registry import ToolRegistry
 from neura_agent_core.tools.spec import ToolContext
+
+if TYPE_CHECKING:
+    # Type-only, and it has to stay that way. `neura_agent_core.audit` reads the
+    # `audit_log` table definition out of `graph.schema`, so importing it here at
+    # runtime closes a cycle — audit → graph.schema → graph/__init__ → nodes →
+    # state → audit — and whether it fires depends on which module a process
+    # happens to import first. The unit suite imported `audit` late and was fine;
+    # the integration suite imported it first and could not collect.
+    from neura_agent_core.audit import AuditSink
+
+#: Set to a falsey string to disable the guard's rules for a measurement run.
+GUARD_ENV_VAR = "NEURA_GUARD_ENABLED"
+
+_FALSEY = frozenset({"0", "false", "no", "off"})
+
+
+def guard_enabled_by_default() -> bool:
+    """Read the guard flag from the environment, defaulting to on.
+
+    Read here rather than from :func:`neura_core.get_settings` on purpose. That
+    function is ``lru_cache``d for the process lifetime, which is right for a
+    database URL and wrong for a flag whose entire job is to be flipped between
+    two runs of the same suite — a cached value would make
+    ``make eval-guard-off`` silently measure the same thing twice.
+    """
+    return os.environ.get(GUARD_ENV_VAR, "true").strip().lower() not in _FALSEY
 
 
 class AgentState(TypedDict, total=False):
@@ -52,7 +80,25 @@ class AgentState(TypedDict, total=False):
 
     # ── guard ────────────────────────────────────────────────────────────────
     blocked: bool
+
+    #: The names of the rules that matched, comma-joined — never the text that
+    #: matched them. This value is checkpointed and logged, and an attack message
+    #: quoted into either is an attack message kept for as long as the row lives.
     block_reason: str
+
+    #: The tokens `guard` issued for this turn — `["[EMAIL_1]", "[PHONE_1]"]`.
+    #:
+    #: **Token names only, and that is the point.** The mapping back to real
+    #: values lives on :class:`Runtime`, which is per-turn and never
+    #: checkpointed, so a conversation resumed from Postgres tomorrow cannot
+    #: re-expose what was tokenised today (security-model.md §6.2). What is safe
+    #: to persist is the fact that an email was present, not whose.
+    redactions: list[str]
+
+    #: Personal data found in the finished reply that nothing in the turn
+    #: accounts for (security-model.md §6.3, threat T10). Non-empty means the
+    #: turn escalated instead of answering. Descriptions, never values.
+    pii_leaks: list[str]
 
     # ── route ────────────────────────────────────────────────────────────────
     intent: str
@@ -133,6 +179,27 @@ class Runtime:
     budget: ConversationBudget = field(default_factory=ConversationBudget)
     #: Optional: an agent that answers only from tools needs no retrieval.
     retriever: Retriever | None = None
+
+    #: This turn's PII redaction map. Deliberately here and not in the state:
+    #: the state is checkpointed to PostgreSQL after every node, and a token map
+    #: written to a database is a token map that outlives the session it was
+    #: meant to last for (security-model.md §6.2). `guard` fills it, `respond`
+    #: and `escalate` read it, and it dies with the turn.
+    vault: PiiVault = field(default_factory=PiiVault)
+
+    #: Whether `guard`'s rules run at all. Off is a *measurement* mode, not a
+    #: deployment mode — `make eval-guard-off` uses it to prove that injection
+    #: resistance comes from the policy engine and not from the guard (ADR-0011).
+    #: The node logs a warning on every turn when it is off, because a disabled
+    #: control that says nothing looks exactly like an enabled one.
+    guard_enabled: bool = field(default_factory=lambda: guard_enabled_by_default())
+
+    #: Where security events go. Optional for the same reason `retriever` is:
+    #: a graph must be runnable in a unit test without a database. **A block
+    #: with no sink is a block nobody can count**, which is most of what makes
+    #: blocking defensible instead of merely cheap (ADR-0012) — so the serving
+    #: path must wire a real one.
+    audit: AuditSink | None = None
     #: The LLM client. Typed loosely so `neura-agent-core` does not force a
     #: particular client on an agent that stubs it in tests.
     llm: Any = None
@@ -201,5 +268,7 @@ def initial_state(
         decisions=[],
         entities={},
         sources=[],
+        redactions=[],
+        pii_leaks=[],
         usage={},
     )

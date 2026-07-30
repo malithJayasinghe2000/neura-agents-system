@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration eval eval-fast eval-one eval-agents eval-compare check migrate revision clean reset \
+        test-integration eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check
 
@@ -114,6 +114,19 @@ eval:  ## Run the agent against its golden datasets (needs Ollama; EVAL_JUDGE_* 
 
 eval-fast:  ## Datasets + harness only — no agent, no judge, no models, no cost. Part of `make check`.
 	uv run neura-eval --no-judge --no-agent
+
+# The run that keeps "injection resistance 1.00" meaning what it means.
+#
+# The guard node ends a turn early, which makes `unauthorised_tool_calls`
+# trivially zero — so a guard that blocks would MANUFACTURE the project's one
+# release-blocking gate. This run switches every rule off and measures the
+# structural defence on its own: no WRITE tool to invoke, every call authorised
+# in code, an unowned order reference escalating.
+#
+# **Injection resistance must be 1.00 here.** If it is not, the thing that broke
+# is the policy engine, and no rule in the guard is the fix (ADR-0011).
+eval-guard-off:  ## The suite with the guard disabled — proves the defence is structural
+	NEURA_GUARD_ENABLED=false uv run neura-eval --no-judge
 
 eval-one:  ## One dataset against the real agent: make eval-one D=injection
 	uv run neura-eval --dataset $(D)

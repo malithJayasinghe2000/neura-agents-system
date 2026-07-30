@@ -43,15 +43,19 @@ stateDiagram-v2
 | Node | Does | LLM role | Failure → |
 |:--|:--|:--|:--|
 | `ingest` | Load conversation, tenant config, negotiate capabilities → tool set | — | 500 |
-| `guard` | Prompt-injection scan, PII redaction | `GUARD` | `blocked` |
+| `guard` | Prompt-injection scan, PII redaction | **none — deterministic** | `blocked` |
 | `route` | Classify intent, extract entities (order ref, product, topic) | `ROUTER` | `escalate` |
 | `retrieve` | pgvector search, tenant + model scoped | `EMBEDDER` | continue with no context |
 | `act` | Select and execute tools through the policy engine | `REASONER` | `escalate` |
 | `compose` | Draft the answer from retrieved context + tool results | `REASONER` | `escalate` |
-| `verify` | Groundedness check: is every claim supported? | `GUARD` | `escalate` |
+| `verify` | Groundedness check: is every claim supported? **Plus a deterministic outbound PII check** | `GUARD` | `escalate` |
 | `respond` | Rehydrate PII, stream, persist, meter | — | — |
 | `escalate` | Create a human handoff with full context | `SUMMARIZER` | — |
 | `blocked` | Safe refusal, security event logged | — | — |
+
+**`guard` has no model, and that is a decision rather than an omission** ([ADR-0011](adr/0011-deterministic-guard-not-classifier.md), milestone 1.12). It is five named rules over the shopper's text plus reversible PII tokenisation. A classifier would need a threshold, there is no labelled corpus to tune one against, and a classifier reading the attacker's text is itself injectable. The `GUARD` role survives on `verify`, where the job is grading a draft against evidence rather than judging an adversary.
+
+**`guard` is the entry node, and the builder enforces it.** A guard reached after `route` has already shown the raw message to a model, so its redaction is redaction of something already disclosed. `blocked` must be terminal for the mirror-image reason.
 
 **`act` is capped at 4 tool calls.** Local models loop. The cap turns an infinite loop into an escalation, which is a good outcome rather than a hung request and a burned budget.
 

@@ -23,7 +23,8 @@ from typing import Any
 
 from neura_agent_care.prompts import load_prompts
 from neura_agent_care.tools import build_registry
-from neura_agent_core.graph import Runtime
+from neura_agent_core.audit import AuditSink
+from neura_agent_core.graph import Runtime, guard_enabled_by_default
 from neura_agent_core.policy import ConversationBudget, PolicyEngine
 from neura_agent_core.rag.retrieval import Retriever
 from neura_agent_core.tools import SessionIdentity, ToolContext
@@ -49,6 +50,8 @@ def build_runtime(
     scopes: frozenset[str],
     identity: SessionIdentity | None = None,
     retriever: Retriever | None = None,
+    audit: AuditSink | None = None,
+    guard_enabled: bool | None = None,
     allowed_tools: frozenset[str] | None = None,
     max_tool_calls: int = MAX_TOOL_CALLS,
 ) -> Runtime:
@@ -62,6 +65,17 @@ def build_runtime(
     ``identity`` defaults to an anonymous session, which is the only safe
     default for an access-control value: a shopper who has proven nothing must
     start having proven nothing.
+
+    ``audit`` is where `guard` writes a security event when it blocks a turn.
+    It is optional so that a unit test can run the graph without a database —
+    but **a block with no sink is a block nobody can count**, and countability
+    is most of the argument for blocking rather than escalating (ADR-0012). A
+    served conversation must pass a real one.
+
+    ``guard_enabled`` defaults to whatever ``NEURA_GUARD_ENABLED`` says, which
+    is on. Passing it explicitly is for measurement — ``make eval-guard-off``
+    and the tests that prove the guard is not what makes injection resistance
+    1.00 (ADR-0011). It is not a deployment switch.
     """
     ctx = ToolContext(
         tenant_id=tenant_id,
@@ -81,8 +95,16 @@ def build_runtime(
         policy=PolicyEngine(registry),
         budget=ConversationBudget(max_tool_calls=max_tool_calls),
         retriever=retriever,
+        audit=audit,
         llm=llm,
         prompts=load_prompts(),
+        # `None` means "whatever the environment says", which is on. Spelled out
+        # rather than defaulted to `True` here, so that `NEURA_GUARD_ENABLED`
+        # keeps working for callers that never think about the guard.
+        guard_enabled=guard_enabled_by_default() if guard_enabled is None else guard_enabled,
+        # `vault` is deliberately not a parameter: every turn starts with a
+        # fresh, empty redaction map, and a caller able to pass one in is a
+        # caller able to share one between two shoppers by accident.
     )
 
 

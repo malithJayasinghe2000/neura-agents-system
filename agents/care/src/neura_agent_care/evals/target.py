@@ -34,6 +34,7 @@ from neura_agent_care.evals.store import ALL_CAPABILITIES, load_store
 from neura_agent_care.graph import compile_graph
 from neura_agent_care.runtime import build_runtime
 from neura_agent_care.tools import TOOL_SCOPES
+from neura_agent_core.audit import AuditEvent, InMemoryAuditLog
 from neura_agent_core.graph import CONFIG_KEY, initial_state
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity
@@ -65,6 +66,13 @@ class CareTarget:
         """One case, start to finish, through the real graph."""
         store = load_store(self._tenant_id, case.fixtures)
 
+        # A real audit sink, in memory. `guard` writes its security event here,
+        # so a blocked case can be checked against the RECORD rather than
+        # against the reply text — the same argument that makes the injection
+        # suite assert on the policy engine's decisions. A canned refusal is
+        # easy to produce without having noticed anything.
+        audit = InMemoryAuditLog()
+
         runtime = build_runtime(
             tenant_id=self._tenant_id,
             conversation_id=f"cnv_{case.id}",
@@ -78,6 +86,7 @@ class CareTarget:
             # database to answer a question about the agent's reasoning.
             # Retrieval has its own measured smoke test (`make rag-check`).
             retriever=None,
+            audit=audit,
         )
 
         try:
@@ -98,7 +107,7 @@ class CareTarget:
             log.error("care_case_crashed", case_id=case.id, error=str(exc))
             return AgentResponse(reply="", error=f"CARE raised: {type(exc).__name__}: {exc}")
 
-        return _response(final)
+        return _response(final, audit)
 
 
 def _identity(case: EvalCase) -> SessionIdentity:
@@ -112,7 +121,7 @@ def _identity(case: EvalCase) -> SessionIdentity:
     return SessionIdentity(customer_external_id=case.session.verified_customer_id)
 
 
-def _response(final: dict[str, Any]) -> AgentResponse:
+def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
     """Map CARE's final state onto what the harness scores.
 
     The mapping that matters is ``authorised``. It is read from the **policy
@@ -121,6 +130,13 @@ def _response(final: dict[str, Any]) -> AgentResponse:
     reply can sound like a refusal while a tool was quietly invoked, so
     ``injection_resistance`` is asserted against what the engine recorded
     (evaluation-strategy.md §3).
+
+    ``blocked`` follows the same rule for the same reason, and it is read from
+    the **audit log** rather than from the state flag. A node can set
+    ``blocked=True`` and forget to record the security event, and the difference
+    between those two is the whole of ADR-0012's argument: a block the merchant
+    cannot count is not the cheap-and-visible outcome that decision chose, it is
+    the cheap-and-invisible one it rejected.
     """
     decisions = final.get("decisions", [])
     refused = {d.tool_name for d in decisions if d.outcome is not Outcome.ALLOW}
@@ -138,6 +154,9 @@ def _response(final: dict[str, Any]) -> AgentResponse:
     ]
 
     escalated = bool(final.get("escalated"))
+    blocked = bool(final.get("blocked")) and any(
+        entry.event_type is AuditEvent.GUARD_BLOCK for entry in audit.for_tenant(EVAL_TENANT)
+    )
 
     return AgentResponse(
         reply=final.get("reply", ""),
@@ -145,14 +164,17 @@ def _response(final: dict[str, Any]) -> AgentResponse:
         tools_called=tools_called,
         retrieved_context=_evidence(final),
         escalated=escalated,
+        blocked=blocked,
+        pii_leaked=bool(final.get("pii_leaks")),
         # "Refused" is narrower than "escalated": the agent declining to act on
         # something it may not do, rather than handing a live question over.
         #
         # Two ways to get here, and they are genuinely different outcomes. The
         # `decline` node sets `refused` on the state directly and does *not*
         # escalate — that is the A5 path, where the question was out of scope and
-        # no person was needed. The other is a policy refusal that ended in a
-        # handover. Both are refusals; only the second costs a human.
+        # no person was needed. `blocked` does the same, for the S4 path. The
+        # third is a policy refusal that ended in a handover. All three are
+        # refusals; only the last costs a human.
         refused=bool(final.get("refused")) or (escalated and _was_refused(decisions)),
         tokens_used=int(final.get("usage", {}).get("tokens", 0)),
     )

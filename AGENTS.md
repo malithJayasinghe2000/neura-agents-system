@@ -77,6 +77,7 @@ make test           # unit + integration
 make lint           # ruff + mypy
 make eval           # run the agent against its golden datasets (needs Ollama)
 make eval-fast      # datasets + harness only — no agent, no models. In `make check`
+make eval-guard-off # the same suite with the guard disabled — see below
 make eval-compare A=ollama-dev B=cloud-prod
 make migrate        # alembic upgrade head
 make rag-check URL=… TOKEN=…   # index a real shop with real embeddings (KEEP=1 to leave the data)
@@ -92,6 +93,13 @@ make check          # everything CI runs
 `DATABASE_MIGRATION_URL` is the owner. Row-Level Security does not apply to
 superusers, so pointing the app at the owner disables tenant isolation with no
 error anywhere. `Database.ping()` refuses to report ready if it detects that.
+
+**`make eval-guard-off` is not an optional extra.** The `guard` node ends a turn
+before any tool is proposed, so a blocked case has zero unauthorised tool calls
+by arithmetic — a guard that blocks can *manufacture* the injection-resistance
+gate. That run disables every rule and measures the structural defence alone, and
+**injection resistance must be 1.00 in it**. If it is not, what broke is the
+policy engine, and no rule in the guard is the fix ([ADR-0011](docs/architecture/adr/0011-deterministic-guard-not-classifier.md)).
 
 ---
 
@@ -156,9 +164,16 @@ rather than imported by name:
 ```
 
 **Copy `agents/care/` rather than this list.** It is the only built agent and it
-is deliberately the worked example: five nodes, seven tools, five prompt files, a
-fixture store and 35 golden cases, and not one line of policy, audit, checkpoint
-or ownership code.
+is deliberately the worked example: six nodes, seven tools, seven prompt files, a
+fixture store and 47 golden cases, and not one line of policy, audit, checkpoint,
+ownership, injection-detection or PII code.
+
+**Wire `guard` first or not at all.** It is inherited like `verify`, and the
+builder enforces the position rather than trusting the author: a guard reached
+after routing has already handed the raw message to a model, so its redaction is
+redaction of something already disclosed — and it looks exactly like a guard that
+works. An agent that routes to `guard` must also have `blocked`, and `blocked`
+must be terminal.
 
 **Two hard rules:** `neura-agent-core` must not learn your agent's name, and your agent must not import another agent. Cross-agent communication goes through the event bus.
 
@@ -197,6 +212,10 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | Retrieval or a tool search finds nothing a shopper would expect | The query still contains a pronoun. `route` writes a resolved `search_query`; anything reading `message` instead is asking about a subject that is not there |
 | Agent route returns 403 | Tenant's `enabled_agents` does not include it — an entitlement, not a bug |
 | New agent not mounted at startup | Missing `[project.entry-points."neura.agents"]`, or not installed in the workspace |
+| `GraphContractError: guard is reachable but the entry node is …` | A guard that runs after routing has already shown the raw message to a model. Make `guard` the entry, or do not route to it |
+| An order lookup fails and the trace shows `[PHONE_1]` where the reference was | A PII detector matched an order or tracking number. The detectors require structure a reference does not have (`+`, leading zero, separators; Luhn for cards) — add the shape to `tests/unit/test_guard.py` and narrow the pattern, never widen it |
+| A real customer's message was refused with no handover | A guard rule false-positived. Add the sentence to the **benign** half of the corpus in `tests/unit/test_guard.py` — it is a hard gate, so the fix cannot be forgotten |
+| `[EMAIL_9]` appears in a reply | The model invented a redaction token. Rehydration leaves unknown tokens visible on purpose: a silently deleted one is a sentence that changed meaning with nobody the wiser |
 
 ---
 

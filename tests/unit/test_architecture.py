@@ -128,6 +128,34 @@ def test_agent_core_does_not_know_any_agent() -> None:
     assert not offenders, "neura_agent_core imports an agent:\n" + "\n".join(offenders)
 
 
+def test_the_engine_imports_cleanly_from_either_direction() -> None:
+    """A circular import that only fires in one import order is not a bug you
+    find by running the tests — it is a bug you find by running *different*
+    tests.
+
+    `neura_agent_core.audit` reads the `audit_log` table out of `graph.schema`,
+    which pulls in `graph/__init__`. Milestone 1.12 gave `graph.state` a reason
+    to know about `AuditSink` and closed the loop. The unit suite happened to
+    import `audit` late and stayed green; the integration suite imported it
+    first and could not collect a single test.
+
+    Two subprocesses, because the check is meaningless inside a process that has
+    already imported both.
+    """
+    for first, second in (
+        ("neura_agent_core.audit", "neura_agent_core.graph"),
+        ("neura_agent_core.graph", "neura_agent_core.audit"),
+    ):
+        result = subprocess.run(  # noqa: S603 — two literals from the tuple above
+            [sys.executable, "-c", f"import {first}; import {second}"],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        assert result.returncode == 0, f"importing {first} before {second} fails:\n{result.stderr}"
+
+
 def test_commerce_does_not_know_any_adapter() -> None:
     """The adapter contract must not know which platforms implement it."""
     commerce_src = REPO_ROOT / "packages/neura-commerce/src/neura_commerce"

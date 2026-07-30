@@ -17,3 +17,5 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0008](0008-multi-tenancy-rls.md) | Multi-tenancy via PostgreSQL RLS from day 1 | Accepted |
 | [0009](0009-generic-commerce-interface.md) | Generic Commerce Interface as the primary integration tier | Accepted |
 | [0010](0010-read-only-mvp-tools.md) | READ-only tools in the MVP | Accepted |
+| [0011](0011-deterministic-guard-not-classifier.md) | The guard is deterministic code, not a classifier | Accepted |
+| [0012](0012-block-cheaply-escalate-on-uncertainty.md) | A recognised attack is blocked; everything else escalates | Accepted |

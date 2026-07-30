@@ -1,6 +1,13 @@
 # Security Model
 
-> **Status:** Draft for review · **Last updated:** 2026-07-25
+> **Status:** Draft for review · **Last updated:** 2026-07-31
+>
+> **Milestone 1.12 built §2.2 layer 2 and §6.1, and changed what layer 2 is.**
+> It is deterministic code — named rules and reversible tokenisation — not a
+> classifier with a threshold ([ADR-0011](adr/0011-deterministic-guard-not-classifier.md),
+> resolving open question S1). A recognised attack now reaches `blocked` rather
+> than a support person ([ADR-0012](adr/0012-block-cheaply-escalate-on-uncertainty.md),
+> resolving S4). Both sections below are marked with what actually shipped.
 
 An LLM with tool access, fed arbitrary text by anonymous strangers, reading a merchant's customer data, is a genuinely new attack surface. This was the largest gap in `implementation_plan_1`, and it is not something that can be added later.
 
@@ -55,17 +62,23 @@ This is why capability negotiation ([commerce-integration.md §3.2](commerce-int
 
 ### 2.2 Defence in depth
 
-| Layer | Control |
-|:--|:--|
-| 1 | **Least privilege** — READ tools only in MVP; tools filtered by capability + scope |
-| 2 | **`guard` node** — classifier scores each message for injection intent before routing |
-| 3 | **Untrusted delimiting** — all user and catalogue content explicitly marked |
-| 4 | **Policy engine** — every call authorised in code (§9) |
-| 5 | **Ownership verification** — data access is per-session proven, not asserted (§3) |
-| 6 | **Output filtering** — responses scanned for leaked PII and secrets (§6.3) |
-| 7 | **Audit + alerting** — every rejection recorded; spikes alert |
+| Layer | Control | Status |
+|:--|:--|:--|
+| 1 | **Least privilege** — READ tools only in MVP; tools filtered by capability + scope | ✅ 1.10 |
+| 2 | **`guard` node** — ~~a classifier scores each message for injection intent~~ **five named deterministic rules** over the shopper's text, before routing | ✅ 1.12, [ADR-0011](adr/0011-deterministic-guard-not-classifier.md) |
+| 3 | **Untrusted delimiting** — all user and catalogue content explicitly marked | ✅ 1.9/1.11 |
+| 4 | **Policy engine** — every call authorised in code (§9) | ✅ 1.10 |
+| 5 | **Ownership verification** — data access is per-session proven, not asserted (§3) | ✅ 1.10/1.11 |
+| 6 | **Output filtering** — responses scanned for leaked PII and secrets (§6.3) | ✅ 1.12 |
+| 7 | **Audit + alerting** — every rejection recorded; spikes alert | ⚠️ recorded ✅, alerting ⬜ |
 
-No single layer is trusted. Layer 2 in particular *will* have false negatives — it is a cheap filter, not a boundary.
+No single layer is trusted. **Layer 2 is the least trusted of the seven, and it is important to be exact about why.**
+
+The strikethrough above is a decision, not an edit. A classifier needs a threshold; there is no labelled adversarial corpus to tune one against and no design partner to get real traffic from; and a classifier reading the attacker's text is itself a thing the attacker is writing to. What shipped instead is five rules that match or do not, each named, each with a written rationale for why a shopper would not type it — tuned for **precision at the expense of recall**, and measured on a corpus of 40 attack strings and 40 benign ones, equal by construction.
+
+**Layer 2 makes nothing safer, and the project measures that on purpose.** Because a blocked turn never proposes a tool call, `unauthorised_tool_calls` for it is trivially zero — so a guard that blocks would *manufacture* the release-blocking gate in §9. `make eval-guard-off` runs the golden suite with every rule disabled, and injection resistance must still be 1.00 there. That run, not the guard, is the evidence for the claim in §2.1.
+
+What layer 2 buys is **cost**: a recognised attack ends at `blocked` — a canned reply and a `guard.block` audit event — instead of occupying a support person. See [ADR-0012](adr/0012-block-cheaply-escalate-on-uncertainty.md).
 
 ### 2.3 Untrusted content
 
@@ -165,7 +178,22 @@ In the `guard` node, before anything reaches a model — critical when `REASONER
 "Thanks Jane, I've found the order shipping to 42 Hill St…"
 ```
 
-Detected: email, phone, full card numbers, national IDs, postal addresses, and any field the canonical model marks as PII.
+**Built in 1.12.** What is actually detected, and what is not, because the gap matters more than the list:
+
+| | Detected | Note |
+|:--|:--|:--|
+| Email | ✅ | |
+| Phone | ✅ | Only with structure — a `+`, a leading zero, or separators. A bare eleven-digit run is **not** a phone number here, because a merchant's order references look exactly like one, and redacting an order number breaks the lookup silently. |
+| Payment card | ✅ | Luhn-validated. The check digit is the entire difference between a card and a sixteen-digit reference. Also `card ending 4242`. |
+| Postal address | ⚠️ partial | Only the "42 Hill St" shape: a house number, at least one word, then a street type. The intermediate word is what stops "2 Way Speaker" and "3 Piece Set" matching. |
+| National ID | ❌ | The formats are jurisdictional and the geography is undecided (open question B3). A pattern guessed now would be wrong for wherever the first merchant is. |
+| Names | ❌ | Not detectable without a model, and the guard deliberately has none. "Jane" is also a colour and a brand. |
+
+**The token map lives on the per-turn `Runtime`, never in the checkpointed state.** That is what §6.2's "session + 24h, never persisted long-term" asks for, and it comes free rather than needing deletion code: the checkpoint written after every node holds the *redacted* message, so a conversation resumed from Postgres tomorrow cannot re-expose what was tokenised today.
+
+**Rehydration has two audiences and they get different answers.** The shopper's reply gets real values back in `respond`. The escalation handoff also gets them, because the recipient is the merchant's own staff, reading their own customer's ticket — "the customer said `[EMAIL_1]` was wrong" is a puzzle, not a handover. The two-year audit log keeps the tokenised form.
+
+**Tool results and retrieved documents are not redacted**, and that is deliberate: they carry the merchant's own customer data, which is what the order tools exist to return. The control there is the ownership gate in §3, which decides whether the data may be fetched at all.
 
 **Under the Sovereign tier this matters less** — nothing leaves the customer's infrastructure — which is exactly the [§4.3 product argument](../business/blueprint-v2.md#43-data-sovereignty--turning-a-constraint-into-the-moat).
 
@@ -184,7 +212,18 @@ Detected: email, phone, full card numbers, national IDs, postal addresses, and a
 
 ### 6.3 Output filtering
 
-Before any response is sent: scan for PII belonging to anyone other than the verified customer, for secrets and key patterns, and for internal system details. A hit blocks the response and escalates. This is the last line against T10.
+**Built in 1.12, and narrower than this section originally described.** It runs in `verify`, before the model is asked anything, on two deterministic rules:
+
+- **A payment card number may never appear in a reply.** There is no legitimate turn in which CARE reads a card number back to anybody, so there is no false positive to weigh against it.
+- **An email address or phone number must appear in the turn's evidence or in the redaction vault.** If the shopper typed it, or the store returned it under an ownership check that already passed, it is theirs. If it appears in neither, the model either invented it — a fabricated support address is a real support failure — or carried it from text that was not evidence, which is threat T10.
+
+A hit escalates rather than sending, and it does **not** scrub. A reply carrying personal data nothing supports is not a good reply with one bad sentence in it; editing the symptom out would send the rest of it anyway.
+
+**What this is not.** It does not decide whether the data belongs to the *right* customer. That decision is made earlier and in code, by the ownership gate (§3), which is the only place it can be made correctly — a filter reading a finished sentence cannot tell whose address it is. The original wording of this section implied otherwise, and implementing it as written would have produced a control that appeared to check something it cannot.
+
+It lives in `verify` rather than in an agent's `respond` for a second reason worth recording: hand-probing on 2026-07-29 measured `verify`'s *model* verdict flipping from 0/30 to 30/30 refusals on the same draft when a second, meaningless evidence block was added (open question A8). A check that cannot be talked out of its answer is worth having beside one that can.
+
+Secrets and internal system detail are not scanned for, and do not need to be: §2.3's rule is that they never enter the context window at all.
 
 ---
 
@@ -252,6 +291,8 @@ Stated plainly so it is never implied to a customer. SOC 2 · ISO 27001 · PCI-D
 ## 12. Open Questions
 
 1. **Ownership verification UX.** Order number + email is the security floor but adds friction to every order query. Magic links are stronger and slower. Needs a decision with the design partner.
-2. **Injection classifier quality.** A local 3B model as `GUARD` will have false positives (blocking real customers) and false negatives. Needs a labelled adversarial dataset and a tuned threshold before go-live.
+2. ~~**Injection classifier quality.**~~ **Resolved 2026-07-30 by not having a classifier** — [ADR-0011](adr/0011-deterministic-guard-not-classifier.md). There is no threshold to tune because there is no score. Revisit when ~100 real conversations exist and a classifier has something to be measured against; until then, the labelled corpus this question asked for is 40 attack strings and 40 benign ones in `tests/unit/test_guard.py`, and it is a unit test rather than a gate on a model.
 3. **KEK custody.** Environment variable is acceptable for a pilot; cloud KMS is required before real merchants. Decide before the first non-test tenant.
 4. **Sovereign deployment hardening.** When the customer runs the stack, which controls become theirs, and what does the deployment guide have to mandate?
+5. **Alerting on `guard.block` volume.** The events are written; nothing reads them. [ADR-0012](adr/0012-block-cheaply-escalate-on-uncertainty.md) rests on the merchant learning *in aggregate* that they are being probed, and aggregate reporting is not built. Belongs with the merchant console, and it is the part of that ADR that is currently a seam rather than a control.
+6. **Indirect injection is contained but not counted.** A merchant's own catalogue text containing "ignore previous instructions" is handled by delimiting and `verify` and is deliberately never blocked (§2.3, T2) — but nothing tells the merchant their catalogue contains it. Scanning tool output to *flag without blocking* is cheap and was left out of 1.12 for scope.

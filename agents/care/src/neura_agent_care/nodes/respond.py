@@ -16,8 +16,16 @@ complains, "which prompt wrote this?" needs an exact answer, and the only moment
 it can be recorded honestly is the moment the words are committed to
 (agent-runtime.md §8).
 
-Not done here, and deliberately: PII rehydration. Redaction and its inverse are
-milestone 1.12, and the seam is this node.
+## The one thing it does that is not dull: PII rehydration
+
+``guard`` replaced the shopper's email, phone, card and address with tokens
+before any model saw them; this is where they come back, from a map that lived on
+the runtime and never touched a database (security-model.md §6.1).
+
+**Rehydration cannot introduce a leak**, which is why it is safe to do it after
+the last gate. The only values it can restore are the ones the shopper typed this
+turn, and the outbound PII filter in ``verify`` already treats those as
+accounted-for. Anything the model invented was caught before this node ran.
 """
 
 from __future__ import annotations
@@ -32,8 +40,8 @@ log = get_logger(__name__)
 
 
 async def respond(state: AgentState, config: RunnableConfig) -> AgentState:
-    """Send the verified draft."""
-    runtime_of(config or {})  # the turn has a runtime, or nothing here is trustworthy
+    """Rehydrate the verified draft and send it."""
+    runtime = runtime_of(config or {})  # the turn has a runtime, or nothing here is trustworthy
 
     draft = state.get("draft", "").strip()
 
@@ -51,6 +59,12 @@ async def respond(state: AgentState, config: RunnableConfig) -> AgentState:
             "escalation_reason": "respond was reached without a verified draft",
         }
 
+    # Tokens become real values again, for this shopper, at the last moment.
+    # A token the vault does not know is left visible rather than removed:
+    # `[EMAIL_9]` in a reply is a bug report, and a silently deleted one is a
+    # sentence that has changed meaning with nobody the wiser.
+    reply = runtime.vault.rehydrate(draft)
+
     log.info(
         "responded",
         conversation_id=state.get("conversation_id"),
@@ -59,9 +73,10 @@ async def respond(state: AgentState, config: RunnableConfig) -> AgentState:
         prompt_revision=REVISION,
         tools_used=[i.tool_name for i in state.get("invocations", []) if i.ok],
         sources=state.get("sources", []),
+        rehydrated=len(state.get("redactions", [])),
     )
 
     usage = dict(state.get("usage", {}))
     usage["prompt_revision"] = REVISION
 
-    return {"reply": draft, "usage": usage}
+    return {"reply": reply, "usage": usage}

@@ -1,9 +1,10 @@
 """CARE's state machine.
 
-    route ─► retrieve ─► plan ─► act ─► triage ─► compose ─► verify ─► respond
-      │ │                  │              │                    │
-      │ └► decline         └──────────────┴────────────────────┴──────► escalate
-      └────────────────────────────────────────────────────────────────►
+    guard ─► route ─► retrieve ─► plan ─► act ─► triage ─► compose ─► verify ─► respond
+      │        │ │                  │              │                    │
+      │        │ └► decline         └──────────────┴────────────────────┴──────► escalate
+      │        └────────────────────────────────────────────────────────────────►
+      └► blocked
 
 Read the branches as the interesting part. Most lead to ``escalate``, and each is
 a different way a turn can stop being answerable:
@@ -13,17 +14,22 @@ a different way a turn can stop being answerable:
 * **plan** — the reasoner could not be reached at all.
 * **triage** — the policy engine refused on ownership, or the model called
   ``escalate_to_human`` because the shopper asked for a person.
-* **verify** — the draft claims something the evidence does not support.
+* **verify** — the draft claims something the evidence does not support, or the
+  reply carries personal data that nothing in the turn accounts for.
 
-``decline`` is the exception, and the newest node here. An out-of-scope question
-that needs no person — "what's the weather?" — ends there instead, with a fixed
-message and no handoff. Resolves open question A5; the reasoning is in
-``nodes/decline.py``, including why that node may skip ``verify``.
+Two branches do *not* lead to a person, and both are deliberate:
 
-Four of the ten nodes are inherited unchanged from ``neura-agent-core``. CARE
+* ``decline`` — out of scope, but no person needed. "What's the weather?" ends
+  with a fixed message and no handoff. Resolves open question A5; the reasoning
+  is in ``nodes/decline.py``, including why that node may skip ``verify``.
+* ``blocked`` — the guard recognised a named attack. A canned reply, a security
+  event in the audit log, and nobody's afternoon. Resolves open question S4;
+  the reasoning is in ADR-0012.
+
+Six of the twelve nodes are inherited unchanged from ``neura-agent-core``. CARE
 supplies ``route``, ``plan``, ``triage``, ``compose``, ``respond`` and
-``decline``; the engine supplies ``retrieve``, ``act``, ``verify`` and
-``escalate``, and never learns this agent's name.
+``decline``; the engine supplies ``guard``, ``retrieve``, ``act``, ``verify``,
+``escalate`` and ``blocked``, and never learns this agent's name.
 
 ## A known deviation: there is no `act → act` loop
 
@@ -44,21 +50,26 @@ cost and the failure modes of every turn, so it needs its own eval run to justif
 rather than a plausible-looking edge. The single-pass version fails safe — it
 escalates or admits it does not know.
 
-## What is deliberately not here yet
+## What ``guard`` is, and — more importantly — what it is not
 
-``guard`` and ``blocked``. Injection detection and PII redaction are milestone
-1.12 and need their own eval to be worth anything, so the nodes are absent rather
-than present-and-empty — a ``guard`` node that returns "clean" would report as
-protection while being none, which is the failure mode that concerns this project
-most.
+It is deterministic code: five named rules over the shopper's text, and
+reversible PII tokenisation. No model, no score, no threshold (ADR-0011).
 
-Their absence does not leave injection undefended, and it is worth being precise
-about why. CARE's position is that a shopper *can* persuade the model; what they
+**It is not the defence against prompt injection, and it must never be credited
+as one.** CARE's position is that a shopper *can* persuade the model; what they
 cannot do is make a persuaded model achieve anything, because there is no tool
 that changes a store to invoke, every proposal is authorised by code the model
 does not run, and an unowned order reference escalates rather than answering
 (security-model.md §2.1). Injection resistance is measured against the policy
-engine's record, not against the reply text, and it is gated at 1.00 today.
+engine's record, not against the reply text, and it was 1.00 before this node
+existed.
+
+Because a blocked turn never proposes a tool call, a guard that blocks makes
+``unauthorised_tool_calls`` trivially zero — so a guard could *manufacture* this
+project's one release-blocking gate. That is why the guard can be switched off
+and why the suite is run that way: ``make eval-guard-off`` disables every rule,
+and injection resistance must still be 1.00. If it ever is not, what broke is the
+policy engine, and no rule in the guard is the fix.
 """
 
 from __future__ import annotations
@@ -68,6 +79,8 @@ from typing import Any
 from neura_agent_care.nodes import OUT_OF_SCOPE, compose, decline, plan, respond, route, triage
 from neura_agent_core.graph import AgentGraph, AgentState
 
+GUARD = "guard"
+BLOCKED = "blocked"
 ROUTE = "route"
 RETRIEVE = "retrieve"
 PLAN = "plan"
@@ -96,7 +109,11 @@ def build_graph() -> AgentGraph:
         .node(COMPOSE, compose)
         .node(RESPOND, respond)
         .node(DECLINE, decline)
-        .entry(ROUTE)
+        # `guard` is the entry, and the builder enforces that rather than
+        # trusting this line: redacting personal data after the router has read
+        # the message is redaction of something already disclosed.
+        .entry(GUARD)
+        .branch(GUARD, _after_guard, {ROUTE: ROUTE, BLOCKED: BLOCKED})
         .branch(ROUTE, _after_route, {RETRIEVE: RETRIEVE, DECLINE: DECLINE, ESCALATE: ESCALATE})
         .edge(RETRIEVE, PLAN)
         .branch(PLAN, _after_plan, {ACT: ACT, ESCALATE: ESCALATE})
@@ -117,6 +134,18 @@ def compile_graph(checkpointer: Any = None) -> Any:
 # Plain functions of the state, deliberately. "Why did it escalate?" should be
 # answerable by reading five lines, and each of these is one condition with a
 # name.
+
+
+def _after_guard(state: AgentState) -> str:
+    """One condition, and it is a fact rather than a judgement.
+
+    ``blocked`` is set only when a *named* rule matched (ADR-0011); there is no
+    score here to compare against a threshold and therefore no branch to get
+    subtly wrong. Everything the guard does not recognise carries on to ``route``
+    and is handled exactly as it was before this node existed — which is the
+    property that keeps the structural argument in the module docstring true.
+    """
+    return BLOCKED if state.get("blocked") else ROUTE
 
 
 def _after_route(state: AgentState) -> str:

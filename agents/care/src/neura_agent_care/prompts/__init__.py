@@ -36,6 +36,7 @@ REQUIRED = frozenset(
         "decline",
         "verify",
         "escalation_message",
+        "blocked_message",
     }
 )
 

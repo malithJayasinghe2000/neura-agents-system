@@ -66,6 +66,8 @@ EXAMPLE_URL = "http://<your-shop>/neura/v1"
 #: by someone trying to understand the agent, and a node name alone assumes they
 #: already do.
 WHAT_IT_DOES = {
+    "guard": "recognise a named attack · tokenise personal data (no model runs here)",
+    "blocked": "refuse and log a security event — no person, no tools, no model",
     "route": "classify the question · resolve pronouns · pull out the order number",
     "retrieve": "search the indexed catalogue and policies",
     "plan": "choose which store lookups would answer this",
@@ -95,7 +97,20 @@ def _show(node: str, update: dict[str, Any], elapsed_ms: int, runtime: Any) -> N
     """Print what one node did."""
     print(f"  {BOLD}{node.upper()}{OFF} {DIM}— {WHAT_IT_DOES.get(node, '')}  ({elapsed_ms}ms){OFF}")
 
-    if node == "route":
+    if node == "guard":
+        # The two things a reader needs: which rule fired, and what the model is
+        # about to be shown instead of what the shopper typed. Token names only —
+        # printing the values back would undo the point of the node.
+        if update.get("blocked"):
+            print(f"      matched     {RED}{update.get('block_reason', '?')}{OFF}")
+            print(f"      {DIM}the reply names no rule — a block must not be an oracle{OFF}")
+        elif tokens := update.get("redactions"):
+            print(f"      redacted    {CYAN}{', '.join(tokens)}{OFF}")
+            print(f"      model sees  {update.get('message', '')!r}")
+        else:
+            print(f"      {DIM}no rule matched · no personal data found{OFF}")
+
+    elif node == "route":
         confidence = update.get("intent_confidence", 0.0)
         print(f"      intent      {CYAN}{update.get('intent')}{OFF}  confidence {confidence:.2f}")
         if resolved := update.get("search_query"):
@@ -178,9 +193,13 @@ async def _ask(
     who = f"customer {customer}" if customer else "an anonymous shopper (nothing proven)"
     print(f"\n  {BOLD}shopper{OFF}   {question!r}")
     print(f"  {DIM}asking as {who}")
+    # The GUARD *role* is labelled "verifier" here because since milestone 1.12
+    # that is the only node using it. The `guard` node has no model at all —
+    # printing a model name beside it would tell the reader the opposite of what
+    # ADR-0011 decided.
     print(
         f"  router {llm.model_for(ModelRole.ROUTER)} · reasoner {llm.model_for(ModelRole.REASONER)}"
-        f" · guard {llm.model_for(ModelRole.GUARD)}{OFF}\n"
+        f" · verifier {llm.model_for(ModelRole.GUARD)} · guard: no model{OFF}\n"
     )
 
     runtime = build_runtime(

@@ -89,12 +89,25 @@ jobs:
   # Agent evaluations gate behaviour changes: prompts, graph nodes, tools and
   # model config. See docs/architecture/evaluation-strategy.md §4.
   #
-  # On every PR we run the JUDGE-FREE subset: dataset validation plus mechanical
-  # checks. It is fast, free, and needs no secret. Judged metrics (groundedness)
-  # need a strong model and cost money, so they belong in a nightly run once
-  # EVAL_JUDGE_API_KEY exists as a repository secret.
+  # What runs here is the JUDGE-FREE, MODEL-FREE subset — the datasets parse,
+  # every case is well-formed, and the scoring logic works. It is fast, free and
+  # needs no secret.
+  #
+  # It deliberately does NOT run the agent. Since milestone 1.11 there is a real
+  # agent to run, and running it needs Ollama and several minutes per turn on a
+  # GPU this runner does not have. A job that could only ever fail for
+  # environmental reasons was previously kept green with `continue-on-error`,
+  # which is the same thing as not running it while looking like running it.
+  #
+  # The full suite (`make eval`) is a local, pre-merge step against real models,
+  # and its numbers are recorded in docs/PROJECT_STATE.md. Judged metrics
+  # (groundedness) additionally need a paid judge — open question E2.
+  #
+  # The guard's own balanced corpus — 40 attack strings and 40 benign ones —
+  # is deterministic and needs no model, so it runs in the `test` job above and
+  # gates every push (ADR-0011).
   evaluate:
-    name: Agent evaluations
+    name: Agent evaluations (datasets + harness)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,8 +120,5 @@ jobs:
       - run: uv sync --frozen
         name: Install dependencies
 
-      - run: uv run neura-eval --no-judge
-        name: Evals (mechanical checks only)
-        # Not --fail-on-gate yet: no agent is wired up, so every case reports
-        # "not implemented" by design. Turn the gate on with milestone 1.11.
-        continue-on-error: true
+      - run: uv run neura-eval --no-judge --no-agent
+        name: Evals (datasets + harness only)

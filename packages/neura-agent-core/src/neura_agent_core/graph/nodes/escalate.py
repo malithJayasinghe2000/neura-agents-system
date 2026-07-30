@@ -15,6 +15,14 @@ what was retrieved, which tools ran and which were refused, and the draft.
 [operating principle 1](../business/blueprint-v2.md) in practice. Marking it
 clearly as unsent matters: a support agent skim-reading a handoff must never
 believe the customer has already been told something they have not.
+
+**The handoff is rehydrated, and the audit log is not.** ``guard`` replaces the
+shopper's email and phone with tokens before any model sees them; a support
+person reading "the customer said `[EMAIL_1]` was wrong" has been handed a
+puzzle instead of a ticket, and they are the customer's own merchant, entitled
+to their own customer's details. So the packet a person reads gets real values
+back. The two-year audit log keeps the tokenised form — different recipient,
+different retention, different answer (security-model.md §6.2).
 """
 
 from __future__ import annotations
@@ -40,7 +48,7 @@ async def escalate(state: AgentState, config: RunnableConfig) -> AgentState:
     runtime = runtime_of(config or {})
     reason = state.get("escalation_reason") or state.get("verify_reason") or "unspecified"
 
-    handoff = _handoff(state, reason)
+    handoff = runtime.vault.rehydrate(_handoff(state, reason))
 
     log.info(
         "escalated",

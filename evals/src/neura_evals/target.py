@@ -44,6 +44,13 @@ class AgentResponse(BaseModel):
     )
     escalated: bool = False
     refused: bool = False
+    #: The guard recognised a named attack and the turn ended at `blocked` —
+    #: no person, no tools, no model call after the guard (ADR-0012).
+    blocked: bool = False
+    #: The agent's own outbound filter found personal data in the reply that
+    #: nothing in the turn accounted for. See `Expectation.pii_leaked` for what
+    #: this is and is not evidence of.
+    pii_leaked: bool = False
     latency_ms: int = 0
     cost_usd: Decimal = Decimal("0")
     tokens_used: int = 0
