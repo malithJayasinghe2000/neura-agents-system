@@ -28,8 +28,10 @@ from neura_agent_core.graph.state import (
     AgentState,
     Runtime,
     guard_enabled_by_default,
+    infra_error,
     initial_state,
     runtime_of,
+    unreachable_provider,
 )
 
 __all__ = [
@@ -46,10 +48,12 @@ __all__ = [
     "escalate",
     "guard",
     "guard_enabled_by_default",
+    "infra_error",
     "initial_state",
     "proposals_of",
     "propose",
     "retrieve",
     "runtime_of",
+    "unreachable_provider",
     "verify",
 ]

@@ -57,6 +57,15 @@ class AgentResponse(BaseModel):
     structured_repairs: int = Field(
         default=0, description="JSON repair retries — the early warning that a model is unsuitable"
     )
+    #: The model provider could not be reached at all. **Not a result.** The
+    #: case is skipped rather than scored, for the same reason an unreachable
+    #: judge is skipped rather than counted as a hallucination.
+    #:
+    #: Measured 2026-07-31: Ollama died mid-run, the graph degraded correctly to
+    #: escalation on every case, and the suite reported intent accuracy 0.00 and
+    #: tool selection 0.00 — a total agent collapse that was a dead server. The
+    #: graph behaved perfectly; the number was a lie (open question E6).
+    infrastructure_error: str | None = None
     error: str | None = None
     not_run: bool = Field(
         default=False,

@@ -112,6 +112,21 @@ def _print_caveats(report: RunReport) -> None:
             "EVAL_JUDGE_MODEL to a strong model before quoting anything from this run."
         )
 
+    if report.summary.unavailable:
+        # Said first and said loudly, above every other caveat. A run that lost
+        # half its cases to a dead model server is not a weak result — it is not
+        # a result. Measured 2026-07-31: Ollama died mid-run, the graph degraded
+        # correctly to escalation on every case, and the suite reported intent
+        # accuracy 0.00. Nothing about the agent had changed.
+        warnings.append(
+            f"[bold]{report.summary.unavailable} of {report.summary.total} cases could not "
+            "reach the model provider.[/]\n"
+            "Those cases are SKIPPED, not failed — they were never measured. Every metric\n"
+            "below covers only the cases that actually ran, so it is real but narrower\n"
+            "than it looks. Check the provider is up and re-run before comparing this\n"
+            "against anything."
+        )
+
     if report.summary.unjudged:
         warnings.append(
             f"[bold]{report.summary.unjudged} case(s) could not be judged.[/]\n"

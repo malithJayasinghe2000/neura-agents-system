@@ -26,7 +26,7 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from neura_agent_core.graph import AgentState, runtime_of
+from neura_agent_core.graph import AgentState, infra_error, runtime_of
 from neura_core import get_logger
 from neura_llm import ChatRequest, ChatResponse, FinishReason, Message, ModelRole
 
@@ -90,6 +90,7 @@ async def compose(state: AgentState, config: RunnableConfig) -> AgentState:
         return {
             "escalated": True,
             "escalation_reason": f"drafting failed: {type(exc).__name__}",
+            **infra_error(exc, "the reasoner was unreachable while drafting"),
         }
 
     draft = response.content.strip()

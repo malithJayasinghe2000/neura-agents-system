@@ -164,6 +164,7 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
         tools_called=tools_called,
         retrieved_context=_evidence(final),
         escalated=escalated,
+        infrastructure_error=final.get("infrastructure_error"),
         blocked=blocked,
         pii_leaked=bool(final.get("pii_leaks")),
         # "Refused" is narrower than "escalated": the agent declining to act on

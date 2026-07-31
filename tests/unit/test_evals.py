@@ -304,6 +304,36 @@ class TestSummary:
         assert "escalation_precision" not in summary.metrics
         assert "escalation_recall" not in summary.metrics
 
+    async def test_an_unreachable_provider_is_skipped_not_failed(self) -> None:
+        """Open question E6, found the expensive way.
+
+        Ollama died partway through a run on 2026-07-31. The graph did exactly
+        the right thing — `route` could not classify, so every turn escalated —
+        and the suite reported **intent accuracy 0.00 and tool selection 0.00**,
+        which reads as a total agent collapse and was a dead server.
+
+        The case was never measured, so it must be skipped, exactly as an
+        unreachable judge is. This is the third instance of the same shape in
+        this harness: an outage reported as a result.
+        """
+        response = AgentResponse(
+            reply="I'm passing you to a colleague.",
+            escalated=True,
+            infrastructure_error="the router was unreachable: ProviderUnavailableError",
+        )
+        result = await score_case(
+            _case("c1", Expectation(intent=Intent.ORDER_STATUS, escalated=False)),
+            response,
+            judge=None,
+        )
+
+        assert all(c.status is CheckStatus.SKIP for c in result.checks)
+        assert result.passed, "an unmeasured case is not a failure"
+
+        summary = summarise([result])
+        assert summary.unavailable == 1, "the report must say how many cases never ran"
+        assert "intent_accuracy" not in summary.metrics, "a dead provider must not score the agent"
+
     async def test_gate_failures_are_reported(self) -> None:
         results = [
             await score_case(

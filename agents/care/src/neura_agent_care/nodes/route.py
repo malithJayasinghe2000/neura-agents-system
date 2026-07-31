@@ -28,7 +28,7 @@ from typing import Literal, cast
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
-from neura_agent_core.graph import AgentState, Runtime, runtime_of
+from neura_agent_core.graph import AgentState, Runtime, infra_error, runtime_of
 from neura_core import get_logger
 from neura_llm import ChatRequest, Message, ModelRole
 
@@ -112,7 +112,10 @@ async def route(state: AgentState, config: RunnableConfig) -> AgentState:
         # status" — a wrong guess here misroutes the whole turn, and every step
         # after it inherits the mistake while appearing to work.
         log.warning("route_failed", conversation_id=state.get("conversation_id"), error=str(exc))
-        return _escalate(f"routing could not be completed: {type(exc).__name__}")
+        return {
+            **_escalate(f"routing could not be completed: {type(exc).__name__}"),
+            **infra_error(exc, "the router was unreachable"),
+        }
 
     update: AgentState = {
         "intent": result.intent,

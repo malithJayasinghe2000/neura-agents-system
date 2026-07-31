@@ -22,7 +22,7 @@ from __future__ import annotations
 import operator
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 
 from langchain_core.runnables import RunnableConfig
 
@@ -46,6 +46,23 @@ if TYPE_CHECKING:
 GUARD_ENV_VAR = "NEURA_GUARD_ENABLED"
 
 _FALSEY = frozenset({"0", "false", "no", "off"})
+
+
+def unreachable_provider(exc: BaseException) -> bool:
+    """Did this exception mean "the model was not there", rather than "the model
+    said something unusable"?
+
+    Matched on the exception *type name* rather than by importing
+    ``neura_llm.ProviderUnavailableError``, deliberately: this module is imported
+    by every graph, and a node that stubs its LLM in a test must not have to
+    install a provider package to say so. The name is stable and the failure of
+    this check is safe in the honest direction — an unrecognised exception is
+    scored as an agent decision, which is what happens today.
+    """
+    return any(
+        cls.__name__ in {"ProviderUnavailableError", "ProviderTimeoutError"}
+        for cls in type(exc).__mro__
+    )
 
 
 def guard_enabled_by_default() -> bool:
@@ -99,6 +116,29 @@ class AgentState(TypedDict, total=False):
     #: accounts for (security-model.md §6.3, threat T10). Non-empty means the
     #: turn escalated instead of answering. Descriptions, never values.
     pii_leaks: list[str]
+
+    #: Set when a node could not reach the model provider at all — Ollama down,
+    #: a cloud API refusing, a network partition.
+    #:
+    #: **This is not an agent decision and must never be scored as one.** The
+    #: graph degrades correctly when a provider vanishes: `route` cannot classify,
+    #: so it escalates, which is the right thing to do and is indistinguishable
+    #: from an honest "I am not sure" — until you notice that *every* case did it.
+    #: Measured on 2026-07-31: Ollama died mid-run and the suite reported intent
+    #: accuracy 0.00 and tool selection 0.00, which reads as a total agent
+    #: collapse and was a dead server.
+    #:
+    #: The eval harness reads this and **skips** those cases rather than failing
+    #: them, for the same reason an unreachable judge is skipped rather than
+    #: scored as a hallucination (open question E6, and the general lesson of
+    #: 1.11: "not measured" has to be its own value).
+    infrastructure_error: str
+
+    #: Commitments in the draft that the agent cannot honour — "I'll send you a
+    #: prepaid label" in a system with no later turn and no WRITE tool (open
+    #: question A9(3)). Non-empty means the turn escalated. Descriptions, never
+    #: the sentence: the handoff already carries the draft in full.
+    promises: list[str]
 
     # ── route ────────────────────────────────────────────────────────────────
     intent: str
@@ -158,6 +198,23 @@ class AgentState(TypedDict, total=False):
 
     #: Cost and latency, accumulated for the budget and the merchant's bill.
     usage: dict[str, Any]
+
+
+def infra_error(exc: BaseException, detail: str) -> AgentState:
+    """State to merge when a node's failure was the provider, not the agent.
+
+    Returns an **empty** update for any other exception, so every call site can
+    splat it unconditionally:
+
+        return {**_escalate("routing could not be completed"), **infra_error(exc, "…")}
+
+    Empty-on-no-match is the safe direction. A failure we do not recognise stays
+    scored as an agent decision, which is exactly what happens today — the fix
+    can only ever *remove* a false measurement, never invent a skip.
+    """
+    if not unreachable_provider(exc):
+        return {}
+    return cast("AgentState", {"infrastructure_error": f"{detail}: {type(exc).__name__}"})
 
 
 @dataclass(slots=True)
@@ -270,5 +327,6 @@ def initial_state(
         sources=[],
         redactions=[],
         pii_leaks=[],
+        promises=[],
         usage={},
     )

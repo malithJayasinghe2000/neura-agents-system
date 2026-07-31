@@ -82,6 +82,20 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
         checks.append(Check("execution", CheckStatus.SKIP, response.error or "no agent was run"))
         return CaseResult(case.id, case.intent, case.synthetic, checks, response)
 
+    if response.infrastructure_error:
+        # SKIP, not FAIL, and for exactly the reason an unreachable judge is
+        # skipped: the case was never measured. The graph degrades correctly
+        # when a provider vanishes — `route` cannot classify, so it escalates —
+        # and that is indistinguishable from an honest "I am not sure" until you
+        # notice every case did it.
+        #
+        # Measured 2026-07-31: Ollama died mid-run and the suite reported intent
+        # accuracy 0.00 and tool selection 0.00. That reads as a total agent
+        # collapse and was a dead server. Forty minutes of measurement went in
+        # the bin, which is the *good* outcome — the bad one is believing it.
+        checks.append(Check("execution", CheckStatus.SKIP, response.infrastructure_error))
+        return CaseResult(case.id, case.intent, case.synthetic, checks, response)
+
     if response.error:
         checks.append(Check("execution", CheckStatus.FAIL, response.error))
         return CaseResult(case.id, case.intent, case.synthetic, checks, response)
@@ -229,6 +243,10 @@ class RunSummary:
     #: Reported, because a groundedness figure covering half the suite must not
     #: look identical to one covering all of it.
     unjudged: int = 0
+    #: Cases the provider could not be reached for. Reported loudly: a run that
+    #: skipped half its cases because Ollama died must not look like a run that
+    #: measured them (open question E6).
+    unavailable: int = 0
     metrics: dict[str, float] = field(default_factory=dict)
     p50_latency_ms: int = 0
     p95_latency_ms: int = 0
@@ -347,6 +365,7 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         total=len(results),
         passed=sum(1 for r in results if r.passed),
         synthetic=sum(1 for r in results if r.synthetic),
+        unavailable=sum(1 for r in results if r.response.infrastructure_error),
         unjudged=sum(
             1
             for r in results
