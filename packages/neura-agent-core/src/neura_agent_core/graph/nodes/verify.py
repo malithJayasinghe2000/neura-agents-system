@@ -46,7 +46,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 from neura_agent_core.graph.state import AgentState, runtime_of
-from neura_agent_core.guard import find_leaks
+from neura_agent_core.guard import find_leaks, find_promises
 from neura_core import get_logger
 
 log = get_logger(__name__)
@@ -109,6 +109,22 @@ async def verify(state: AgentState, config: RunnableConfig) -> AgentState:
             kinds=[leak.kind for leak in leaks],
         )
         return {**_ungrounded(f"outbound PII check: {'; '.join(reasons)}"), "pii_leaks": reasons}
+
+    if promises := find_promises(draft):
+        # A9(3). Not a groundedness failure — the store's Return Policy is
+        # written in the first person, so "I'll send you a prepaid label" is
+        # *supported* by the evidence and a judge passes it, correctly. It is
+        # still false: there is no later turn, no notification service and no
+        # WRITE tool. `compose.md` forbids it in bold and the model did it
+        # anyway, which is rule 3 generalising from authorisation to correctness.
+        reasons = [promise.detail for promise in promises]
+        log.warning(
+            "unkeepable_promise",
+            conversation_id=state.get("conversation_id"),
+            tenant_id=state.get("tenant_id"),
+            rules=[promise.rule for promise in promises],
+        )
+        return {**_ungrounded(f"unkeepable promise: {'; '.join(reasons)}"), "promises": reasons}
 
     if not evidence:
         # Structural, before any model call. A reply with no evidence behind it
