@@ -4,10 +4,10 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-07-30
+**Last updated:** 2026-07-31
 **Current phase:** Phase 1 — milestones 1.1–1.12 complete
-**Next action:** Milestone 1.13 — Multi-tenancy. But **A8/A9 and E2 are the higher-value work**,
-and 1.12 decided the trigger for paying for a judge is the next attempt at either (see below).
+**Next action:** A9(3) is wired and being measured; then A8, under the no-groundedness-claim
+constraint. **A9(2) is deferred on budget** (E2b). Milestone 1.13 — Multi-tenancy — after that.
 
 > **Starting 1.13 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
 > 1.12 entry below.
@@ -79,7 +79,7 @@ and 1.12 decided the trigger for paying for a judge is the next attempt at eithe
 
 **A merchant's shopper could now hold a conversation with this.** Against the real test shop, CARE quotes that shop's own returns window, finds a waterproof shoe from "I need something for hiking", refuses an anonymous shopper asking about order 1, lists an identified customer's orders, and hands a cancellation request to a person without claiming to have done it.
 
-**But no number here is validation.** All 47 cases are synthetic (open question E1). The honest measured result on the local role map, `--no-judge`, **n=3**: **31 / 30 / 29 of the original 35 golden cases** with the guard on, against **31 / 32 / 31** on `main` without it — a difference inside the ±2 run-to-run variance this project has measured twice, on cases the guard provably cannot touch (see the 1.12 entry, which shows the working). Injection resistance **1.00** in every run including the guard-off control, intent accuracy 0.95, tool selection 1.00, guard-block accuracy 1.00 across 12 balanced cases. Escalation precision (0.78) and recall (0.88) remain below gate, and **recall is now known to be partly a measure of phrasing** (open question E5). Groundedness is 0.86 on the one dataset a judge got through before the free tier ran out, and unknown for the other four (E2 — and 1.12 decided deliberately not to pay for a judge yet, with a stated trigger). **Hand probing on 2026-07-29 qualified one reading of these numbers**: not every escalation is conservative routing — some are `verify` refusing a claim its evidence supported (A8), and some answered turns carry wrong claims the judge never saw (A9).
+**But no number here is validation.** All 47 cases are synthetic (open question E1). The honest measured result on the local role map, `--no-judge`, **n=3**: **31 / 30 / 29 of the original 35 golden cases** with the guard on, against **31 / 32 / 31** on `main` without it — a difference inside the ±2 run-to-run variance this project has measured twice, on cases the guard provably cannot touch (see the 1.12 entry, which shows the working). Injection resistance **1.00** in every run including the guard-off control, intent accuracy 0.95, tool selection 1.00, guard-block accuracy 1.00 across 12 balanced cases. **Escalation recall is now 1.00 ✔ across three runs** — the below-gate figures in 1.11 and 1.12 were substantially a bug in the metric, resolved as E5 on 2026-07-31. **Escalation precision is 0.88 / 0.78 / 0.78 against a 0.85 gate and is a real problem**, driven by two genuine over-escalations. Groundedness is 0.86 on the one dataset a judge got through before the free tier ran out, and unknown for the other four (E2 — and 1.12 decided deliberately not to pay for a judge yet, with a stated trigger). **Hand probing on 2026-07-29 qualified one reading of these numbers**: not every escalation is conservative routing — some are `verify` refusing a claim its evidence supported (A8), and some answered turns carry wrong claims the judge never saw (A9).
 
 ---
 
@@ -109,7 +109,9 @@ and 1.12 decided the trigger for paying for a judge is the next attempt at eithe
 
 **Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for the one table that exists; each new table is covered by the same test) · **end-to-end conversation working ✅** (`make care-check` against the real shop — over REST and WebSocket is 1.14).
 
-Remaining: evals green on both role maps (**not green on either**: 29/35 on `ollama-dev`, and the cloud map has no model configured) · injection resistance 1.00 (**met today at 1.00, and it is a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
+Remaining: evals green on both role maps (**not green on either** — 31–32 of the original 35 on `ollama-dev`, with escalation *precision* the one gate still unmet at 0.78–0.88 against 0.85; the cloud map has no model configured) · injection resistance 1.00 (**met, including with the guard disabled — a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
+
+**Escalation recall reached its gate on 2026-07-31**, and it is worth knowing *how*: not by improving the agent but by fixing the metric (E5). Nothing about CARE changed.
 
 ---
 
@@ -191,6 +193,83 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-07-31 — A gated metric was measuring phrasing (E5 resolved), and the judge is deferred
+
+**Escalation recall has been below gate since 1.11, and roughly half of that was a bug in the
+metric.** Resolves open question **E5**, which was raised — and deliberately *not* fixed — during
+1.12, because changing a gated metric mid-measurement makes the before and after incomparable.
+
+Both escalation metrics were derived from whether the whole **case** passed:
+
+```
+true_pos   = escalated and case.passed
+actual_pos = (escalated and case.passed) or (not escalated and not case.passed)
+```
+
+`case.passed` is true only when *every* check passed — intent, tool selection, `must_contain`, all
+of it. So a case asserting `escalated: false`, which correctly did **not** escalate and then failed
+on a wording check, landed in the recall denominator as an escalation the agent should have made and
+did not. And a case that escalated exactly as expected but phrased its handover badly stopped
+counting as a true positive at all.
+
+Now derived from the escalation check's own verdict and nothing else, which is the textbook
+definition and is independent of every other assertion.
+
+**Re-baselined, `uv run neura-eval --no-judge`, n=3, on the corrected metric:**
+
+| | run 1 | run 2 | run 3 |
+|:--|:--|:--|:--|
+| original 35 golden cases | 32 | 31 | 31 |
+| **escalation recall** | **1.00 ✔** | **1.00 ✔** | **1.00 ✔** |
+| escalation precision | 0.88 ✔ | 0.78 ✘ | 0.78 ✘ |
+| injection resistance | 1.00 ✔ | 1.00 ✔ | 1.00 ✔ |
+
+Intent accuracy 0.95, tool selection 1.00, guard-block accuracy 1.00 and the PII leak check 1.00 in
+all three.
+
+**The result splits, and the split is the useful part:**
+
+- **Recall was the casualty.** 1.00 in every run. Every case that should hand over does. The 0.90
+  recorded in 1.11 and the 0.88 in 1.12 were substantially measurement error, and the designed
+  asymmetry — escalate rather than answer wrongly — was working the whole time. **Two milestones
+  reported an agent problem that was partly an arithmetic problem.**
+- **Precision did not move and is a genuine problem.** 0.88 / 0.78 / 0.78 against a 0.85 gate, driven
+  by two real over-escalations: `policy_qa_005` routes a policy question to `needs_person`, and
+  `order_status_003` escalates on an order number that matches nothing. Both are the agent being too
+  cautious, which is the cheap error by design — but it is below gate and it is real.
+
+**Numbers from before this fix are not comparable with numbers after it.** The 1.12 entry's
+escalation figures were computed the old way and are left as recorded rather than restated.
+
+**On the judge: the E2 trigger fired and there is no budget, so it is deferred — and the deferral is
+narrower than it first looked.** Recorded as **E2b**, because a fired trigger with no explanation is
+what confuses the next session.
+
+- **A9(2)** — unsupported inference and catalogue-wide superlatives — genuinely needs a judge. That
+  *is* a groundedness question. **Deferred.**
+- **A9(3)** — promised future action — does not. A promise is *supported* by the evidence (the store's
+  Return Policy is written in the first person), so a judge cannot see it in either direction. What
+  moves is escalation, which is mechanical.
+- **A8** does not either, and the 1.12 wording was too broad on this point. The 2026-07-30 regression
+  it warns about was **caught by the golden suite under `--no-judge`** — 32/35 → 27/35. The failure
+  mode is detectable without a judge; what a judge would add is confirming that a *successful* change
+  improved groundedness rather than merely avoiding a regression. So A8 is attemptable, with no
+  groundedness claim permitted.
+
+The free tier is not zero — ~20 requests/day is a paired before/after on one 7-case dataset in a
+single day — but n=1 against ±2 case variance is exactly the weak evidence that misled on
+2026-07-30. A hint, never a result.
+
+**Also fixed: the judge setup instructions named a model that 404s.** `.env.example` and
+GETTING_STARTED both told a new reader to set `EVAL_JUDGE_MODEL=gemini-2.5-flash`. Milestone 1.11
+found that model retired for new API projects — which is how the pinning rule was discovered — and
+then pinned the working one everywhere *except* the two files a new reader actually follows. Both now
+carry the two warnings learned the expensive way: pin the model, never an alias; and a free tier
+cannot complete one run.
+
+- **Next:** A9(3) is built and wired, and its n=3 measurement is running against the baseline above.
+  Then A8, under the no-groundedness-claim constraint. A9(2) waits for budget.
 
 ### 2026-07-31 — Guard: injection detection and PII redaction, both without a model (milestone 1.12)
 
