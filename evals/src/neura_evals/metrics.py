@@ -264,6 +264,76 @@ def _rate(results: list[CaseResult], check_name: str) -> float | None:
     return sum(1 for c in relevant if c.status is CheckStatus.PASS) / len(relevant)
 
 
+def _escalation_check(result: CaseResult) -> Check | None:
+    """The one check that is about escalation, or ``None`` if the case is silent."""
+    for check in result.checks:
+        if check.name == "escalation" and check.status is not CheckStatus.SKIP:
+            return check
+    return None
+
+
+def _score_escalation(results: list[CaseResult], summary: RunSummary) -> None:
+    """Escalation precision and recall, from the escalation check and nothing else.
+
+    **This was wrong until milestone 1.13, and the wrongness was invisible**
+    (open question E5). The original version asked whether the whole *case*
+    passed:
+
+        true_pos   = escalated and case.passed
+        actual_pos = (escalated and case.passed) or (not escalated and not case.passed)
+
+    ``case.passed`` is true only when **every** check passed — intent, tool
+    selection, `must_contain`, all of it. So a case that asserted
+    ``escalated: false``, correctly did not escalate, and then failed on a
+    *wording* check landed in the recall denominator as an escalation the agent
+    should have made and did not. And a case that escalated exactly as expected
+    but phrased its handover badly stopped counting as a true positive at all.
+
+    Measured on the 1.12 runs: `product_qa_001` failing on
+    ``must_contain: "Waterproof Hiking Shoe"`` moved recall by a full
+    case-worth, with no escalation behaviour changing in any direction. A gated
+    metric was partly measuring phrasing.
+
+    The definition below is the textbook one, derived from the escalation check's
+    own verdict and therefore independent of every other assertion:
+
+    ==================  ============================================
+    prediction          ``response.escalated``
+    the check passed    prediction matched what the case expected
+    true positive       escalated, and that was expected
+    false positive      escalated, and it was not expected
+    false negative      did not escalate, and it should have
+    ==================  ============================================
+
+    Note what *has not* changed: the asymmetry the gates encode. Recall is still
+    gated higher than precision, because over-escalating wastes a colleague's
+    minute and under-escalating tells a customer something wrong about their
+    money (evaluation-strategy.md §3).
+    """
+    true_pos = false_pos = false_neg = 0
+
+    for result in results:
+        check = _escalation_check(result)
+        if check is None:
+            continue
+        if result.response.escalated:
+            if check.failed:
+                false_pos += 1
+            else:
+                true_pos += 1
+        elif check.failed:
+            # It did not escalate and the check failed, so the case expected an
+            # escalation and did not get one. The one branch the old version got
+            # right only by accident — it also swept up every case that failed
+            # for a reason having nothing to do with escalating.
+            false_neg += 1
+
+    if predicted_pos := true_pos + false_pos:
+        summary.metrics["escalation_precision"] = true_pos / predicted_pos
+    if actual_pos := true_pos + false_neg:
+        summary.metrics["escalation_recall"] = true_pos / actual_pos
+
+
 def _percentile(values: list[int], pct: float) -> int:
     if not values:
         return 0
@@ -305,25 +375,7 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         if value is not None:
             summary.metrics[metric_name] = value
 
-    # Escalation precision and recall, from cases that asserted on escalation.
-    escalation_cases = [
-        r
-        for r in results
-        for c in r.checks
-        if c.name == "escalation" and c.status is not CheckStatus.SKIP
-    ]
-    if escalation_cases:
-        true_pos = sum(1 for r in escalation_cases if r.response.escalated and r.passed)
-        predicted_pos = sum(1 for r in escalation_cases if r.response.escalated)
-        actual_pos = sum(
-            1
-            for r in escalation_cases
-            if (r.response.escalated and r.passed) or (not r.response.escalated and not r.passed)
-        )
-        if predicted_pos:
-            summary.metrics["escalation_precision"] = true_pos / predicted_pos
-        if actual_pos:
-            summary.metrics["escalation_recall"] = true_pos / actual_pos
+    _score_escalation(results, summary)
 
     # Only cases that actually ran. Counting an unrun case as "one call, zero
     # repairs" reported a perfect 0.00 repair rate — a green gate derived from no

@@ -215,6 +215,95 @@ class TestSummary:
         # The third case asserted no intent, so it must not dilute the metric.
         assert summary.metrics["intent_accuracy"] == 0.5
 
+    async def test_escalation_metrics_ignore_failures_that_are_not_about_escalating(self) -> None:
+        """Open question E5, and the reason it was worth its own fix.
+
+        Both cases below get their escalation decision exactly right. Both then
+        fail on wording. Under the original definition — which asked whether the
+        whole *case* passed — the first stopped counting as a true positive and
+        the second was counted as an escalation the agent should have made and
+        did not, so a gated metric was partly measuring phrasing.
+
+        Precision and recall must both be 1.00 here. Nothing escalated wrongly
+        and nothing failed to escalate.
+        """
+        results = [
+            # Correctly escalated, and the reply is missing a required word.
+            await score_case(
+                _case(
+                    "escalated_but_worded_badly", Expectation(escalated=True, must_contain=["X"])
+                ),
+                AgentResponse(reply="passing you to a colleague", escalated=True),
+                judge=None,
+            ),
+            # Correctly did NOT escalate, and the reply is missing a required word.
+            await score_case(
+                _case(
+                    "answered_but_worded_badly", Expectation(escalated=False, must_contain=["X"])
+                ),
+                AgentResponse(reply="we ship in 3 days", escalated=False),
+                judge=None,
+            ),
+        ]
+
+        summary = summarise(results)
+        assert not results[0].passed and not results[1].passed, "both must fail on `must_contain`"
+        assert summary.metrics["escalation_precision"] == 1.0
+        assert summary.metrics["escalation_recall"] == 1.0
+
+    async def test_a_missed_escalation_is_still_counted(self) -> None:
+        """The fix must not make the metric blind in the direction that matters.
+
+        Under-escalating is the expensive error — it tells a customer something
+        wrong about their money — so a case that should have handed over and did
+        not has to show up as a recall miss.
+        """
+        results = [
+            await score_case(
+                _case("should_have_escalated", Expectation(escalated=True)),
+                AgentResponse(reply="it'll be fine", escalated=False),
+                judge=None,
+            ),
+            await score_case(
+                _case("escalated_properly", Expectation(escalated=True)),
+                AgentResponse(reply="passing you over", escalated=True),
+                judge=None,
+            ),
+        ]
+        summary = summarise(results)
+        assert summary.metrics["escalation_recall"] == 0.5
+        assert summary.metrics["escalation_precision"] == 1.0
+
+    async def test_an_unnecessary_escalation_costs_precision(self) -> None:
+        """The other direction: a handover nobody needed."""
+        results = [
+            await score_case(
+                _case("did_not_need_a_person", Expectation(escalated=False)),
+                AgentResponse(reply="passing you over", escalated=True),
+                judge=None,
+            ),
+            await score_case(
+                _case("escalated_properly", Expectation(escalated=True)),
+                AgentResponse(reply="passing you over", escalated=True),
+                judge=None,
+            ),
+        ]
+        summary = summarise(results)
+        assert summary.metrics["escalation_precision"] == 0.5
+        assert summary.metrics["escalation_recall"] == 1.0
+
+    async def test_cases_that_say_nothing_about_escalation_are_excluded(self) -> None:
+        results = [
+            await score_case(
+                _case("silent", Expectation(must_contain=["ok"])),
+                AgentResponse(reply="nope", escalated=True),
+                judge=None,
+            )
+        ]
+        summary = summarise(results)
+        assert "escalation_precision" not in summary.metrics
+        assert "escalation_recall" not in summary.metrics
+
     async def test_gate_failures_are_reported(self) -> None:
         results = [
             await score_case(
