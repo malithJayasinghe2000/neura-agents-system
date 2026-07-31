@@ -288,13 +288,17 @@ make test              # unit tests
 
 `make eval` uses an AI to grade the agent's answers. By default it falls back to a local model and **labels every score untrustworthy** — because a weak model grading a weak model produces numbers that look real and aren't.
 
-To fix that, get a free Gemini key at **https://aistudio.google.com/apikey** and uncomment **exactly these three lines** in `.env` — nothing else is needed:
+To fix that, get a free Gemini key at **https://aistudio.google.com/apikey** and uncomment **exactly these three lines** in `.env` — nothing else is needed. Any OpenAI-compatible endpoint works; this is just the one with a free tier.
 
 ```bash
 EVAL_JUDGE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 EVAL_JUDGE_API_KEY=your-key-here
-EVAL_JUDGE_MODEL=gemini-2.5-flash
+EVAL_JUDGE_MODEL=gemini-3.6-flash
 ```
+
+**Pin the model. Never use a `-latest` alias** — it changes under you, and this month's scores stop being comparable with last month's with nothing in any report to say why. Model names also get retired for new API projects without notice: this file said `gemini-2.5-flash` until milestone 1.13, and it now 404s.
+
+**A free tier will not get you through a whole run.** Measured: 20 requests a day, exhausted partway through the suite. Unjudged cases are *skipped* rather than counted against the agent, so the report stays honest and tells you how many it missed — but you will not get a complete groundedness number without paying. That is open question E2.
 
 Then check it actually works:
 
@@ -303,7 +307,7 @@ make judge-check
 ```
 
 ```
-  model   gemini-2.5-flash
+  model   gemini-3.6-flash
   trust   trusted
 
   ✔ accepts a grounded reply    score=1.0
