@@ -304,6 +304,40 @@ class TestSummary:
         assert "escalation_precision" not in summary.metrics
         assert "escalation_recall" not in summary.metrics
 
+    def test_a_small_hosted_model_is_not_trusted_to_judge(self) -> None:
+        """The trust heuristic knew only Ollama tags until the judge moved to a
+        cloud gateway on 2026-08-02.
+
+        A hosted 9B is called `nvidia/nemotron-nano-9b-v2:free`. It matches no
+        Ollama marker, so it would have been labelled **trusted** — a weak model
+        grading a weak model, reported as a measurement, by the one component
+        whose whole job is to refuse exactly that.
+        """
+        from neura_evals.config import _looks_weak
+
+        for weak in (
+            "nvidia/nemotron-nano-9b-v2:free",
+            "some/model-3b-instruct",
+            "vendor/tiny-chat",
+            "vendor/gpt-mini",
+            "vendor/mini-judge",
+            "llama3.2:3b",
+        ):
+            assert _looks_weak(weak), f"{weak} should not be trusted to judge"
+
+        for strong in (
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "google/gemma-4-26b-a4b-it:free",
+            # The bug the first draft of this list shipped: bare "mini" matches
+            # ge-MINI, so a good judge was quietly declared untrustworthy.
+            "gemini-3.6-flash",
+        ):
+            assert not _looks_weak(strong), (
+                f"{strong} was wrongly called weak — a parameter count like "
+                "`a12b` or `120b` must not read as a size suffix"
+            )
+
     async def test_an_unreachable_provider_is_skipped_not_failed(self) -> None:
         """Open question E6, found the expensive way.
 
