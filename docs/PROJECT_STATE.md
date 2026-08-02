@@ -4,10 +4,12 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-07-31
+**Last updated:** 2026-08-02
 **Current phase:** Phase 1 — milestones 1.1–1.12 complete
-**Next action:** A9(3) is wired and being measured; then A8, under the no-groundedness-claim
-constraint. **A9(2) is deferred on budget** (E2b). Milestone 1.13 — Multi-tenancy — after that.
+**Next action:** the ~20-call A8 control probe, once the OpenRouter daily limit resets — it
+decides whether A8 is a model swap or a redesign. Then A9(2), now unblocked by a working
+judge. Both want a decision on API credits: the free tier is 50 requests/day and one suite
+run is ~235 calls. Milestone 1.13 — Multi-tenancy — after that.
 
 > **Starting 1.13 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
 > 1.12 entry below.
@@ -193,6 +195,79 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-02 — The judge works, three harness bugs fixed, A9(3) reverted on measurement
+
+**Four things the eval harness was getting wrong are now fixed, and none of them were about the
+agent.** That is the theme of the session: most of what looked like agent quality was measurement.
+
+**The judge is working, and E2 is resolved.** An OpenRouter free-tier key reaches
+`nvidia/nemotron-3-ultra-550b-a55b:free`; `make judge-check` passes, accepting a grounded reply and
+catching both fabricated claims. Groundedness is measurable again and **A9(2) is unblocked**. The
+compliance clause is unchanged and still stands: free tiers may train on what you send them, fine
+while every case is invented, not fine once real conversations arrive.
+
+**`cloud-prod` is configured for the first time** — router `nemotron-nano-9b`, reasoner
+`nemotron-3-super-120b`, verifier `gpt-oss-20b`, chosen from the four free models that support both
+tool calling and structured output. **`GUARD` is deliberately a different model from `REASONER`**,
+because `verify`'s whole premise is that a model checking its own work agrees with itself.
+
+**The free tier is 50 requests/day.** Measured, not guessed — the API does not expose it, but a 429
+does: `X-RateLimit-Limit: 50`. A full 47-case suite is roughly **235 model calls**, so
+**n=3 comparisons are not possible on the free tier**: one configuration alone needs five days.
+$10 of credits raises it to 1,000/day, which is about four suite runs a day.
+
+**A9(3) was measured and reverted — a second recorded negative result.**
+
+| | baseline | with A9(3) |
+|:--|:--|:--|
+| original 35 golden cases | 32 / 31 / 31 | 30 / 29 / 31 |
+| escalation precision | 0.88 / 0.78 / 0.78 | **0.70 / 0.70 / 0.70** |
+| escalation recall | 1.00 ×3 | 1.00 ×3 |
+
+One new failure in all three runs: `product_qa_005` ("Do you sell tents?"), where the right answer
+is a plain "no" and the check turned it into a handover. The detector stays in the tree unwired at
+`guard/promises.py` — it scores 30/30 and 0/30 on its balanced corpus and it is not the problem.
+
+**The lesson is about the response, not the rule.** Even granting the firing is a true positive — an
+offer to follow up genuinely cannot be honoured — escalating to a person over it is
+disproportionate. The swimsuit reply that raised A9(3) deserves a handover; "we don't stock tents,
+shall I check similar?" does not. The fix is probably to stop `compose` offering, or to strip the
+offer, and that is a different change needing its own measurement. Also learned: on `cloud-prod` the
+same case drafts cleanly and nothing fires, so **a check like this must be measured on every role
+map it will run under.**
+
+**A8 might be a model problem rather than a design problem. Suggestive, not settled.** The 2026-07-29
+finding — 0/30 refusals with one evidence block, 30/30 with the same text duplicated — was only ever
+measured on local `qwen3:8b`. On `openai/gpt-oss-20b:free`, the same shape gives **0/10 and 0/10:
+perfectly stable.** If that holds, A8 is largely "`qwen3:8b` is unsuitable for the GUARD role", which
+is a model swap rather than a redesign.
+
+**It is not a conclusion, for two reasons.** The probe is a *reconstruction* — the original strings
+were never recorded — so the stability could be gentler inputs rather than a better model. And the
+control that separates those, the same probe on a ~9B cloud verifier which should flip if the inputs
+can expose it at all, **did not run: the daily limit was exhausted.** That control is ~20 calls and
+it decides whether the rest of A8 is worth doing.
+
+**Three harness bugs, all the same shape as the three found in 1.11 — an outage or a
+non-measurement reported as a result.**
+
+- **E6 — a dead provider was scored as agent failure.** Ollama died mid-run and the suite reported
+  intent accuracy **0.00** and tool selection **0.00**. That reads as total collapse; it was a dead
+  server, and the graph had behaved perfectly by degrading to escalation. Such cases are now
+  **skipped**, counted, and the report leads with a panel saying how many never ran.
+- **E7 — a failed case could not be diagnosed without re-running the suite.** The harness logged
+  `composed chars=51` and threw the text away, which is exactly why the A9(3) decision had to be
+  made on the metric alone. `AgentResponse` now carries the pre-verify draft and the verifier's
+  reason, printed under each failed case.
+- **The judge-trust heuristic knew only Ollama names.** A hosted 9B is
+  `nvidia/nemotron-nano-9b-v2:free` and would have been labelled **trusted** — a weak model grading a
+  weak model, reported without a caveat, by the one component whose job is to refuse that. Markers
+  are now delimited, after the first attempt matched `"mini"` inside **ge-mini** and was caught
+  immediately by the existing test.
+
+- **Next:** the ~20-call A8 control, as soon as the daily limit resets. Then A9(2), now unblocked.
+  Both want a decision on credits first — see the capacity note above.
 
 ### 2026-07-31 — A gated metric was measuring phrasing (E5 resolved), and the judge is deferred
 
