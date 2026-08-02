@@ -7,7 +7,8 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
         test-integration eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
-        care-check care-ask llm-check judge-check
+        care-check care-ask llm-check judge-check \
+        tenant-new tenant-show tenant-usage key-new key-revoke
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -144,6 +145,32 @@ check: lint typecheck arch test eval-fast  ## Everything CI runs. Run before eve
 
 migrate:  ## Apply migrations
 	uv run alembic upgrade head
+
+# ── Tenancy (1.13) ───────────────────────────────────────────────────────────
+#
+# The operator tool until the merchant console exists. Everything here runs as
+# the ordinary application role, so it is subject to the same Row-Level Security
+# a request is — creating a tenant works only because the insert is scoped to
+# the id being created.
+
+tenant-new:  ## Create a tenant: make tenant-new NAME="Acme Store" AGENTS=care
+	uv run python scripts/tenant_admin.py create-tenant --name "$(NAME)" --agents "$(AGENTS)"
+
+tenant-show:  ## Tenant, keys and usage: make tenant-show TENANT=tn_...
+	uv run python scripts/tenant_admin.py show --tenant-id $(TENANT)
+
+tenant-usage:  ## Today's metered usage: make tenant-usage TENANT=tn_...
+	uv run python scripts/tenant_admin.py usage --tenant-id $(TENANT)
+
+# Printed once. Only the hash is stored, so there is no command to show it again.
+key-new:  ## Issue a key: make key-new TENANT=tn_... SCOPES=care:chat:write [NAME=server]
+	uv run python scripts/tenant_admin.py issue-key --tenant-id $(TENANT) \
+	  --scopes "$(SCOPES)" --name "$(NAME)" \
+	  $(if $(PUBLIC),--public --origins "$(ORIGINS)",) \
+	  $(if $(EXPIRES),--expires-days $(EXPIRES),)
+
+key-revoke:  ## Revoke a key: make key-revoke TENANT=tn_... KEY=key_...
+	uv run python scripts/tenant_admin.py revoke-key --tenant-id $(TENANT) --key-id $(KEY)
 
 revision:  ## New migration: make revision M="add tenants"
 	uv run alembic revision --autogenerate -m "$(M)"

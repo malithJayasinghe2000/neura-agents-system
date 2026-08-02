@@ -19,3 +19,6 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0010](0010-read-only-mvp-tools.md) | READ-only tools in the MVP | Accepted |
 | [0011](0011-deterministic-guard-not-classifier.md) | The guard is deterministic code, not a classifier | Accepted |
 | [0012](0012-block-cheaply-escalate-on-uncertainty.md) | A recognised attack is blocked; everything else escalates | Accepted |
+| [0013](0013-tenant-record-and-configuration.md) | The tenant record: one table, typed where it is enforced | Accepted |
+| [0014](0014-api-keys-and-the-rls-bootstrap.md) | API keys: SHA-256, and reading one row before the tenant is known | Accepted |
+| [0015](0015-usage-rollups-and-budget-degradation.md) | Usage is a daily rollup; a budget degrades rather than errors | Accepted |

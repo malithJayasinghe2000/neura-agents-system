@@ -41,6 +41,10 @@ log = get_logger(__name__)
 #: The session variable every RLS policy reads.
 TENANT_SETTING = "app.tenant_id"
 
+#: The session variable that lets *one* row of ``api_keys`` be read before the
+#: tenant is known. See :meth:`Database.credential_session` and ADR-0014.
+CREDENTIAL_SETTING = "app.api_key_hash"
+
 #: Predictable constraint and index names. Without this, Alembic autogenerate
 #: emits migrations that cannot drop an unnamed constraint, and a schema becomes
 #: hard to change some months after nobody remembers why.
@@ -110,6 +114,44 @@ class Database:
             await session.execute(
                 text("SELECT set_config(:name, :value, true)"),
                 {"name": TENANT_SETTING, "value": tenant_id},
+            )
+            yield session
+
+    @asynccontextmanager
+    async def credential_session(self, token_hash: str) -> AsyncIterator[AsyncSession]:
+        """The one transaction that is allowed to run before the tenant is known.
+
+        Authentication is a chicken-and-egg problem under ADR-0008: the tenant
+        comes *from* the API key, so the row that identifies the tenant has to
+        be read by a transaction that cannot yet say which tenant it is acting
+        for — and such a transaction sees nothing, which is the whole point of
+        the design.
+
+        The answer is not an exemption. This session sets
+        ``app.api_key_hash`` and **not** ``app.tenant_id``, and the policy on
+        ``api_keys`` grants read access to rows whose hash equals that setting.
+        So the caller may read exactly the row for a credential they already
+        hold, and nothing else in the database — no other key, no tenant, no
+        conversation. Presenting a key you possess to learn about that key
+        discloses nothing you did not already have (ADR-0014).
+
+        ``READ ONLY`` makes it structural rather than careful: the bootstrap
+        path cannot write, so it cannot become a way to mutate anything before
+        authentication has happened.
+        """
+        if not token_hash:
+            raise ConfigurationError(
+                "credential_session requires a token hash. Without one the "
+                "session can read nothing, which would look like an unknown "
+                "API key rather than the programming error it is.",
+            )
+
+        async with self._sessions() as session, session.begin():
+            # First statement in the transaction, or PostgreSQL rejects it.
+            await session.execute(text("SET TRANSACTION READ ONLY"))
+            await session.execute(
+                text("SELECT set_config(:name, :value, true)"),
+                {"name": CREDENTIAL_SETTING, "value": token_hash},
             )
             yield session
 

@@ -13,7 +13,13 @@ from neura_core.context import (
     get_tenant_id,
     get_trace_id,
 )
-from neura_core.db import TENANT_SETTING, Database, get_database, metadata
+from neura_core.db import (
+    CREDENTIAL_SETTING,
+    TENANT_SETTING,
+    Database,
+    get_database,
+    metadata,
+)
 from neura_core.env import find_env_file, load_env
 from neura_core.errors import (
     AgentNotEnabledError,
@@ -34,6 +40,7 @@ from neura_core.logging import configure_logging, get_logger
 from neura_core.telemetry import configure_telemetry, current_trace_id, get_tracer
 
 __all__ = [
+    "CREDENTIAL_SETTING",
     "TENANT_SETTING",
     "AgentNotEnabledError",
     "AuthenticationError",

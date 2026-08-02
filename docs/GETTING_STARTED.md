@@ -282,6 +282,13 @@ make lint              # code style
 make typecheck         # type errors
 make arch              # architecture rules
 make test              # unit tests
+
+# tenants (milestone 1.13) — nothing serves traffic yet, but this is how a
+# merchant comes into being, and every command runs under the same row-level
+# security a request does
+make tenant-new  NAME="Acme Store" AGENTS=care
+make key-new     TENANT=tn_… SCOPES=care:chat:write   # shown ONCE, then only its hash is kept
+make tenant-show TENANT=tn_…
 ```
 
 ### Optional: a better grader for `make eval`

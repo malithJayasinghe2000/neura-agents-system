@@ -45,7 +45,8 @@ Three categories: **libraries**, **products**, **deployables**.
 
 ```
 packages/                   LIBRARIES — shared, no product identity
-  neura-core/               config · logging · OTel · errors · auth · crypto · db
+  neura-core/               config · logging · OTel · errors · crypto · db
+                            tenancy/ — tenants · API keys · budgets · metering
   neura-domain/             canonical models + events   (PURE — no I/O)
   neura-llm/                provider abstraction · roles · structured output
   neura-commerce/           adapter Protocol · capabilities · sync engine
@@ -80,6 +81,9 @@ make eval-fast      # datasets + harness only — no agent, no models. In `make 
 make eval-guard-off # the same suite with the guard disabled — see below
 make eval-compare A=ollama-dev B=cloud-prod
 make migrate        # alembic upgrade head
+make tenant-new NAME="Acme Store" AGENTS=care   # create a tenant
+make key-new TENANT=tn_… SCOPES=care:chat:write # issue a key — printed ONCE
+make tenant-show TENANT=tn_…                    # tenant, keys, usage
 make rag-check URL=… TOKEN=…   # index a real shop with real embeddings (KEEP=1 to leave the data)
 make rag-ask Q="…" [SHOW=1]    # search what is indexed — answers "why did it retrieve that?"
 make agent-check               # run the agent runtime end to end on real models
@@ -211,6 +215,10 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | Agent escalates every turn with "no draft to verify" | A reasoning model spent `max_tokens` thinking and emitted no content. `max_tokens` budgets *thinking plus answer*; raise it, or set `reasoning_effort="none"` |
 | Retrieval or a tool search finds nothing a shopper would expect | The query still contains a pronoun. `route` writes a resolved `search_query`; anything reading `message` instead is asking about a subject that is not there |
 | Agent route returns 403 | Tenant's `enabled_agents` does not include it — an entitlement, not a bug |
+| An API key that exists authenticates as nobody | The lookup runs on `Database.credential_session`, not `tenant_session` — the tenant is not known yet. Any other session sees no `api_keys` row at all ([ADR-0014](docs/architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
+| A tenant's agent suddenly calls no tools | It is over its **hard** daily budget, so its tool allowlist is empty and every turn escalates. By design — check `make tenant-usage TENANT=…`, not the graph |
+| A `fn_pk_` key is refused from the merchant's own site | A public key with an empty origin allowlist permits *nothing*. Issue it with `PUBLIC=1 ORIGINS=https://…` |
+| A key was issued and the token is gone | There is no command to show it again — only the hash is stored. Issue a new one and revoke the old |
 | New agent not mounted at startup | Missing `[project.entry-points."neura.agents"]`, or not installed in the workspace |
 | `GraphContractError: guard is reachable but the entry node is …` | A guard that runs after routing has already shown the raw message to a model. Make `guard` the entry, or do not route to it |
 | An order lookup fails and the trace shows `[PHONE_1]` where the reference was | A PII detector matched an order or tracking number. The detectors require structure a reference does not have (`+`, leading zero, separators; Luhn for cards) — add the shape to `tests/unit/test_guard.py` and narrow the pattern, never widen it |

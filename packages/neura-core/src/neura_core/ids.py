@@ -16,6 +16,7 @@ from typing import Final
 from ulid import ULID
 
 TENANT: Final = "tn"
+API_KEY: Final = "key"
 CONVERSATION: Final = "cnv"
 MESSAGE: Final = "msg"
 REQUEST: Final = "req"

@@ -1,6 +1,19 @@
 # Tenancy & Packaging — How Agents Are Delivered Individually
 
-> **Status:** Draft for review · **Last updated:** 2026-07-25
+> **Status:** §3 built in milestone 1.13 · **Last updated:** 2026-08-02
+
+> **What of this exists.** The entitlement layer in §3 is real: `tenants.enabled_agents`,
+> API keys with scopes, per-tenant configuration, budgets and usage metering, all under
+> the Row-Level Security of [ADR-0008](adr/0008-multi-tenancy-rls.md). Decisions in
+> [ADR-0013](adr/0013-tenant-record-and-configuration.md),
+> [ADR-0014](adr/0014-api-keys-and-the-rls-bootstrap.md) and
+> [ADR-0015](adr/0015-usage-rollups-and-budget-degradation.md).
+>
+> **What of it does not.** Route mounting per entitlement and the widget are 1.14 and 1.16,
+> so the §3 table below describes four layers that work and three that are waiting for a
+> surface to work on. Usage rows are written by nothing until the request path exists —
+> open question **P5**. The §6 questions are unchanged except **6.1**, where 1.13 chose
+> per-agent granularity and recorded why (**P6**).
 
 The product sells **modular agents**: a customer buys NEURA-CARE alone, or CARE + SELL, or all five ([blueprint-v2 §8](../business/blueprint-v2.md#8-pricing)). The system is a **single deployable** ([ADR-0002](adr/0002-modular-monolith.md)).
 
