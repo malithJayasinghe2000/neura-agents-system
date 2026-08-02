@@ -6,10 +6,13 @@
 
 **Last updated:** 2026-08-02
 **Current phase:** Phase 1 — milestones 1.1–1.12 complete
-**Next action:** the ~20-call A8 control probe, once the OpenRouter daily limit resets — it
-decides whether A8 is a model swap or a redesign. Then A9(2), now unblocked by a working
-judge. Both want a decision on API credits: the free tier is 50 requests/day and one suite
-run is ~235 calls. Milestone 1.13 — Multi-tenancy — after that.
+**Next action:** **Milestone 1.13 — Multi-tenancy.** Tenants, API keys, per-tenant config,
+budgets, usage metering. Chosen next deliberately: it needs **zero model calls**, so it is
+unblocked while the LLM budget is not.
+
+**A8 and A9(2) are PARKED on API budget, not abandoned.** Both need a paid tier — see the
+2026-08-02 entry. A8 is one ~20-call control probe away from a real answer and is the better
+buy of the two. Do not restart either without reading that entry first.
 
 > **Starting 1.13 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
 > 1.12 entry below.
