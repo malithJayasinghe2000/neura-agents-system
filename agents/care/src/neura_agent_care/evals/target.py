@@ -164,6 +164,8 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
         tools_called=tools_called,
         retrieved_context=_evidence(final),
         escalated=escalated,
+        draft=final.get("draft", ""),
+        verify_reason=final.get("verify_reason", ""),
         infrastructure_error=final.get("infrastructure_error"),
         blocked=blocked,
         pii_leaked=bool(final.get("pii_leaks")),

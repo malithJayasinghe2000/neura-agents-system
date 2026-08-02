@@ -65,6 +65,19 @@ def print_report(report: RunReport) -> None:
             console.print(f"  [red]✘[/] {result.case_id}  [dim]({result.intent.value})[/]")
             for check in result.failures:
                 console.print(f"      {check.name}: {check.detail}")
+
+            # The draft, for failed cases only (open question E7). Without it a
+            # failure can only be diagnosed by re-running the whole suite and
+            # hoping it reproduces — which on 2026-08-02 meant a twenty-minute
+            # run against a model server that had already crashed three times.
+            #
+            # Only on failures: printing every draft would bury the signal, and
+            # the drafts that matter are the ones somebody is about to
+            # investigate.
+            if draft := result.response.draft.strip():
+                console.print(f"      [dim]draft:  {draft[:220]}[/]")
+            if reason := result.response.verify_reason.strip():
+                console.print(f"      [dim]verify: {reason[:160]}[/]")
         if len(failures) > 20:
             console.print(f"\n  ... and {len(failures) - 20} more")
         console.print()

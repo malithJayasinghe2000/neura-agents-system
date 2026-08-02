@@ -57,6 +57,17 @@ class AgentResponse(BaseModel):
     structured_repairs: int = Field(
         default=0, description="JSON repair retries — the early warning that a model is unsuitable"
     )
+    #: The reply as `compose` wrote it, **before `verify` saw it**, and the
+    #: verifier's stated reason. Carried so that a failed case can be diagnosed
+    #: from the report instead of by re-running the suite (open question E7).
+    #:
+    #: Found the expensive way on 2026-08-02: a check began failing one case and
+    #: the harness had recorded only `composed chars=51`, so telling a true
+    #: positive from a false one needed another twenty-minute run against a model
+    #: server that had already crashed three times.
+    draft: str = ""
+    verify_reason: str = ""
+
     #: The model provider could not be reached at all. **Not a result.** The
     #: case is skipped rather than scored, for the same reason an unreachable
     #: judge is skipped rather than counted as a hallucination.
