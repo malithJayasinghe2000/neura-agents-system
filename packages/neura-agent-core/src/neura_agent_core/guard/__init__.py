@@ -21,19 +21,15 @@ shipped.
 
 from neura_agent_core.guard.injection import RULES, Rule, Verdict, normalise, scan
 from neura_agent_core.guard.pii import TOKEN_RE, Leak, PiiVault, find_leaks
-from neura_agent_core.guard.promises import PROMISE_RULES, Promise, find_promises
 
 __all__ = [
-    "PROMISE_RULES",
     "RULES",
     "TOKEN_RE",
     "Leak",
     "PiiVault",
-    "Promise",
     "Rule",
     "Verdict",
     "find_leaks",
-    "find_promises",
     "normalise",
     "scan",
 ]
