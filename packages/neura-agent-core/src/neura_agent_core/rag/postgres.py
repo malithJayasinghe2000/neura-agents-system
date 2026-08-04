@@ -322,3 +322,68 @@ def _to_vector(embedding: Sequence[float]) -> str:
     brackets and some commas.
     """
     return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
+class DatabaseVectorStore:
+    """A :class:`VectorStore` that opens its own session per operation.
+
+    ``PostgresVectorStore`` needs a live session, which is right for indexing —
+    a backfill writes thousands of chunks and wants one transaction. It is wrong
+    for *serving*: a turn takes seconds, and holding a pooled connection open
+    across a model call would let a handful of concurrent shoppers exhaust the
+    pool while the fix looks like "make the pool bigger".
+
+    So this wraps a :class:`~neura_core.db.Database` and gives each call a short
+    transaction of its own. Retrieval during a turn is one search and, when that
+    search finds nothing, two diagnostic reads — three brief transactions rather
+    than one long one.
+
+    Reads only in practice, but the whole protocol is implemented rather than
+    the two methods retrieval happens to use: a partial implementation of a
+    Protocol type-checks and then fails at runtime the first time a caller does
+    something reasonable.
+    """
+
+    def __init__(self, db: Any, tenant_id: str) -> None:
+        self._db = db
+        self._tenant_id = tenant_id
+
+    async def upsert(self, ns: Namespace, chunks: Sequence[EmbeddedChunk]) -> WriteResult:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresVectorStore(session).upsert(ns, chunks)
+
+    async def search(
+        self,
+        ns: Namespace,
+        embedding: Sequence[float],
+        *,
+        limit: int = 5,
+        source_types: Sequence[EntityType] | None = None,
+        min_score: float = 0.0,
+    ) -> list[RetrievedChunk]:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresVectorStore(session).search(
+                ns, embedding, limit=limit, source_types=source_types, min_score=min_score
+            )
+
+    async def content_hashes(self, ns: Namespace) -> dict[tuple[str, str, int], str]:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresVectorStore(session).content_hashes(ns)
+
+    async def delete_source(self, ns: Namespace, source_type: EntityType, source_id: str) -> int:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresVectorStore(session).delete_source(ns, source_type, source_id)
+
+    async def prune(
+        self, ns: Namespace, source_type: EntityType, source_id: str, keep_upto: int
+    ) -> int:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresVectorStore(session).prune(ns, source_type, source_id, keep_upto)
+
+    async def count(self, ns: Namespace) -> int:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresVectorStore(session).count(ns)
+
+    async def models_for(self, tenant_id: str) -> dict[str, int]:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresVectorStore(session).models_for(tenant_id)

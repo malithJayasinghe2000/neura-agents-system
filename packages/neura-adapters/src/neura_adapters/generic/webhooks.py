@@ -18,9 +18,6 @@ demand. Three properties, each closing a specific attack:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,14 +25,22 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from neura_commerce import AdapterError
 
-SIGNATURE_HEADER = "X-Neura-Signature"
-TIMESTAMP_HEADER = "X-Neura-Timestamp"
-
-SIGNATURE_PREFIX = "sha256="
-
-#: How far out of date a signed request may be. Five minutes tolerates clock
-#: drift on a merchant's server without leaving a replay window worth using.
-DEFAULT_TOLERANCE_S = 300
+# The algorithm lives in `neura_core.webhooks.signing` and is shared with the
+# outbound direction (api-design.md §9). It moved down there in milestone 1.14
+# rather than being copied: two implementations of one signature scheme diverge,
+# and the divergence shows up as an integration that mysteriously stops
+# verifying. Re-exported here so every existing importer of this module — the
+# reference store, the conformance tool, the tests — is unaffected.
+from neura_core.webhooks.signing import (
+    DEFAULT_TOLERANCE_S,
+    SIGNATURE_HEADER,
+    SIGNATURE_PREFIX,
+    TIMESTAMP_HEADER,
+    matches,
+    sign,
+    signing_payload,
+    within_tolerance,
+)
 
 #: Events a conforming store may send. Unknown names parse — a store on a later
 #: spec version must not break this one — but the receiver ignores them.
@@ -84,27 +89,6 @@ class WebhookEvent(BaseModel):
         return self.event.split(".", 1)[0]
 
 
-def signing_payload(body: bytes, timestamp: int) -> bytes:
-    """Exactly what is signed: ``<timestamp>.<raw body>``.
-
-    The **raw** body, byte for byte. Re-serialising parsed JSON before verifying
-    changes key order and whitespace, and the signature stops matching for
-    reasons no log will explain.
-    """
-    return f"{timestamp}.".encode() + body
-
-
-def sign(body: bytes, secret: str, *, timestamp: int | None = None) -> tuple[str, int]:
-    """Produce ``(signature, timestamp)`` for a body.
-
-    Used by the reference store, by the conformance tool's example generator,
-    and by tests — so what we verify is what we document.
-    """
-    ts = timestamp if timestamp is not None else int(time.time())
-    digest = hmac.new(secret.encode(), signing_payload(body, ts), hashlib.sha256).hexdigest()
-    return f"{SIGNATURE_PREFIX}{digest}", ts
-
-
 def verify(
     body: bytes,
     *,
@@ -131,16 +115,37 @@ def verify(
         raise WebhookSignatureError(f"{TIMESTAMP_HEADER} must be a unix timestamp") from exc
 
     reference = int((now or datetime.now(UTC)).timestamp())
-    if abs(reference - ts) > tolerance_s:
+    if not within_tolerance(ts, now=reference, tolerance_s=tolerance_s):
         raise WebhookSignatureError(
             f"timestamp is {abs(reference - ts)}s away from now, outside the {tolerance_s}s window"
         )
 
-    expected, _ = sign(body, secret, timestamp=ts)
-    if not hmac.compare_digest(expected, signature.strip()):
+    if not matches(body, signature, secret, timestamp=ts):
         raise WebhookSignatureError("signature does not match")
 
 
 def parse(body: bytes) -> WebhookEvent:
     """Parse a verified body. Verify first — this does not authenticate anything."""
     return WebhookEvent.model_validate_json(body)
+
+
+#: Re-exports are deliberate, not leftovers. Callers of this module — the CLI's
+#: example generator, the reference store, the conformance tests — import the
+#: signing primitives from here because this is the module that documents the
+#: *inbound* contract. Naming them keeps that true after the algorithm moved
+#: down into `neura_core`.
+__all__ = [
+    "DEFAULT_TOLERANCE_S",
+    "KNOWN_EVENTS",
+    "SIGNATURE_HEADER",
+    "SIGNATURE_PREFIX",
+    "TIMESTAMP_HEADER",
+    "WebhookEvent",
+    "WebhookSignatureError",
+    "matches",
+    "parse",
+    "sign",
+    "signing_payload",
+    "verify",
+    "within_tolerance",
+]

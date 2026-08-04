@@ -276,6 +276,8 @@ make check             # everything CI runs
 make conformance URL=… TOKEN=…   # does the shop implement our spec?
 make sync-check   URL=… TOKEN=…   # can we copy its catalogue?
 make rag-check    URL=… TOKEN=…   # can we search that catalogue by meaning?
+make care-check   URL=… TOKEN=…   # can the agent hold a conversation about it?
+make api-check    URL=… TOKEN=…   # can a shopper reach it over HTTP and a socket?
 
 # individual checks
 make lint              # code style
@@ -283,12 +285,13 @@ make typecheck         # type errors
 make arch              # architecture rules
 make test              # unit tests
 
-# tenants (milestone 1.13) — nothing serves traffic yet, but this is how a
-# merchant comes into being, and every command runs under the same row-level
-# security a request does
+# tenants — how a merchant comes into being. Every command runs under the same
+# row-level security a request does, and since milestone 1.14 the key it issues
+# is one a real HTTP request can authenticate with.
 make tenant-new  NAME="Acme Store" AGENTS=care
 make key-new     TENANT=tn_… SCOPES=care:chat:write   # shown ONCE, then only its hash is kept
 make tenant-show TENANT=tn_…
+make tenant-usage TENANT=tn_…                         # what they actually spent today
 ```
 
 ### Optional: a better grader for `make eval`

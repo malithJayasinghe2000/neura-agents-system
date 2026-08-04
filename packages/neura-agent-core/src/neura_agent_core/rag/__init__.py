@@ -24,7 +24,7 @@ from neura_agent_core.rag.chunking import (
     split,
 )
 from neura_agent_core.rag.indexer import Indexer, IndexOutcome
-from neura_agent_core.rag.postgres import PostgresVectorStore
+from neura_agent_core.rag.postgres import DatabaseVectorStore, PostgresVectorStore
 from neura_agent_core.rag.reindex import (
     Comparison,
     ComparisonRow,
@@ -64,6 +64,7 @@ __all__ = [
     "Comparison",
     "ComparisonRow",
     "CrossTenantWriteError",
+    "DatabaseVectorStore",
     "DimensionMismatchError",
     "EmbeddedChunk",
     "InMemoryVectorStore",

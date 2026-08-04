@@ -2,20 +2,34 @@
 
 One deployable process (ADR-0002). Agents are discovered at startup via entry
 points and mounted at their declared prefixes; there is no central list to edit.
+
+**Everything expensive is built once, at startup, and lives on ``app.state``.**
+The LLM client holds provider connections, an agent runner holds a compiled
+graph, the store directory holds a capability cache, and the rate limiter holds a
+Redis pool. Building any of them per request would put process setup inside a
+shopper's latency — and, for the graph, would measure graph construction as if it
+were agent latency, which is the mistake the eval target's docstring warns about.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from neura_api.errors import register_error_handlers
+from neura_api.idempotency import Idempotency
 from neura_api.middleware.request_context import RequestContextMiddleware
-from neura_api.registry import discover_agents
-from neura_api.routes import health
+from neura_api.ratelimit import RateLimiter
+from neura_api.registry import discover_agents, discover_runners
+from neura_api.routes import agent as agent_routes
+from neura_api.routes import health, stores, webhooks
+from neura_api.stores import StoreDirectory
+from neura_api.turns import TurnService
+from neura_api.webhooks import WebhookDrainer
 from neura_core import (
     Environment,
     configure_logging,
@@ -36,22 +50,63 @@ platform. See https://docs.fiveneurals.com for integration guides.
 """.strip()
 
 
+def _redis() -> Any | None:
+    """A Redis client, or ``None`` if the package or the server is missing.
+
+    ``None`` is a working state, not a failure: rate limiting fails **open** and
+    says so on every request (ADR-0017 §3), and the webhook drainer falls back to
+    a process-local index. Both degradations are loud, and both are bounded by
+    controls that live in PostgreSQL.
+    """
+    try:
+        import redis.asyncio as redis
+    except ImportError:  # pragma: no cover — redis is a declared dependency
+        log.error("redis_unavailable", detail="package not installed")
+        return None
+
+    try:
+        return redis.from_url(str(get_settings().redis_url))
+    except Exception as exc:  # a bad URL must not stop the process booting
+        log.error("redis_unavailable", error=str(exc))
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     # Refuse to serve real traffic with placeholder secrets.
     settings.validate_for_runtime()
 
+    database = get_database()
+    app.state.database = database
     app.state.agents = discover_agents()
+    app.state.runners = discover_runners()
+    app.state.redis = _redis()
+    app.state.limiter = RateLimiter(app.state.redis)
+    app.state.idempotency = Idempotency(database)
+    app.state.stores = StoreDirectory(database)
+    app.state.drainer = WebhookDrainer(database, app.state.redis)
+    app.state.turns = TurnService(database, _llm(), app.state.stores)
+
+    # Agents are mounted here rather than in `create_app`, because discovery is
+    # a startup activity and a route table built from an empty registry would
+    # silently serve 404s for every agent.
+    _mount_agents(app)
+    app.state.drainer.start()
+
     log.info(
         "api_started",
         environment=settings.env.value,
         role_map=settings.role_map,
         agents=sorted(app.state.agents),
+        runners=sorted(app.state.runners),
     )
     try:
         yield
     finally:
+        await app.state.drainer.stop()
+        if app.state.redis is not None:
+            await app.state.redis.aclose()
         # The connection pool is process-wide and lazily created, so it outlives
         # any single request. Closing it here means a shutdown returns its
         # connections rather than leaving PostgreSQL to time them out — and, in
@@ -60,6 +115,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await get_database().dispose()
         get_database.cache_clear()
         log.info("api_stopped")
+
+
+def _llm() -> Any:
+    """The process-wide model client, resolved from the configured role map.
+
+    One per process, wrapped per turn by ``MeteredLLM`` so the counters belong
+    to one conversation. Building a client per request would open a new HTTP
+    connection pool per shopper.
+    """
+    from neura_llm import LLMClient
+
+    return LLMClient.from_role_map_name(get_settings().role_map)
+
+
+def _mount_agents(app: FastAPI) -> None:
+    """Give every installed agent its routes, under its own declared prefix.
+
+    ``/v1/care/chat`` exists because CARE's manifest says so, not because
+    anything here knows the word "care". An agent that is installed but has no
+    runner is still mounted: the route then answers ``AGENT_NOT_RUNNABLE``,
+    which tells an operator "we have it and it is broken" rather than pretending
+    the deployment does not have it.
+    """
+    for key, discovered in sorted(app.state.agents.items()):
+        app.include_router(agent_routes.build_router(key), prefix=discovered.route_prefix)
+        log.info("agent_mounted", agent=key, prefix=discovered.route_prefix)
+
+    # Rebuilt so the agent routes appear in `/openapi.json`, which FastAPI
+    # otherwise caches from before the mount.
+    app.openapi_schema = None
 
 
 def create_app() -> FastAPI:
@@ -100,11 +185,20 @@ def create_app() -> FastAPI:
         allow_credentials=False,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-        expose_headers=["X-Request-Id", "X-RateLimit-Remaining", "Retry-After"],
+        expose_headers=[
+            "X-Request-Id",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Reset",
+            "Retry-After",
+            "Idempotency-Replayed",
+        ],
     )
 
     register_error_handlers(app)
     app.include_router(health.router, prefix="/v1")
+    app.include_router(stores.router, prefix="/v1")
+    app.include_router(webhooks.router, prefix="/v1")
 
     return app
 

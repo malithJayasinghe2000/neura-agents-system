@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from neura_core import ConfigurationError, get_database, get_settings
@@ -60,16 +60,10 @@ async def health() -> HealthResponse:
     summary="Readiness probe",
     responses={503: {"description": "One or more dependencies unavailable"}},
 )
-async def readiness(response: Response) -> ReadinessResponse:
+async def readiness(request: Request, response: Response) -> ReadinessResponse:
     components: list[ComponentStatus] = [
         await _postgres_status(),
-        # Nothing uses Redis yet. Reported explicitly rather than omitted, so
-        # readiness never looks green for a reason that does not exist yet.
-        ComponentStatus(
-            name="redis",
-            status="not_implemented",
-            detail="Wired with the session and rate-limit work",
-        ),
+        await _redis_status(request),
     ]
 
     failed = [c for c in components if c.status == "down"]
@@ -81,6 +75,32 @@ async def readiness(response: Response) -> ReadinessResponse:
         components=components,
         timestamp=datetime.now(UTC),
     )
+
+
+async def _redis_status(request: Request) -> ComponentStatus:
+    """Reachable? Reported as **degraded**, never ``down``, when it is not.
+
+    Redis backs rate limiting and the webhook drainer's tenant index. Both fail
+    open by design (ADR-0017 §3) — a rate limiter is not an access control, and
+    the *cost* ceiling is a PostgreSQL rollup that is unaffected. So a Redis
+    outage must not take a healthy process out of rotation and deny every
+    merchant service to defend against unmetered request pacing.
+
+    It is still *reported*, at the one place an operator looks, because a
+    control that has silently stopped working looks exactly like one that is on.
+    """
+    client = getattr(request.app.state, "redis", None)
+    if client is None:
+        return ComponentStatus(
+            name="redis",
+            status="degraded",
+            detail="not configured — rate limits are not enforced",
+        )
+    try:
+        await client.ping()
+    except Exception as exc:  # any client failure is the same operational fact
+        return ComponentStatus(name="redis", status="degraded", detail=str(exc)[:200])
+    return ComponentStatus(name="redis", status="ok")
 
 
 async def _postgres_status() -> ComponentStatus:

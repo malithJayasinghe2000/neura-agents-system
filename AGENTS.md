@@ -58,6 +58,8 @@ agents/                     PRODUCTS — one folder per sellable agent
   sell/ mind/ grow/ guard/  ⬜ NOT DESIGNED — see docs/agents/README.md
 
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
+                            auth · rate limits · idempotency · metering ·
+                            chat + WebSocket · webhook outbox drainer
 
 evals/                      eval runner — finds agents and their datasets by
                             entry point, and never learns an agent's name
@@ -65,7 +67,8 @@ infra/                      docker-compose · Dockerfiles · Alembic
 tests/                      integration + e2e
 ```
 
-Each agent: `manifest.py` · `graph.py` · `nodes/` · `tools/` · `prompts/` · `evals/datasets/`.
+Each agent: `manifest.py` · `graph.py` · `nodes/` · `tools/` · `prompts/` ·
+`serving.py` · `evals/datasets/`.
 Full detail in [docs/architecture/tenancy-and-packaging.md](docs/architecture/tenancy-and-packaging.md).
 
 ---
@@ -84,12 +87,18 @@ make migrate        # alembic upgrade head
 make tenant-new NAME="Acme Store" AGENTS=care   # create a tenant
 make key-new TENANT=tn_… SCOPES=care:chat:write # issue a key — printed ONCE
 make tenant-show TENANT=tn_…                    # tenant, keys, usage
+make tenant-usage TENANT=tn_…                  # what a tenant actually spent today
+make webhook-drain TENANT=tn_…                 # send queued webhooks now (open question P7)
 make rag-check URL=… TOKEN=…   # index a real shop with real embeddings (KEEP=1 to leave the data)
 make rag-ask Q="…" [SHOW=1]    # search what is indexed — answers "why did it retrieve that?"
 make agent-check               # run the agent runtime end to end on real models
 make care-check URL=… TOKEN=…  # hold real conversations with CARE against a real shop
 make care-ask Q="…" URL=… TOKEN=… [CUSTOMER=385]   # one question, every step printed —
                                                    # the "why did it say that?" tool
+make api-check URL=… TOKEN=…   # the whole request path against a real shop: a real key
+                               # authenticating, a store decrypted from the database, a
+                               # usage row written, an audit entry for a blocked turn,
+                               # and the same turn over REST and over a WebSocket
 make check          # everything CI runs
 ```
 
@@ -165,7 +174,23 @@ rather than imported by name:
 
 [project.entry-points."neura.eval_targets"]
 <name> = "neura_agent_<name>.evals:build_target"  # `make eval` measures it
+
+[project.entry-points."neura.agent_runners"]
+<name> = "neura_agent_<name>.serving:build_runner"  # a request becomes a turn
 ```
+
+**Three groups, all discovered rather than imported by name, for one reason.**
+`neura-api` must not learn that an agent called "care" exists, or adding agent #2
+becomes an edit to the deployable and the "one codebase, five products" claim
+stops being structural. A runner's `key` must equal its manifest key — the API
+refuses a mismatch at startup, because the key decides which routes it is
+mounted under, which entitlement is checked, and **which agent is billed**.
+
+**A runner must stream even when nobody is listening.** `CareRunner` uses
+`astream` whether or not a progress sink was supplied, so REST and WebSocket
+execute one code path. Invoking one way and streaming the other would create the
+second code path api-design.md §8 forbids, and the golden suite would then be
+evidence about only one of them ([ADR-0016](docs/architecture/adr/0016-stream-only-after-verify.md) §4).
 
 **Copy `agents/care/` rather than this list.** It is the only built agent and it
 is deliberately the worked example: six nodes, seven tools, seven prompt files, a
@@ -224,6 +249,14 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | An order lookup fails and the trace shows `[PHONE_1]` where the reference was | A PII detector matched an order or tracking number. The detectors require structure a reference does not have (`+`, leading zero, separators; Luhn for cards) — add the shape to `tests/unit/test_guard.py` and narrow the pattern, never widen it |
 | A real customer's message was refused with no handover | A guard rule false-positived. Add the sentence to the **benign** half of the corpus in `tests/unit/test_guard.py` — it is a hard gate, so the fix cannot be forgotten |
 | `[EMAIL_9]` appears in a reply | The model invented a redaction token. Rehydration leaves unknown tokens visible on purpose: a silently deleted one is a sentence that changed meaning with nobody the wiser |
+| A chat request 404s with `NO_STORE_CONNECTED` | The tenant has no `tenant_stores` row. `POST /v1/stores` first — a tenant, a key and an agent are not enough to answer "where is my order?" |
+| A `POST /v1/care/chat` returns 409 | An `Idempotency-Key` was reused with a *different* body. That is a client bug and surfacing it beats silently doing the wrong thing. The same key **in flight** is also a 409, and that one is retryable |
+| Rate limits appear not to apply | Redis is unreachable, and the limiter **fails open on purpose** ([ADR-0017](docs/architecture/adr/0017-rate-limit-subjects.md) §3). It logs `rate_limit_unavailable` on every request and `/v1/health/ready` reports redis `degraded`. The daily budget still applies — it is a Postgres rollup |
+| A limit is enforced ~N× higher than configured | An in-process counter across N workers. There is no in-process counter here; if one is ever added, this is the symptom |
+| Webhooks stop being delivered after a restart | The drainer's tenant index lives in Redis (open question **P7**). Rows are safe, the schedule is not — `make webhook-drain TENANT=…` |
+| A webhook endpoint quietly stops receiving events | 20 consecutive failures auto-disables it. Check `GET /v1/webhooks` for `status: disabled`, and `GET /v1/webhooks/deliveries?status=dead` for what was lost |
+| A WebSocket delivers the whole reply at once with no `token` frames | The turn was blocked or escalated. Those replies are fixed text delivered whole — typing out a refusal is theatre (ADR-0016) |
+| `AGENT_NOT_RUNNABLE` (403) rather than 404 | The agent declares `neura.agents` and not `neura.agent_runners`, or its `build_runner` raised at startup. "We have it and it is broken" is a different problem from "we do not have it" |
 
 ---
 

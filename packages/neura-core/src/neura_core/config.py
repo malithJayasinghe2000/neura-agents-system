@@ -89,6 +89,39 @@ class Settings(BaseSettings):
     )
     budget_turn_max_tool_calls: int = Field(default=4, alias="BUDGET_TURN_MAX_TOOL_CALLS")
 
+    # ── Rate limits (ADR-0017) ───────────────────────────────────────────────
+    #
+    # Every one of these is a guess. They are informed starting points and must
+    # not be quoted as measurements (CLAUDE.md §4) — nothing here has seen a
+    # real shopper. They are configuration for exactly that reason, and the
+    # trigger to recalibrate is E3's: roughly a hundred real conversations.
+    #
+    # A request is checked against several subjects at once and all must pass;
+    # the response headers report the tightest. `tenant` is the merchant-wide
+    # backstop, `key` bounds one credential, and `client` and `conversation`
+    # are the two narrower subjects a shared `fn_pk_` key needs.
+    rate_limit_window_s: int = Field(default=60, alias="RATE_LIMIT_WINDOW_S")
+    rate_limit_per_tenant: int = Field(default=600, alias="RATE_LIMIT_PER_TENANT")
+    rate_limit_per_key: int = Field(default=600, alias="RATE_LIMIT_PER_KEY")
+    #: Sized for a shared address — an office or a household behind one NAT —
+    #: not for one person, because that is what an IP identifies.
+    rate_limit_per_client: int = Field(default=40, alias="RATE_LIMIT_PER_CLIENT")
+    rate_limit_per_conversation: int = Field(default=20, alias="RATE_LIMIT_PER_CONVERSATION")
+
+    #: How many proxies sit in front of this deployment. **Zero means
+    #: ``X-Forwarded-For`` is ignored entirely**, which is the only safe default:
+    #: the header is attacker-controlled, and trusting it makes the narrowest
+    #: rate-limit subject free to rotate while the limiter carries on reporting
+    #: plausible numbers. A hop count rather than an allowlist, because it is a
+    #: fact about this deployment's own topology (ADR-0017 §2).
+    trusted_proxy_hops: int = Field(default=0, ge=0, alias="NEURA_TRUSTED_PROXY_HOPS")
+
+    # ── Conversations ────────────────────────────────────────────────────────
+    #: How many previous turns are replayed into a prompt. Bounded because the
+    #: history is tokens: an unbounded transcript is an unbounded bill and,
+    #: eventually, a context window that truncates the part that mattered.
+    conversation_history_turns: int = Field(default=6, ge=0, alias="CONVERSATION_HISTORY_TURNS")
+
     # ── Observability ────────────────────────────────────────────────────────
     otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
     otel_endpoint: str | None = Field(default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT")

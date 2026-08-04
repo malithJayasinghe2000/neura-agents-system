@@ -103,7 +103,14 @@ audit_log = Table(
     Column("sequence", Integer, nullable=False),
     Column("event_type", String(64), nullable=False),
     Column("actor", String(128), nullable=False),
-    Column("outcome", String(32), nullable=False),
+    #: Widened from 32 in milestone 1.14, and the reason is worth keeping.
+    #: `outcome` was sized for "allow" / "reject" / "escalate". `guard.block`
+    #: puts the comma-joined names of every rule that matched here, and two
+    #: rules already overflowed 32 characters — which nothing noticed for two
+    #: milestones, because until 1.14 every caller passed a `None` audit sink
+    #: and the write never happened (open question S5). The first real one
+    #: failed on its first attack.
+    Column("outcome", String(256), nullable=False),
     Column("payload", JSONB, nullable=False, server_default="{}"),
     # The chain. Each row's hash covers its own content *and* its predecessor's
     # hash, so a deleted or edited row breaks verification of everything after

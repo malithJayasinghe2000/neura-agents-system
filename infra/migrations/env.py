@@ -22,9 +22,12 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Import for side effects: each module registers its tables on `metadata`.
+import neura_agent_core.conversations
 import neura_agent_core.graph.schema
 import neura_agent_core.rag.schema  # noqa: F401
-import neura_core.tenancy.schema  # noqa: F401
+import neura_core.idempotency
+import neura_core.tenancy.schema
+import neura_core.webhooks.schema  # noqa: F401
 from neura_core import get_settings, load_env, metadata
 
 load_env()

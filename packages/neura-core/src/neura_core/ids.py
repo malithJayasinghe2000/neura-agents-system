@@ -26,6 +26,11 @@ CHUNK: Final = "chk"
 EVENT: Final = "evt"
 IDEMPOTENCY: Final = "idk"
 NEURA_ENTITY: Final = "ne"
+WEBHOOK: Final = "whk"
+#: One (event, endpoint) pair in the outbox — distinct from the event itself,
+#: which keeps its ``evt_`` id across every endpoint and every retry because it
+#: is the merchant's dedupe key.
+WEBHOOK_DELIVERY: Final = "whd"
 
 
 def new_id(prefix: str) -> str:

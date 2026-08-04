@@ -6,6 +6,7 @@
     make key-new     TENANT=tn_01J8... SCOPES=care:chat:write NAME=server
     make key-revoke  TENANT=tn_01J8... KEY=key_01J8...
     make tenant-usage TENANT=tn_01J8...
+    make webhook-drain TENANT=tn_01J8...
 
 The operator tool for milestone 1.13. Until the merchant console exists this is
 how a tenant comes into being, so it is a real command rather than a paragraph
@@ -144,6 +145,34 @@ async def show_usage(db: Database, tenant_id: str) -> int:
     return 0
 
 
+async def drain_webhooks(tenant_id: str) -> int:
+    """Send whatever is queued for one tenant, now.
+
+    The repair for open question **P7**. The drainer finds work through a Redis
+    set naming tenants with queued deliveries, because no transaction can ask
+    "which deliveries are due?" across tenants — a session that has not named a
+    tenant matches no row anywhere (ADR-0008), and the alternatives were a
+    ``BYPASSRLS`` role or a policy exemption.
+
+    If that Redis set is lost, the *rows* are safe and the *schedule* is not:
+    they wait until the tenant's next event re-registers them. This is the
+    command that unsticks them without either of the two exemptions.
+    """
+    from neura_api.webhooks import WebhookDrainer
+
+    database = Database.from_settings()
+    drainer = WebhookDrainer(database, None)
+    try:
+        await drainer.note(tenant_id)
+        sent = await drainer.drain_tenant(tenant_id)
+    finally:
+        await drainer.stop()
+        await database.dispose()
+
+    print(f"\n  delivered {sent} queued event(s) for {tenant_id}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -169,6 +198,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     usage = commands.add_parser("usage")
     usage.add_argument("--tenant-id", required=True)
+
+    drain = commands.add_parser("drain-webhooks")
+    drain.add_argument("--tenant-id", required=True)
 
     return parser
 
@@ -208,6 +240,8 @@ async def main() -> int:
                 return await revoke_key(db, args.tenant_id, args.key_id)
             case "usage":
                 return await show_usage(db, args.tenant_id)
+            case "drain-webhooks":
+                return await drain_webhooks(args.tenant_id)
             case _:  # pragma: no cover — argparse rejects anything else
                 return 2
     finally:

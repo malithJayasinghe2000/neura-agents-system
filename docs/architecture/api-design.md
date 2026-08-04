@@ -1,6 +1,13 @@
 # API Design
 
-> **Status:** Draft for review · **Last updated:** 2026-07-25
+> **Status:** Built in milestone 1.14 · **Last updated:** 2026-08-04
+>
+> **What is built and what is not.** Authentication, the error contract, the
+> success and page envelopes, idempotency, rate limiting, chat, the WebSocket,
+> conversations, store connection and outbound webhooks all exist and are tested
+> against real PostgreSQL. Three things named below are **deliberately not
+> built**, each because building them would have shipped a control that writes
+> into nothing — see §13.
 
 The API is the product's first impression and, for the [ICP](../business/blueprint-v2.md#3-ideal-customer-profile), the whole integration experience. `implementation_plan_1` got most of this right; it is carried forward here with the gaps filled.
 
@@ -191,11 +198,12 @@ For content not in the commerce platform: FAQs, policy PDFs, shipping tables. Ca
 
 ```http
 POST   /v1/stores                      // register a store + credentials
+GET    /v1/stores                      // list, without secrets
 GET    /v1/stores/{id}                 // includes negotiated capabilities
-POST   /v1/stores/{id}/sync            // trigger a sync
-GET    /v1/stores/{id}/sync/status
-GET    /v1/stores/{id}/health
+GET    /v1/stores/{id}/health          // live check, bypasses the cache
 ```
+
+`POST /v1/stores/{id}/sync` and its status endpoint are **not built** — see §13.
 
 `GET /v1/stores/{id}` returning the **negotiated capability list** is important for integrator sanity — it is where a developer sees, concretely, which agent abilities their platform does and does not support.
 
@@ -225,7 +233,28 @@ Server → client: `token` (streaming delta) · `tool_call` (a UI affordance —
 
 Same auth, same tenancy, same policy engine as REST. One agent runtime behind both transports — the transport is never allowed to become a second code path.
 
-> **Open item:** streaming interacts awkwardly with the `verify` node, which runs *after* composition. Tracked in [agent-runtime.md §9.1](agent-runtime.md).
+**Decided in 1.14: no model-generated text reaches a client before `verify` has
+passed** ([ADR-0016](adr/0016-stream-only-after-verify.md), resolving open
+question A1). The socket streams the *turn*:
+
+| Frame | When | Carries |
+|:--|:--|:--|
+| `accepted` | the turn has started | `conversation_id` |
+| `step` | a node finished | the node name |
+| `tool_call` | a tool ran | the tool name only |
+| `token` | **after `verify` passed** | slices of the verified reply |
+| `done` | end of turn | `message_id`, `state`, `citations`, `ai_disclosure` |
+| `error` | failure | the same error object REST returns |
+
+A blocked or escalated turn emits no `token` frame at all — its reply is fixed
+text, delivered whole. The `token` stream is a **simulation**: slices of a
+finished string, not provider deltas, so a client must not infer backpressure or
+partial-word boundaries from it.
+
+The credential arrives as a query parameter because a browser's `WebSocket`
+constructor cannot set headers. That is the only difference between the two
+transports; `Origin` is still sent on the handshake, so the origin lock on
+`fn_pk_` keys applies unchanged.
 
 ---
 
@@ -267,7 +296,42 @@ Breaking changes require `/v2`, with `/v1` supported for **12 months minimum**, 
 
 ## 12. Open Questions
 
-1. **Chat rate limiting granularity.** Per API key is too coarse for a widget where every shopper shares one public key — needs a per-session dimension.
-2. **Conversation ID ownership.** Client-supplied or server-issued? Server-issued is safer (unguessable); client-supplied is easier to correlate with the merchant's own systems. Leaning server-issued with an optional `external_ref`.
-3. **Bulk endpoints.** Merchants will eventually want bulk conversation export. Not MVP.
-4. **GraphQL.** Regularly requested, rarely needed. Not planned; revisit only if an integrator is genuinely blocked.
+1. ~~**Chat rate limiting granularity.**~~ **Resolved in 1.14** —
+   [ADR-0017](adr/0017-rate-limit-subjects.md). A request is checked against
+   several subjects at once and the narrowest binds. A public key adds `client`
+   and `conversation`, because one widget key is the shop and not the shopper.
+2. ~~**Conversation ID ownership.**~~ **Resolved in 1.14, as this section
+   proposed**: server-issued and unguessable, with an optional `external_ref` for
+   the merchant's own correlation. A client-supplied `conversation_id` that this
+   API did not issue is a `400`.
+3. **Bulk endpoints.** Merchants will eventually want bulk conversation export.
+   Not MVP.
+4. **GraphQL.** Regularly requested, rarely needed. Not planned; revisit only if
+   an integrator is genuinely blocked.
+5. **Background work cannot enumerate tenants under Row-Level Security.** New in
+   1.14 and general rather than webhook-specific — open question **P7**.
+
+---
+
+## 13. Built in 1.14, and deliberately not built
+
+Three endpoints in this document are specified and were **left out on purpose**.
+Each would have been a control that writes into nothing, which is the failure
+this milestone exists to repay — usage rows nobody wrote (P5) and guard blocks
+nobody could read (S5) were both discovered exactly that way.
+
+| Not built | Why |
+|:--|:--|
+| `POST /v1/stores/{id}/sync` and its status | The sync engine's entity persistence is still in memory — the `EntityStore` seam from milestone 1.8. A triggered sync would write results that vanish on the next restart. |
+| `POST /v1/care/conversations/{id}/feedback` | It is described here as the highest-value signal we receive, and it becomes a golden case. Nothing ingests golden cases from a table yet; shadow mode is 1.15. A feedback endpoint today records a merchant's most valuable input into a place nobody reads. |
+| Knowledge-base document upload and reindex | RAG indexes what the sync engine syncs. Merchant-uploaded documents need a document store that does not exist, and catalogue and policies already arrive by sync. |
+
+Also not built, and lower stakes: auto-generated SDKs, the Postman/Bruno
+collection, `llms.txt` and the sandbox tenant (§10 — all Phase 2), and a durable
+scheduler for webhook retries, which needs a worker process (1.17) and is the
+subject of P7.
+
+`POST /v1/care/conversations/{id}/escalate` is also absent. A merchant forcing a
+handover has to hand it *to* something, and there is no ticketing seam; the
+escalation path that exists today is the agent's own, and it produces a handoff
+packet delivered by the `conversation.escalated` webhook.

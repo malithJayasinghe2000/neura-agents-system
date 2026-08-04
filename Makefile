@@ -8,7 +8,8 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         test-integration eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
-        tenant-new tenant-show tenant-usage key-new key-revoke
+        tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
+        api-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -93,6 +94,10 @@ rag-ask:  ## Search what is indexed: make rag-ask Q="do you sell my data?" [SHOW
 agent-check:  ## Run the agent runtime end to end against REAL models + Postgres
 	uv run python scripts/agent_smoke_test.py
 
+api-check:  ## Hold a conversation over HTTP and a socket, against a REAL shop
+	uv run python scripts/api_smoke_test.py --url $(URL) --token $(TOKEN) \
+	  $(if $(PLATFORM),--platform $(PLATFORM),)
+
 care-check:  ## Hold real conversations with CARE against a REAL shop: make care-check URL=... TOKEN=...
 	uv run python scripts/care_smoke_test.py --url $(URL) --token $(TOKEN)
 
@@ -161,6 +166,12 @@ tenant-show:  ## Tenant, keys and usage: make tenant-show TENANT=tn_...
 
 tenant-usage:  ## Today's metered usage: make tenant-usage TENANT=tn_...
 	uv run python scripts/tenant_admin.py usage --tenant-id $(TENANT)
+
+# The repair for open question P7: the drainer finds work through a Redis index,
+# because no transaction can query deliveries across tenants under RLS. If that
+# index is lost, the rows are safe and the schedule is not — this unsticks them.
+webhook-drain:  ## Send queued webhooks now: make webhook-drain TENANT=tn_...
+	uv run python scripts/tenant_admin.py drain-webhooks --tenant-id $(TENANT)
 
 # Printed once. Only the hash is stored, so there is no command to show it again.
 key-new:  ## Issue a key: make key-new TENANT=tn_... SCOPES=care:chat:write [NAME=server]

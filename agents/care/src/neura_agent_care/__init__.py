@@ -13,9 +13,10 @@ MVP scope, cut deliberately narrow (blueprint-v2 §5.1, agent-runtime.md):
 The parts:
 
   manifest.py      identity: the capabilities it needs, its scopes, its routes
-  graph.py         the flow — five CARE nodes, four inherited from the engine
-  nodes/           route · plan · triage · compose · respond
+  graph.py         the flow — six CARE nodes, six inherited from the engine
+  nodes/           route · plan · triage · compose · respond · decline
   runtime.py       how one conversation is equipped
+  serving.py       how a request becomes a turn (the API resolves this)
   tools/           the seven above, each adapter-backed
   prompts/         versioned files, content-hashed, never inline strings
   evals/           the golden dataset, and the target that runs CARE against it
@@ -26,10 +27,10 @@ checkpointer, no capability filtering, no ownership enforcement — those live i
 from here. Agent #2 supplies the same parts and nothing else (agent-runtime.md
 §7).
 
-Not built yet, deliberately: ``guard`` and ``blocked``. Injection detection and
-PII redaction are milestone 1.12 and need their own eval — a ``guard`` node that
-returned "clean" would look like protection while being none. See ``graph.py``
-for why their absence does not leave injection undefended.
+``guard`` and ``blocked`` arrived in milestone 1.12 and are inherited, not
+written here: five deterministic injection rules and reversible PII tokenisation,
+no model and no threshold (ADR-0011). ``graph.py`` explains why injection
+resistance was 1.00 *before* they existed and must never be credited to them.
 
 HARD RULE: this package must never import another agent. Cross-agent
 communication goes through the event bus (Phase 3), never a direct import.
@@ -39,6 +40,7 @@ from neura_agent_care.graph import build_graph, compile_graph
 from neura_agent_care.manifest import MANIFEST, AgentManifest
 from neura_agent_care.prompts import REVISION as PROMPT_REVISION
 from neura_agent_care.runtime import build_runtime
+from neura_agent_care.serving import CareRunner, build_runner
 from neura_agent_care.tools import CARE_TOOLS, build_registry
 
 __all__ = [
@@ -46,8 +48,10 @@ __all__ = [
     "MANIFEST",
     "PROMPT_REVISION",
     "AgentManifest",
+    "CareRunner",
     "build_graph",
     "build_registry",
+    "build_runner",
     "build_runtime",
     "compile_graph",
 ]

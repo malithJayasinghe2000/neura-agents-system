@@ -4,26 +4,33 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-02 (evening — milestone 1.13)
-**Current phase:** Phase 1 — milestones 1.1–1.13 complete
-**Next action:** **Milestone 1.14 — API.** REST `/v1/*`, WebSocket, webhooks, OpenAPI, error
-contract, idempotency. It is also where three seams become controls: authentication
-(built in 1.13, wired to nothing), usage metering (**P5**) and a real `PostgresAuditLog`
-in the runtime (**S5**).
+**Last updated:** 2026-08-04 (milestone 1.14)
+**Current phase:** Phase 1 — milestones 1.1–1.14 complete
+**Next action:** **Milestone 1.15 — shadow mode.** The agent answers alongside a human
+without being sent, and the answers are graded. It is the first milestone that can produce
+a *real* golden case — which is the top blocker on the eval strategy (**E1**) and needs
+a design partner (**B2**), still the top project risk.
 
 **A8 and A9(2) are PARKED on API budget, not abandoned.** Both need a paid tier — see the
 2026-08-02 (morning) entry. A8 is one ~20-call control probe away from a real answer and is
 the better buy of the two. Do not restart either without reading that entry first.
 
-> **Starting 1.14 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
-> 1.13 and 1.12 entries below.
+> **Starting 1.15 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
+> 1.14 and 1.12 entries below.
 >
-> **The one thing to carry forward from 1.13.** Tenancy is built and **nothing calls it**.
-> Authentication, entitlements, budgets and the usage meter all work and are tested against
-> real PostgreSQL, and no request path exists to invoke them. That is deliberate sequencing,
-> not an oversight — but it is exactly the shape of failure this project has recorded three
-> times (`pii_leaked` scored by nothing, `guard.block` read by nobody, and now usage written
-> by nobody). **1.14 is where it is repaid**, and the specific calls are written down in P5.
+> **The one thing to carry forward from 1.14.** The three seams are closed:
+> authentication is called on every request, every turn writes a usage row (**P5**), and a
+> `guard.block` reaches a real hash-chained audit log (**S5**). Wiring the third one
+> **found a defect two milestones of a `None` sink had hidden** — `audit_log.outcome` was
+> `VARCHAR(32)` and two matched guard rules already overflow it, so the first genuine write
+> failed on the first attack it saw. That is the argument for this project's habit, stated
+> as evidence rather than as a principle: **a control nothing calls is not a control that
+> works, it is a control nobody has run.**
+>
+> **And one that is newly open.** No transaction can enumerate tenants under RLS, so any
+> background sweeper needs an index of "which tenants have work" kept outside PostgreSQL.
+> 1.14 took that route rather than a `BYPASSRLS` role or a policy exemption, and the cost is
+> recorded as **P7**: lose the index and the rows are safe but the schedule is not.
 >
 > **The one thing to carry forward from 1.12.** Injection resistance is 1.00 because the defence
 > is **structural** — no WRITE tool exists to invoke, every call is authorised in code, an unowned
@@ -50,12 +57,12 @@ the better buy of the two. Do not restart either without reading that entry firs
 
 | | Status |
 |:--|:--|
-| Documentation | ✅ Complete — 29 files, plus the published interface spec in `docs/spec/` |
+| Documentation | ✅ Complete — 34 files, plus the published interface spec in `docs/spec/` |
 | Git repository | ✅ Initialised, branch `main` |
 | Workspace | ✅ uv workspace, Python 3.12.13, 8 packages |
 | `neura-core` | ✅ config · logging+redaction · errors · context · telemetry · crypto · ids · db · **tenancy** |
 | `neura-domain` | ✅ canonical models · enums · events (pure, verified) |
-| `neura-api` | ✅ boots; `/v1/health`, `/v1/health/ready`, `/v1/agents`; error contract |
+| `neura-api` | ✅ **1.14** — authenticated `/v1/*`, chat, WebSocket, conversations, stores, webhooks, idempotency, rate limits, OpenAPI at `/docs`. Agents are **mounted from their manifests**, so `/v1/care/chat` exists without the API knowing the word "care" |
 | Agent discovery | ✅ entry points working — `care` manifest discovered at startup |
 | Infrastructure | ✅ docker-compose: Postgres 16 + pgvector, Redis 7 — both healthy |
 | Guardrails | ✅ ruff · mypy strict · 7 import-linter contracts · platform-independence check |
@@ -77,25 +84,43 @@ the better buy of the two. Do not restart either without reading that entry firs
 | **Tenancy** | ✅ **1.13** — `tenants` · `api_keys` · `tenant_stores` · `tenant_usage`, all forced-RLS. Entitlements (`enabled_agents`), per-tenant config, envelope-encrypted store credentials, the budget ladder, and a usage rollup per (tenant, day, agent) |
 | API keys | ✅ `fn_sk_`/`fn_pk_`, 256 random bits, SHA-256 at rest, scoped · expirable · revocable · `last_used_at`. Public keys are **inert** until origin-locked. **The lookup runs before the tenant is known** — a read-only session that can see exactly the row whose hash it presented ([ADR-0014](architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
 | Budgets | ✅ soft → fewer tool calls, hard → **empty tool allowlist**, so every turn escalates. No new graph branch: it reuses policy check 4. **Untriggerable until 1.14 records usage (P5)** |
-| Usage metering | ⚠️ meter, atomic daily rollup and reader (`make tenant-usage`) all built and tested — **and nothing writes a row yet**. Open question **P5** |
+| Usage metering | ✅ **1.14 — P5 closed.** Every turn records a `UsageDelta` in the same transaction as the transcript: turns/calls/tokens/cost from a metering LLM **wrapper** (no node changed), tool calls and escalations from the graph. `spend_today` is a real number, so the ADR-0015 ladder is triggerable |
+| Conversations | ✅ **1.14** — the Postgres transcript of agent-runtime.md §5: `conversations` + `conversation_messages`, forced RLS, cursor-paginated. It is what makes turn 2 know what turn 1 was about, and what `GET /v1/*/conversations` reads. **The shopper's message is stored as the guard left it** — tokenised |
+| Idempotency | ✅ **1.14** — per-tenant keys, 24h, replay returns the original response with `Idempotency-Replayed: true`, same key + different body is a 409. Claim commits *before* the work, completion *with* it |
+| Rate limits | ✅ **1.14** — several subjects at once, narrowest binds ([ADR-0017](architecture/adr/0017-rate-limit-subjects.md)); Redis counters that **fail open, loudly**. Every limit is a guess and labelled as one |
+| Outbound webhooks | ✅ **1.14** — registration with a signed secret shown once, a **durable outbox** written in the turn's transaction, HMAC identical to the inbound scheme, backoff over 7 attempts, auto-disable after 20 failures, and a dead-letter queue the merchant can read |
 | Operator tooling | ✅ `make tenant-new` · `key-new` · `key-revoke` · `tenant-show` · `tenant-usage`, all as the ordinary app role under RLS |
 | `neura-agent-core` | ✅ graph runtime · shared nodes · tool registry · policy engine · checkpointer · audit log · `rag` |
 | Tool layer | ✅ declaration (schema from the signature) · capability filtering · bounded execution. `WRITE` tools **cannot be registered** (ADR-0010, structural) |
 | Policy engine | ✅ all eight checks in code. Ownership failure escalates rather than rejects, and the refusal is uniform so it is not an enumeration oracle |
 | Graph runtime | ✅ LangGraph, explicit nodes. The builder **refuses to compile** a graph where `respond` is reachable without `verify`, or that has no `escalate` |
 | Checkpointer | ✅ ours, not LangGraph's — theirs has no `tenant_id` and needs a second Postgres driver. Conversations resume across processes, under RLS |
-| Audit log | ✅ append-only, hash-chained. Tampering and deletion are both detected; the app role is *revoked* UPDATE/DELETE |
+| Audit log | ✅ append-only, hash-chained. Tampering and deletion are both detected; the app role is *revoked* UPDATE/DELETE. **1.14 wired a real sink into the serving path (S5)** — and the first real write failed, because `outcome` was `VARCHAR(32)` and two guard rules overflow it. Widened to 256 |
 | RAG | ✅ render · chunk (skipping records with nothing to index, and naming them) · embed · pgvector namespaced by `(tenant_id, embedding_model)` · retrieval · reindex path. Verified against the real shop (`make rag-check`) |
 | **NEURA-CARE** | ✅ **the first product agent** — graph · 6 nodes · 7 READ tools · 6 prompt files · fixture store · 35 golden cases. Verified against the real shop (`make care-check`) |
 | CARE prompts | ✅ files, content-hashed; the revision is stamped on every answered turn |
 | Eval target | ✅ `make eval` measures a real agent. Agents and their datasets are found by entry point — the harness never learns an agent's name |
 | Guard node | ✅ **1.12** — `guard` + `blocked`, deterministic: five named injection rules, reversible PII tokenisation, an outbound leak filter in `verify`. No model, no threshold ([ADR-0011](architecture/adr/0011-deterministic-guard-not-classifier.md)). The builder refuses a graph that guards late or lets a block fall through |
 | Guard, measured | ✅ **precision 1.00 (0 of 40 benign blocked), recall 0.85 (34 of 40)** on a balanced corpus, run free in CI. And `make eval-guard-off` — the suite with every rule disabled, injection resistance still 1.00, which is what stops the guard being credited with the gate |
-| Tests | ✅ **576 unit + 54 integration** passing (1.13 added 46 + 30). The count carried into 1.13 was quoted as 554 and was in fact **530** — measured on a clean checkout, not adjusted |
+| Tests | ✅ **623 unit + 95 integration** passing (1.14 added 47 + 41) |
 | CI | ✅ workflow written and **pushed** — `main` has taken six pushes since the workflow landed, so GitHub has run it. **The results have not been read from this machine**: the repository is private and there is no `gh` CLI or token here, so `make check` locally is the evidence, not a green tick anybody has seen |
 | Design partner | ❌ None — top project risk |
 
-**A merchant's shopper could now hold a conversation with this.** Against the real test shop, CARE quotes that shop's own returns window, finds a waterproof shoe from "I need something for hiking", refuses an anonymous shopper asking about order 1, lists an identified customer's orders, and hands a cancellation request to a person without claiming to have done it.
+**A merchant's shopper can now hold a conversation with this over HTTP.** `make api-check`
+against the real test shop, 2026-08-04: a real `fn_sk_` key authenticates, the store
+connection is decrypted out of PostgreSQL, CARE quotes that shop's own 30-day returns
+window with a citation, a second turn resolves "and how long do I have?" from the
+transcript, a named attack is **blocked in 35ms with zero model calls**, and the same kind
+of turn over a WebSocket streams `guard → route → retrieve → plan → act → triage → compose
+→ verify → respond` and then the verified reply. Four turns, 15 model calls, 3 tool calls,
+1 block — **all of it in a `tenant_usage` row that did not exist a milestone ago.**
+
+One honest observation from that run: the product turn asked for "waterproof hiking shoes",
+the shop's own search returns nothing for that exact phrase (it returns results for
+"waterproof"), and the agent said so and offered to look for something else. The refusal is
+correct. **The offer is the A9(3) shape** — an offer to follow up that nothing can honour —
+which was built, measured and reverted on 2026-08-02, and this is a second sighting of it in
+the wild rather than a new finding.
 
 **But no number here is validation.** All 47 cases are synthetic (open question E1). The honest measured result on the local role map, `--no-judge`, **n=3**: **31 / 30 / 29 of the original 35 golden cases** with the guard on, against **31 / 32 / 31** on `main` without it — a difference inside the ±2 run-to-run variance this project has measured twice, on cases the guard provably cannot touch (see the 1.12 entry, which shows the working). Injection resistance **1.00** in every run including the guard-off control, intent accuracy 0.95, tool selection 1.00, guard-block accuracy 1.00 across 12 balanced cases. **Escalation recall is now 1.00 ✔ across three runs** — the below-gate figures in 1.11 and 1.12 were substantially a bug in the metric, resolved as E5 on 2026-07-31. **Escalation precision is 0.88 / 0.78 / 0.78 against a 0.85 gate and is a real problem**, driven by two genuine over-escalations. Groundedness is 0.86 on the one dataset a judge got through before the free tier ran out, and unknown for the other four (E2 — and 1.12 decided deliberately not to pay for a judge yet, with a stated trigger). **Hand probing on 2026-07-29 qualified one reading of these numbers**: not every escalation is conservative routing — some are `verify` refusing a claim its evidence supported (A8), and some answered turns carry wrong claims the judge never saw (A9).
 
@@ -119,14 +144,14 @@ the better buy of the two. Do not restart either without reading that entry firs
 1.11 CARE agent                 ✅ done  (verified against the real shop)
 1.12 Guard (injection + PII)    ✅ done  (deterministic; measured with it OFF too)
 1.13 Multi-tenancy              ✅ done  (zero model calls; RLS on four new tables)
-1.14 API                        ⬜   ← NEXT
+1.14 API                        ✅ done  (three seams became controls)
 
-1.15 Shadow mode                ⬜
+1.15 Shadow mode                ⬜   ← NEXT
 1.16 Widget                     ⬜
 1.17 Deploy                     ⬜
 ```
 
-**Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for **all eight** `tenant_id` tables; each new table is covered by the same test, which is why 1.13's four came with it for free) · **end-to-end conversation working ✅** (`make care-check` against the real shop — over REST and WebSocket is 1.14).
+**Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for **all thirteen** `tenant_id` tables; each new table is covered by the same test, which is why 1.14's five came with it for free) · **end-to-end conversation working ✅ — now over REST and over a WebSocket** (`make api-check` against the real shop).
 
 Remaining: evals green on both role maps (**not green on either** — 31–32 of the original 35 on `ollama-dev`, with escalation *precision* the one gate still unmet at 0.78–0.88 against 0.85; the cloud map has no model configured) · injection resistance 1.00 (**met, including with the guard disabled — a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
 
@@ -153,6 +178,8 @@ Remaining: evals green on both role maps (**not green on either** — 31–32 of
 | Tenant record: one table, typed where enforced | [ADR-0013](architecture/adr/0013-tenant-record-and-configuration.md) |
 | API keys, and reading one row before the tenant is known | [ADR-0014](architecture/adr/0014-api-keys-and-the-rls-bootstrap.md) |
 | Usage as a daily rollup; budgets degrade, never error | [ADR-0015](architecture/adr/0015-usage-rollups-and-budget-degradation.md) |
+| Nothing the model wrote is streamed before `verify` passes | [ADR-0016](architecture/adr/0016-stream-only-after-verify.md) |
+| Rate limits apply to several subjects; the narrowest binds | [ADR-0017](architecture/adr/0017-rate-limit-subjects.md) |
 
 Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
 
@@ -217,6 +244,179 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-04 — The API, and three seams that stopped being seams (milestone 1.14)
+
+**A merchant's shopper can now reach this over HTTP, and everything that was wired to
+nothing is wired to something.** Authenticated `/v1/*`, chat, a WebSocket, conversations,
+store connection, outbound webhooks, idempotency, rate limits and OpenAPI at `/docs`.
+`make check` is green: **623 unit + 95 integration**, ruff, mypy strict, 7 import
+contracts, platform independence, eval-fast 47/47.
+
+**The headline is not the endpoints. It is that a control nobody calls is a control nobody
+has run — and this milestone has the receipt.** Wiring a real audit sink into the serving
+path (open question **S5**) made the first genuine `guard.block` write, and it **failed**:
+`audit_log.outcome` is `VARCHAR(32)`, and two matched guard rules — `instruction_override,
+role_reassignment` — are 37 characters. That column has been wrong since 1.10 and invisible
+for two milestones, because every caller until now passed a `None` sink. Widened to 256 in
+the migration. **This project has now recorded the same shape of failure four times**
+(`pii_leaked` scored by nothing, `guard.block` read by nobody, usage written by nobody, and
+now an audit column nobody could have overflowed). No amount of reading would have found
+this one: the code was correct and the *schema* was not, and the only thing that
+distinguishes those two is running it.
+
+**The two decisions were made as ADRs rather than asked about.**
+
+- **[ADR-0016](architecture/adr/0016-stream-only-after-verify.md) — nothing the model wrote
+  reaches a shopper before `verify` has passed. Resolves A1.** The socket streams the
+  *turn*: `step` and `tool_call` frames while the graph runs, then `token` frames carrying
+  slices of the **verified** reply. Perceived behaviour is unchanged and every character in
+  the stream is text `verify` accepted. The "fast pre-check" option was rejected because A8
+  already measured that *one* verifier is unstable, a second would need the threshold
+  ADR-0011 declined to pick, and it would move the safety boundary into the transport. The
+  accepted cost is time to first token.
+- **[ADR-0017](architecture/adr/0017-rate-limit-subjects.md) — a request is limited on
+  several subjects at once and the narrowest binds. Resolves P1.** A secret key gets
+  `tenant` and `key`; a **public** key adds `client` and `conversation`, because one widget
+  key identifies the shop and not the shopper — which was P1's entire complaint. The
+  headers report the *binding* subject. `X-Forwarded-For` is ignored unless a proxy hop
+  count is configured, because trusting it makes the narrowest control free to rotate while
+  the limiter carries on reporting plausible numbers. Counters are in Redis and **fail
+  open, loudly** — a rate limiter is not an access control, and the cost ceiling is a
+  Postgres rollup that survives Redis being gone.
+
+**Open question P5 is closed, and the shape of the fix is the interesting part.** Every
+turn now records a `UsageDelta` in the same transaction as the transcript, split exactly as
+P5 specified: turns, LLM calls, tokens and cost from the client; tool calls, escalations and
+blocks from the graph. The client half is a **wrapper**, `MeteredLLM`, not a change to any
+node. Only `compose` accumulates cost into `AgentState`, so counting properly by editing
+nodes would have meant five behaviour-adjacent edits across two packages, under Rule 4, to
+count something — and would still have missed the sixth node somebody adds next year. A
+wrapper cannot miss a call, and a test asserts `response is inner_response` because "it just
+passes through" is exactly the claim that quietly stops being true.
+
+**`spend_today` is therefore a real number for the first time, and the ADR-0015 ladder is
+triggerable.** An integration test walks a tenant past its hard ceiling and asserts the
+resolved policy is an *empty tool allowlist* — no new graph branch, check 4 of the policy
+engine, CARE handing over as it already does when it cannot act.
+
+**Rule 4: agent behaviour provably cannot have moved, and the argument is checkable rather
+than asserted.** `git status` under `agents/care/src/neura_agent_care/{nodes,prompts,tools}`,
+`graph.py`, `runtime.py` and `evals/` is **empty**. The whole diff under `agents/` is one new
+file (`serving.py`), seven lines of `pyproject.toml` for the runner entry point, and the
+package docstring plus its exports. Under `neura_agent_core`, `graph/`, `guard/`, `policy/`
+and `tools/` are untouched except one **column width** in `graph/schema.py`. The eval target
+imports none of the new code, so `make eval` runs byte-identical agent code.
+
+But "the eval measures what we ship" was previously true only because there was **one**
+caller of `build_runtime`. There are now two, so it is asserted:
+`tests/unit/test_serving.py::TestTheServedRuntimeIsTheMeasuredRuntime` builds both and
+compares tool set, tool-call ceiling, guard state, prompts and allowlist — and pins that an
+unconfigured tenant resolves to `{"allowed_tools": None, "max_tool_calls": 4}`, byte for
+byte what the harness passes. That is the 1.12 `eval-guard-off` lesson applied before it
+could bite: a measurement mode must differ from the real thing in exactly one respect, or
+its number is about something nobody ships.
+
+**A confirmation run was done anyway, and it is reported as what it is: n=1, and not a
+comparison.** `uv run neura-eval --no-judge` on `ollama-dev`, 412s, after the milestone
+landed:
+
+| | this run | recorded band (1.12 · 1.11 · E5 re-baseline) |
+|:--|:--|:--|
+| whole suite | **44 / 47** | — |
+| original 35 golden cases | **32** | 29–32 across seven runs |
+| injection resistance | **1.00 ✔** | 1.00 in every run ever recorded |
+| escalation recall | **1.00 ✔** | 1.00 ×3 |
+| escalation precision | 0.88 | 0.88 / 0.78 / 0.78 |
+| intent accuracy | 0.95 ✔ | 0.95 |
+| tool selection | 1.00 ✔ | 1.00 |
+| guard block accuracy | 1.00 | 1.00 |
+| pii leak check | 1.00 | 1.00 |
+
+The three failures are `policy_qa_001`, `policy_qa_005` and `product_qa_006` — all three in
+the set of six that has failed in some combination in every run since 1.11, and none of
+them touched by anything in this milestone.
+
+**Two things must not be read into that table.** Escalation precision landing on 0.88 is
+**not** evidence that the gate is met: the recorded spread is 0.88 / 0.78 / 0.78 on
+identical code, this is one sample from it, and one sample from a band is not a
+measurement. And 32/35 is not an improvement — it is the top of a range this suite has
+occupied for three milestones. The run's only job was to confirm that nothing broke by
+accident, and it did that.
+
+
+**What was deliberately NOT built, with the reason, because each would have been the very
+failure this milestone repays.**
+
+- **`POST /v1/stores/{id}/sync`** — the sync engine's entity persistence is still in memory
+  (the `EntityStore` seam from 1.8). A triggered sync would write results that vanish on
+  restart.
+- **`POST /v1/care/conversations/{id}/feedback`** — api-design.md calls it the highest-value
+  signal we receive, and it becomes a golden case. Nothing ingests golden cases from a table
+  yet; shadow mode is 1.15. Shipping it now would record a merchant's most valuable input
+  into a place nobody reads.
+- **Knowledge-base upload and reindex** — needs a document store that does not exist.
+  Catalogue and policies arrive by sync.
+- **The LangGraph checkpointer, in the serving path.** Its purpose is resuming a turn
+  interrupted mid-node, and nothing here would pick a half-finished thread back up. Writing
+  a checkpoint after every node so that nothing ever reads it is the same mistake in
+  miniature. Continuity comes from the transcript, forensics from the audit log, and a lost
+  turn is retried by the client under its idempotency key.
+
+**One new open question, and it is general rather than webhook-specific.** **P7**: no
+transaction can enumerate tenants under Row-Level Security, so a background sweeper cannot
+ask "which rows across every tenant are due?". Three ways out existed and 1.14 took the
+least convenient one on purpose — not a second database role with `BYPASSRLS`, not a policy
+exemption, but an index of *which tenants have work* kept in Redis, with the drainer opening
+one scoped session per tenant. **The cost is stated rather than hidden: lose the index and
+the rows are safe but the schedule is not**, and `make webhook-drain TENANT=…` is the
+repair. This needs a real answer before anything time-critical is swept — retention
+deletion, budget resets, the approval queue.
+
+**Also worth knowing for the next session:**
+
+- **A third discovery seam.** `neura.agent_runners` joins `neura.agents` and
+  `neura.eval_targets`. `/v1/care/chat` exists because CARE's manifest says
+  `route_prefix="/v1/care"`, and `neura_api` contains the string "care" nowhere. A runner
+  whose key disagrees with its entry-point name is **refused at startup**, because the key
+  decides which routes it is mounted under, which entitlement is checked, and which agent is
+  billed.
+- **Both transports run one code path.** `CareRunner` uses `astream` whether or not anyone
+  is listening, so REST and WebSocket execute identically. Invoking one way and streaming
+  the other would be the second code path api-design.md §8 forbids, and an eval result would
+  then be evidence about REST only.
+- **Five new tables, all forced RLS, and no exemption was needed.** 1.13 had to widen one
+  policy on `api_keys` for the authentication bootstrap (ADR-0014). Everything added here is
+  read by a request that has already authenticated, so all five take the plain policy.
+- **Idempotency keys are per tenant, and that is not theoretical.** `idk_` values are chosen
+  by clients; two merchants using the same library will eventually choose the same one. An
+  integration test has both tenants present the same key and asserts neither replays the
+  other.
+- **The signing scheme moved down into `neura-core` and is now shared by both webhook
+  directions.** Inbound (the shop signs, we verify) and outbound (we sign, the merchant
+  verifies) were about to have two implementations of one algorithm; a test asserts
+  `inbound.sign is outbound.sign`, because divergence shows up as an integration that
+  mysteriously stops verifying.
+- **`make api-check URL=… TOKEN=…`** is the new smoke script — the whole request path
+  against the real shop, in the tradition of `make care-check`. It provisions a tenant, a
+  key and a store connection, holds three REST turns and one socket turn, prints the metered
+  usage, and deletes everything except the audit rows, which it cannot delete because the
+  app role is revoked DELETE on them. That refusal is the append-only guarantee working.
+  **Run on 2026-08-04 and green**: an attack blocked in 35ms with zero model calls, a
+  policy answer with a citation, a follow-up resolved from the transcript, and a socket turn
+  whose streamed characters matched the verified reply exactly.
+- **Retrieval is empty for a brand-new tenant, and it says so out loud.** The smoke run logs
+  `nothing is indexed for tenant … under any embedding model`, which is the 1.9 diagnosis
+  working as designed — a fresh tenant has no vectors until somebody runs the indexer, and
+  the honest report of that is what stops it being mistaken for bad retrieval. **There is no
+  API route that indexes a store**, and that is the same deliberate omission as the sync
+  trigger: `make rag-check` is still how a catalogue gets indexed.
+
+- **Next:** milestone 1.15, shadow mode. It is the first milestone that can produce a
+  **real** golden case, which is the top blocker on the eval strategy (**E1**) — and it
+  needs a design partner (**B2**), which is still the top project risk. A1 and A8/A9 are
+  unchanged by this milestone; A8 is still one ~20-call control probe from an answer and
+  still parked on API budget.
 
 ### 2026-08-02 (evening) — Multi-tenancy: a tenant is now a thing (milestone 1.13)
 

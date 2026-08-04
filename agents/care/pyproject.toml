@@ -28,6 +28,13 @@ care = "neura_agent_care:MANIFEST"
 [project.entry-points."neura.eval_targets"]
 care = "neura_agent_care.evals:build_target"
 
+# How the API turns a request into a turn (milestone 1.14). The third seam of
+# the same shape and for the same reason: `neura-api` resolves a runner by entry
+# point rather than importing an agent by name, so the deployable never learns
+# which products it is serving.
+[project.entry-points."neura.agent_runners"]
+care = "neura_agent_care.serving:build_runner"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

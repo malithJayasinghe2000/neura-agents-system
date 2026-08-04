@@ -21,12 +21,23 @@ def _request_id(request: Request) -> str | None:
     return rid or current_trace_id()
 
 
+def _retry_headers(exc: NeuraError) -> dict[str, str] | None:
+    retry_after = exc.details.get("retry_after")
+    return {"Retry-After": str(retry_after)} if retry_after else None
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(NeuraError)
     async def _neura(request: Request, exc: NeuraError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.http_status,
             content=exc.to_dict(_request_id(request)),
+            # `Retry-After` has to survive the exception path, or a 429 raised
+            # from deep in a handler arrives without the one header a client
+            # needs in order to back off correctly (api-design.md §6). The
+            # limiter puts the value in `details`; this is what gets it onto the
+            # response.
+            headers=_retry_headers(exc),
         )
 
     @app.exception_handler(RequestValidationError)
