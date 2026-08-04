@@ -95,6 +95,10 @@ make agent-check               # run the agent runtime end to end on real models
 make care-check URL=… TOKEN=…  # hold real conversations with CARE against a real shop
 make care-ask Q="…" URL=… TOKEN=… [CUSTOMER=385]   # one question, every step printed —
                                                    # the "why did it say that?" tool
+make verify-probe [MODEL=… CLOUD=1]   # A10/A8: does `verify` catch a fabricated fact?
+                                      # Four arms; two of them are controls the verifier
+                                      # MUST refuse. Run it before trusting any model in
+                                      # the GUARD role — `llama3.2:3b` fails both 10/10.
 make api-check URL=… TOKEN=…   # the whole request path against a real shop: a real key
                                # authenticating, a store decrypted from the database, a
                                # usage row written, an audit entry for a blocked turn,
@@ -247,6 +251,7 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | New agent not mounted at startup | Missing `[project.entry-points."neura.agents"]`, or not installed in the workspace |
 | `GraphContractError: guard is reachable but the entry node is …` | A guard that runs after routing has already shown the raw message to a model. Make `guard` the entry, or do not route to it |
 | An order lookup fails and the trace shows `[PHONE_1]` where the reference was | A PII detector matched an order or tracking number. The detectors require structure a reference does not have (`+`, leading zero, separators; Luhn for cards) — add the shape to `tests/unit/test_guard.py` and narrow the pattern, never widen it |
+| `verify` passes a draft that states a wrong date or status | The `GUARD` model cannot discriminate. `make verify-probe` measures exactly this — `llama3.2:3b` calls both an invented delivery date and a contradicted status "grounded" 10/10 (open question **A10**). Changing the model is a **Rule 4** change: n≥3 either side, and expect the pass rate to fall while the system improves |
 | A real customer's message was refused with no handover | A guard rule false-positived. Add the sentence to the **benign** half of the corpus in `tests/unit/test_guard.py` — it is a hard gate, so the fix cannot be forgotten |
 | `[EMAIL_9]` appears in a reply | The model invented a redaction token. Rehydration leaves unknown tokens visible on purpose: a silently deleted one is a sentence that changed meaning with nobody the wiser |
 | A chat request 404s with `NO_STORE_CONNECTED` | The tenant has no `tenant_stores` row. `POST /v1/stores` first — a tenant, a key and an agent are not enough to answer "where is my order?" |

@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        api-check
+        api-check verify-probe
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -97,6 +97,13 @@ agent-check:  ## Run the agent runtime end to end against REAL models + Postgres
 api-check:  ## Hold a conversation over HTTP and a socket, against a REAL shop
 	uv run python scripts/api_smoke_test.py --url $(URL) --token $(TOKEN) \
 	  $(if $(PLATFORM),--platform $(PLATFORM),)
+
+# Open question A8. The strings live in the script, under version control, because
+# the 2026-07-29 probe's inputs were never recorded and the 2026-08-02 re-run had to
+# reconstruct them — which is why its negative result could not be interpreted.
+verify-probe:  ## A8: is `verify` stable under a meaning-free change? [MODEL=… CLOUD=1 N=10]
+	uv run python scripts/verify_probe.py -n $(or $(N),10) \
+	  $(if $(CLOUD),--role-map cloud-prod,) $(if $(MODEL),--model $(MODEL),)
 
 care-check:  ## Hold real conversations with CARE against a REAL shop: make care-check URL=... TOKEN=...
 	uv run python scripts/care_smoke_test.py --url $(URL) --token $(TOKEN)

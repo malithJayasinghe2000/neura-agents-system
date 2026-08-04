@@ -4,9 +4,15 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-04 (milestone 1.14)
+**Last updated:** 2026-08-04 (milestone 1.14, then the A8 probe)
 **Current phase:** Phase 1 — milestones 1.1–1.14 complete
-**Next action:** **Milestone 1.15 — shadow mode.** The agent answers alongside a human
+**Next action:** **Open question A10, before 1.15.** `verify` does not catch a fabricated
+fact on `llama3.2:3b`, the model the local role map configures as `GUARD` — 10/10 missed on
+both an added fact and a contradicted one, where `qwen3:8b` catches both 10/10. It is free
+to work on and it is about the failure class this product exists to prevent. Read the
+2026-08-04 (later) entry for the measurement and the protocol.
+
+**Then milestone 1.15 — shadow mode.** The agent answers alongside a human
 without being sent, and the answers are graded. It is the first milestone that can produce
 a *real* golden case — which is the top blocker on the eval strategy (**E1**) and needs
 a design partner (**B2**), still the top project risk.
@@ -244,6 +250,87 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-04 (later) — A8 does not reproduce, and looking for it found something worse
+
+**Ran the A8 control the 2026-08-02 session could not afford. It answered a different
+question than the one it was asked, and the answer is more serious.**
+
+**First, the tooling, because it is why this session could conclude anything.** There was
+no probe script. The 2026-07-29 finding was made by hand and **its inputs were never
+recorded**, which is why the 2026-08-02 re-run had to *reconstruct* them and why its
+negative result was uninterpretable — better model, or gentler probe, with no way to tell.
+`scripts/verify_probe.py` now holds the evidence and draft strings in the file, under
+version control, and `make verify-probe` runs it. Whatever it measures, the next person
+measures the same thing.
+
+**Second, the result nobody expected. The probe was returning 0/10 everywhere, so a
+negative control was added — a draft the verifier *must* refuse.** That is the arm that
+makes the other arms mean anything: two conditions that both answer "grounded" prove
+stability only if the model is capable of answering "not grounded". Without it, a model
+that says yes to everything scores a perfect 0/10 and looks like the best verifier in the
+building.
+
+n=10 per arm, temperature 0.0, against the **real** `verify` prompt and schema:
+
+| arm | what it is | `qwen3:8b` | **`llama3.2:3b`** |
+|:--|:--|:--:|:--:|
+| A | one evidence block | 0/10 false refusals | 0/10 false refusals |
+| B | the same block, verbatim, twice | 0/10 false refusals | 0/10 false refusals |
+| **C** | an **added** fact — an invented delivery date | **0/10 missed** ✔ | **10/10 missed** ✘ |
+| **D** | a **contradicted** fact — "delivered" where the evidence says `shipped` | **0/10 missed** ✔ | **10/10 missed** ✘ |
+
+**`llama3.2:3b` is the model configured as `GUARD` in `ollama-dev`, and therefore in
+`sovereign`.** It is what has run `verify` on every local turn and every `--no-judge` eval
+since milestone 1.11. Arm D is the *literal example* in `prompts/verify.md`: *"a status the
+evidence does not state — 'delivered' when the evidence says shipped."* It passed it ten
+times out of ten. `qwen3:8b` refuses both, every time, quoting the offending claim exactly.
+
+**It is not a constant yes, and the distinction matters.** The same model refused
+`product_qa_006` in this morning's eval run because the evidence did not mention colours at
+all. The pattern consistent with both observations: it notices when the **subject** is
+absent from the evidence, and not when a **fact about a subject that is present** is wrong.
+That is the worse half to miss — a plausible date appended to an otherwise correct sentence
+is precisely the confident wrong answer agent-runtime.md §2 calls this node the single most
+valuable one for catching.
+
+**A8 itself is downgraded from 🔴 to 🟡 and is *not* resolved.** One evidence block versus
+the same block twice is 0/10 and 0/10 on both models — including `qwen3:8b`, the very model
+the 30/30 flip was seen on. So the flip is not reproducible by anything currently written
+down. That is not the same as A8 being wrong: the original observation stands, and what is
+now known is that nobody can re-create it. It stops blocking because the probe exists, it
+is free to run, and a future sighting can be captured by adding a condition to a file rather
+than by remembering.
+
+**What was deliberately NOT done: the model was not swapped.** `GUARD` → `qwen3:8b` is a
+**model configuration change**, which is a Rule 4 behaviour change, and `verify` gates every
+answered turn. Two things follow and both argue for a separate, focused session:
+
+- It needs its own n≥3 before/after. Swapping and re-baselining in one step is exactly the
+  2026-07-30 mistake this project has already paid for once.
+- **It will probably make the golden numbers look worse while making the system better.**
+  A verifier that starts refusing fabrications will refuse more, escalate more, and push
+  escalation *precision* down from a figure that is partly flattered by a verifier that
+  rarely refuses. Anyone running that comparison should expect it and not treat it as a
+  regression.
+
+**And a caveat on every existing number, stated plainly.** Every `--no-judge` result on
+`ollama-dev` since 1.11 was produced with this verifier. **Injection resistance and the
+guard corpus are untouched by this** — both are structural and deterministic, which is the
+whole reason ADR-0011 and `make eval-guard-off` insist on it. But anything that depended on
+`verify` *refusing* is softer evidence than it looked.
+
+**One more finding, free.** `nvidia/nemotron-nano-9b-v2:free` took roughly **seven minutes
+per structured call**, so the cloud arm was abandoned rather than completed. It is a
+reasoning model with no `max_tokens` and no `reasoning_effort` in `cloud_prod()`, so it
+thinks without a budget — the gotcha already in AGENTS.md. It is configured as
+`CLOUD_MODEL_ROUTER`, which is on the latency-critical path of **every** turn. Raised as
+**A11**. Roughly 4 free-tier calls were spent in total; the 50/day budget is essentially
+untouched, because the useful arms all ran locally for nothing.
+
+- **Next:** **A10** is the highest-value thing in the register now, and it is free to work
+  on — no API budget, no design partner, no judge. The protocol is written into A10: isolate
+  the `GUARD` model change, n≥3 either side, and expect the headline number to fall.
 
 ### 2026-08-04 — The API, and three seams that stopped being seams (milestone 1.14)
 
