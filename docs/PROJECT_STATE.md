@@ -273,12 +273,15 @@ building.
 
 n=10 per arm, temperature 0.0, against the **real** `verify` prompt and schema:
 
-| arm | what it is | `qwen3:8b` | **`llama3.2:3b`** |
-|:--|:--|:--:|:--:|
-| A | one evidence block | 0/10 false refusals | 0/10 false refusals |
-| B | the same block, verbatim, twice | 0/10 false refusals | 0/10 false refusals |
-| **C** | an **added** fact — an invented delivery date | **0/10 missed** ✔ | **10/10 missed** ✘ |
-| **D** | a **contradicted** fact — "delivered" where the evidence says `shipped` | **0/10 missed** ✔ | **10/10 missed** ✘ |
+| arm | what it is | `qwen3:8b` | **`llama3.2:3b`** | `gpt-oss-20b` (cloud) |
+|:--|:--|:--:|:--:|:--:|
+| A | one evidence block | 0/10 | 0/10 | 0/5 |
+| B | the same block, verbatim, twice | 0/10 | 0/10 | 0/5 |
+| **C** | an **added** fact — an invented delivery date | **0/10 missed** ✔ | **10/10 missed** ✘ | **0/5 missed** ✔ |
+| **D** | a **contradicted** fact — "delivered" where the evidence says `shipped` | **0/10 missed** ✔ | **10/10 missed** ✘ | **0/5 missed** ✔ |
+
+(A and B count *false refusals*; C and D count *missed fabrications*. Every arm complete, no
+errored runs.)
 
 **`llama3.2:3b` is the model configured as `GUARD` in `ollama-dev`, and therefore in
 `sovereign`.** It is what has run `verify` on every local turn and every `--no-judge` eval
@@ -319,6 +322,29 @@ answered turn. Two things follow and both argue for a separate, focused session:
 guard corpus are untouched by this** — both are structural and deterministic, which is the
 whole reason ADR-0011 and `make eval-guard-off` insist on it. But anything that depended on
 `verify` *refusing* is softer evidence than it looked.
+
+**The cloud verifier is fine, and that localises the problem.** Screened 2026-08-07, n=5 per
+arm: `openai/gpt-oss-20b:free`, the configured `CLOUD_MODEL_GUARD`, refuses both fabrications
+5/5 and 5/5 and holds A and B at 0/5 — fit for the role on these strings. **So the hole is
+the local role map, and `sovereign()` *is* `ollama_dev()`.** Sovereign is a shipping product
+tier, not a dev convenience, so this is not only an eval-hygiene problem: a merchant on that
+tier gets the verifier that misses both.
+
+**Two bugs in the tooling were found on the way, and the first one is the one to remember.**
+
+- **The probe scored unreached calls as failures.** When the provider dropped connections it
+  reported *"this verifier called an invented delivery date grounded in 5/5 runs"* about a
+  model that had not been asked anything. That is **E6** — a dead provider scored as agent
+  failure — reintroduced in the reporting layer of the script written to be careful about
+  exactly that. The cause was one word: dividing by *attempted* rather than *answered*.
+  Fixed, and errors now end the run before any interpretation, because a partial arm cannot
+  be compared with a complete one. **"Not measured" has to be its own value, everywhere, or
+  it silently becomes a measurement.**
+- **A free tier drops excess calls at the connection level, not with a 429.** A direct call
+  with the real payload returns HTTP 200 in 25s; unpaced, the first two calls of each arm
+  answered and the rest arrived as `APIConnectionError`, which reads as a broken network and
+  is easy to misdiagnose as an exhausted quota. The probe now paces hosted providers at 8s
+  between calls. A complete 42-call run then went through without a single error.
 
 **One more finding, free.** `nvidia/nemotron-nano-9b-v2:free` took roughly **seven minutes
 per structured call**, so the cloud arm was abandoned rather than completed. It is a
