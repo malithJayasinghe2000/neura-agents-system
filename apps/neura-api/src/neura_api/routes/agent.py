@@ -13,6 +13,12 @@ The four endpoints are api-design.md §7 and §8:
     GET  /conversations                 cursor-paginated, filterable by state
     GET  /conversations/{id}            one transcript
 
+Plus three from milestone 1.15, which are the review queue of agent-runtime.md §6:
+
+    GET  /shadow                        what the agent would have said
+    POST /shadow/{id}/grade             agree · disagree · would-have-harmed
+    GET  /shadow/scorecard              counts, and every rate with its denominator
+
 **Chat and stream share one code path** — both build a ``TurnInput`` and hand it
 to ``TurnService``. api-design.md §8 requires it ("the transport is never allowed
 to become a second code path"), and the practical reason is that the golden suite
@@ -29,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.websockets import WebSocket
 
 from neura_agent_core.conversations import ConversationRepository, ConversationState
+from neura_agent_core.shadow import ShadowRepository, ShadowTurn, ShadowVerdict
 from neura_api import idempotency as idem
 from neura_api.dependencies import agent_context, client_address
 from neura_api.envelopes import decode_cursor, encode_cursor, envelope, page
@@ -54,6 +61,19 @@ log = get_logger(__name__)
 AI_DISCLOSURE = "You are chatting with an AI assistant."
 
 MAX_MESSAGE_CHARS = 4000
+
+
+class GradeRequest(BaseModel):
+    """One human's verdict on one withheld reply."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: ShadowVerdict
+    note: str = Field(default="", max_length=2000)
+    #: A free string, because there is no user table yet. Recorded rather than
+    #: omitted: "who approved this?" is the first question asked after a bad
+    #: answer reaches a shopper.
+    reviewed_by: str = Field(default="", max_length=128)
 
 
 class CustomerRef(BaseModel):
@@ -251,6 +271,119 @@ def build_router(agent_key: str) -> APIRouter:
             request_id=getattr(request.state, "request_id", None),
         )
 
+    # ── Shadow mode: the review queue (agent-runtime.md §6) ──────────────────
+    #
+    # Three endpoints and one asymmetry worth naming: reading the queue and
+    # grading it are **separate scopes**. A merchant's dashboard showing what the
+    # agent would have said needs `shadow:read`; changing a verdict is a
+    # different act by a different person, and a key that can only look is the
+    # one most integrations want.
+
+    @router.get("/shadow", summary="Shadowed turns awaiting review, newest first")
+    async def list_shadow_turns(
+        request: Request,
+        graded: Annotated[bool | None, Query()] = None,
+        cursor: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> dict[str, Any]:
+        context = await agent_context(request, agent_key, scopes=(f"{agent_key}:shadow:read",))
+        position = decode_cursor(cursor)
+        before = None
+        if position is not None:
+            from datetime import datetime
+
+            before = (datetime.fromisoformat(str(position["c"])), str(position["i"]))
+
+        db = request.app.state.database
+        async with db.tenant_session(context.tenant_id) as session:
+            rows = await ShadowRepository(session).pending(
+                context.tenant_id, graded=graded, before=before, limit=limit + 1
+            )
+
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = (
+            encode_cursor({"c": rows[-1].created_at.isoformat(), "i": rows[-1].id})
+            if has_more and rows and rows[-1].created_at is not None
+            else None
+        )
+        return page(
+            [_shadow_payload(row) for row in rows],
+            next_cursor=next_cursor,
+            request_id=getattr(request.state, "request_id", None),
+        )
+
+    @router.post("/shadow/{shadow_id}/grade", summary="Record a human verdict on one turn")
+    async def grade_shadow_turn(
+        request: Request, shadow_id: str, body: GradeRequest
+    ) -> dict[str, Any]:
+        context = await agent_context(request, agent_key, scopes=(f"{agent_key}:shadow:write",))
+
+        db = request.app.state.database
+        async with db.tenant_session(context.tenant_id) as session:
+            repository = ShadowRepository(session)
+            graded = await repository.grade(
+                context.tenant_id,
+                shadow_id,
+                verdict=body.verdict,
+                note=body.note,
+                reviewed_by=body.reviewed_by,
+            )
+            if not graded:
+                # 404 rather than 403 for a row belonging to another tenant, and
+                # they are the same response for a reason: under RLS the row is
+                # not merely forbidden, it is not visible, and distinguishing the
+                # two would turn this endpoint into a way of asking whether an id
+                # exists somewhere else.
+                raise NotFoundError("No such shadowed turn.", details={"id": shadow_id})
+            row = await repository.get(context.tenant_id, shadow_id)
+
+        log.info(
+            "shadow_graded",
+            tenant_id=context.tenant_id,
+            agent=agent_key,
+            shadow_id=shadow_id,
+            verdict=body.verdict.value,
+        )
+        return envelope(
+            _shadow_payload(row) if row else {},
+            request_id=getattr(request.state, "request_id", None),
+        )
+
+    @router.get("/shadow/scorecard", summary="What the shadow queue says so far")
+    async def shadow_scorecard(request: Request) -> dict[str, Any]:
+        context = await agent_context(request, agent_key, scopes=(f"{agent_key}:shadow:read",))
+
+        db = request.app.state.database
+        async with db.tenant_session(context.tenant_id) as session:
+            card = await ShadowRepository(session).scorecard(context.tenant_id, agent_key=agent_key)
+
+        return envelope(
+            {
+                # Counts first, and every rate below carries its denominator.
+                # A run of two graded turns and a run of two hundred must not
+                # produce the same-looking "100%" (CLAUDE.md §4).
+                "recorded": card.total,
+                "graded": card.graded,
+                "ungraded": card.ungraded,
+                "verdicts": {
+                    "agree": card.agree,
+                    "disagree": card.disagree,
+                    "would_have_harmed": card.would_have_harmed,
+                },
+                # `null` until something is graded, rather than 0.0 — an
+                # unreviewed queue is not a queue that failed review.
+                "agreement_rate": card.agreement_rate,
+                # A boolean, not a rate. There is no acceptable percentage of
+                # harmful answers about a shopper's money.
+                "harm_free": card.harm_free,
+                "escalated": card.escalated,
+                "cost_usd": str(card.cost_usd),
+                "total_latency_ms": card.total_latency_ms,
+            },
+            request_id=getattr(request.state, "request_id", None),
+        )
+
     return router
 
 
@@ -328,6 +461,40 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
         ).model_dump(mode="json"),
         request_id=str(getattr(getattr(request, "state", None), "request_id", "") or ""),
     )
+
+
+def _shadow_payload(row: ShadowTurn) -> dict[str, Any]:
+    """One queued turn, as a reviewer sees it.
+
+    Everything needed to grade it without re-running it: what it would have
+    said, what it looked at, what `verify` thought, and what it would have cost.
+    """
+    return {
+        "id": row.id,
+        "conversation_id": row.conversation_id,
+        "message_id": row.message_id,
+        "mode": row.mode,
+        "intent": row.intent,
+        "state": row.state,
+        # Tokenised, exactly as it is stored. A queue read for six weeks does not
+        # become a store of card numbers (security-model.md §6.2).
+        "draft": row.draft,
+        "escalated": row.escalated,
+        "grounded": row.grounded,
+        "verify_reason": row.verify_reason,
+        "tools": row.tools,
+        "citations": row.citations,
+        "tool_calls": row.tool_calls,
+        "llm_calls": row.llm_calls,
+        "cost_usd": str(row.cost_usd),
+        "latency_ms": row.latency_ms,
+        "prompt_revision": row.prompt_revision,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "verdict": row.verdict.value if row.verdict else None,
+        "note": row.note,
+        "reviewed_by": row.reviewed_by,
+        "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+    }
 
 
 def _conversation_payload(conversation: Any) -> dict[str, Any]:

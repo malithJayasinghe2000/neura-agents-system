@@ -262,6 +262,8 @@ transports; `Origin` is still sent on the handshake, so the origin lock on
 
 ## 9. Outbound Webhooks
 
+**Shadow review (1.15).** `GET /v1/{agent}/shadow` lists what the agent would have said, newest first, filterable by `graded` and cursor-paginated. `POST /v1/{agent}/shadow/{id}/grade` records one of three verdicts — `agree` · `disagree` · `would_have_harmed` — plus an optional note and reviewer. `GET /v1/{agent}/shadow/scorecard` returns counts, and **every rate carries its denominator**: `agreement_rate` is `null` until something is graded, and harm is reported as a boolean `harm_free` rather than a percentage, because there is no acceptable share of harmful answers about a shopper's money. Reading and grading are **separate scopes** (`shadow:read`, `shadow:write`): a dashboard is not a reviewer.
+
 Events we push to the merchant: `conversation.started` · `conversation.resolved` · `conversation.escalated` · `agent.action.pending_approval` · `store.sync.failed` · `budget.threshold.reached`.
 
 ```http

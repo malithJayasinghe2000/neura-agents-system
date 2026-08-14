@@ -4,13 +4,18 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-14 (shadow mode — the mechanism, 1.15 part one)
-**Current phase:** Phase 1 — milestones 1.1–1.14 complete, 1.15 half done
-**Next action:** **Finish 1.15 — the review queue API and the scorecard.** The mechanism
-landed on 2026-08-14: a turn runs in full, the shopper sees nothing, and the draft is in
-`shadow_turns` under forced RLS. Nothing grades it yet. **Do not add sampling first** —
-**A4** is unanswered and a rate chosen before anybody has graded for an hour is a rate
-invented to fit an imaginary constraint.
+**Last updated:** 2026-08-15 (shadow mode complete — 1.15)
+**Current phase:** Phase 1 — milestones 1.1–1.15 complete
+**Next action:** **Milestone 1.16 — the widget.** Embeddable chat, client-side rendered, AI
+disclosure, origin-locked public keys. It is the first surface a real shopper would touch, and
+the public-key path it needs already exists and is inert until origin-locked.
+
+**1.15 completed on 2026-08-15.** A turn can run in full with the shopper shown nothing, and
+the draft is graded through `GET /shadow`, `POST /shadow/{id}/grade` and
+`GET /shadow/scorecard`. **Do not add sampling** — **A4** is unanswered, and a rate chosen
+before anybody has graded for an hour is a rate invented to fit an imaginary constraint.
+There is still no console to grade *in* (Phase 2) and no path from a graded turn into a
+golden case (**E1**).
 
 **Also closed on 2026-08-13: A10.** `GUARD` is now `llama3.1:8b`
 ([ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)), measured n=3 either side with
@@ -97,7 +102,8 @@ the better buy of the two. Do not restart either without reading that entry firs
 | API keys | ✅ `fn_sk_`/`fn_pk_`, 256 random bits, SHA-256 at rest, scoped · expirable · revocable · `last_used_at`. Public keys are **inert** until origin-locked. **The lookup runs before the tenant is known** — a read-only session that can see exactly the row whose hash it presented ([ADR-0014](architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
 | Budgets | ✅ soft → fewer tool calls, hard → **empty tool allowlist**, so every turn escalates. No new graph branch: it reuses policy check 4. **Untriggerable until 1.14 records usage (P5)** |
 | Usage metering | ✅ **1.14 — P5 closed.** Every turn records a `UsageDelta` in the same transaction as the transcript: turns/calls/tokens/cost from a metering LLM **wrapper** (no node changed), tool calls and escalations from the graph. `spend_today` is a real number, so the ADR-0015 ladder is triggerable |
-| **Shadow mode** | ◐ **1.15 — the mechanism, not the milestone.** A turn runs in full and the shopper is shown nothing: `TurnMode` per tenant **and** per intent, the draft to a forced-RLS `shadow_turns` queue, the reply withheld over both REST and the WebSocket. **The review queue API and the scorecard are not built**, so nothing grades anything yet and no shadow turn has become a golden case (**E1**) |
+| **Shadow mode** | ✅ **1.15** — a turn runs in full and the shopper sees nothing; the draft lands in a forced-RLS `shadow_turns` queue with `agree` / `disagree` / `would_have_harmed`, and a scorecard that reports **counts beside every rate**. What is still missing is a **console** to grade in (Phase 2) and a path from a graded turn into a golden case (**E1**) |
+| ~~Shadow mode, part one~~ | ◐ **superseded by the row above.** A turn runs in full and the shopper is shown nothing: `TurnMode` per tenant **and** per intent, the draft to a forced-RLS `shadow_turns` queue, the reply withheld over both REST and the WebSocket. **The review queue API and the scorecard are not built**, so nothing grades anything yet and no shadow turn has become a golden case (**E1**) |
 | Conversations | ✅ **1.14** — the Postgres transcript of agent-runtime.md §5: `conversations` + `conversation_messages`, forced RLS, cursor-paginated. It is what makes turn 2 know what turn 1 was about, and what `GET /v1/*/conversations` reads. **The shopper's message is stored as the guard left it** — tokenised |
 | Idempotency | ✅ **1.14** — per-tenant keys, 24h, replay returns the original response with `Idempotency-Replayed: true`, same key + different body is a 409. Claim commits *before* the work, completion *with* it |
 | Rate limits | ✅ **1.14** — several subjects at once, narrowest binds ([ADR-0017](architecture/adr/0017-rate-limit-subjects.md)); Redis counters that **fail open, loudly**. Every limit is a guess and labelled as one |
@@ -159,15 +165,15 @@ the wild rather than a new finding.
 1.13 Multi-tenancy              ✅ done  (zero model calls; RLS on four new tables)
 1.14 API                        ✅ done  (three seams became controls)
 
-1.15 Shadow mode                ◐   mechanism + persistence done;
-                                    review queue + scorecard NOT built
+1.15 Shadow mode                ✅  mechanism · review queue · scorecard
+                                    (no console to grade in — Phase 2)
 1.16 Widget                     ⬜
 1.17 Deploy                     ⬜
 ```
 
 **Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for **all thirteen** `tenant_id` tables; each new table is covered by the same test, which is why 1.14's five came with it for free) · **end-to-end conversation working ✅ — now over REST and over a WebSocket** (`make api-check` against the real shop).
 
-Remaining: **shadow mode producing *graded* conversations** — 1.15 built the half that produces them; grading needs the queue API, the scorecard and a person (**A4**, **B2**) · evals green on both role maps (**not green on either** — 31–32 of the original 35 on `ollama-dev`, with escalation *precision* the one gate still unmet at 0.78–0.88 against 0.85; the cloud map has no model configured) · injection resistance 1.00 (**met, including with the guard disabled — a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
+Remaining: **shadow mode producing *graded* conversations** — every part except the people is built (the queue records turns, the API grades them, the scorecard counts them). What is missing is real traffic to shadow and somebody to grade it (**B2**, **A4**), and a path from a graded turn into a golden case (**E1**) · evals green on both role maps (**not green on either** — 31–32 of the original 35 on `ollama-dev`, with escalation *precision* the one gate still unmet at 0.78–0.88 against 0.85; the cloud map has no model configured) · injection resistance 1.00 (**met, including with the guard disabled — a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
 
 **Escalation recall reached its gate on 2026-07-31**, and it is worth knowing *how*: not by improving the agent but by fixing the metric (E5). Nothing about CARE changed.
 
@@ -259,7 +265,43 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
 
-### 2026-08-14 — Shadow mode: the mechanism, not the milestone (1.15, part one)
+### 2026-08-15 — The review queue and the scorecard (1.15 complete)
+
+**Three endpoints, and the shape of them is the argument.** `GET /shadow` lists what the
+agent would have said, filterable by `graded` and keyset-paginated so a reviewer working
+through a queue never skips a row that a new turn pushed down. `POST /shadow/{id}/grade`
+records **agree · disagree · would_have_harmed** — the three words of §6, unchanged.
+`GET /shadow/scorecard` counts them.
+
+**Why three verdicts and not two.** "Disagree" covers unhelpful, off-key or wrong, and most
+disagreements are that. **"Would have harmed" is the one that stops a go-live**: a wrong
+order status, an invented refund, a policy stated more generously than the merchant's own
+page. Folding it into "disagree" would average the only signal that matters into the noise of
+the one that does not — one harmful turn in fifty is not "96% agreement".
+
+**The scorecard is built so it cannot flatter itself.** Counts first; every rate carries its
+denominator; `agreement_rate` is **null** until something is graded rather than 0.0, because
+an unreviewed queue is not a queue that failed review; and harm is a **boolean**
+(`harm_free`) rather than a percentage, because there is no acceptable share of harmful
+answers about a shopper's money. That is CLAUDE.md §4 applied to a surface a merchant will
+eventually read.
+
+**Two smaller decisions worth knowing.** Reading the queue and grading it are **separate
+scopes** — a dashboard is not a reviewer. And a grade **can be changed**: first-verdict-wins
+sounds safer and is not, because a reviewer told their mis-click is permanent grades slowly
+or stops. `reviewed_at` / `reviewed_by` always describe the current verdict.
+
+**Measured.** 16 shadow tests now (7 from part one, 9 new), all against real PostgreSQL:
+grading moves a row out of the ungraded queue, another tenant's row is a **404 and not a
+403** (under RLS it does not exist, and 403 would confirm that it does somewhere), the
+scorecard reports `null` before anything is graded, and one harmful verdict is not averaged
+away. 630 unit + 111 integration green, 7 contracts kept, migration applied, no model drift.
+**No models were run at all** — nothing here touches the graph.
+
+- **Next:** 1.16, the widget. **A4 is still the thing to answer first if anyone starts
+  grading**: sampling stays unbuilt until an hour of real review has measured what it costs.
+
+### 2026-08-14 — Shadow mode: the mechanism (1.15, part one)
 
 **A turn can now run in full and show the shopper nothing.** `TurnMode` per tenant **and**
 per intent, the reply withheld over REST and the WebSocket, and the draft written to a

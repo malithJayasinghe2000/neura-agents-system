@@ -68,6 +68,11 @@ MANIFEST = AgentManifest(
         {
             "care:chat:write",
             "care:conversations:read",
+            # Reading the shadow queue and grading it are separate on purpose: a
+            # dashboard that shows what the agent would have said is a different
+            # thing from a key that can change a verdict.
+            "care:shadow:read",
+            "care:shadow:write",
             "care:knowledge-base:write",
             "care:order:read",
             "care:catalogue:read",

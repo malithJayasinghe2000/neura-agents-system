@@ -268,6 +268,8 @@ async def _provision(
             else [
                 "care:chat:write",
                 "care:conversations:read",
+                "care:shadow:read",
+                "care:shadow:write",
                 "care:order:read",
                 "care:catalogue:read",
                 "care:policies:read",
@@ -1117,6 +1119,153 @@ class TestShadowMode:
 
         async with db.tenant_session(TENANT_B) as session:
             assert await ShadowRepository(session).pending(TENANT_B) == []
+
+
+class TestTheReviewQueue:
+    """1.15 part two. Rows a human can actually work through, and a scorecard
+    that cannot flatter itself."""
+
+    async def _one_shadowed_turn(self, client: TestClient, db: Database) -> tuple[str, str]:
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+        client.post(
+            "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
+        )
+        listed = client.get("/v1/care/shadow", headers=_auth(token)).json()["data"]
+        return token, listed[0]["id"]
+
+    async def test_the_queue_shows_what_would_have_been_said(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token, _ = await self._one_shadowed_turn(client, db)
+
+        response = client.get("/v1/care/shadow", headers=_auth(token))
+
+        assert response.status_code == 200
+        row = response.json()["data"][0]
+        # Everything needed to grade it without re-running the turn.
+        assert row["draft"]
+        assert row["verdict"] is None
+        assert row["intent"]
+        assert "grounded" in row and "verify_reason" in row
+        assert "cost_usd" in row and "latency_ms" in row
+
+    async def test_grading_moves_a_row_out_of_the_ungraded_queue(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token, shadow_id = await self._one_shadowed_turn(client, db)
+
+        graded = client.post(
+            f"/v1/care/shadow/{shadow_id}/grade",
+            json={"verdict": "agree", "note": "would have sent this", "reviewed_by": "malith"},
+            headers=_auth(token),
+        )
+
+        assert graded.status_code == 200
+        assert graded.json()["data"]["verdict"] == "agree"
+        assert graded.json()["data"]["reviewed_by"] == "malith"
+
+        ungraded = client.get("/v1/care/shadow?graded=false", headers=_auth(token)).json()["data"]
+        done = client.get("/v1/care/shadow?graded=true", headers=_auth(token)).json()["data"]
+        assert ungraded == []
+        assert [r["id"] for r in done] == [shadow_id]
+
+    async def test_a_grade_can_be_corrected(self, client: TestClient, db: Database) -> None:
+        """First-verdict-wins sounds safer and is not: a reviewer told their
+        mis-click is permanent grades more carefully than quickly, or stops."""
+        token, shadow_id = await self._one_shadowed_turn(client, db)
+
+        client.post(
+            f"/v1/care/shadow/{shadow_id}/grade", json={"verdict": "agree"}, headers=_auth(token)
+        )
+        corrected = client.post(
+            f"/v1/care/shadow/{shadow_id}/grade",
+            json={"verdict": "would_have_harmed", "note": "wrong returns window"},
+            headers=_auth(token),
+        )
+
+        assert corrected.json()["data"]["verdict"] == "would_have_harmed"
+
+    async def test_grading_a_row_that_is_not_yours_is_a_404(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """403 would confirm the id exists somewhere. Under RLS it does not
+        exist here, and that is the honest answer to give."""
+        _, shadow_id = await self._one_shadowed_turn(client, db)
+        other = await _provision(db, TENANT_B)
+
+        response = client.post(
+            f"/v1/care/shadow/{shadow_id}/grade",
+            json={"verdict": "agree"},
+            headers=_auth(other),
+        )
+
+        assert response.status_code == 404
+
+    async def test_the_scorecard_reports_counts_beside_every_rate(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """CLAUDE.md §4. "100% agreement" over one graded turn and over two
+        hundred must not read the same."""
+        token, shadow_id = await self._one_shadowed_turn(client, db)
+
+        before = client.get("/v1/care/shadow/scorecard", headers=_auth(token)).json()["data"]
+        # Nothing graded yet: a rate here would be a number about no evidence.
+        assert before["recorded"] == 1
+        assert before["graded"] == 0
+        assert before["ungraded"] == 1
+        assert before["agreement_rate"] is None
+        assert before["harm_free"] is None
+
+        client.post(
+            f"/v1/care/shadow/{shadow_id}/grade", json={"verdict": "agree"}, headers=_auth(token)
+        )
+
+        after = client.get("/v1/care/shadow/scorecard", headers=_auth(token)).json()["data"]
+        assert after["graded"] == 1
+        assert after["agreement_rate"] == 1.0
+        assert after["verdicts"] == {"agree": 1, "disagree": 0, "would_have_harmed": 0}
+        assert after["harm_free"] is True
+
+    async def test_one_harmful_turn_is_not_averaged_away(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """The whole reason `would_have_harmed` is a third verdict and
+        `harm_free` is a boolean rather than a percentage."""
+        token, shadow_id = await self._one_shadowed_turn(client, db)
+        client.post(
+            f"/v1/care/shadow/{shadow_id}/grade",
+            json={"verdict": "would_have_harmed"},
+            headers=_auth(token),
+        )
+
+        card = client.get("/v1/care/shadow/scorecard", headers=_auth(token)).json()["data"]
+        assert card["harm_free"] is False
+        assert card["verdicts"]["would_have_harmed"] == 1
+
+    async def test_reading_the_queue_needs_its_own_scope(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, scopes=["care:chat:write"])
+        assert client.get("/v1/care/shadow", headers=_auth(token)).status_code == 403
+
+    async def test_grading_needs_more_than_reading(self, client: TestClient, db: Database) -> None:
+        """A dashboard that shows what the agent would have said is a different
+        thing from a key that can change a verdict."""
+        token = await _provision(db, TENANT_A, scopes=["care:chat:write", "care:shadow:read"])
+        response = client.post(
+            "/v1/care/shadow/msg_whatever/grade", json={"verdict": "agree"}, headers=_auth(token)
+        )
+        assert response.status_code == 403
+
+    async def test_another_tenants_queue_is_invisible(
+        self, client: TestClient, db: Database
+    ) -> None:
+        await self._one_shadowed_turn(client, db)
+        other = await _provision(db, TENANT_B)
+
+        assert client.get("/v1/care/shadow", headers=_auth(other)).json()["data"] == []
+        card = client.get("/v1/care/shadow/scorecard", headers=_auth(other)).json()["data"]
+        assert card["recorded"] == 0
 
 
 class TestStreaming:
