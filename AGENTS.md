@@ -101,6 +101,10 @@ make verify-probe [MODEL=… CLOUD=1]   # does `verify` catch a fabricated fact?
                                       # the GUARD role (ADR-0018). `llama3.2:3b` misses
                                       # both fabrications 10/10 — this is why GUARD is not
                                       # the router's 3B.
+make router-probe [MODEL=… ROLE_MAP=…]  # A11: can this model hold the ROUTER role?
+                                      # 5 messages, 3 budget arms. Capping a reasoning
+                                      # model is a QUALITY change: max_tokens=512 broke
+                                      # structured output on 4 of 5 cases.
 make api-check URL=… TOKEN=…   # the whole request path against a real shop: a real key
                                # authenticating, a store decrypted from the database, a
                                # usage row written, an audit entry for a blocked turn,

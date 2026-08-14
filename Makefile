@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        api-check verify-probe
+        api-check verify-probe router-probe
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -104,6 +104,12 @@ api-check:  ## Hold a conversation over HTTP and a socket, against a REAL shop
 verify-probe:  ## Can this model hold the GUARD role? Four arms, two controls. [MODEL=… CLOUD=1 N=10]
 	uv run python scripts/verify_probe.py -n $(or $(N),10) \
 	  $(if $(CLOUD),--role-map cloud-prod,) $(if $(MODEL),--model $(MODEL),)
+
+# Open question A11. The cloud ROUTER is a reasoning model with no thinking
+# budget, on the latency path of every turn — measured at ~7 minutes per call.
+router-probe:  ## A11: can this model hold the ROUTER role? [MODEL=… ROLE_MAP=…]
+	uv run python scripts/router_probe.py \
+	  $(if $(ROLE_MAP),--role-map $(ROLE_MAP),) $(if $(MODEL),--model $(MODEL),)
 
 care-check:  ## Hold real conversations with CARE against a REAL shop: make care-check URL=... TOKEN=...
 	uv run python scripts/care_smoke_test.py --url $(URL) --token $(TOKEN)

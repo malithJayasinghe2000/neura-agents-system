@@ -309,6 +309,18 @@ this verifier and every gate met. **n=1 rather than n≥3, deliberately and for 
 reason**: the harness never imports `neura_api`, so no code path it exercises can reach this
 change. n≥3 is for changes that can move the number, like the model swap earlier the same day.
 
+**And one thing measured on OpenRouter for nothing, because the laptop needed to cool down.**
+`make router-probe` exists now, and **A11 is re-scoped rather than closed**. The cloud ROUTER
+as configured routes 5/5 correctly with a **median of 7.7s** — the premise A11 was raised on,
+minutes per call on every turn, does not hold for routing. Both fixes A11 proposed are worse:
+`reasoning_effort="none"` is *slower* (median 11.2s), and `max_tokens=512` **broke structured
+output on 4 of 5 cases**, because a reasoning model truncated mid-thought cannot close its
+JSON. What *does* reproduce is the original sighting on the workload it was actually seen on:
+one `verify`-shaped call on the same model did not answer in **8 minutes**. So the finding is
+about that model on verify-shaped work, not about the ROUTER role — and nothing needs
+changing today, because `CLOUD_MODEL_GUARD` is `openai/gpt-oss-20b:free`, already screened
+5/5. About 16 of the 50 daily free calls spent.
+
 - **Next:** the review queue API and the scorecard — and **A4** before any sampling is added.
   Every shadowed turn is recorded and none is sampled, because a sampling rate chosen before
   anybody has graded for an hour is a rate invented to fit an imaginary constraint.
