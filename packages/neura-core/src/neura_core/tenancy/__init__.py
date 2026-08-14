@@ -38,6 +38,7 @@ from neura_core.tenancy.models import (
     TenantConfig,
     TenantStatus,
 )
+from neura_core.tenancy.modes import TurnMode, resolve_turn_mode
 from neura_core.tenancy.repository import (
     ApiKeyRepository,
     StoreConnectionRepository,
@@ -61,6 +62,7 @@ __all__ = [
     "TenantConfig",
     "TenantRepository",
     "TenantStatus",
+    "TurnMode",
     "UsageDelta",
     "UsageMeter",
     "UsageTotals",
@@ -69,6 +71,7 @@ __all__ = [
     "require_agent",
     "require_scopes",
     "resolve_runtime_policy",
+    "resolve_turn_mode",
     "tenant_stores",
     "tenant_usage",
     "tenants",

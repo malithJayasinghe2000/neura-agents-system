@@ -71,6 +71,22 @@ class ConversationState(StrEnum):
     ESCALATED = "escalated"
     BLOCKED = "blocked"
 
+    SHADOWED = "shadowed"
+    """The agent answered and the shopper was shown nothing (agent-runtime.md §6).
+
+    Added in 1.15, and it is a fifth value for the same reason there were four:
+    conflating it with anything else hides something a merchant needs. It is not
+    ``resolved`` — nothing was resolved, and a shadow turn counted as a resolution
+    would inflate the one number this product will eventually be sold on. It is
+    not ``escalated`` either: a shadow turn that escalated did not reach a person,
+    because reaching a person is an action and shadow mode takes none.
+
+    **A shadow turn's own outcome is not lost** — whether it would have escalated
+    is recorded on the ``shadow_turns`` row, which is where the question "what
+    would it have done?" belongs. This state answers the different question the
+    transcript is asked: what did the shopper experience?
+    """
+
 
 class Role(StrEnum):
     SHOPPER = "shopper"
@@ -352,6 +368,57 @@ class ConversationRepository:
             )
         )
         return shopper_id, agent_id
+
+    async def append_shopper_message(
+        self,
+        tenant_id: str,
+        conversation_id: str,
+        *,
+        shopper: str,
+        trace_id: str | None = None,
+    ) -> str:
+        """Write the shopper's message and **no reply**. Returns its id.
+
+        For a shadowed turn (agent-runtime.md §6). The shopper really did say
+        this, so it is history; the agent's draft really was not said, so it is
+        not. Writing it here anyway — even flagged — would make the next turn
+        answer as though the shopper had read it, and that error is invisible
+        precisely because the transcript is what "what happened" is later read
+        from.
+
+        The conversation still rolls forward. A turn happened, it cost money, and
+        a queue of shadowed turns whose conversations look untouched is a queue
+        nobody can find their way back from. ``escalations`` deliberately does
+        **not** move: a shadow turn that would have escalated reached nobody, and
+        counting it would put work in a merchant's escalation figures that no
+        colleague ever received.
+        """
+        sequence = await self._next_sequence(tenant_id, conversation_id)
+        message_id = new_id(MESSAGE)
+
+        await self._session.execute(
+            conversation_messages.insert().values(
+                tenant_id=tenant_id,
+                id=message_id,
+                conversation_id=conversation_id,
+                sequence=sequence,
+                role=Role.SHOPPER.value,
+                content=shopper,
+                trace_id=trace_id,
+                citations=[],
+            )
+        )
+        await self._session.execute(
+            update(conversations)
+            .where(conversations.c.tenant_id == tenant_id)
+            .where(conversations.c.id == conversation_id)
+            .values(
+                state=ConversationState.SHADOWED.value,
+                turns=conversations.c.turns + 1,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        return message_id
 
     async def _next_sequence(self, tenant_id: str, conversation_id: str) -> int:
         current = await self._session.scalar(

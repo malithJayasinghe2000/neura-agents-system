@@ -38,6 +38,7 @@ from neura_agent_core.conversations import ConversationRepository, ConversationS
 from neura_agent_core.rag import DatabaseVectorStore
 from neura_agent_core.rag.retrieval import Retriever
 from neura_agent_core.serving import AgentRunner, ProgressSink, TurnOutcome, TurnRequest
+from neura_agent_core.shadow import ShadowRepository, ShadowTurn
 from neura_agent_core.tools import SessionIdentity
 from neura_api.audit import TenantAuditLog
 from neura_api.metering import MeteredLLM
@@ -48,9 +49,11 @@ from neura_core.tenancy import (
     Admission,
     AuthenticatedCaller,
     RuntimePolicy,
+    TurnMode,
     UsageDelta,
     UsageMeter,
     resolve_runtime_policy,
+    resolve_turn_mode,
 )
 from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
 
@@ -86,10 +89,30 @@ class TurnResult:
     outcome: TurnOutcome
     policy: RuntimePolicy
     started_conversation: bool
+    #: What happened to the reply. ``SHADOW`` means the transport must not send
+    #: it — see ``reply`` below, which is the only thing a route should read.
+    mode: TurnMode = TurnMode.LIVE
+
+    @property
+    def is_shadowed(self) -> bool:
+        return self.mode is TurnMode.SHADOW
 
     @property
     def state(self) -> ConversationState:
-        return self.outcome.state
+        """What the *shopper* experienced, which is what the API reports."""
+        return ConversationState.SHADOWED if self.is_shadowed else self.outcome.state
+
+    @property
+    def reply(self) -> str:
+        """The text to send, which for a shadowed turn is nothing at all.
+
+        A property rather than a rule in a route handler, deliberately. There are
+        two transports and there will be more, and "remember not to send the
+        reply" is the kind of instruction that holds until somebody adds a third.
+        Reading ``outcome.reply`` directly is now the mistake, and it is one that
+        has to be made on purpose.
+        """
+        return "" if self.is_shadowed else self.outcome.reply
 
 
 class TurnService:
@@ -179,23 +202,60 @@ class TurnService:
             # leaks a connection pool per shopper.
             await _close(store.adapter)
 
+        # Shadow mode is resolved *after* the turn, because it is per-intent and
+        # the intent is something the turn produces (agent-runtime.md §6). That
+        # ordering is also what makes a shadow turn worth anything: the whole
+        # graph has already run, on the same models with the same tools, so what
+        # a human grades is the answer the shopper would have received rather
+        # than a cheaper approximation of it.
+        mode = resolve_turn_mode(
+            tenant_mode=turn.caller.tenant.config.mode,
+            shadow_intents=turn.caller.tenant.config.shadow_intents,
+            intent=outcome.intent,
+        )
+
         # ── After the turn: one transaction, everything or nothing ───────────
         async with self._db.tenant_session(tenant_id) as session:
-            _, message_id = await ConversationRepository(session).append_turn(
-                tenant_id,
-                conversation_id,
-                # As the guard left it. A transcript kept under a merchant's
-                # retention policy must not become a long-term store of card
-                # numbers (security-model.md §6.2) — the rehydrated text exists
-                # only in the reply the shopper saw.
-                shopper=turn.message,
-                reply=outcome.reply,
-                state=outcome.state,
-                intent=outcome.intent,
-                citations=[c.as_dict() for c in outcome.citations],
-                trace_id=turn.trace_id or None,
-                prompt_revision=outcome.prompt_revision,
-            )
+            conversations_repo = ConversationRepository(session)
+
+            if mode is TurnMode.SHADOW:
+                # The shopper's words are history; the agent's are not. The
+                # draft goes to the review queue in this same transaction, so
+                # "withheld from the shopper" and "recorded for a human" cannot
+                # come apart.
+                message_id = await conversations_repo.append_shopper_message(
+                    tenant_id,
+                    conversation_id,
+                    shopper=turn.message,
+                    trace_id=turn.trace_id or None,
+                )
+                await ShadowRepository(session).record(
+                    _shadow_turn(
+                        outcome,
+                        metered,
+                        tenant_id=tenant_id,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        agent_key=turn.agent_key,
+                        mode=mode,
+                    )
+                )
+            else:
+                _, message_id = await conversations_repo.append_turn(
+                    tenant_id,
+                    conversation_id,
+                    # As the guard left it. A transcript kept under a merchant's
+                    # retention policy must not become a long-term store of card
+                    # numbers (security-model.md §6.2) — the rehydrated text exists
+                    # only in the reply the shopper saw.
+                    shopper=turn.message,
+                    reply=outcome.reply,
+                    state=outcome.state,
+                    intent=outcome.intent,
+                    citations=[c.as_dict() for c in outcome.citations],
+                    trace_id=turn.trace_id or None,
+                    prompt_revision=outcome.prompt_revision,
+                )
 
             await UsageMeter(session).record(
                 tenant_id,
@@ -215,6 +275,7 @@ class TurnService:
                 tenant_id,
                 conversation_id=conversation_id,
                 outcome=outcome,
+                mode=mode,
                 policy=policy,
                 spend=spend + metered.spend.cost_usd,
                 crossed_into=crossed_into,
@@ -231,6 +292,7 @@ class TurnService:
             llm_calls=metered.spend.calls,
             cost_usd=str(metered.spend.cost_usd),
             admission=policy.admission.value,
+            mode=mode.value,
         )
 
         return TurnResult(
@@ -239,6 +301,7 @@ class TurnService:
             outcome=outcome,
             policy=policy,
             started_conversation=started,
+            mode=mode,
         )
 
     def _retriever(self, tenant_id: str, llm: object) -> Retriever | None:
@@ -277,12 +340,57 @@ def _delta(outcome: TurnOutcome, metered: MeteredLLM, *, conversation_started: b
     )
 
 
+def _shadow_turn(
+    outcome: TurnOutcome,
+    metered: MeteredLLM,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+    message_id: str,
+    agent_key: str,
+    mode: TurnMode,
+) -> ShadowTurn:
+    """One withheld turn, as a human will read it weeks later.
+
+    ``draft`` rather than ``reply`` — tokenised, and present even when the turn
+    escalated, which is the case somebody most wants to read. What the reply
+    *would* have been is the whole artefact here; ``outcome.reply`` is empty on an
+    escalated turn and rehydrated on an answered one, and neither is what belongs
+    in a queue kept for six weeks.
+
+    The cost figures come from the meter and the graph separately, exactly as the
+    usage row does (open question P5): neither side invents the other's numbers.
+    """
+    return ShadowTurn(
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        agent_key=agent_key,
+        mode=mode.value,
+        # The outcome the *agent* reached, not the one the shopper experienced.
+        # `TurnResult.state` reports the second; this records the first, and a
+        # scorecard that could not tell them apart would be measuring the mode.
+        state=outcome.state.value,
+        draft=outcome.draft or outcome.reply,
+        intent=outcome.intent,
+        escalated=outcome.escalated,
+        grounded=outcome.grounded,
+        verify_reason=outcome.verify_reason,
+        tools=[c.id for c in outcome.citations if c.type == "tool"],
+        citations=[c.as_dict() for c in outcome.citations],
+        tool_calls=outcome.tool_calls,
+        llm_calls=metered.spend.calls,
+        cost_usd=metered.spend.cost_usd,
+    )
+
+
 async def _emit(
     session: object,
     tenant_id: str,
     *,
     conversation_id: str,
     outcome: TurnOutcome,
+    mode: TurnMode,
     policy: RuntimePolicy,
     spend: Decimal,
     crossed_into: Admission,
@@ -312,7 +420,17 @@ async def _emit(
             )
         )
 
-    if outcome.escalated:
+    # **A shadowed turn emits neither outcome event, and the reason is the same
+    # one that makes the state a fifth value rather than a flag.** Nobody was
+    # escalated to and nothing was resolved: the reply was never sent. A
+    # `conversation.escalated` webhook here would put a ticket in a merchant's
+    # queue for a handover that did not happen, which is worse than silence
+    # because it is actionable. `conversation.started` above still fires — the
+    # conversation genuinely started — and so do the budget events below, because
+    # a shadow turn spends real money.
+    if mode is TurnMode.SHADOW:
+        pass
+    elif outcome.escalated:
         events.append(
             PendingEvent(
                 event=WebhookEvent.CONVERSATION_ESCALATED,

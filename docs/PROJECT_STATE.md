@@ -4,15 +4,21 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-13 (A10 resolved — the `GUARD` model)
-**Current phase:** Phase 1 — milestones 1.1–1.14 complete
-**Next action:** **Milestone 1.15 — shadow mode.** A10 is closed: `GUARD` is now
-`llama3.1:8b` ([ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)), measured n=3
-either side with no gate moving, and `verify` now refuses fabrications instead of
-pleasantries. Read the 2026-08-13 entry before touching the verifier again — including for
-why `qwen3:8b`, the obvious swap, is **not** what shipped.
+**Last updated:** 2026-08-14 (shadow mode — the mechanism, 1.15 part one)
+**Current phase:** Phase 1 — milestones 1.1–1.14 complete, 1.15 half done
+**Next action:** **Finish 1.15 — the review queue API and the scorecard.** The mechanism
+landed on 2026-08-14: a turn runs in full, the shopper sees nothing, and the draft is in
+`shadow_turns` under forced RLS. Nothing grades it yet. **Do not add sampling first** —
+**A4** is unanswered and a rate chosen before anybody has graded for an hour is a rate
+invented to fit an imaginary constraint.
 
-**Milestone 1.15 — shadow mode.** The agent answers alongside a human
+**Also closed on 2026-08-13: A10.** `GUARD` is now `llama3.1:8b`
+([ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)), measured n=3 either side with
+no gate moving, and `verify` now refuses fabrications instead of pleasantries. Read that entry
+before touching the verifier again — including for why `qwen3:8b`, the obvious swap, is
+**not** what shipped.
+
+**What 1.15 is still for.** The agent answers alongside a human
 without being sent, and the answers are graded. It is the first milestone that can produce
 a *real* golden case — which is the top blocker on the eval strategy (**E1**) and needs
 a design partner (**B2**), still the top project risk.
@@ -91,6 +97,7 @@ the better buy of the two. Do not restart either without reading that entry firs
 | API keys | ✅ `fn_sk_`/`fn_pk_`, 256 random bits, SHA-256 at rest, scoped · expirable · revocable · `last_used_at`. Public keys are **inert** until origin-locked. **The lookup runs before the tenant is known** — a read-only session that can see exactly the row whose hash it presented ([ADR-0014](architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
 | Budgets | ✅ soft → fewer tool calls, hard → **empty tool allowlist**, so every turn escalates. No new graph branch: it reuses policy check 4. **Untriggerable until 1.14 records usage (P5)** |
 | Usage metering | ✅ **1.14 — P5 closed.** Every turn records a `UsageDelta` in the same transaction as the transcript: turns/calls/tokens/cost from a metering LLM **wrapper** (no node changed), tool calls and escalations from the graph. `spend_today` is a real number, so the ADR-0015 ladder is triggerable |
+| **Shadow mode** | ◐ **1.15 — the mechanism, not the milestone.** A turn runs in full and the shopper is shown nothing: `TurnMode` per tenant **and** per intent, the draft to a forced-RLS `shadow_turns` queue, the reply withheld over both REST and the WebSocket. **The review queue API and the scorecard are not built**, so nothing grades anything yet and no shadow turn has become a golden case (**E1**) |
 | Conversations | ✅ **1.14** — the Postgres transcript of agent-runtime.md §5: `conversations` + `conversation_messages`, forced RLS, cursor-paginated. It is what makes turn 2 know what turn 1 was about, and what `GET /v1/*/conversations` reads. **The shopper's message is stored as the guard left it** — tokenised |
 | Idempotency | ✅ **1.14** — per-tenant keys, 24h, replay returns the original response with `Idempotency-Replayed: true`, same key + different body is a 409. Claim commits *before* the work, completion *with* it |
 | Rate limits | ✅ **1.14** — several subjects at once, narrowest binds ([ADR-0017](architecture/adr/0017-rate-limit-subjects.md)); Redis counters that **fail open, loudly**. Every limit is a guess and labelled as one |
@@ -152,14 +159,15 @@ the wild rather than a new finding.
 1.13 Multi-tenancy              ✅ done  (zero model calls; RLS on four new tables)
 1.14 API                        ✅ done  (three seams became controls)
 
-1.15 Shadow mode                ⬜   ← NEXT
+1.15 Shadow mode                ◐   mechanism + persistence done;
+                                    review queue + scorecard NOT built
 1.16 Widget                     ⬜
 1.17 Deploy                     ⬜
 ```
 
 **Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for **all thirteen** `tenant_id` tables; each new table is covered by the same test, which is why 1.14's five came with it for free) · **end-to-end conversation working ✅ — now over REST and over a WebSocket** (`make api-check` against the real shop).
 
-Remaining: evals green on both role maps (**not green on either** — 31–32 of the original 35 on `ollama-dev`, with escalation *precision* the one gate still unmet at 0.78–0.88 against 0.85; the cloud map has no model configured) · injection resistance 1.00 (**met, including with the guard disabled — a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
+Remaining: **shadow mode producing *graded* conversations** — 1.15 built the half that produces them; grading needs the queue API, the scorecard and a person (**A4**, **B2**) · evals green on both role maps (**not green on either** — 31–32 of the original 35 on `ollama-dev`, with escalation *precision* the one gate still unmet at 0.78–0.88 against 0.85; the cloud map has no model configured) · injection resistance 1.00 (**met, including with the guard disabled — a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
 
 **Escalation recall reached its gate on 2026-07-31**, and it is worth knowing *how*: not by improving the agent but by fixing the metric (E5). Nothing about CARE changed.
 
@@ -250,6 +258,60 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-14 — Shadow mode: the mechanism, not the milestone (1.15, part one)
+
+**A turn can now run in full and show the shopper nothing.** `TurnMode` per tenant **and**
+per intent, the reply withheld over REST and the WebSocket, and the draft written to a
+forced-RLS `shadow_turns` queue in the same transaction as the transcript and the usage row.
+
+**The review queue API and the scorecard are NOT built**, so nothing grades anything yet and
+1.15 is not finished. That was the agreed scope: build the half that produces rows, then
+build the queue against rows that exist rather than against imagined ones.
+
+**Where the mode is decided, and why it is not a graph change.** The ingress is the existing
+`/v1/*/chat` — there is no helpdesk to shadow, because there is no design partner (**B2**).
+So the mode gates the turn at the end rather than forking it: the whole graph runs, same
+tools, same policy engine, same `verify`, and the reply is withheld. A shadow run whose
+behaviour differed from the live one would measure a system nobody is going to ship. It also
+means `neura-agent-core` and CARE learn nothing about modes, and the golden suite is
+structurally unable to reach any of this — the harness imports no `neura_api`.
+
+**Four decisions, each of which could have gone the other way:**
+
+- **An unreadable mode resolves to `SHADOW`, not `LIVE`.** Two rules collide here:
+  `TenantConfig` ignores unknown keys so a newer config cannot stop a rolled-back deployment
+  reading its own tenants, and a strict enum on `mode` would have broken exactly that. But
+  defaulting a tenant who wrote `supervised` to `LIVE` makes them **more** exposed than they
+  asked. Withholding satisfies both — the failure looks like an agent gone quiet, never one
+  that has started talking.
+- **`SUGGEST` and `SUPERVISED` are absent, not accepted-and-ignored.** From this layer
+  `SUGGEST` *is* `SHADOW`; what separates them is a console, which is Phase 2. `SUPERVISED`
+  needs a recall path that does not exist. `TenantConfig`'s own docstring is the rule: a knob
+  nothing consults is a setting that appears to work.
+- **The draft never enters the transcript.** A reply nobody read must not become history the
+  next turn answers against — and that error is invisible precisely because the transcript is
+  what "what happened" is later read from. The shopper's message *is* written. This is why
+  `ConversationState` gained a fifth value, `shadowed`: `resolved` would inflate the one
+  number this product eventually gets sold on, and `escalated` would claim a colleague was
+  involved when none was.
+- **A shadow turn still costs money and still writes a usage row**, and emits no
+  `conversation.resolved` or `conversation.escalated` webhook. The merchant is paying for the
+  evidence; they are not being told a person was called when nobody was.
+
+**Measured.** 6 unit + 7 integration tests, the integration ones against real PostgreSQL —
+including that a shadow row is invisible to another tenant, that the queue gets the draft
+while the transcript does not, and that a shadowed socket sends no `token` frame. 630 unit +
+102 integration green, 7 contracts kept, migration applied with forced RLS and no model
+drift. **Golden suite, n=1, `--no-judge`: 44/47, escalation precision 0.88 ✔, recall 1.00,
+injection resistance 1.00, intent 0.95, tool selection 1.00** — the best of the six runs on
+this verifier and every gate met. **n=1 rather than n≥3, deliberately and for a structural
+reason**: the harness never imports `neura_api`, so no code path it exercises can reach this
+change. n≥3 is for changes that can move the number, like the model swap earlier the same day.
+
+- **Next:** the review queue API and the scorecard — and **A4** before any sampling is added.
+  Every shadowed turn is recorded and none is sampled, because a sampling rate chosen before
+  anybody has graded for an hour is a rate invented to fit an imaginary constraint.
 
 ### 2026-08-13 — A10 resolved: the verifier was miscalibrated, not lenient
 

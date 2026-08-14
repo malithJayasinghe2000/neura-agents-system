@@ -157,13 +157,22 @@ async def run_streamed_turn(
             # text, delivered whole — typing out a refusal a character at a time
             # is theatre, and ADR-0016 says a blocked turn emits no `token`
             # frame at all.
-            if outcome.is_answer:
-                for start in range(0, len(outcome.reply), TOKEN_CHUNK_CHARS):
+            #
+            # **A shadowed turn emits none either**, and `result.reply` is empty
+            # for it, so the two conditions below are one condition read twice.
+            # ADR-0016's rule is that nothing reaches a shopper before `verify`
+            # has passed; shadow mode's is that nothing reaches them at all. The
+            # `step` and `tool_call` frames that already went out say which node
+            # ran and nothing about the answer, which is what makes them safe to
+            # send before the mode is even known — the intent it depends on does
+            # not exist until `route` has finished.
+            if outcome.is_answer and not result.is_shadowed:
+                for start in range(0, len(result.reply), TOKEN_CHUNK_CHARS):
                     await _send(
                         websocket,
                         {
                             "type": "token",
-                            "content": outcome.reply[start : start + TOKEN_CHUNK_CHARS],
+                            "content": result.reply[start : start + TOKEN_CHUNK_CHARS],
                         },
                     )
                     await asyncio.sleep(TOKEN_DELAY_S)
@@ -174,8 +183,8 @@ async def run_streamed_turn(
                     "type": "done",
                     "conversation_id": result.conversation_id,
                     "message_id": result.message_id,
-                    "reply": outcome.reply,
-                    "state": outcome.state.value,
+                    "reply": result.reply,
+                    "state": result.state.value,
                     "escalated": outcome.escalated,
                     "blocked": outcome.blocked,
                     "citations": [c.as_dict() for c in outcome.citations],

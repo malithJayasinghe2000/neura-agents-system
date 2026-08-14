@@ -163,6 +163,22 @@ class TurnOutcome:
     blocked: bool = False
     refused: bool = False
     grounded: bool | None = None
+    #: The reply as it stood when ``verify`` passed it — **before** rehydration,
+    #: so still tokenised. Empty on a turn that produced no draft.
+    #:
+    #: Two callers need it and neither can use ``reply``. A **shadow** turn has
+    #: no ``reply`` at all, because nothing was sent, and what a human grades is
+    #: this (agent-runtime.md §6). And a **failed eval case** is undiagnosable
+    #: without it — the harness recorded `composed chars=51` and threw the text
+    #: away, so open question **E7** meant re-running a twenty-minute suite to
+    #: see one sentence. Tokenised is the right form for both: a review queue and
+    #: an eval report are read for weeks, and neither should accumulate card
+    #: numbers (security-model.md §6.2).
+    draft: str = ""
+    #: Why ``verify`` said what it said. The other half of E7 — a refusal whose
+    #: reason is not recorded is a refusal somebody has to reproduce to argue
+    #: with.
+    verify_reason: str = ""
     intent: str | None = None
     citations: list[Citation] = field(default_factory=list)
     tool_calls: int = 0

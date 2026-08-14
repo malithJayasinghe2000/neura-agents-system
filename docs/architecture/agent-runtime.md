@@ -226,14 +226,22 @@ Real conversation ──► human answers the customer (as today)
 
 **Modes, as a progression:**
 
-| Mode | Customer sees | Used for |
-|:--|:--|:--|
-| `SHADOW` | Nothing | Pre-launch validation, model swaps |
-| `SUGGEST` | Nothing — the human sees a draft | Human-in-the-loop assist |
-| `SUPERVISED` | Agent replies, human can recall within N seconds | Cautious go-live |
-| `LIVE` | Agent replies | Steady state |
+| Mode | Customer sees | Used for | Built |
+|:--|:--|:--|:--|
+| `SHADOW` | Nothing | Pre-launch validation, model swaps | ✅ 1.15 |
+| `SUGGEST` | Nothing — the human sees a draft | Human-in-the-loop assist | ❌ needs a console |
+| `SUPERVISED` | Agent replies, human can recall within N seconds | Cautious go-live | ❌ needs a recall path |
+| `LIVE` | Agent replies | Steady state | ✅ the default |
 
 Mode is per-tenant **and** per-intent — a store can run `LIVE` for order status while keeping returns policy in `SUGGEST`. This is how a merchant is talked into adopting it: they choose exactly how much rope to give it.
+
+**Two of the four are deliberately absent rather than accepted and ignored** (1.15). From the serving layer's point of view `SUGGEST` *is* `SHADOW` — what separates them is a console for the human to read the draft in, and that is Phase 2. `SUPERVISED` needs a recall path, a timer and a button. A tenant configuring either today would silently get the mode this deployment understands, so an unreadable mode resolves to **`SHADOW`**: the failure shows up as an agent that has gone quiet, never as one that has started talking (`neura_core.tenancy.modes`).
+
+**How 1.15 built it: the mode gates the turn, it does not fork it.** A shadow turn runs the whole graph — same tools, same policy engine, same `verify` — and the reply is withheld at the end. There is deliberately no second execution path, because a shadow run whose behaviour differs from the live one measures a system nobody is going to ship. Three consequences, each of which is a place this could have gone silently wrong:
+
+- **The mode is resolved *after* the turn**, because it is per-intent and the intent is something the turn produces. A `step` frame may therefore reach a WebSocket before the mode is known — safe, because those name a node and nothing about the answer. No `token` frame is ever sent.
+- **The draft is not written to the transcript.** A reply nobody read must not become history the next turn answers against, and that error is invisible precisely because the transcript is what "what happened" is later read from. The shopper's own message *is* written; the draft goes to `shadow_turns`.
+- **A shadow turn still costs money and still writes a usage row**, and it emits no `conversation.resolved` or `conversation.escalated` webhook. The merchant is paying for the evidence; they are not being told a colleague was called when nobody was.
 
 Graded shadow conversations feed the golden dataset ([evaluation-strategy.md](evaluation-strategy.md)), so the review effort compounds instead of evaporating.
 

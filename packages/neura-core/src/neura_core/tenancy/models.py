@@ -11,9 +11,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from neura_core.tenancy.keys import ApiKeyKind
+from neura_core.tenancy.modes import TurnMode, coerce_mode
 
 
 class TenantStatus(StrEnum):
@@ -72,6 +73,31 @@ class TenantConfig(BaseModel):
             "every registered tool; an empty set means none of them."
         ),
     )
+    mode: TurnMode = Field(
+        default=TurnMode.LIVE,
+        description=(
+            "Does the shopper read the agent's reply? `shadow` runs the whole turn "
+            "and shows the shopper nothing (agent-runtime.md §6)."
+        ),
+    )
+    shadow_intents: frozenset[str] = Field(
+        default=frozenset(),
+        description=(
+            "Intents shadowed even while the tenant is live. This is the per-intent "
+            "half of §6 — live for order status, watched for returns policy."
+        ),
+    )
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _mode_falls_back_to_shadow(cls, value: object) -> object:
+        """An unreadable mode withholds rather than defaults — see ``modes.py``.
+
+        ``before``, deliberately: by the time Pydantic has rejected
+        ``"supervised"`` as an invalid enum member the whole tenant has failed to
+        load, and a tenant that cannot be read cannot be served at all.
+        """
+        return TurnMode.LIVE if value is None else coerce_mode(value)
 
 
 class Tenant(BaseModel):

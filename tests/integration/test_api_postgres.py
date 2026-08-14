@@ -42,6 +42,7 @@ from neura_agent_core.conversations import (
     conversations,
 )
 from neura_agent_core.graph.schema import audit_log
+from neura_agent_core.shadow import ShadowRepository, shadow_turns
 from neura_commerce import registry
 from neura_core import Database, get_database, get_settings
 from neura_core.errors import ConflictError, IdempotencyConflictError
@@ -81,6 +82,7 @@ ALL_TENANT_TABLES = (
     idempotency_keys,
     webhook_endpoints,
     webhook_deliveries,
+    shadow_turns,
 )
 
 
@@ -985,6 +987,136 @@ class TestIsolation:
 
 
 # ── The WebSocket transport (ADR-0016) ───────────────────────────────────────
+
+
+class TestShadowMode:
+    """Milestone 1.15. The turn runs in full and the shopper is shown nothing.
+
+    Every assertion here is about the difference between *what the agent did* and
+    *what the shopper experienced*, because that difference is the entire feature
+    and every way of getting it wrong is silent: a reply that leaks out, a draft
+    that lands in the transcript and becomes history, a queue with no rows in it.
+    """
+
+    async def test_a_shadowed_turn_returns_no_reply(self, client: TestClient, db: Database) -> None:
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        body = response.json()["data"]
+        assert body["reply"] == ""
+        assert body["state"] == ConversationState.SHADOWED.value
+
+    async def test_the_draft_reaches_the_queue_and_not_the_transcript(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """The one that matters. A draft written into the transcript becomes
+        history, and the next turn answers as though the shopper had read it."""
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        ).json()["data"]
+
+        async with db.tenant_session(TENANT_A) as session:
+            messages = await ConversationRepository(session).messages(
+                TENANT_A, body["conversation_id"]
+            )
+            queued = await ShadowRepository(session).pending(TENANT_A)
+
+        # The shopper spoke; the agent did not.
+        assert [m.role.value for m in messages] == ["shopper"]
+
+        assert len(queued) == 1
+        row = queued[0]
+        assert row.conversation_id == body["conversation_id"]
+        assert row.mode == "shadow"
+        assert row.message_id == messages[0].id
+        assert row.draft, "a shadow row with no draft is a queue entry nobody can grade"
+
+    async def test_a_shadowed_turn_still_costs_the_tenant(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """The merchant is paying for the evidence. Hiding that in the billing
+        would be a surprise on the invoice rather than a kindness."""
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+
+        client.post(
+            "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
+        )
+
+        async with db.tenant_session(TENANT_A) as session:
+            totals = await UsageMeter(session).totals(TENANT_A)
+        assert totals.turns == 1
+
+    async def test_one_intent_can_be_shadowed_while_the_tenant_is_live(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """The per-intent half of §6, and the reason a merchant adopts this at
+        all: live for order status, watched for returns policy."""
+        token = await _provision(
+            db, TENANT_A, config=TenantConfig(shadow_intents=frozenset({"policy_qa"}))
+        )
+
+        shadowed = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert shadowed["state"] == ConversationState.SHADOWED.value
+        assert shadowed["reply"] == ""
+
+    async def test_a_live_tenant_is_untouched(self, client: TestClient, db: Database) -> None:
+        """The default. Everything above must cost a tenant who asked for none
+        of it exactly nothing."""
+        token = await _provision(db, TENANT_A)
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert body["state"] != ConversationState.SHADOWED.value
+        async with db.tenant_session(TENANT_A) as session:
+            assert await ShadowRepository(session).pending(TENANT_A) == []
+
+    async def test_a_shadowed_stream_sends_no_text(self, client: TestClient, db: Database) -> None:
+        """ADR-0016 says nothing reaches a shopper before `verify` passes.
+        Shadow mode says nothing reaches them at all, and the socket is the
+        second place that has to be true."""
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+
+        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+            socket.send_json({"type": "message", "content": "what is your returns policy?"})
+            frames = _drain(socket)
+
+        assert not [f for f in frames if f["type"] == "token"]
+        assert frames[-1]["reply"] == ""
+        assert frames[-1]["state"] == ConversationState.SHADOWED.value
+
+    async def test_a_shadow_row_is_invisible_to_another_tenant(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """Forced RLS, on the newest table. Every table that carries a
+        `tenant_id` proves this or it does not ship."""
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+        await _provision(db, TENANT_B)
+
+        client.post(
+            "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
+        )
+
+        async with db.tenant_session(TENANT_B) as session:
+            assert await ShadowRepository(session).pending(TENANT_B) == []
 
 
 class TestStreaming:

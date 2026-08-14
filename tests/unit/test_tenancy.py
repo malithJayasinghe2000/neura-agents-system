@@ -37,6 +37,7 @@ from neura_core.tenancy.models import (
     TenantConfig,
     TenantStatus,
 )
+from neura_core.tenancy.modes import TurnMode, resolve_turn_mode
 from neura_core.tenancy.schema import tenant_usage
 from neura_core.tenancy.usage import COUNTERS, UsageDelta
 
@@ -358,3 +359,61 @@ class TestTenantConfig:
         assert config.daily_cost_usd_hard is None
         assert config.max_tool_calls is None
         assert config.allowed_tools is None
+
+
+class TestTurnMode:
+    """Milestone 1.15. Which way each mistake falls is the whole design here."""
+
+    def test_a_tenant_defaults_to_live(self) -> None:
+        """Everything shadow mode adds must cost a tenant who asked for none of
+        it exactly nothing."""
+        assert TenantConfig().mode is TurnMode.LIVE
+        assert TenantConfig().shadow_intents == frozenset()
+
+    def test_a_shadowed_tenant_shadows_every_intent(self) -> None:
+        assert (
+            resolve_turn_mode(
+                tenant_mode=TurnMode.SHADOW,
+                shadow_intents=frozenset(),
+                intent="order_status",
+            )
+            is TurnMode.SHADOW
+        )
+
+    def test_a_live_tenant_still_shadows_the_intents_it_named(self) -> None:
+        """The per-intent half of agent-runtime.md §6 — live for order status,
+        watched for returns policy."""
+        resolved = resolve_turn_mode(
+            tenant_mode=TurnMode.LIVE,
+            shadow_intents=frozenset({"policy_qa"}),
+            intent="policy_qa",
+        )
+        assert resolved is TurnMode.SHADOW
+
+    def test_an_unnamed_intent_on_a_live_tenant_stays_live(self) -> None:
+        resolved = resolve_turn_mode(
+            tenant_mode=TurnMode.LIVE,
+            shadow_intents=frozenset({"policy_qa"}),
+            intent="order_status",
+        )
+        assert resolved is TurnMode.LIVE
+
+    def test_a_turn_with_no_intent_follows_the_tenant(self) -> None:
+        """A blocked attack or a dead provider never reaches the router. Falling
+        back to LIVE would answer a shopper the merchant had not agreed to
+        answer."""
+        assert (
+            resolve_turn_mode(tenant_mode=TurnMode.SHADOW, shadow_intents=frozenset(), intent=None)
+            is TurnMode.SHADOW
+        )
+
+    def test_an_unreadable_mode_withholds_rather_than_defaults(self) -> None:
+        """The direction is the point. A tenant who configured a mode this
+        deployment has never heard of — `supervised`, from a newer version —
+        must not silently get the *more* permissive behaviour.
+
+        Refusing to load the tenant would honour that too, and would break the
+        rule the line above this class tests: a newer config must not stop an
+        older deployment reading its own tenants.
+        """
+        assert TenantConfig.model_validate({"mode": "supervised"}).mode is TurnMode.SHADOW

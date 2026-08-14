@@ -168,7 +168,9 @@ Idempotency-Key: idk_...
 }
 ```
 
-`state` ∈ `resolved` · `awaiting_customer` · `escalated` · `blocked`.
+`state` ∈ `resolved` · `awaiting_customer` · `escalated` · `blocked` · `shadowed`.
+
+`shadowed` (1.15) means the agent answered and the shopper was shown nothing — `reply` is empty and the draft is in the merchant's review queue ([agent-runtime §6](agent-runtime.md)). It is a fifth value rather than a flag for the same reason there were four: a shadow turn counted as `resolved` would inflate the one number this product is eventually sold on, and counted as `escalated` would claim a person was involved when none was. `escalated` and `blocked` still report what the *agent* did.
 `citations` make grounding visible to the integrator — and to us, when a merchant disputes an answer.
 `ai_disclosure` is always present ([EU AI Act Art. 50](../business/blueprint-v2.md#9-legal-compliance--risk)); the widget renders it, and any custom client is contractually required to.
 

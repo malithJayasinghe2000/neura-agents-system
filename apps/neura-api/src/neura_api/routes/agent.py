@@ -305,13 +305,23 @@ async def _rate_limit(
 
 
 def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str, Any]:
+    """What the caller is told.
+
+    ``reply`` and ``state`` come from the :class:`TurnResult`, not from the
+    outcome underneath it, and on a shadowed turn those differ: the reply is
+    empty and the state is ``shadowed`` (agent-runtime.md §6). ``escalated`` and
+    ``blocked`` still describe what the *agent* did, because a merchant reading
+    their own shadow traffic wants to know that it would have escalated — the
+    difference between "would have" and "did" is carried by ``state``, in one
+    place, rather than by three fields that could disagree.
+    """
     outcome = result.outcome
     return envelope(
         ChatData(
             conversation_id=result.conversation_id,
             message_id=result.message_id,
-            reply=outcome.reply,
-            state=outcome.state,
+            reply=result.reply,
+            state=result.state,
             escalated=outcome.escalated,
             blocked=outcome.blocked,
             citations=[Citation(type=c.type, id=c.id) for c in outcome.citations],

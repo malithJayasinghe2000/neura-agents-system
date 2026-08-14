@@ -163,6 +163,11 @@ def _outcome(final: dict[str, Any]) -> TurnOutcome:
         blocked=blocked,
         refused=bool(final.get("refused")),
         grounded=final.get("grounded"),
+        # The tokenised draft, not the rehydrated reply — see `TurnOutcome.draft`.
+        # It is present even when the turn escalated, which is exactly when
+        # somebody wants to read it.
+        draft=str(final.get("draft", "")),
+        verify_reason=str(final.get("verify_reason", "")),
         intent=final.get("intent"),
         citations=_citations(final),
         tool_calls=sum(1 for i in invocations if i.ok),
