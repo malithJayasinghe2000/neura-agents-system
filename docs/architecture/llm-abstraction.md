@@ -44,7 +44,7 @@ llm:
   roles:
     router:      { provider: ollama, model: "llama3.2:3b",           temperature: 0.0 }
     reasoner:    { provider: ollama, model: "qwen3.5:9b",            temperature: 0.3 }
-    guard:       { provider: ollama, model: "llama3.2:3b",           temperature: 0.0 }
+    guard:       { provider: ollama, model: "llama3.1:8b",           temperature: 0.0 }  # ADR-0018
     embedder:    { provider: ollama, model: "nomic-embed-text",      dimensions: 768  }
     summarizer:  { provider: ollama, model: "llama3.1:8b",           temperature: 0.3 }
 ```
@@ -283,7 +283,9 @@ Practical constraints discovered on this machine. Recorded so they are designed 
 | Context windows are smaller than cloud | Retrieval budget is a config value per role map, not a constant |
 | No GPU on typical PaaS hosts (Railway, Fly, Render) | Production cloud inference is an API call; **sovereign** deployments require the customer's own GPU host |
 
-**Models available locally today:** `llama3.2:3b`, `llama3.1:8b`, `qwen3.5:9b`, `qwen2.5-coder:7b`, `qwen2.5-coder:32b`, `deepseek-r1:14b`, `nomic-embed-text`.
+**Models available locally today:** `llama3.2:3b`, `llama3.1:8b`, `qwen3:8b`, `qwen3.5:9b`, `qwen2.5-coder:7b`, `qwen2.5-coder:32b`, `deepseek-r1:14b`, `nomic-embed-text`.
+
+**A model is not fit for a role until it has been measured in that role.** `llama3.2:3b` served `GUARD` for three milestones and, measured, called an invented delivery date and a contradicted order status "grounded" 10 times out of 10 each — while refusing pleasantries the prompt exempts. It is a capable classifier and was never a verifier. `make verify-probe` is the check, it is free, and [ADR-0018](adr/0018-guard-model-must-refuse.md) makes passing it the bar for the role.
 
 ---
 
@@ -292,4 +294,4 @@ Practical constraints discovered on this machine. Recorded so they are designed 
 1. **Cloud provider choice.** Deliberately unfixed. Decided by eval results, latency and price at the time of the swap — the whole point of this layer is that the decision is deferrable and reversible.
 2. **Reasoning models.** `deepseek-r1:14b` is available locally. Whether visible reasoning helps the verify/guard nodes enough to justify its latency is an open experiment.
 3. **Fine-tuning.** A small fine-tuned router could beat a large general model at intent classification, cheaply. Only worth exploring once real conversation data exists (and only with opt-in — [blueprint-v2 §7.5](../business/blueprint-v2.md)).
-4. **Sovereign hardware floor.** What is the minimum spec at which quality is acceptable? Needs measurement before the tier can be sold.
+4. **Sovereign hardware floor.** What is the minimum spec at which quality is acceptable? Needs measurement before the tier can be sold. **One hard input as of 2026-08-13:** the floor includes an 8B verifier beside the 8B reasoner, because a 3B in the `GUARD` role cannot tell an invented delivery date from a real one ([ADR-0018](adr/0018-guard-model-must-refuse.md)).

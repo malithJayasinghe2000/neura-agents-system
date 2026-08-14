@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""Open question A8 — is `verify`'s verdict stable under a change that carries no meaning?
+"""Can this model hold the `GUARD` role? Four arms, two of them controls.
 
     make verify-probe                       # local, free
     make verify-probe MODEL=nvidia/nemotron-nano-9b-v2:free CLOUD=1
     make verify-probe MODEL=openai/gpt-oss-20b:free CLOUD=1
+
+**This is the bar a `GUARD` model has to clear (ADR-0018), and it started life as a
+probe for open question A8.** Both jobs are still here and they are the same four
+arms: A and B ask whether the verdict is stable under a change that carries no
+meaning, C and D ask whether the verifier can refuse a fabrication at all. A
+candidate must pass all four. It exits non-zero on any miss in either direction —
+a verifier that refuses supported text and one that passes invented text are two
+ways of not being a verifier.
 
 **Why this file exists at all, before what it measures.** On 2026-07-29 twenty hand
 probes found `verify` refusing a supported claim 30 times out of 30 when a second,
@@ -252,7 +260,7 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
     verifier = llm.model_for(ModelRole.GUARD)
     pace = CLOUD_PACE_S if pace_s is None and role_map != "ollama-dev" else (pace_s or 0.0)
 
-    print(f"\n  {BOLD}A8 — verify stability under a meaning-free change{OFF}")
+    print(f"\n  {BOLD}verify — can this model hold the GUARD role?{OFF}")
     print(f"  {DIM}verifier   {verifier}  ({role_map}){OFF}")
     print(
         f"  {DIM}runs       {n} per condition · temperature 0.0"
@@ -335,6 +343,24 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
         )
         return 1
 
+    # The mirror of the branch above, and it was missing until 2026-08-13. A
+    # candidate prompt that caught every added fact and missed the contradicted
+    # status 10/10 printed "Fit for the GUARD role" — because the only
+    # per-control test was the one written for the failure that had already been
+    # seen. A control arm exists to be checked; one that can be failed silently
+    # is not a control.
+    if contradicted.refusals == 0:
+        print(
+            f"\n  {RED}THIS VERIFIER MISSES CONTRADICTED FACTS.{OFF} It caught an invented"
+            f" delivery date {added.refusals}/{added.answered} times and called"
+            f' "delivered" grounded in evidence that says `shipped` every time.'
+        )
+        print(
+            f"  {DIM}That case is the literal example in prompts/verify.md, so this is not a"
+            f" verifier the prompt can be written around.{OFF}\n"
+        )
+        return 1
+
     swing = abs(b.wrong(expect_grounded=True) - a.wrong(expect_grounded=True))
     if swing >= max(1, a.answered // 2):
         print(
@@ -342,6 +368,20 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
             f" on a change that carries no meaning.{OFF}"
         )
         print(f"  {DIM}A8 reproduces on this verifier.{OFF}\n")
+        return 1
+
+    missed = added.wrong(expect_grounded=False) + contradicted.wrong(expect_grounded=False)
+    if missed:
+        print(
+            f"\n  {RED}This verifier misses fabrications some of the time.{OFF} {missed} of"
+            f" {added.answered + contradicted.answered} control runs called an unsupported"
+            f" claim grounded, at temperature 0.0."
+        )
+        print(
+            f"  {DIM}Reported as a failure rather than a rate: the controls are unambiguous,"
+            f" and a verifier that catches them 8 times in 10 is a verifier a shopper meets"
+            f" on the other 2.{OFF}\n"
+        )
         return 1
 
     print(f"\n  {GREEN}Fit for the GUARD role on these strings.{OFF}")

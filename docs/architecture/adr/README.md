@@ -22,3 +22,6 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0013](0013-tenant-record-and-configuration.md) | The tenant record: one table, typed where it is enforced | Accepted |
 | [0014](0014-api-keys-and-the-rls-bootstrap.md) | API keys: SHA-256, and reading one row before the tenant is known | Accepted |
 | [0015](0015-usage-rollups-and-budget-degradation.md) | Usage is a daily rollup; a budget degrades rather than errors | Accepted |
+| [0016](0016-stream-only-after-verify.md) | The WebSocket streams the turn, not the draft — nothing reaches a shopper before `verify` | Accepted |
+| [0017](0017-rate-limit-subjects.md) | Rate limits: several subjects at once, the narrowest binds | Accepted |
+| [0018](0018-guard-model-must-refuse.md) | The `GUARD` model must be able to refuse, and is chosen by measurement | Accepted |

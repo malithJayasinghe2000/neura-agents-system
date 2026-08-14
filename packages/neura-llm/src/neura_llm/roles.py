@@ -186,6 +186,16 @@ def ollama_dev() -> RoleMap:
     people test by not testing. Defaults are what the measurements below chose;
     an override is how the next measurement gets made.
 
+    `GUARD` is `llama3.1:8b` and **not** the 3B that serves `ROUTER`, decided by
+    measurement on 2026-08-13 (open question A10, ADR-0018). `verify` runs on the
+    GUARD role and gates every answered turn, and `llama3.2:3b` called an
+    invented delivery date and a contradicted order status "grounded" **10 times
+    out of 10 each** — the second of which is the literal example in
+    `prompts/verify.md`. A verifier that cannot say no is not a verifier. Three
+    alternatives were measured and rejected: `qwen3:8b` is correct but ~16x
+    slower per call, and two strengthened prompts on the 3B each traded the miss
+    for a worse failure. `make verify-probe` is the measurement, and it is free.
+
     `REASONER` is `qwen3:8b`, measured against `qwen3.5:9b` and `llama3.1:8b`
     on 2026-07-29: identical tool selection (5/5) at roughly **half** the
     latency of the 9B, and a grounded draft of the same quality. `llama3.1:8b`
@@ -213,7 +223,7 @@ def ollama_dev() -> RoleMap:
             ),
             ModelRole.GUARD: RoleConfig(
                 provider="ollama",
-                model=os.getenv("OLLAMA_MODEL_GUARD", "llama3.2:3b"),
+                model=os.getenv("OLLAMA_MODEL_GUARD", "llama3.1:8b"),
                 temperature=0.0,
             ),
             ModelRole.EMBEDDER: RoleConfig(
@@ -279,12 +289,18 @@ def hybrid() -> RoleMap:
     which see every product and every customer message — on our own machines.
     """
     base = cloud_prod()
+    local = ollama_dev()
     return RoleMap(
         name="hybrid",
         providers={"ollama": _ollama_provider(), "cloud": base.providers["cloud"]},
         roles={
             ModelRole.ROUTER: RoleConfig(provider="ollama", model="llama3.2:3b", temperature=0.0),
-            ModelRole.GUARD: RoleConfig(provider="ollama", model="llama3.2:3b", temperature=0.0),
+            # Taken from `ollama_dev` rather than named again here. It was named
+            # again here, and that is how this map kept the verifier A10 found:
+            # the model was chosen once, written twice, and fixed in one place.
+            # Not separately measured — `make eval` runs `ollama-dev`, and this
+            # is the same model on the same prompt in the same node.
+            ModelRole.GUARD: local.roles[ModelRole.GUARD],
             ModelRole.EMBEDDER: RoleConfig(
                 provider="ollama", model="nomic-embed-text", dimensions=768
             ),

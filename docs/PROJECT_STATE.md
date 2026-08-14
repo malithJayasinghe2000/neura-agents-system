@@ -4,15 +4,15 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-04 (milestone 1.14, then the A8 probe)
+**Last updated:** 2026-08-13 (A10 resolved — the `GUARD` model)
 **Current phase:** Phase 1 — milestones 1.1–1.14 complete
-**Next action:** **Open question A10, before 1.15.** `verify` does not catch a fabricated
-fact on `llama3.2:3b`, the model the local role map configures as `GUARD` — 10/10 missed on
-both an added fact and a contradicted one, where `qwen3:8b` catches both 10/10. It is free
-to work on and it is about the failure class this product exists to prevent. Read the
-2026-08-04 (later) entry for the measurement and the protocol.
+**Next action:** **Milestone 1.15 — shadow mode.** A10 is closed: `GUARD` is now
+`llama3.1:8b` ([ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)), measured n=3
+either side with no gate moving, and `verify` now refuses fabrications instead of
+pleasantries. Read the 2026-08-13 entry before touching the verifier again — including for
+why `qwen3:8b`, the obvious swap, is **not** what shipped.
 
-**Then milestone 1.15 — shadow mode.** The agent answers alongside a human
+**Milestone 1.15 — shadow mode.** The agent answers alongside a human
 without being sent, and the answers are graded. It is the first milestone that can produce
 a *real* golden case — which is the top blocker on the eval strategy (**E1**) and needs
 a design partner (**B2**), still the top project risk.
@@ -128,7 +128,7 @@ correct. **The offer is the A9(3) shape** — an offer to follow up that nothing
 which was built, measured and reverted on 2026-08-02, and this is a second sighting of it in
 the wild rather than a new finding.
 
-**But no number here is validation.** All 47 cases are synthetic (open question E1). The honest measured result on the local role map, `--no-judge`, **n=3**: **31 / 30 / 29 of the original 35 golden cases** with the guard on, against **31 / 32 / 31** on `main` without it — a difference inside the ±2 run-to-run variance this project has measured twice, on cases the guard provably cannot touch (see the 1.12 entry, which shows the working). Injection resistance **1.00** in every run including the guard-off control, intent accuracy 0.95, tool selection 1.00, guard-block accuracy 1.00 across 12 balanced cases. **Escalation recall is now 1.00 ✔ across three runs** — the below-gate figures in 1.11 and 1.12 were substantially a bug in the metric, resolved as E5 on 2026-07-31. **Escalation precision is 0.88 / 0.78 / 0.78 against a 0.85 gate and is a real problem**, driven by two genuine over-escalations. Groundedness is 0.86 on the one dataset a judge got through before the free tier ran out, and unknown for the other four (E2 — and 1.12 decided deliberately not to pay for a judge yet, with a stated trigger). **Hand probing on 2026-07-29 qualified one reading of these numbers**: not every escalation is conservative routing — some are `verify` refusing a claim its evidence supported (A8), and some answered turns carry wrong claims the judge never saw (A9).
+**But no number here is validation.** All 47 cases are synthetic (open question E1). The honest measured result on the local role map, `--no-judge`, **n=3**: **31 / 30 / 29 of the original 35 golden cases** with the guard on, against **31 / 32 / 31** on `main` without it — a difference inside the ±2 run-to-run variance this project has measured twice, on cases the guard provably cannot touch (see the 1.12 entry, which shows the working). Injection resistance **1.00** in every run including the guard-off control, intent accuracy 0.95, tool selection 1.00, guard-block accuracy 1.00 across 12 balanced cases. **Escalation recall is now 1.00 ✔ across three runs** — the below-gate figures in 1.11 and 1.12 were substantially a bug in the metric, resolved as E5 on 2026-07-31. **Escalation precision is 0.88 / 0.78 / 0.78 against a 0.85 gate and is a real problem**, driven by two genuine over-escalations. Groundedness is 0.86 on the one dataset a judge got through before the free tier ran out, and unknown for the other four (E2 — and 1.12 decided deliberately not to pay for a judge yet, with a stated trigger). **Hand probing on 2026-07-29 qualified one reading of these numbers**: not every escalation is conservative routing — some are `verify` refusing a claim its evidence supported (A8), and some answered turns carry wrong claims the judge never saw (A9). **And one more qualification, added 2026-08-13: every figure in this paragraph was produced with `llama3.2:3b` on the `GUARD` role** — a verifier since measured to miss both an added and a contradicted fact 10/10, while refusing pleasantries the prompt exempts (A10, now resolved by [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)). Injection resistance is untouched by that, because it is structural and is asserted against the policy engine's audit log rather than against reply text. Anything that depended on `verify` *refusing* is softer evidence than it looks, and re-baselining these numbers on the current verifier has not been done.
 
 ---
 
@@ -250,6 +250,66 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-13 — A10 resolved: the verifier was miscalibrated, not lenient
+
+**`GUARD` is now `llama3.1:8b` in `ollama-dev`, and therefore in `sovereign` and
+`hybrid`** ([ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)). One default changed,
+plus the bar that default has to clear.
+
+**The protocol from A10 was followed and its central prediction was wrong, which is the
+interesting part.** The change was isolated to one model default, measured n=3 either side on
+`uv run neura-eval --no-judge`, 47 cases, same machine, nothing else touched:
+
+| | pass rate | escalation precision | recall | injection | intent | tool | p50 latency | duration |
+|:--|:--|:--|:--|:--|:--|:--|:--|:--|
+| `llama3.2:3b` | 42 / 43 / 43 | 0.78 / 0.88 / 0.78 | 1.00 ×3 | **1.00 ×3** | 0.95 ×3 | 1.00 ×3 | 41.8 / 38.6 / 45.0s | 392 / 396 / 445s |
+| `llama3.1:8b` | 43 / 42 / 44 | 0.88 / 0.78 / 0.88 | 1.00 ×3 | **1.00 ×3** | 0.95 ×3 | 1.00 ×3 | 46.4 / 46.9 / 50.9s | 506 / 532 / 500s |
+
+**Everything is inside the variance and no gate moved.** The pass rate was expected to *fall* —
+a verifier that starts refusing fabrications refuses more — and it did not. **Counting the
+refusals says why.** Across three runs the 3B refused **15** drafts and **11 of those were
+non-claims the prompt explicitly exempts**: *"Could you please check the number and try again"*,
+*"I can pass you to a colleague"*, *"We recommend checking the product page"*. The 8B refused
+**4**, and all four were real: an invented *"Your order was delivered 40 days ago"*, and a draft
+quoting express delivery at **7.90 GBP** where the store's own policy says **7.95**.
+
+**So the old verifier was not lenient. It was miscalibrated in both directions at once** —
+strict on pleasantries, blind on facts — and that is worse than lenient, because each of those
+refusals was an escalation a shopper paid for and none of them caught a wrong fact. The
+predicted rise in escalations was real and was cancelled by a larger fall nobody had predicted.
+
+**The 7.90 case is the one to remember.** `policy_qa_002` is scored a **failure** in that run —
+it asserts `escalated: false` and `must_contain: "3.95"`, and a correct refusal turned the reply
+into a handover. A golden case expecting no escalation is silently also expecting the composer
+to be right. Left as-is deliberately: rewriting an expectation inside the change that exposed it
+is the 2026-07-30 mistake in a smaller costume.
+
+**Three candidates were rejected on measurement, and one of the rejections found something.**
+
+- **`qwen3:8b`** — correct on all four probe arms and roughly **16x** slower per call (20 calls
+  in 329s, against 33s for 40 calls on `llama3.1:8b`). `verify` gates every answered turn, so
+  the cheapest correct model wins and it is not this one. This is why the obvious swap named in
+  A10 is *not* the one that shipped.
+- **Keeping the 3B and strengthening the prompt** — measured twice, because A10 said explicitly
+  that this outcome was legitimate. A strict rewrite fixed both fabrication controls **and then
+  refused arm B — the same evidence block twice — 10/10, quoting a claim that is verbatim in the
+  evidence.** That is **A8 reproducing**, under version control, for the first time since
+  2026-07-29 and on a model it had never been seen on. It reads as a strictness artefact of a
+  small model rather than a property of `qwen3:8b`, and it means the 2026-08-04 negative result
+  was a real negative and not a gentler probe. A milder rewrite kept B clean and still missed
+  the contradicted status 10/10. **On this model a prompt buys one failure with another.**
+- **`qwen3.5:9b`** — started, exceeded the window, abandoned. **Not measured**, which is not the
+  same as worse.
+
+**A bug in the probe, found the same way the last one was.** A candidate that missed the
+contradicted control 10/10 printed *"Fit for the GUARD role"*, because the only per-control test
+was written for the failure that had already been seen — the added-fact arm. Both arms are now
+checked, in both directions, and a partial miss is reported as a failure rather than as a rate.
+**A control that can be failed silently is not a control.**
+
+- **Next:** milestone **1.15, shadow mode**. A10 is closed; A8 is still 🟡 and now has a
+  reproducible recipe attached to it.
 
 ### 2026-08-04 (later) — A8 does not reproduce, and looking for it found something worse
 

@@ -100,6 +100,20 @@ class TestRoleMaps:
             provider, _ = role_map.resolve(role)
             assert provider.is_local, role
 
+    def test_every_local_map_verifies_with_the_same_model(self) -> None:
+        """The verifier is chosen once (ADR-0018) and must not be named twice.
+
+        `hybrid` used to name its own `GUARD` model, so it kept `llama3.2:3b`
+        after A10 measured that model calling an invented delivery date and a
+        contradicted order status "grounded" 10/10. A decision written in two
+        places is a decision that gets made in one of them.
+        """
+        guard_models = {
+            name: load_role_map(name).resolve(ModelRole.GUARD)[1].model
+            for name in ("ollama-dev", "sovereign", "hybrid")
+        }
+        assert len(set(guard_models.values())) == 1, guard_models
+
     def test_missing_role_is_a_clear_error(self) -> None:
         role_map = RoleMap(
             name="partial",

@@ -47,14 +47,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ### The AI models
 
-Three are needed. They total about 9 GB and are already on this machine:
+Four are needed. They total about 14 GB and are already on this machine:
 
 ```bash
 ollama pull llama3.2:3b        # 2.0 GB — fast, for classification
+ollama pull llama3.1:8b        # 4.9 GB — checks answers are true, and writes handovers
 ollama pull qwen3.5:9b         # 6.6 GB — the main thinker
 ollama pull nomic-embed-text   # 274 MB — turns text into numbers for search
 
-ollama list                    # confirm all three appear
+ollama list                    # confirm all four appear
 ```
 
 **Why three?** Different jobs need different sizes. Classifying "is this about an order?" doesn't need a large model, and a small one answers in a fraction of the time. Only the hard reasoning uses the big model. This is what the code calls **roles** — see [§5](#5-the-one-idea-worth-understanding).
@@ -122,7 +123,7 @@ make llm-check
   role          model               capabilities
   router        llama3.2:3b         json.object, json.schema, streaming, tools.native
   reasoner      qwen3.5:9b          json.object, json.schema, streaming, tools.native
-  guard         llama3.2:3b         json.object, json.schema, streaming, tools.native
+  guard         llama3.1:8b         json.object, json.schema, streaming, tools.native
   embedder      nomic-embed-text    json.object, json.schema, streaming
   summarizer    llama3.1:8b         json.object, json.schema, streaming, tools.native
 
@@ -232,7 +233,7 @@ Five jobs exist:
 |:--|:--|:--|
 | `ROUTER` | Works out what the customer is asking | `llama3.2:3b` |
 | `REASONER` | Writes the answer, decides which tools to use | `qwen3.5:9b` |
-| `GUARD` | Spots manipulation, checks answers are truthful | `llama3.2:3b` |
+| `GUARD` | Checks the answer is supported by the evidence | `llama3.1:8b` — **not** the 3B, and `make verify-probe` is why ([ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)) |
 | `EMBEDDER` | Turns text into searchable numbers | `nomic-embed-text` |
 | `SUMMARIZER` | Writes handover notes for humans | `llama3.1:8b` |
 
@@ -393,7 +394,7 @@ Bagisto ships a sample-data generator that produces most of this.
 |:--|:--|
 | `uv: command not found` | `source $HOME/.local/bin/env`, or restart the terminal |
 | `make llm-check` → "Could not reach ollama" | Ollama isn't running. Start the app, or run `ollama serve` |
-| `make llm-check` → "Model not found" | `ollama pull llama3.2:3b` (and the other two) |
+| `make llm-check` → "Model not found" | `ollama pull llama3.2:3b` (and the other three) |
 | `make up` → "port already in use" | Something else uses that port. `POSTGRES_PORT=5434 make up` |
 | `make up` → "Cannot connect to Docker daemon" | Docker Desktop isn't running. Open it and wait for the whale icon |
 | `make llm-check` very slow | Normal on first run — the model loads into memory. Later runs are faster. |

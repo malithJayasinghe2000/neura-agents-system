@@ -93,7 +93,7 @@ Python 3.12 · uv workspace · FastAPI · LangGraph · PostgreSQL 16 + pgvector 
 
 Nothing to run yet. Implementation begins once the documentation is reviewed — see [roadmap §Phase 1](docs/roadmap.md).
 
-Prerequisites when it does: `uv`, Docker (daemon running), and Ollama with `llama3.2:3b`, `qwen3.5:9b` and `nomic-embed-text` pulled.
+Prerequisites when it does: `uv`, Docker (daemon running), and Ollama with `llama3.2:3b`, `llama3.1:8b`, `qwen3.5:9b` and `nomic-embed-text` pulled.
 
 ---
 

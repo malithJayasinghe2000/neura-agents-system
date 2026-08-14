@@ -14,7 +14,10 @@ decorative:**
 
 * **It runs on the ``GUARD`` role, never the composer.** A model checking its
   own work agrees with itself. This is the same reason the eval harness refuses
-  to let a model judge itself (evaluation-strategy.md §3.1).
+  to let a model judge itself (evaluation-strategy.md §3.1). **And the model on
+  that role has to be able to say no**: `llama3.2:3b` held it for three
+  milestones and called an invented delivery date grounded 10 times out of 10.
+  `make verify-probe` is the check, and passing it is the bar (ADR-0018).
 * **It fails closed.** If the verifier errors, times out, or returns something
   unparseable, the draft is *not* sent. A verification step that lets answers
   through when it breaks is worse than none, because it looks like protection.
