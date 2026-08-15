@@ -635,6 +635,11 @@ async def main() -> int:
     parser.add_argument(
         "--shadow", action="store_true", help="provision the tenant in SHADOW mode (ADR-0020)"
     )
+    parser.add_argument(
+        "--setup-only",
+        action="store_true",
+        help="provision and print a URL to open by hand, instead of driving Chrome",
+    )
     parser.add_argument("--message", default="what is your returns policy?")
     args = parser.parse_args()
 
@@ -649,6 +654,20 @@ async def main() -> int:
                 args.url, args.shop_url, args.shop_token, shadow=args.shadow
             )
             print(f"  provisioned {tenant_id} with a public key locked to {args.url}")
+        if args.setup_only:
+            # Left running on purpose. A headless pass proves the widget works;
+            # it does not show anybody what it looks like, and the first person
+            # to look at it is the one who notices what no assertion can.
+            print()
+            print("  Open this in your own browser:")
+            print()
+            print(f"    {args.url.rstrip('/')}/v1/widget/demo?key={key}")
+            print()
+            print(f"  Mode: {'SHADOW — the reply is withheld' if args.shadow else 'LIVE'}")
+            print(f"  When you are done:  make tenant-drop TENANT={tenant_id}")
+            print()
+            return 0
+
         try:
             results = await run_live(chrome_binary, args.url, key, args.message, shadow=args.shadow)
         finally:
@@ -661,4 +680,10 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    # `--drop` cleans up after `--setup-only`, which deliberately leaves its
+    # tenant, key and store connection in place so a person can keep clicking.
+    if len(sys.argv) > 2 and sys.argv[1] == "--drop":
+        asyncio.run(deprovision(sys.argv[2]))
+        print(f"  removed {sys.argv[2]}")
+        raise SystemExit(0)
     sys.exit(asyncio.run(main()))

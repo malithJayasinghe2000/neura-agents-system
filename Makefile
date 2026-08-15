@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration test-widget widget-check widget-check-live eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
+        test-integration test-widget widget-check widget-check-live widget-demo tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
@@ -79,6 +79,17 @@ widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no c
 widget-check-live:
 	uv run python scripts/widget_check.py --live --url $(or $(URL),http://localhost:8000) \
 	  --shop-url $(SHOP) --shop-token $(TOKEN) $(if $(SHADOW),--shadow,)
+
+# Set a tenant up and hand you a URL to open in your OWN browser. A headless
+# pass proves the widget works; it does not show anybody what it looks like.
+#   make widget-demo SHOP=http://bagisto.test/neura/v1 TOKEN=... [SHADOW=1]
+widget-demo:  ## Provision a tenant + widget key and print a URL to open by hand
+	uv run python scripts/widget_check.py --live --setup-only \
+	  --url $(or $(URL),http://localhost:8000) \
+	  --shop-url $(SHOP) --shop-token $(TOKEN) $(if $(SHADOW),--shadow,)
+
+tenant-drop:  ## Remove a tenant made by `make widget-demo`: make tenant-drop TENANT=tn_...
+	uv run python scripts/widget_check.py --drop $(TENANT)
 
 test: test-unit test-widget  ## Alias for the fast test suite
 
