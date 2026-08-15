@@ -32,7 +32,7 @@ Estimates below are in **focused work-weeks** (≈30 productive hours). Part-tim
 | 1.13 | **Multi-tenancy** ✅ | Tenants, API keys, per-tenant config, budgets, usage metering. *RLS itself landed in 1.9 with the first migration and is enforced by a test* | 1.5w |
 | 1.14 | **API** ✅ | REST `/v1/*`, WebSocket, webhooks, OpenAPI, error contract, idempotency — plus the three seams that became controls: authentication called on every request, a usage row per turn (**P5**), a real audit sink in the runtime (**S5**). Two ADRs: [0016](architecture/adr/0016-stream-only-after-verify.md) streaming, [0017](architecture/adr/0017-rate-limit-subjects.md) rate limits | 1.5w |
 | 1.15 | **Shadow mode** ✅ | Parallel execution (mode per tenant *and* per intent, the withheld reply) · review queue (`agree` / `disagree` / `would_have_harmed`) · scorecard (counts beside every rate). `SUGGEST` and `SUPERVISED` deliberately not built — one needs a console, the other a recall path. **No sampling**: every shadowed turn is recorded (**A4**) | 1w |
-| 1.16 | **Widget** | Embeddable chat, client-side rendered, AI disclosure, origin-locked keys | 1w |
+| 1.16 | **Widget** ✅ | Embeddable chat as a dependency-free custom element, hosted by the API, WebSocket-first with a REST fallback, AI disclosure on every message, origin-locked keys. Two ADRs: [0019](architecture/adr/0019-widget-no-build-step.md) no build step, [0020](architecture/adr/0020-a-withheld-turn-says-so.md) a withheld turn says so. **CORS moved from a deployment-wide list to the presented key** — onboarding a merchant is no longer a redeploy | 1w |
 | 1.17 | **Deploy** | Dockerfiles, staging deploy, Langfuse, alerting, runbook | 1w |
 
 **Exit criteria — all must hold:**
@@ -41,7 +41,7 @@ Estimates below are in **focused work-weeks** (≈30 productive hours). Part-tim
 - [ ] Eval suite green on both the Ollama and a cloud role map, with the delta reported
 - [ ] Injection resistance = **1.00**
 - [ ] Cross-tenant isolation test passes
-- [ ] End-to-end conversation working over REST and WebSocket
+- [x] End-to-end conversation working over REST and WebSocket
 - [ ] Shadow mode producing graded conversations
 
 ### Suggested order

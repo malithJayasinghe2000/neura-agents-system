@@ -120,6 +120,11 @@ class ChatData(BaseModel):
     blocked: bool
     citations: list[Citation]
     ai_disclosure: str = AI_DISCLOSURE
+    #: What to show when ``reply`` is empty because the turn was withheld
+    #: (ADR-0020). Empty on every turn the shopper is actually answered on, so
+    #: ``reply or fallback_message`` is correct in both cases. Fixed text, never
+    #: the withheld draft, and it never claims a person was told.
+    fallback_message: str = ""
 
 
 def build_router(agent_key: str) -> APIRouter:
@@ -447,6 +452,9 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
     their own shadow traffic wants to know that it would have escalated — the
     difference between "would have" and "did" is carried by ``state``, in one
     place, rather than by three fields that could disagree.
+
+    ``fallback_message`` comes from the same object for the same reason, and is
+    the half of a withheld turn a client can actually render (ADR-0020).
     """
     outcome = result.outcome
     return envelope(
@@ -458,6 +466,7 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
             escalated=outcome.escalated,
             blocked=outcome.blocked,
             citations=[Citation(type=c.type, id=c.id) for c in outcome.citations],
+            fallback_message=result.fallback_message,
         ).model_dump(mode="json"),
         request_id=str(getattr(getattr(request, "state", None), "request_id", "") or ""),
     )

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NEURA widget — local harness</title>
+    <!--
+      The CSP a merchant would be asked to run, applied to ourselves first.
+
+      No 'unsafe-inline' in `script-src`: the widget adds no inline script and
+      no inline event handler, and this page would break if that stopped being
+      true. `style-src` has no 'unsafe-inline' either, which is what makes the
+      constructable-stylesheet path in widget.js a requirement rather than a
+      preference — an injected <style> element would be blocked here.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; connect-src 'self' ws: wss:; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+    />
+  </head>
+  <body>
+    <main>
+      <h1>NEURA widget — local harness</h1>
+      <p>
+        Not a product page. This exists so the widget can be driven against a
+        running API without a merchant site, under the same Content-Security-Policy
+        a merchant would be asked to apply.
+      </p>
+      <p>
+        Load it with a public key in the query string, which the route below
+        turns into the embed snippet:
+        <code>/v1/widget/demo?key=fn_pk_test_…</code>
+      </p>
+      <p>
+        The key must be origin-locked to this origin
+        (<code>ADR-0014 §3</code>) or every request is refused before a model
+        runs — which is the control working, not a misconfiguration to route
+        around.
+      </p>
+    </main>
+    <script src="/v1/widget/widget.js" data-neura-key="__KEY__" data-neura-open="true" async></script>
+  </body>
+</html>

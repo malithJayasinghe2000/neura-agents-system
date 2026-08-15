@@ -1121,6 +1121,159 @@ class TestShadowMode:
             assert await ShadowRepository(session).pending(TENANT_B) == []
 
 
+class TestAWithheldTurnIsNeverEmptyHanded:
+    """Milestone 1.16, [ADR-0020](../../docs/architecture/adr/0020-a-withheld-turn-says-so.md).
+
+    1.15 made the reply empty by design. That is correct and it is exactly half
+    of a shopper-facing feature: a widget handed an empty string renders
+    nothing, and a chat that silently swallows a question is a bug report from
+    the merchant within a day. So the turn that withholds a reply must also
+    carry the words to say instead — asserted here, on both transports, rather
+    than left to whoever writes the next client.
+    """
+
+    async def test_a_shadowed_turn_carries_words_for_the_shopper(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert body["reply"] == ""
+        assert body["fallback_message"], "a withheld turn with nothing to render is silence"
+
+    async def test_the_fallback_is_not_the_withheld_draft(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """The one way this field could undo shadow mode entirely — and it would
+        do it through a path where no `verify` verdict is consulted, because the
+        text is chosen after the turn has finished."""
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        ).json()["data"]
+
+        async with db.tenant_session(TENANT_A) as session:
+            queued = await ShadowRepository(session).pending(TENANT_A)
+
+        assert queued[0].draft
+        assert body["fallback_message"] != queued[0].draft
+
+    async def test_the_merchant_owns_the_wording(self, client: TestClient, db: Database) -> None:
+        token = await _provision(
+            db,
+            TENANT_A,
+            config=TenantConfig(mode="shadow", withheld_message="We read these ourselves."),
+        )
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert body["fallback_message"] == "We read these ourselves."
+
+    async def test_an_answered_turn_carries_no_fallback(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """Or a client rendering `reply or fallback_message` would show the
+        fallback on a turn that was answered perfectly well."""
+        token = await _provision(db, TENANT_A)
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert body["fallback_message"] == ""
+
+    async def test_the_socket_says_it_too(self, client: TestClient, db: Database) -> None:
+        """Two transports, one sentence. A field on REST and absent on the
+        socket is a widget that behaves differently depending on whether a
+        socket happened to open."""
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+
+        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+            socket.send_json({"type": "message", "content": "what is your returns policy?"})
+            frames = _drain(socket)
+
+        done = frames[-1]
+        assert not [f for f in frames if f["type"] == "token"]
+        assert done["reply"] == ""
+        assert done["fallback_message"]
+
+
+class TestCorsIsDecidedByTheKey:
+    """Milestone 1.16, [ADR-0019 §3](../../docs/architecture/adr/0019-widget-no-build-step.md).
+
+    A widget key belongs to one merchant, so the allowlist that decides is that
+    key's own. The preflight cannot know which key is coming — it carries no
+    ``Authorization`` header — so it grants permission to *ask*, and the
+    response header that lets a browser *read* is the one that waits for the
+    credential.
+    """
+
+    async def test_a_permitted_origin_can_read_the_answer(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "https://shop.example"
+
+    async def test_an_unlisted_origin_gets_a_refusal_it_cannot_read(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """Both halves. The origin lock refuses the request before a model runs,
+        and the missing header means the browser will not hand the refusal back
+        — so it is not an oracle for whether the key works somewhere else."""
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "hi"},
+            headers={**_auth(token), "Origin": "https://evil.example"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_onboarding_a_merchant_needs_no_deploy(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """The point of the whole change. ``https://shop.example`` is not in
+        ``WIDGET_ALLOWED_ORIGINS`` and never will be — it is on the key, which is
+        issued at runtime."""
+        from neura_core import get_settings
+
+        assert "https://shop.example" not in get_settings().widget_origins
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+
+        assert response.status_code == 200
+
+
 class TestTheReviewQueue:
     """1.15 part two. Rows a human can actually work through, and a scorecard
     that cannot flatter itself."""

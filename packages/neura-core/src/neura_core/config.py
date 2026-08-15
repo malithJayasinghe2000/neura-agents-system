@@ -128,8 +128,29 @@ class Settings(BaseSettings):
     otel_service_name: str = Field(default="neura-api", alias="OTEL_SERVICE_NAME")
 
     # ── Widget ───────────────────────────────────────────────────────────────
+    #: Origins permitted on endpoints that have **no key to consult** — the
+    #: widget asset and health. Every keyed request is decided by the presented
+    #: key's own allowlist instead (ADR-0014 §3, ADR-0019 §3), which is what
+    #: makes onboarding a merchant a key issue rather than a redeploy.
     widget_allowed_origins: str = Field(
         default="http://localhost:3000", alias="WIDGET_ALLOWED_ORIGINS"
+    )
+    #: How this API is reachable from a merchant's page. Used to build the embed
+    #: snippet, and only for that: nothing authenticates against it. It cannot be
+    #: derived from an incoming request, because the request that asks for the
+    #: snippet is usually not the one a shopper's browser will make.
+    public_base_url: str = Field(default="http://localhost:8000", alias="PUBLIC_BASE_URL")
+    #: What a shopper is shown when the reply is withheld and the tenant has
+    #: configured no wording of its own (ADR-0020). **It promises nothing**: a
+    #: shadowed turn tells no person, so a default about somebody getting back
+    #: to them would be an offer nothing can honour — the A9(3) failure, shipped
+    #: as a platform string on the one path where no verifier runs.
+    widget_withheld_message: str = Field(
+        default=(
+            "Thanks — your message has been received. There is no automated "
+            "answer available for it right now."
+        ),
+        alias="WIDGET_WITHHELD_MESSAGE",
     )
 
     # ── Derived ──────────────────────────────────────────────────────────────

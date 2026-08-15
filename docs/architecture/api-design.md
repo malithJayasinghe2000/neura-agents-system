@@ -162,7 +162,8 @@ Idempotency-Key: idk_...
     "escalated": false,
     "confidence": 0.91,
     "citations": [ { "type": "order", "id": "1001" } ],
-    "ai_disclosure": "You are chatting with an AI assistant."
+    "ai_disclosure": "You are chatting with an AI assistant.",
+    "fallback_message": ""
   },
   "meta": { "request_id": "req_...", "timestamp": "..." }
 }
@@ -171,6 +172,8 @@ Idempotency-Key: idk_...
 `state` ∈ `resolved` · `awaiting_customer` · `escalated` · `blocked` · `shadowed`.
 
 `shadowed` (1.15) means the agent answered and the shopper was shown nothing — `reply` is empty and the draft is in the merchant's review queue ([agent-runtime §6](agent-runtime.md)). It is a fifth value rather than a flag for the same reason there were four: a shadow turn counted as `resolved` would inflate the one number this product is eventually sold on, and counted as `escalated` would claim a person was involved when none was. `escalated` and `blocked` still report what the *agent* did.
+`fallback_message` (1.16) is what to show when `reply` is empty because the turn was **withheld** — today that means `shadowed`, and the field turns on emptiness rather than on the state so any future withholding mode is covered ([ADR-0020](adr/0020-a-withheld-turn-says-so.md)). It is empty on every turn the shopper is actually answered on, so `reply or fallback_message` is correct in both cases. **It is fixed text and never the withheld draft** — the merchant's wording from `TenantConfig.withheld_message`, or a platform default — so ADR-0016 is untouched: nothing the model wrote reaches a shopper at all. It **must not claim a person was told**, because a shadow turn emits no webhook and there is no console anybody is watching. A client that renders an empty reply with an empty fallback is showing silence, which is indistinguishable from a bug; the widget treats that as an error.
+
 `citations` make grounding visible to the integrator — and to us, when a merchant disputes an answer.
 `ai_disclosure` is always present ([EU AI Act Art. 50](../business/blueprint-v2.md#9-legal-compliance--risk)); the widget renders it, and any custom client is contractually required to.
 

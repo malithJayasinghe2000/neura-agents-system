@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
+        test-integration test-widget widget-check widget-check-live eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
@@ -66,7 +66,21 @@ test-unit:  ## Unit tests (no external services)
 test-integration:  ## Integration tests (requires: make up)
 	uv run pytest tests/integration -m integration
 
-test: test-unit  ## Alias for the fast test suite
+test-widget:  ## The widget's pure logic (Node's built-in runner — no npm, no install)
+	node --test "tests/widget/*.test.js"
+
+widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no cost.
+	uv run python scripts/widget_check.py
+
+# The same file against a running API and a real shop. Needs `make api` up.
+#   make widget-check-live SHOP=http://bagisto.test/neura/v1 TOKEN=... [SHADOW=1]
+# One turn, not an eval. SHADOW=1 provisions the tenant in shadow mode, which is
+# the only way to see what a shopper is shown when the reply is withheld.
+widget-check-live:
+	uv run python scripts/widget_check.py --live --url $(or $(URL),http://localhost:8000) \
+	  --shop-url $(SHOP) --shop-token $(TOKEN) $(if $(SHADOW),--shadow,)
+
+test: test-unit test-widget  ## Alias for the fast test suite
 
 spec:  ## Regenerate the published OpenAPI document from the canonical models
 	uv run python scripts/generate_spec.py

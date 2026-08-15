@@ -79,7 +79,7 @@ Phase 1 deploys **two processes** against **two datastores**.
 
 | Container | What it is | Responsibilities |
 |:--|:--|:--|
-| **neura-api** | FastAPI (ASGI) | REST `/v1/*`, WebSocket chat, widget hosting, auth, tenancy, rate limiting, agent execution |
+| **neura-api** | FastAPI (ASGI) | REST `/v1/*`, WebSocket chat, widget hosting (**real since 1.16** — `GET /v1/widget/widget.js`, [ADR-0019](adr/0019-widget-no-build-step.md)), auth, tenancy, rate limiting, agent execution |
 | **neura-worker** | Async task runner | Catalogue/order sync, outbound webhook delivery + retries, reindexing, scheduled evals |
 | **PostgreSQL 16 + pgvector** | Primary store | Tenants, canonical commerce data, conversations, audit log, LangGraph checkpoints, **and vectors** |
 | **Redis 7** | Ephemeral store | Session state, rate-limit counters, task queue, cache |

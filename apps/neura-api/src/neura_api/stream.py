@@ -189,6 +189,11 @@ async def run_streamed_turn(
                     "blocked": outcome.blocked,
                     "citations": [c.as_dict() for c in outcome.citations],
                     "ai_disclosure": AI_DISCLOSURE,
+                    # The socket sent no `token` frame for this turn, so this is
+                    # the only thing the shopper can be shown (ADR-0020). It
+                    # carries the same value the REST payload does, from the
+                    # same property — two transports, one sentence.
+                    "fallback_message": result.fallback_message,
                 },
             )
 

@@ -92,6 +92,11 @@ class TurnResult:
     #: What happened to the reply. ``SHADOW`` means the transport must not send
     #: it — see ``reply`` below, which is the only thing a route should read.
     mode: TurnMode = TurnMode.LIVE
+    #: The tenant's wording for a withheld turn, resolved before the transport
+    #: sees it. Held rather than read from config at render time so that the
+    #: rule "a withheld reply is never empty-handed" lives in one object with
+    #: the withholding itself.
+    withheld_message: str = ""
 
     @property
     def is_shadowed(self) -> bool:
@@ -113,6 +118,22 @@ class TurnResult:
         has to be made on purpose.
         """
         return "" if self.is_shadowed else self.outcome.reply
+
+    @property
+    def fallback_message(self) -> str:
+        """What to show the shopper when there is no reply to show (ADR-0020).
+
+        Non-empty **only** when the reply was withheld, so a client can render
+        ``reply or fallback_message`` and be right in both cases. It is fixed
+        text and never the draft: ADR-0016's rule that nothing the model wrote
+        reaches a shopper before ``verify`` passes is untouched here, because
+        nothing the model wrote reaches them at all.
+
+        The pairing is the point. A transport that can withhold a reply can now
+        only do so while holding the sentence that explains it, which is what
+        stops the empty bubble being a thing anybody has to remember about.
+        """
+        return self.withheld_message if self.is_shadowed else ""
 
 
 class TurnService:
@@ -302,6 +323,12 @@ class TurnService:
             policy=policy,
             started_conversation=started,
             mode=mode,
+            # Resolved here, where the tenant is in hand, rather than in a
+            # route: there are two transports and the one that forgot would
+            # show a shopper nothing at all (ADR-0020 §4).
+            withheld_message=(
+                turn.caller.tenant.config.withheld_message or settings.widget_withheld_message
+            ),
         )
 
     def _retriever(self, tenant_id: str, llm: object) -> Retriever | None:

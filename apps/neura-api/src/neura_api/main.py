@@ -18,15 +18,15 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
+from neura_api.middleware.cors import TenantCorsMiddleware
 from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.ratelimit import RateLimiter
 from neura_api.registry import discover_agents, discover_runners
 from neura_api.routes import agent as agent_routes
-from neura_api.routes import health, stores, webhooks
+from neura_api.routes import health, stores, webhooks, widget
 from neura_api.stores import StoreDirectory
 from neura_api.turns import TurnService
 from neura_api.webhooks import WebhookDrainer
@@ -178,25 +178,17 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(RequestContextMiddleware)
-    app.add_middleware(
-        CORSMiddleware,
-        # Never "*": fn_pk_ keys are, by definition, exposed in the browser.
-        allow_origins=settings.widget_origins,
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-        expose_headers=[
-            "X-Request-Id",
-            "X-RateLimit-Limit",
-            "X-RateLimit-Remaining",
-            "X-RateLimit-Reset",
-            "Retry-After",
-            "Idempotency-Replayed",
-        ],
-    )
+    # Not Starlette's CORSMiddleware, and not a deployment-wide origin list.
+    # A widget key belongs to one merchant, so the allowlist that decides is
+    # that key's own (ADR-0014 §3, ADR-0019 §3) — which also means onboarding a
+    # merchant's domain is a key issue rather than a redeploy. The reason this
+    # cannot be resolved at preflight instead is P7, and it is written out in
+    # `middleware/cors.py`.
+    app.add_middleware(TenantCorsMiddleware)
 
     register_error_handlers(app)
     app.include_router(health.router, prefix="/v1")
+    app.include_router(widget.router, prefix="/v1")
     app.include_router(stores.router, prefix="/v1")
     app.include_router(webhooks.router, prefix="/v1")
 

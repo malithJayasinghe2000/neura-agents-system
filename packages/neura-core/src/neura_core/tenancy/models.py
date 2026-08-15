@@ -87,6 +87,16 @@ class TenantConfig(BaseModel):
             "half of §6 — live for order status, watched for returns policy."
         ),
     )
+    withheld_message: str | None = Field(
+        default=None,
+        max_length=500,
+        description=(
+            "What a shopper is shown when the reply is withheld — a shadowed turn "
+            "(ADR-0020). `None` uses the platform default. It must not claim a "
+            "person was told: no webhook fires on a shadow turn and there is no "
+            "console for anyone to be watching."
+        ),
+    )
 
     @field_validator("mode", mode="before")
     @classmethod

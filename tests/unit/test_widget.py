@@ -1,0 +1,282 @@
+"""The widget: hosting, per-tenant CORS, and the withheld-turn contract.
+
+Three groups, and the third is the one that matters most. ADR-0020 says a
+withheld reply must arrive with the words to say instead, and the whole reason
+that is a *server* decision rather than a client convention is so it can be
+asserted here — once, against both transports, rather than trusted to whoever
+writes the next client.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from neura_agent_core.conversations import ConversationState
+from neura_agent_core.serving import TurnOutcome
+from neura_api.main import create_app
+from neura_api.middleware.cors import is_valid_origin
+from neura_api.turns import TurnResult
+from neura_core import get_settings
+from neura_core.tenancy import TenantConfig, TurnMode
+
+WIDGET_JS = Path(__file__).parents[2] / "apps/neura-api/src/neura_api/widget/widget.js"
+
+
+def _code_only(source: str) -> str:
+    """The widget's source with its comments removed.
+
+    Needed because these assertions are about what the code *does*, and a check
+    a comment can trip is a check that gets satisfied by rewording the comment
+    explaining why the thing is forbidden.
+    """
+    lines = []
+    in_block = False
+    for line in source.splitlines():
+        stripped = line.strip()
+        if in_block:
+            in_block = not stripped.endswith("*/")
+            continue
+        if stripped.startswith("/*"):
+            in_block = not stripped.endswith("*/")
+            continue
+        if stripped.startswith("//"):
+            continue
+        lines.append(line.split("//")[0] if "://" not in line else line)
+    return "\n".join(lines)
+
+
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    with TestClient(create_app()) as test_client:
+        yield test_client
+
+
+def _result(
+    *, mode: TurnMode, reply: str, withheld: str = "Nothing automated is available."
+) -> TurnResult:
+    return TurnResult(
+        conversation_id="cnv_1",
+        message_id="msg_1",
+        outcome=TurnOutcome(reply=reply, state=ConversationState.RESOLVED),
+        policy=None,  # type: ignore[arg-type]
+        started_conversation=True,
+        mode=mode,
+        withheld_message=withheld,
+    )
+
+
+class TestAWithheldTurnIsNeverEmptyHanded:
+    """ADR-0020. The invariant, stated where both transports read it."""
+
+    def test_a_shadowed_turn_withholds_the_reply_and_supplies_words(self) -> None:
+        result = _result(mode=TurnMode.SHADOW, reply="Your order shipped on 22 July.")
+        # 1.15's decision, unchanged: the draft does not reach the shopper.
+        assert result.reply == ""
+        # ADR-0020's addition: and they are not shown nothing.
+        assert result.fallback_message == "Nothing automated is available."
+
+    def test_a_live_turn_carries_no_fallback(self) -> None:
+        """Otherwise a client rendering `reply or fallback_message` would show
+        both, or show the fallback on a turn that was answered perfectly well."""
+        result = _result(mode=TurnMode.LIVE, reply="Your order shipped on 22 July.")
+        assert result.reply == "Your order shipped on 22 July."
+        assert result.fallback_message == ""
+
+    def test_the_reply_and_the_fallback_are_never_both_present(self) -> None:
+        for mode in (TurnMode.LIVE, TurnMode.SHADOW):
+            result = _result(mode=mode, reply="something")
+            assert not (result.reply and result.fallback_message)
+
+    def test_the_fallback_is_never_the_withheld_draft(self) -> None:
+        """The draft is the one thing this field must not become.
+
+        A field that showed the shopper what the agent would have said would
+        undo shadow mode entirely — and would do it through a path where no
+        `verify` result is consulted, because the text is chosen after the turn.
+        """
+        result = _result(mode=TurnMode.SHADOW, reply="Your order shipped on 22 July.")
+        assert "22 July" not in result.fallback_message
+
+    def test_the_platform_default_promises_nothing(self) -> None:
+        """The A9(3) failure, shipped as a platform string, is the thing to avoid.
+
+        A shadow turn emits no webhook and there is no console anybody watches,
+        so a default about a colleague getting in touch would be an offer
+        nothing can honour — on the one path where no verifier runs, because no
+        model ran.
+        """
+        default = get_settings().widget_withheld_message.lower()
+        for promise in ("get back to you", "will be in touch", "our team", "someone will"):
+            assert promise not in default
+
+    def test_a_tenant_may_override_the_wording(self) -> None:
+        config = TenantConfig.model_validate({"withheld_message": "We are reading this ourselves."})
+        assert config.withheld_message == "We are reading this ourselves."
+
+    def test_an_unconfigured_tenant_has_none_and_not_an_empty_string(self) -> None:
+        """`None` means "use the platform default"; `""` would mean "say nothing",
+        which is exactly the outcome ADR-0020 exists to prevent."""
+        assert TenantConfig().withheld_message is None
+
+
+class TestBothTransportsCarryTheSameFields:
+    """ADR-0019 §4 accepts two transports; it does not accept two contracts.
+
+    The widget renders from one function, so a field present on one path and
+    absent on the other is a widget that behaves differently depending on
+    whether a socket happened to open.
+    """
+
+    def test_the_chat_response_model_declares_the_fallback(self) -> None:
+        from neura_api.routes.agent import ChatData
+
+        assert "fallback_message" in ChatData.model_fields
+
+    def test_the_socket_done_frame_declares_the_fallback(self) -> None:
+        source = Path(__file__).parents[2] / "apps/neura-api/src/neura_api/stream.py"
+        body = source.read_text(encoding="utf-8")
+        assert '"fallback_message": result.fallback_message' in body
+
+    def test_neither_transport_reads_the_outcome_reply_directly(self) -> None:
+        """`TurnResult.reply` is the only safe reader — see its docstring."""
+        for name in ("stream.py", "routes/agent.py"):
+            source = Path(__file__).parents[2] / "apps/neura-api/src/neura_api" / name
+            assert "outcome.reply" not in source.read_text(encoding="utf-8")
+
+
+class TestWidgetHosting:
+    def test_the_asset_is_served_from_our_own_origin(self, client: TestClient) -> None:
+        response = client.get("/v1/widget/widget.js")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/javascript")
+        assert "neura-chat" in response.text
+
+    def test_the_asset_is_public(self, client: TestClient) -> None:
+        """No key, no 401. It is code served to every shopper on every site, and
+        a `<script src>` cannot present a credential anyway."""
+        assert client.get("/v1/widget/widget.js").status_code == 200
+
+    def test_the_asset_is_not_sniffable(self, client: TestClient) -> None:
+        headers = client.get("/v1/widget/widget.js").headers
+        assert headers["x-content-type-options"] == "nosniff"
+        assert "max-age=300" in headers["cache-control"]
+
+    def test_the_snippet_names_the_key_and_the_hosted_url(self, client: TestClient) -> None:
+        body = client.get("/v1/widget/snippet?key=fn_pk_test_abc").json()
+        assert "fn_pk_test_abc" in body["snippet"]
+        assert body["widget_url"].endswith("/v1/widget/widget.js")
+
+    def test_the_demo_page_strips_anything_but_a_key(self, client: TestClient) -> None:
+        """The key lands in an attribute value on a page whose job is to load a
+        script, so anything that could close the attribute is removed."""
+        response = client.get('/v1/widget/demo?key=x"><script>alert(1)</script>')
+        assert response.status_code == 200
+        assert "<script>alert" not in response.text
+        assert 'data-neura-key="xscriptalert1script"' in response.text
+
+
+class TestTheWidgetShipsAsItsOwnSource:
+    """ADR-0019 §1. No build step, so what a browser runs is this file."""
+
+    def test_there_is_no_javascript_toolchain(self) -> None:
+        root = Path(__file__).parents[2]
+        stray = [
+            p
+            for p in root.rglob("package.json")
+            if ".venv" not in p.parts and "node_modules" not in p.parts
+        ]
+        assert stray == [], f"a JS toolchain appeared without an ADR: {stray}"
+
+    def test_the_element_needs_no_imports(self) -> None:
+        source = _code_only(WIDGET_JS.read_text(encoding="utf-8"))
+        assert "import " not in source
+        assert "require(" not in source
+
+    def test_nothing_is_rendered_as_markup(self) -> None:
+        """Everything the widget renders came off the network — a shopper's own
+        words, a merchant's policy text, a model's reply. None of it is markup
+        we authored, so none of it goes near innerHTML."""
+        source = _code_only(WIDGET_JS.read_text(encoding="utf-8"))
+        assert "innerHTML" not in source
+        assert "outerHTML" not in source
+        assert "document.write" not in source
+        assert "eval(" not in source
+
+    def test_the_served_asset_is_the_file_on_disk(self, client: TestClient) -> None:
+        assert client.get("/v1/widget/widget.js").text == WIDGET_JS.read_text(encoding="utf-8")
+
+
+class TestPerTenantCors:
+    """ADR-0019 §3. The presented key decides, and preflight decides nothing."""
+
+    def test_a_preflight_is_answered_for_any_valid_origin(self, client: TestClient) -> None:
+        """It authorises a browser to *send*, never to read. The request it
+        permits is still refused by the key's own origin lock."""
+        response = client.options(
+            "/v1/care/chat",
+            headers={
+                "Origin": "https://a-shop-we-have-never-heard-of.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert response.status_code == 204
+        allowed = response.headers["access-control-allow-origin"]
+        assert allowed == "https://a-shop-we-have-never-heard-of.example"
+
+    def test_a_preflight_promises_only_what_a_real_request_honours(
+        self, client: TestClient
+    ) -> None:
+        response = client.options(
+            "/v1/care/chat",
+            headers={"Origin": "https://shop.example", "Access-Control-Request-Method": "POST"},
+        )
+        assert "Idempotency-Key" in response.headers["access-control-allow-headers"]
+        assert "POST" in response.headers["access-control-allow-methods"]
+        assert response.headers["vary"] == "Origin"
+
+    def test_an_unauthenticated_response_carries_no_allow_origin(self, client: TestClient) -> None:
+        """The half that actually protects anything: a cross-origin request from
+        an origin the key does not permit is unreadable in the browser, and its
+        refusal is not an oracle for whether the key is valid somewhere else."""
+        response = client.post(
+            "/v1/care/chat",
+            headers={"Origin": "https://not-a-tenant.example", "Authorization": "Bearer fn_pk_x"},
+            json={"message": "hello"},
+        )
+        assert response.status_code in {401, 403}
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_an_unkeyed_endpoint_falls_back_to_the_platform_list(self, client: TestClient) -> None:
+        allowed = get_settings().widget_origins[0]
+        response = client.get("/v1/health", headers={"Origin": allowed})
+        assert response.headers.get("access-control-allow-origin") == allowed
+
+        refused = client.get("/v1/health", headers={"Origin": "https://elsewhere.example"})
+        assert "access-control-allow-origin" not in refused.headers
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            None,
+            "",
+            # A sandboxed iframe or a file:// page. Every such page shares it, so
+            # it is the one string that cannot identify anybody.
+            "null",
+            "not-a-url",
+            "ftp://shop.example",
+            # A URL somebody pasted rather than an origin a browser sent —
+            # echoing it would put attacker-chosen text into a header.
+            "https://shop.example/path",
+            "https://shop.example?q=1",
+        ],
+    )
+    def test_a_non_origin_is_never_reflected(self, origin: str | None) -> None:
+        assert not is_valid_origin(origin)
+
+    def test_a_real_origin_is_accepted(self) -> None:
+        assert is_valid_origin("https://shop.example")
+        assert is_valid_origin("http://localhost:3000")

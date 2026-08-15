@@ -4,14 +4,25 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-15 (shadow mode complete — 1.15)
-**Current phase:** Phase 1 — milestones 1.1–1.15 complete
-**Next action:** **Milestone 1.16 — the widget.** Embeddable chat, client-side rendered, AI
-disclosure, origin-locked public keys. It is the first surface a real shopper would touch, and
-the public-key path it needs already exists and is inert until origin-locked. **Read P8 before
-writing any of it**: the constraints are documented and the *build* is not, and this repository
-has no JavaScript toolchain at all — so 1.16 either introduces one or deliberately avoids one.
-Four things need deciding and none of them should be decided silently.
+**Last updated:** 2026-08-15 (the widget — 1.16)
+**Current phase:** Phase 1 — milestones 1.1–1.16 complete
+**Next action:** **Milestone 1.17 — deploy.** Dockerfiles, a staging deploy, Langfuse, alerting,
+a runbook. **X2 is the thing to answer first**: the deployment target is still undecided, and
+Railway — the earlier plan — has no GPU path. Production inference is a cloud API, so the
+API/worker host is a separate choice from the model host and should be made as one.
+
+**1.16 completed on 2026-08-15, and P8 is closed by two ADRs rather than by four silent
+choices** — [0019](architecture/adr/0019-widget-no-build-step.md) (build, delivery, transport)
+and [0020](architecture/adr/0020-a-withheld-turn-says-so.md) (the withheld turn). A shopper can
+now be shown something on a merchant's page. **The one to carry forward:** 1.15 made the reply
+empty by design and 1.16 found that this is exactly half a feature — a widget handed an empty
+string renders nothing, and a chat that silently swallows a question is a bug report within a
+day. `fallback_message` is the other half, and it comes from the **server**, because a
+merchant-facing sentence in a JavaScript asset is one the merchant cannot change and nobody
+reviews. **And it has been driven in a real browser**: `make widget-check` runs the real
+`widget.js` in headless Chrome — free, no models — and two live turns against the real shop
+confirmed it, including one deliberately **shadowed** turn where the shopper saw the honest
+message instead of an empty panel. Only Chrome, though. See the 1.16 entry.
 
 **1.15 completed on 2026-08-15.** A turn can run in full with the shopper shown nothing, and
 the draft is graded through `GET /shadow`, `POST /shadow/{id}/grade` and
@@ -35,8 +46,17 @@ a design partner (**B2**), still the top project risk.
 2026-08-02 (morning) entry. A8 is one ~20-call control probe away from a real answer and is
 the better buy of the two. Do not restart either without reading that entry first.
 
-> **Starting 1.15 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
+> **Starting 1.17 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
 > 1.14 and 1.12 entries below.
+>
+> **The one thing to carry forward from 1.16.** **P7 was met a second time, and the webhook
+> answer was the wrong one for it.** A CORS preflight carries no credential and RLS forbids
+> reading every tenant's origins, which is the same wall the webhook outbox hit — but losing
+> the webhook index costs a delayed schedule, and losing a CORS index would cost a **total
+> widget outage**. So 1.16 did not keep an index: the preflight grants permission to *ask* and
+> the key decides what may be *read*. **The general lesson is that "do what the webhooks did"
+> is not the answer to P7** — the cost of losing the out-of-band index is different on every
+> surface, and P7 still needs a general answer before anything time-critical is swept.
 >
 > **The one thing to carry forward from 1.14.** The three seams are closed:
 > authentication is called on every request, every turn writes a usage row (**P5**), and a
@@ -124,7 +144,9 @@ the better buy of the two. Do not restart either without reading that entry firs
 | Eval target | ✅ `make eval` measures a real agent. Agents and their datasets are found by entry point — the harness never learns an agent's name |
 | Guard node | ✅ **1.12** — `guard` + `blocked`, deterministic: five named injection rules, reversible PII tokenisation, an outbound leak filter in `verify`. No model, no threshold ([ADR-0011](architecture/adr/0011-deterministic-guard-not-classifier.md)). The builder refuses a graph that guards late or lets a block fall through |
 | Guard, measured | ✅ **precision 1.00 (0 of 40 benign blocked), recall 0.85 (34 of 40)** on a balanced corpus, run free in CI. And `make eval-guard-off` — the suite with every rule disabled, injection resistance still 1.00, which is what stops the guard being credited with the gate |
-| Tests | ✅ **623 unit + 95 integration** passing (1.14 added 47 + 41) |
+| **Widget** | ✅ **1.16** — `<neura-chat>`, one dependency-free custom element with a Shadow root, served by the API at `GET /v1/widget/widget.js`. **No build step and no `package.json` anywhere** ([ADR-0019](architecture/adr/0019-widget-no-build-step.md)); a test fails if one appears. WebSocket first with a REST fallback, `ai_disclosure` on every message, and a withheld turn renders the server's words rather than nothing ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)). **Driven in real headless Chrome** (`make widget-check`) — 4 stub scenarios free of models, plus 2 live turns against the real shop, one of them shadowed. Chrome only |
+| CORS | ✅ **1.16** — decided by the **presented key**, not by a deployment-wide list. A preflight is answered for any valid origin because it carries no credential and grants nothing; `Access-Control-Allow-Origin` is withheld until the key's own allowlist permits it. Onboarding a merchant's domain is a key issue, not a redeploy |
+| Tests | ✅ **661 unit + 119 integration + 12 widget (JS)** passing (1.16 added 31 + 8 + 12) |
 | CI | ✅ workflow written and **pushed** — `main` has taken six pushes since the workflow landed, so GitHub has run it. **The results have not been read from this machine**: the repository is private and there is no `gh` CLI or token here, so `make check` locally is the evidence, not a green tick anybody has seen |
 | Design partner | ❌ None — top project risk |
 
@@ -170,7 +192,8 @@ the wild rather than a new finding.
 
 1.15 Shadow mode                ✅  mechanism · review queue · scorecard
                                     (no console to grade in — Phase 2)
-1.16 Widget                     ⬜
+1.16 Widget                     ✅  hosted element · per-tenant CORS · a withheld
+                                    turn says so · driven in real Chrome
 1.17 Deploy                     ⬜
 ```
 
@@ -203,6 +226,9 @@ Remaining: **shadow mode producing *graded* conversations** — every part excep
 | Usage as a daily rollup; budgets degrade, never error | [ADR-0015](architecture/adr/0015-usage-rollups-and-budget-degradation.md) |
 | Nothing the model wrote is streamed before `verify` passes | [ADR-0016](architecture/adr/0016-stream-only-after-verify.md) |
 | Rate limits apply to several subjects; the narrowest binds | [ADR-0017](architecture/adr/0017-rate-limit-subjects.md) |
+| The `GUARD` model must be able to refuse, and is chosen by measurement | [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md) |
+| The widget is a dependency-free custom element, served by the API | [ADR-0019](architecture/adr/0019-widget-no-build-step.md) |
+| A withheld turn says so, and the server supplies the words | [ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md) |
 
 Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
 
@@ -267,6 +293,144 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-15 (later) — The widget, and the half of shadow mode nobody could see (1.16)
+
+**A shopper can now be shown something on a merchant's page, and P8's four questions were
+brought to a decision instead of answered in passing.** Two ADRs:
+[0019](architecture/adr/0019-widget-no-build-step.md) covers build, delivery and transport;
+[0020](architecture/adr/0020-a-withheld-turn-says-so.md) covers what a shopper sees when a turn
+is shadowed.
+
+**The finding, and it is a 1.15 finding arriving one milestone late.** 1.15 made the reply
+empty by design, which was correct and was **exactly half of a shopper-facing feature**. Nothing
+noticed, because there was no client. A widget handed `reply: ""` renders nothing at all, and a
+chat that silently swallows a question is a bug report from the merchant within a day. This is
+the same shape as the four already recorded here — `pii_leaked` scored by nothing, `guard.block`
+read by nobody, usage written by nobody, an audit column nobody could overflow — with one
+difference worth noting: **the gap was not in a control nobody called, it was in a contract
+nobody had consumed.** A field is only finished when something reads it.
+
+**So the words come from the server, and the reasoning is the part to keep.** `fallback_message`
+is a sibling field, non-empty only when the reply was withheld; `reply` stays empty, so 1.15 and
+ADR-0016 are untouched and the draft still reaches nobody. It is fixed text from
+`TenantConfig.withheld_message`, never the draft, and **it must not say a person was told** — no
+webhook fires on a shadow turn and there is no console anybody watches. *"Someone will get back
+to you"* would be **A9(3)** — an offer nothing can honour — shipped as a hardcoded platform
+string, on the one path where no verifier runs because no model ran. That is worse than the case
+that was caught, not better. The alternative of putting the sentence in `widget.js` was rejected
+for the same family of reason: merchant-facing voice the merchant cannot change, in a file no
+merchant can see, versioned by a cache header.
+
+**Four decisions, each of which could have gone the other way:**
+
+- **No JavaScript toolchain.** One custom element with a Shadow root, no framework, no
+  `package.json`, no bundler, no lockfile. The decisive argument is **style isolation** inside an
+  arbitrary merchant's theme, not toolchain cost — a framework would have to reproduce it. Tests
+  run on `node --test`, which ships inside Node and needs no install. `make test-widget`, and a
+  unit test fails if a `package.json` appears anywhere.
+- **Hosted from our own origin.** `GET /v1/widget/widget.js` — the line that finally makes
+  overview.md §4's "widget hosting" claim true after it sat unimplemented since it was written.
+  A copy-paste snippet freezes every bug across the install base and forces `unsafe-inline` into
+  the **merchant's** CSP; a CDN adds a third party while **X2** is open.
+- **WebSocket first, REST fallback.** ADR-0016 already means the socket buys no earlier *text*.
+  What it buys is `step` frames across a p50 of **41.8–50.9s** — the difference between a system
+  visibly working and one a shopper reads as broken. The accepted cost is that there is no
+  `Idempotency-Key` on the socket, so a dropped-and-retried turn is billed twice.
+- **CORS is decided by the presented key.** Which brings the milestone's second finding.
+
+**P7 was met a second time, and the webhook answer was wrong for it.** security-model.md §13 has
+always asked for "per-tenant widget origin allowlists"; what existed was one process-wide env
+list, so merchant #2 needed an env change and a restart. Resolving it per tenant at preflight
+turns out to be **impossible as stated**: an `OPTIONS` request carries no `Authorization` header,
+and the union of every tenant's origins cannot be read out of PostgreSQL either, because
+`api_keys` is under forced RLS and no transaction can enumerate tenants. That is P7 exactly. The
+1.14 route — an index kept outside PostgreSQL — was **considered and rejected here**, because
+losing the webhook index costs a delayed schedule and losing a CORS index would cost a **total
+widget outage**. So the check moved to where the credential actually is: the preflight grants
+permission to *ask*, and `Access-Control-Allow-Origin` is withheld until the key's own allowlist
+has permitted the origin. A rejected cross-origin request is therefore unreadable in the browser
+and its refusal is not an oracle. **The general lesson: "do what the webhooks did" is not the
+answer to P7 — the cost of losing the index differs on every surface.**
+
+Stated honestly rather than buried: with `allow_credentials=False` and a bearer token there are
+no ambient credentials to ride on, so **CORS here is defence in depth and the key's origin lock
+is the access control**. Answering every preflight reads as permissive in isolation and is only
+defensible because of what sits behind it.
+
+**Measured.** 31 new unit tests, 8 new integration tests against real PostgreSQL, and 12
+`node --test` cases. **661 unit + 119 integration + 12 widget green**, ruff, mypy strict, 7
+import contracts kept, platform independence clean, eval-fast 47/47. The integration tests are
+the ones that matter: a shadowed turn over REST **and** over the socket both carry non-empty
+words, the fallback is asserted **not equal to the queued draft**, an answered turn carries no
+fallback, and a public key from `https://shop.example` — an origin that is deliberately *not* in
+`WIDGET_ALLOWED_ORIGINS` — completes a turn, which is the redeploy coupling proved gone.
+
+**No models were run, and Rule 4 is satisfied structurally rather than by spending heat.**
+`git status` under `agents/` and `packages/neura-agent-core/` is **empty** — the whole diff is
+the deployable, `neura-core` config and models, tests, and docs. The eval harness imports no
+`neura_api`, so no code path it exercises can reach any of this. This is the same argument 1.14
+and 1.15 made, and it is checkable rather than asserted.
+
+**What was deliberately NOT built.**
+
+- **A merchant console.** Phase 2, and it is what `SUGGEST` and `SUPERVISED` are still waiting
+  on. Until it exists the withheld-turn message may not claim a human is looking.
+- **Widget theming beyond a title.** No colour or logo configuration. It would be invented
+  product surface, and there is no merchant to have asked (**B2**).
+- **Any change to the shadow queue or the scorecard.** 1.16 reads none of it.
+
+**Verified live against a running API, with zero model calls** (`uv run neura-api`, then curl):
+the asset serves as `application/javascript` with `nosniff` and `max-age=300` and is **byte-identical
+to the file on disk**; the snippet endpoint returns the two lines a merchant pastes; a preflight
+from `https://brand-new-merchant.example` — an origin this deployment has never heard of — is
+answered `204` with that origin echoed; and a real `POST` from the same origin with an invalid
+key comes back **`401` with no `Access-Control-Allow-Origin` at all**, which is the layering
+working in both directions at once. The demo page carries the CSP a merchant would be asked to
+run. The API log contains no reference to a model.
+
+**The browser half was written up as a gap and then closed in the same session.**
+`scripts/widget_check.py` / **`make widget-check`** drives the real `widget.js` in **real
+headless Google Chrome** over the DevTools Protocol. No npm, no Playwright, no `package.json`
+— Chrome is already on this machine and `websockets` already ships with `uvicorn[standard]`.
+
+**Stub mode is free — no models, no heat — and it is the one that earns its keep**, because it
+can produce turn shapes that are awkward to ask for on demand. Four scenarios, all passing in
+Chrome: an answered turn draws the reply; **a shadowed turn draws the server's words rather
+than silence**; an empty turn draws a visible error; and a refused socket falls back to REST
+and still answers.
+
+**Then two live turns against the real API and the real shop**, on `NEURA_ROLE_MAP=hybrid` so
+`compose` went to OpenRouter and only the small local models ran — **5 LLM calls each, one turn
+apiece, nothing like an eval**. A real origin-locked `fn_pk_` key, a real browser, the real
+graph: the first answered *"You may return most items within 30 days of delivery for a full
+refund…"* from the shop's own policy page, and the second — tenant provisioned in **shadow
+mode**, `turn_completed … mode=shadow` in the log — showed the shopper the withheld-turn
+message instead of an empty panel. **That is ADR-0020 working end to end in a browser, and
+there was no other way to prove it.**
+
+**Running it found two bugs, and the second is the one to remember.** Both were in the check's
+own stub, which is the point: they were only findable by running something.
+
+- **Function-local `fastapi` imports do not resolve under `from __future__ import
+  annotations`.** FastAPI resolves a handler's annotations against the *module* namespace, so a
+  locally-imported `Request` silently became a required query parameter — `422` on the POST,
+  a bare `403` on the socket handshake, and no error anywhere naming the cause.
+- **The first passing run passed for the wrong reason.** The socket was rejecting every
+  handshake, the widget's REST fallback was quietly covering for it, and the scenario reported
+  a clean tick. **A check that cannot say which transport answered cannot tell you the
+  preferred one is broken** — it measures the fallback and calls it the feature. The stub now
+  records the transport per turn and every scenario asserts it: three over the WebSocket, one
+  over REST. This is the same shape as `eval-guard-off` and as the 1.14 serving/eval runtime
+  test, met in a third place.
+
+**What is still not covered, stated rather than left implied:** Chrome only — no Safari, no
+Firefox, no real mobile, and no merchant's actual theme. The Shadow root is the *argument* that
+the last one is safe, and it is an argument rather than a measurement.
+
+- **Next:** 1.17, deploy — and **X2** before anything else, because Railway has no GPU path and
+  the API host is a separate choice from the model host. **A4 is still the thing to answer first
+  if anyone starts grading.**
 
 ### 2026-08-15 — The review queue and the scorecard (1.15 complete)
 

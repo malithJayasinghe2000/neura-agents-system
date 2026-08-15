@@ -82,6 +82,12 @@ ignore = [
 # order to prove that real ones are redacted and rejected.
 "tests/**" = ["S101", "S105", "S106"]
 "evals/**" = ["S101", "S105", "S106"]
+# `widget_check.py` launches a browser it found on this machine and polls it
+# over the DevTools Protocol. Popen of a known-good path, a `timeout=` argument
+# on a poll loop and a swallowed exception while waiting for a port to open are
+# what that job *is* — the alternative is an async subprocess wrapper and an
+# Event around a process this script does not own.
+"scripts/widget_check.py" = ["ASYNC109", "ASYNC110", "ASYNC220", "S110", "S603"]
 
 [tool.ruff.lint.isort]
 known-first-party = [

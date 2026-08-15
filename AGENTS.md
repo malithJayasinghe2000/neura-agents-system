@@ -60,6 +60,10 @@ agents/                     PRODUCTS — one folder per sellable agent
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
                             auth · rate limits · idempotency · metering ·
                             chat + WebSocket · webhook outbox drainer
+  widget/                   the embeddable chat element. THE ONLY JAVASCRIPT
+                            IN THIS REPOSITORY — one file, no build step, no
+                            package.json anywhere (ADR-0019). A test fails if
+                            one appears
 
 evals/                      eval runner — finds agents and their datasets by
                             entry point, and never learns an agent's name
@@ -77,7 +81,12 @@ Full detail in [docs/architecture/tenancy-and-packaging.md](docs/architecture/te
 
 ```bash
 make dev            # docker compose up + API with reload
-make test           # unit + integration
+make test           # unit + the widget's JS logic
+make test-widget    # `node --test` — Node ships the runner, so no npm and no install
+make widget-check   # drive the REAL widget in REAL headless Chrome. No models, no cost —
+                    # the browser half is not reachable from pytest or from node --test
+make widget-check-live SHOP=… TOKEN=… [SHADOW=1]   # the same file against a running API
+                                                   # and a real shop. One turn, not an eval
 make lint           # ruff + mypy
 make eval           # run the agent against its golden datasets (needs Ollama)
 make eval-fast      # datasets + harness only — no agent, no models. In `make check`
@@ -279,3 +288,8 @@ Every significant choice is in [`docs/architecture/adr/`](docs/architecture/adr/
 **ADRs are immutable.** Disagreeing with one is fine — write a new ADR that supersedes it. Do not edit the old one; future readers need to see why we once thought otherwise.
 
 If something here seems wrong, it may well be. Say so, in an ADR.
+
+**Two that a session touching the API will meet immediately:**
+
+- **[ADR-0019](docs/architecture/adr/0019-widget-no-build-step.md)** — the widget is one dependency-free custom element served from our own origin, WebSocket-first with a REST fallback. There is no JavaScript toolchain and `tests/unit/test_widget.py` fails if a `package.json` appears. **CORS is decided by the presented key, not by `WIDGET_ALLOWED_ORIGINS`** — that setting now covers only endpoints with no key to consult.
+- **[ADR-0020](docs/architecture/adr/0020-a-withheld-turn-says-so.md)** — a turn that withholds its reply carries `fallback_message`, and an empty reply with an empty fallback is a bug rather than a quiet turn. If you add a mode that withholds, it is that field you populate, not `reply`.
