@@ -8,7 +8,10 @@
 **Current phase:** Phase 1 — milestones 1.1–1.15 complete
 **Next action:** **Milestone 1.16 — the widget.** Embeddable chat, client-side rendered, AI
 disclosure, origin-locked public keys. It is the first surface a real shopper would touch, and
-the public-key path it needs already exists and is inert until origin-locked.
+the public-key path it needs already exists and is inert until origin-locked. **Read P8 before
+writing any of it**: the constraints are documented and the *build* is not, and this repository
+has no JavaScript toolchain at all — so 1.16 either introduces one or deliberately avoids one.
+Four things need deciding and none of them should be decided silently.
 
 **1.15 completed on 2026-08-15.** A turn can run in full with the shopper shown nothing, and
 the draft is graded through `GET /shadow`, `POST /shadow/{id}/grade` and
