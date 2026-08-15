@@ -33,7 +33,11 @@ jobs:
       - run: uv run ruff format --check .
         name: Format check
 
-      - run: uv run mypy packages apps agents
+      # `evals` belongs here. Without it mypy cannot see `neura_evals`' own
+      # types, and the only symptom is two `import-untyped` errors in the agent
+      # that imports it — a red CI caused by the checked path, not the code.
+      # `make typecheck` has always included it; this line had drifted.
+      - run: uv run mypy packages apps agents evals
         name: Typecheck (strict)
 
       # The two checks that keep the architecture honest. Boundaries that are
@@ -91,11 +95,37 @@ jobs:
       - run: node --test "tests/widget/*.test.js"
         name: Widget tests
 
+      # ── The database, set up exactly as `make up` does it locally ──────────
+      #
+      # A GitHub service container cannot mount a file, so the init script that
+      # docker-compose mounts has to be run as a step. It is the SAME file, not
+      # a copy: two scripts that are supposed to agree eventually will not, and
+      # the way that failure shows up is CI proving isolation against a database
+      # that never had the policies.
+      - run: psql "$PGURL" -v ON_ERROR_STOP=1 -f infra/docker/init-db.sql
+        name: Initialise roles and extensions
+        env:
+          PGURL: postgresql://neura:neura@localhost:5432/neura
+
+      - run: uv run alembic upgrade head
+        name: Migrate
+        env:
+          DATABASE_URL: postgresql+asyncpg://neura_app:neura_app@localhost:5432/neura
+          DATABASE_MIGRATION_URL: postgresql+asyncpg://neura:neura@localhost:5432/neura
+
       - run: uv run pytest tests/integration -v -m integration
         name: Integration tests
         if: hashFiles('tests/integration/test_*.py') != ''
         env:
-          DATABASE_URL: postgresql+asyncpg://neura:neura@localhost:5432/neura
+          # `neura_app`, NOT `neura`. PostgreSQL exempts superusers from every
+          # RLS policy, so connecting as the owner would run the whole isolation
+          # suite against policies that are never consulted — passing, and
+          # proving nothing. `Database.ping` refuses to start on a superuser for
+          # exactly this reason (ADR-0008), which is why the previous CI run
+          # errored instead of quietly going green. **That refusal is the
+          # control working. Do not "fix" it by relaxing the check.**
+          DATABASE_URL: postgresql+asyncpg://neura_app:neura_app@localhost:5432/neura
+          DATABASE_MIGRATION_URL: postgresql+asyncpg://neura:neura@localhost:5432/neura
           REDIS_URL: redis://localhost:6379/0
 
   # Agent evaluations gate behaviour changes: prompts, graph nodes, tools and

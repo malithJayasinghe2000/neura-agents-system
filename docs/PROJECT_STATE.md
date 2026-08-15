@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-15 (the widget — 1.16)
+**Last updated:** 2026-08-16 (the widget — 1.16 — and CI made green)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete
 **Next action:** **Milestone 1.17 — deploy.** Dockerfiles, a staging deploy, Langfuse, alerting,
 a runbook. **X2 is the thing to answer first**: the deployment target is still undecided, and
@@ -146,8 +146,8 @@ the better buy of the two. Do not restart either without reading that entry firs
 | Guard, measured | ✅ **precision 1.00 (0 of 40 benign blocked), recall 0.85 (34 of 40)** on a balanced corpus, run free in CI. And `make eval-guard-off` — the suite with every rule disabled, injection resistance still 1.00, which is what stops the guard being credited with the gate |
 | **Widget** | ✅ **1.16** — `<neura-chat>`, one dependency-free custom element with a Shadow root, served by the API at `GET /v1/widget/widget.js`. **No build step and no `package.json` anywhere** ([ADR-0019](architecture/adr/0019-widget-no-build-step.md)); a test fails if one appears. WebSocket first with a REST fallback, `ai_disclosure` on every message, and a withheld turn renders the server's words rather than nothing ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)). **Driven in real headless Chrome** (`make widget-check`) — 4 stub scenarios free of models, plus 2 live turns against the real shop, one of them shadowed. Chrome only |
 | CORS | ✅ **1.16** — decided by the **presented key**, not by a deployment-wide list. A preflight is answered for any valid origin because it carries no credential and grants nothing; `Access-Control-Allow-Origin` is withheld until the key's own allowlist permits it. Onboarding a merchant's domain is a key issue, not a redeploy |
-| Tests | ✅ **661 unit + 119 integration + 12 widget (JS)** passing (1.16 added 31 + 8 + 12) |
-| CI | ✅ workflow written and **pushed** — `main` has taken six pushes since the workflow landed, so GitHub has run it. **The results have not been read from this machine**: the repository is private and there is no `gh` CLI or token here, so `make check` locally is the evidence, not a green tick anybody has seen |
+| Tests | ✅ **665 unit + 119 integration + 12 widget (JS)** passing (1.16 added 35 + 8 + 12) |
+| CI | ✅ **and now actually green — 1.16 read the results for the first time.** It had been red on every push since the workflow landed, for two reasons that were both *configuration*, not code: the typecheck line had drifted from the Makefile's (missing `evals`, which hides `neura_evals`' own types and reports two errors in the agent that imports it), and the integration job connected as `neura` — a **superuser**, which PostgreSQL exempts from every RLS policy. `Database.ping` refused to start, which is the ADR-0008 control working exactly as designed. CI now runs the same `infra/docker/init-db.sql` the dev stack mounts, migrates, and connects as `neura_app`. Four tests in `test_architecture.py` pin all of it, and each was proved to fail when its bug is reintroduced |
 | Design partner | ❌ None — top project risk |
 
 **A merchant's shopper can now hold a conversation with this over HTTP.** `make api-check`
@@ -293,6 +293,51 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-16 — CI was red on every push, and both causes were configuration
+
+**Somebody looked at GitHub Actions for the first time.** PROJECT_STATE has said since 1.14
+that the workflow was written and pushed and *"the results have not been read from this
+machine"* — private repository, no `gh`, no token. Six pushes later, the answer is that it had
+been failing the whole time, on two jobs, for two reasons that were **both configuration and
+neither of them code**.
+
+**1. The typecheck line had drifted from the Makefile's.** The workflow ran
+`mypy packages apps agents`; `make typecheck` runs `mypy packages apps agents evals`. Dropping
+`evals` means mypy cannot see `neura_evals`' own type information, so the *agent* that imports
+it reports two `import-untyped` errors. Red CI, nothing wrong in the code, and **not
+reproducible with any command anybody runs locally** — which is precisely why it survived six
+pushes.
+
+**2. The integration job connected to PostgreSQL as `neura` — the superuser.** Every one of the
+111 integration tests errored at fixture setup. **This is the most reassuring failure in the
+repository**, because what stopped it was the check ADR-0008 exists for:
+
+> Refusing to run: the database role 'neura' is a superuser, so Row-Level Security does not
+> apply to it and tenant isolation is silently disabled.
+
+PostgreSQL exempts superusers from every policy. Had `Database.ping` not refused, the entire
+isolation suite would have run **green against policies that were never consulted** — the
+single most expensive silent pass this system could produce. The 1.14 entry's line about
+controls nobody calls has a companion: *a control that fires in anger is worth more than the
+test that says it would.*
+
+**The fix is that CI now does what `make up` does.** GitHub service containers cannot mount a
+file, so `infra/docker/init-db.sql` — **the same file** docker-compose mounts, not a copy —
+runs as a step; then `alembic upgrade head`; then the tests, connecting as `neura_app`.
+
+**Reproduced and verified locally rather than by pushing and hoping.** A throwaway
+`pgvector/pgvector:pg16` container with no init script — GitHub's exact shape — reproduced the
+superuser error first, then the fixed sequence ran **119 integration tests green** against it.
+
+**Four tests now pin the configuration** (`test_architecture.py::TestCiRunsWhatTheMakefileRuns`):
+the typechecked paths in CI and the Makefile must be identical, CI's `DATABASE_URL` must name
+`neura_app`, CI must run the dev stack's own init script, and it must migrate before it tests.
+**Each was proved to fail when its bug is put back** — a test that cannot fail is not a test,
+which is this project's own rule applied to the thing that had been silently broken longest.
+
+- **Next:** unchanged — 1.17 and **X2**. But CI is now evidence rather than decoration, which
+  matters more for 1.17 than for anything before it.
 
 ### 2026-08-15 (later) — The widget, and the half of shadow mode nobody could see (1.16)
 

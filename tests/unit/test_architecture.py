@@ -166,3 +166,92 @@ def test_commerce_does_not_know_any_adapter() -> None:
         if line.strip().startswith(("import ", "from ")) and "neura_adapters" in line
     ]
     assert not offenders, "neura_commerce imports an adapter:\n" + "\n".join(offenders)
+
+
+class TestCiRunsWhatTheMakefileRuns:
+    """CI and `make check` must not drift, because only one of them is run
+    before a push and the other is the one that goes red.
+
+    This is not hypothetical. On 2026-08-15 the workflow's typecheck line read
+    ``mypy packages apps agents`` while the Makefile's read
+    ``mypy packages apps agents evals``. Dropping ``evals`` hides
+    ``neura_evals``' own type information, so the *agent* that imports it
+    reported two ``import-untyped`` errors — a red CI caused entirely by the
+    paths being checked, with nothing wrong in the code and nothing reproducible
+    locally. It went unnoticed for six pushes because nobody on this machine can
+    read the CI result (the repository is private and there is no `gh` here).
+    """
+
+    WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
+    MAKEFILE = REPO_ROOT / "Makefile"
+
+    def _mypy_paths(self, path: Path) -> set[str]:
+        """The paths each file actually hands to mypy.
+
+        Only real invocations — ``uv run mypy …`` — and only the part before a
+        trailing comment, so the Makefile's own `## help text` and `.mypy_cache`
+        in the clean target are not mistaken for arguments.
+        """
+        found: set[str] = set()
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line.startswith("#") or "uv run mypy" not in line:
+                continue
+            _, _, tail = line.partition("uv run mypy")
+            found |= {word for word in tail.split("#")[0].split() if not word.startswith("-")}
+        return found
+
+    def test_the_typechecked_paths_agree(self) -> None:
+        ci = self._mypy_paths(self.WORKFLOW)
+        makefile = self._mypy_paths(self.MAKEFILE)
+        assert ci, "no `uv run mypy` invocation found in the workflow"
+        assert ci == makefile, (
+            f"CI typechecks {sorted(ci)} and `make typecheck` checks "
+            f"{sorted(makefile)}. Whichever is smaller is the one that will "
+            "surprise somebody."
+        )
+
+    def test_ci_connects_as_the_unprivileged_role(self) -> None:
+        """PostgreSQL exempts superusers from every RLS policy, so a CI that
+        connects as the owner runs the whole isolation suite against policies
+        that are never consulted.
+
+        ``Database.ping`` refuses to start on such a role, which is why this was
+        a loud CI error rather than a silent green — but the refusal only helps
+        the run it stops. This pins the configuration itself.
+        """
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or "DATABASE_URL:" not in stripped:
+                continue
+            assert "neura_app:" in stripped, (
+                f"CI sets an application DATABASE_URL to a privileged role: {stripped!r}. "
+                "Row-Level Security does not apply to superusers, so the isolation "
+                "tests would pass without testing anything (ADR-0008)."
+            )
+
+    def test_ci_runs_the_same_init_script_the_dev_stack_mounts(self) -> None:
+        """A GitHub service container cannot mount a file, so the init script
+        has to be run as a step — and it must be *this* file rather than a copy.
+
+        Two scripts that are supposed to agree eventually will not, and the way
+        that failure surfaces is CI proving tenant isolation against a database
+        that never had the roles or the extensions.
+        """
+        workflow = self.WORKFLOW.read_text(encoding="utf-8")
+        compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        script = "infra/docker/init-db.sql"
+        assert script in workflow, f"CI never runs {script}, so `neura_app` will not exist"
+        assert script in compose, f"the dev stack no longer mounts {script}"
+
+    def test_ci_migrates_before_it_tests(self) -> None:
+        """Integration tests skip on an absent database and FAIL on an empty
+        one, which is the right way round — but only if something has run the
+        migrations first."""
+        lines = self.WORKFLOW.read_text(encoding="utf-8").splitlines()
+        migrate = next((i for i, x in enumerate(lines) if "alembic upgrade head" in x), -1)
+        test = next((i for i, x in enumerate(lines) if "tests/integration" in x), -1)
+        assert migrate != -1, "CI never runs migrations"
+        assert test != -1, "CI never runs the integration tests"
+        assert migrate < test, "CI runs the integration tests before migrating"
