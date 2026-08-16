@@ -34,6 +34,7 @@ from neura_commerce.sync import (
     fingerprint,
 )
 from neura_domain import (
+    CanonicalEntity,
     Capability,
     Category,
     Customer,
@@ -561,3 +562,118 @@ async def test_a_checkpoint_survives_the_run_that_wrote_it() -> None:
     assert checkpoint.has_completed_backfill
     assert not checkpoint.is_backfilling
     assert checkpoint.updated_through is not None
+
+
+# ── Identity survives an edit ────────────────────────────────────────────────
+
+
+async def test_a_stored_neura_id_survives_a_content_change() -> None:
+    """An adapter mints a fresh ``neura_id`` on every fetch.
+
+    Writing the incoming one would give a product a new permanent identity each
+    time a merchant edits its title, which is the exact opposite of what
+    ``identity.py`` exists for — and it only becomes visible once the store is
+    durable, because in memory nobody outlives the process that holds the ids.
+    """
+    shop = FakeShop()
+    store = InMemoryEntityStore()
+    key = EntityKey(TENANT, shop.platform, EntityType.PRODUCT, "1")
+
+    await store.upsert([shop._product("1")])
+    original = await store.get(key)
+    assert original is not None
+
+    edited = shop._product("1", title="A New Title").model_copy(
+        update={"neura_id": "ent_freshly_minted"}
+    )
+    result = await store.upsert([edited])
+
+    assert result.updated == 1
+    after = await store.get(key)
+    assert after is not None
+    assert after.title == "A New Title"
+    # Both the row's id and the entity inside it, or a reader gets two answers.
+    assert after.neura_id == original.neura_id
+    assert store._rows[key.as_tuple()].neura_id == original.neura_id
+
+
+# ── What a stored document deserialises to ───────────────────────────────────
+
+
+def test_every_synced_entity_type_maps_to_a_canonical_model() -> None:
+    """Both directions of the map live in one module so a new entity type
+    cannot be added to one and forgotten in the other."""
+    from neura_commerce.sync import model_for
+
+    for entity_type in (
+        EntityType.PRODUCT,
+        EntityType.CATEGORY,
+        EntityType.POLICY,
+        EntityType.ORDER,
+        EntityType.CUSTOMER,
+    ):
+        assert issubclass(model_for(entity_type), CanonicalEntity)
+
+
+def test_a_variant_is_not_a_stored_entity() -> None:
+    """A variant is a field of a Product, not an entity with provenance of its
+    own. A store asked for one should say so rather than guess."""
+    from neura_commerce.sync import model_for
+
+    with pytest.raises(ValueError, match="variant"):
+        model_for(EntityType.VARIANT)
+
+
+# ── The schema, as a contract ────────────────────────────────────────────────
+
+
+def test_the_entity_primary_key_is_exactly_an_entity_key() -> None:
+    """A surrogate id would permit two rows for one entity — the single failure
+    the store contract says must be structurally impossible."""
+    from neura_commerce.sync import synced_entities
+
+    assert [c.name for c in synced_entities.primary_key.columns] == [
+        "tenant_id",
+        "platform",
+        "entity_type",
+        "external_id",
+    ]
+
+
+def test_the_checkpoint_primary_key_is_exactly_a_sync_key() -> None:
+    from neura_commerce.sync import sync_checkpoints
+
+    assert [c.name for c in sync_checkpoints.primary_key.columns] == [
+        "tenant_id",
+        "platform",
+        "entity_type",
+    ]
+
+
+def test_both_sync_tables_carry_a_tenant_id() -> None:
+    """Which is what puts them in reach of the ADR-0008 protection test — the
+    integration suite finds tenant-scoped tables by this column, so a table
+    without one is a table nothing checks for a policy."""
+    from neura_commerce.sync import sync_checkpoints, synced_entities
+
+    for table in (synced_entities, sync_checkpoints):
+        assert "tenant_id" in table.c
+
+
+def test_an_entity_is_stored_as_a_document_not_as_a_second_schema() -> None:
+    """ADR-0021. If this fails, someone has started defining the canonical
+    model in PostgreSQL as well as in neura-domain — which is a superseding
+    ADR, not a column."""
+    from neura_commerce.sync import synced_entities
+
+    assert set(synced_entities.c.keys()) == {
+        "tenant_id",
+        "platform",
+        "entity_type",
+        "external_id",
+        "neura_id",
+        "fingerprint",
+        "document",
+        "created_at",
+        "updated_at",
+    }

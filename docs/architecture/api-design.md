@@ -329,7 +329,7 @@ nobody could read (S5) were both discovered exactly that way.
 
 | Not built | Why |
 |:--|:--|
-| `POST /v1/stores/{id}/sync` and its status | The sync engine's entity persistence is still in memory — the `EntityStore` seam from milestone 1.8. A triggered sync would write results that vanish on the next restart. |
+| `POST /v1/stores/{id}/sync` and its status | **The reason this gave has been removed.** Entity persistence landed on 2026-08-16 ([ADR-0021](adr/0021-synced-entities-are-documents.md)), so a triggered sync now writes results that survive. What is still missing is somewhere for the *job* to run and be reported on: a synchronous endpoint that crawls a catalogue is a request that times out. That needs the worker, and a status endpoint needs run records this schema does not hold. |
 | `POST /v1/care/conversations/{id}/feedback` | It is described here as the highest-value signal we receive, and it becomes a golden case. Nothing ingests golden cases from a table yet; shadow mode is 1.15. A feedback endpoint today records a merchant's most valuable input into a place nobody reads. |
 | Knowledge-base document upload and reindex | RAG indexes what the sync engine syncs. Merchant-uploaded documents need a document store that does not exist, and catalogue and policies already arrive by sync. |
 

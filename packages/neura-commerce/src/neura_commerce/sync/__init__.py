@@ -17,6 +17,13 @@ from neura_commerce.sync.engine import (
     SyncOutcome,
     Throttle,
 )
+from neura_commerce.sync.postgres import (
+    DatabaseEntityStore,
+    DatabaseSyncStateStore,
+    PostgresEntityStore,
+    PostgresSyncStateStore,
+)
+from neura_commerce.sync.schema import sync_checkpoints, synced_entities
 from neura_commerce.sync.state import (
     InMemorySyncStateStore,
     SyncCheckpoint,
@@ -24,11 +31,17 @@ from neura_commerce.sync.state import (
     SyncStateStore,
 )
 from neura_commerce.sync.store import (
+    CrossTenantWriteError,
     EntityStore,
     InMemoryEntityStore,
     StoredEntity,
+    StoredEntityInvalidError,
+    SyncStoreError,
     WriteResult,
     fingerprint,
+    key_for,
+    model_for,
+    with_id,
 )
 from neura_commerce.sync.throttle import (
     DEFAULT_BURST,
@@ -43,19 +56,31 @@ __all__ = [
     "MAX_ATTEMPTS",
     "MAX_PAGES",
     "SYNCED_TYPES",
+    "CrossTenantWriteError",
+    "DatabaseEntityStore",
+    "DatabaseSyncStateStore",
     "EntityStore",
     "InMemoryEntityStore",
     "InMemorySyncStateStore",
     "NoLimit",
+    "PostgresEntityStore",
+    "PostgresSyncStateStore",
     "RateLimiter",
     "ReconcileOutcome",
     "StoredEntity",
+    "StoredEntityInvalidError",
     "SyncCheckpoint",
     "SyncEngine",
     "SyncKey",
     "SyncOutcome",
     "SyncStateStore",
+    "SyncStoreError",
     "Throttle",
     "WriteResult",
     "fingerprint",
+    "key_for",
+    "model_for",
+    "sync_checkpoints",
+    "synced_entities",
+    "with_id",
 ]

@@ -247,7 +247,7 @@ Stated plainly, so nobody plans around something that does not exist:
 | Upload a CSV instead of building endpoints | **Phase 3** |
 | A web page for the merchant to grade shadow answers in | **Phase 2.** Today grading is API calls |
 | Merchant self-service signup | Not built — account setup is an operator command |
-| Synced data surviving a restart | ⚠️ **Still in memory.** The catalogue re-syncs after a restart |
+| A sync that runs on a schedule | ⚠️ **Not built.** The synced catalogue is durable now, but nothing triggers a sync — an operator runs it (**P7**) |
 | Anything that changes your shop | Deliberately never, in this phase ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)) |
 
 ---

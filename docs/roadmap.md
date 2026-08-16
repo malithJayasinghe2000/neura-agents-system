@@ -25,6 +25,7 @@ Estimates below are in **focused work-weeks** (≈30 productive hours). Part-tim
 | 1.6 | **Generic Interface** ✅ | OpenAPI spec + `GenericAdapter` + `neura-conformance` CLI | 1.5w |
 | 1.7 | **Bagisto bridge** ✅ | Laravel package in the Bagisto install conforming to the spec; Redis queue; webhooks | 1.5w |
 | 1.8 | **Sync engine** ✅ | Backfill, incremental, event-driven, reconciliation, per-tenant rate limiting | 1.5w |
+| — | **Sync persistence** ✅ | Not a milestone: the `EntityStore` / `SyncStateStore` seam 1.8 left open, closed on 2026-08-16 out of order ([ADR-0021](architecture/adr/0021-synced-entities-are-documents.md)) | — |
 | 1.9 | **RAG** ✅ | Chunking, embedding, pgvector with `(tenant, model)` namespacing, retrieval, reindex path — plus Alembic, the first migration, and RLS proved live | 1w |
 | 1.10 | **Agent runtime** ✅ | `neura-agent-core`: graph, tool registry, policy engine, checkpointer, audit log | 2w |
 | 1.11 | **CARE agent** ✅ | 3 intents, 7 tools, prompts as files, escalation handoff, first golden dataset run against a real agent | 1.5w |

@@ -10,6 +10,9 @@ dependencies = [
     "neura-core",
     "neura-domain",
     "httpx>=0.28",
+    # The engine and tenant-scoped sessions come from neura-core; this is for
+    # the two sync tables and their queries in `sync/`.
+    "sqlalchemy[asyncio]>=2.0",
 ]
 
 [build-system]

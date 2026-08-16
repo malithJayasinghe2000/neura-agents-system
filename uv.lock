@@ -846,6 +846,7 @@ dependencies = [
     { name = "httpx" },
     { name = "neura-core" },
     { name = "neura-domain" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
 [package.metadata]
@@ -853,6 +854,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "neura-core", editable = "packages/neura-core" },
     { name = "neura-domain", editable = "packages/neura-domain" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
 ]
 
 [[package]]

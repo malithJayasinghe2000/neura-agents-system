@@ -102,8 +102,9 @@ conformance:  ## Check a store: make conformance URL=https://shop/neura/v1 TOKEN
 conformance-self-test:  ## Verify the conformance tool itself against a built-in store
 	uv run neura-conformance --self-test
 
-sync-check:  ## Run the sync engine against a REAL shop: make sync-check URL=... TOKEN=...
-	uv run python scripts/sync_smoke_test.py --url $(URL) --token $(TOKEN)
+sync-check:  ## Sync a REAL shop into PostgreSQL: make sync-check URL=... TOKEN=... [RESET=1]
+	uv run python scripts/sync_smoke_test.py --url $(URL) --token $(TOKEN) \
+	  $(if $(TENANT),--tenant-id $(TENANT),) $(if $(RESET),--reset,)
 
 sync-watch:  ## Sync, then edit the shop and re-run to see exactly what changed
 	uv run python scripts/sync_watch.py --url $(URL) --token $(TOKEN)

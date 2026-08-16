@@ -15,6 +15,11 @@ Two decisions are encoded here rather than left to each caller:
   answer "is what I hold still what the shop has?" without re-reading every
   field of every row, and an `updated_at` cannot answer it — some platforms
   don't touch the timestamp on every edit.
+* **The stored `neura_id` survives a content change.** An adapter mints a fresh
+  one on every fetch, so writing the incoming id would give a product a new
+  permanent identity each time a merchant edits its title — which is the exact
+  opposite of what `identity.py` exists for. Both implementations keep the id
+  they first recorded.
 """
 
 from __future__ import annotations
@@ -25,7 +30,43 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from neura_commerce.identity import EntityKey, EntityType
-from neura_domain import CanonicalEntity
+from neura_core import NeuraError
+from neura_domain import CanonicalEntity, Category, Customer, Order, Policy, Product
+
+
+class SyncStoreError(NeuraError):
+    """Something went wrong persisting a sync.
+
+    Declared beside the Protocol rather than beside the PostgreSQL
+    implementation, so a caller can handle these without importing a storage
+    backend it otherwise never names.
+    """
+
+    code = "SYNC_STORE_ERROR"
+
+
+class CrossTenantWriteError(SyncStoreError):
+    """A write was refused because it belongs to another tenant.
+
+    Row-Level Security doing its job, not a bug in it. Named because it is a
+    security event: something upstream resolved the tenant one way and built an
+    entity another way, and that deserves an alert rather than a driver stack
+    trace.
+    """
+
+    code = "SYNC_CROSS_TENANT_WRITE"
+
+
+class StoredEntityInvalidError(SyncStoreError):
+    """A stored document no longer validates against its canonical model.
+
+    The stated cost of storing entities as documents (ADR-0021), surfaced rather
+    than swallowed. Either ``neura-domain`` gained a required field without a
+    backfill, or the row was written by something that is not the sync engine.
+    """
+
+    code = "SYNC_STORED_ENTITY_INVALID"
+
 
 #: Excluded from the fingerprint. These change on every read without the shop
 #: having changed anything, and including them would make every reconcile
@@ -118,7 +159,7 @@ class InMemoryEntityStore:
         result = WriteResult()
 
         for entity in entities:
-            key = _key_for(entity)
+            key = key_for(entity)
             digest = fingerprint(entity)
             existing = self._rows.get(key.as_tuple())
 
@@ -134,8 +175,15 @@ class InMemoryEntityStore:
             else:
                 result.updated += 1
 
+            # The first id wins. See the module docstring: the incoming one is
+            # freshly minted by the adapter and means nothing. Stamped onto the
+            # entity too, so a reader cannot get one id from the row and a
+            # different one from the object inside it.
+            neura_id = existing.neura_id if existing else entity.neura_id
+            stored = entity if neura_id == entity.neura_id else with_id(entity, neura_id)
+
             self._rows[key.as_tuple()] = StoredEntity(
-                key=key, neura_id=entity.neura_id, fingerprint=digest, entity=entity
+                key=key, neura_id=neura_id, fingerprint=digest, entity=stored
             )
             result.external_ids.append(entity.external_id)
 
@@ -174,7 +222,16 @@ class InMemoryEntityStore:
         ]
 
 
-def _key_for(entity: CanonicalEntity) -> EntityKey:
+def with_id(entity: CanonicalEntity, neura_id: str) -> CanonicalEntity:
+    """The same entity under a different ``neura_id``.
+
+    Used when a store already holds this entity: the id it recorded first is the
+    stable one, and the adapter's freshly minted replacement is discarded.
+    """
+    return entity.model_copy(update={"neura_id": neura_id})
+
+
+def key_for(entity: CanonicalEntity) -> EntityKey:
     return EntityKey(
         tenant_id=entity.tenant_id,
         platform=entity.platform,
@@ -190,3 +247,29 @@ _ENTITY_TYPES = {
     "Order": EntityType.ORDER,
     "Policy": EntityType.POLICY,
 }
+
+#: The reverse direction, for rehydrating a stored document. Both maps live here
+#: so a new entity type cannot be added to one and forgotten in the other.
+#:
+#: ``EntityType.VARIANT`` is deliberately absent: a variant is a field of a
+#: ``Product``, not an entity with provenance of its own, so there is no
+#: ``CanonicalEntity`` to build and a store asked for one should say so rather
+#: than guess.
+_MODELS: dict[EntityType, type[CanonicalEntity]] = {
+    EntityType.PRODUCT: Product,
+    EntityType.CATEGORY: Category,
+    EntityType.CUSTOMER: Customer,
+    EntityType.ORDER: Order,
+    EntityType.POLICY: Policy,
+}
+
+
+def model_for(entity_type: EntityType) -> type[CanonicalEntity]:
+    """Which canonical model a stored document of this type deserialises to."""
+    model = _MODELS.get(entity_type)
+    if model is None:
+        raise ValueError(
+            f"{entity_type.value!r} is not a stored entity type — it has no "
+            "CanonicalEntity of its own"
+        )
+    return model

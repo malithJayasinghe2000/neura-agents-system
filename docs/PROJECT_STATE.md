@@ -4,12 +4,21 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-16 (the widget — 1.16 — and CI made green)
-**Current phase:** Phase 1 — milestones 1.1–1.16 complete
+**Last updated:** 2026-08-16 (sync persistence — the 1.8 seam closed)
+**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence
 **Next action:** **Milestone 1.17 — deploy.** Dockerfiles, a staging deploy, Langfuse, alerting,
 a runbook. **X2 is the thing to answer first**: the deployment target is still undecided, and
 Railway — the earlier plan — has no GPU path. Production inference is a cloud API, so the
 API/worker host is a separate choice from the model host and should be made as one.
+
+**Sync persistence landed on 2026-08-16, out of milestone order and deliberately so.** It is
+not 1.17 and it is not a numbered milestone at all — it is the `EntityStore` / `SyncStateStore`
+seam that has been open since 1.8, and it was the last thing in the system that lost real
+merchant data on a restart. Two tables ([ADR-0021](architecture/adr/0021-synced-entities-are-documents.md)),
+forced RLS, **zero model calls, and zero lines added to `neura-domain`**. **The one to carry
+forward:** an entity is stored as its *canonical document*, so PostgreSQL never becomes a
+second definition of the domain model — the day something needs to query a product by price,
+that is a superseding ADR and not a column.
 
 **1.16 completed on 2026-08-15, and P8 is closed by two ADRs rather than by four silent
 choices** — [0019](architecture/adr/0019-widget-no-build-step.md) (build, delivery, transport)
@@ -116,11 +125,11 @@ the better buy of the two. Do not restart either without reading that entry firs
 | Real platform conformed | ✅ **the abstraction is proven** — a real commerce platform passes conformance with 0 failures, 0 warnings, via a bridge in its own repo. Zero core changes here. |
 | Signed webhooks | ✅ verified end to end over Redis: shop signs → client verifies; forged, unsigned and replayed requests all rejected |
 | Sync engine | ✅ backfill (resumable) · incremental · webhook refresh · reconciliation · per-tenant rate limiting. Verified against the real shop (`make sync-check`) |
-| Sync persistence | ⚠️ still in-memory — the seam (`EntityStore`, `SyncStateStore`) is defined and tested. **Not** done in 1.9: that milestone persisted *vectors*, not entities. **Considered for 1.13 and deliberately excluded** — see the 1.13 entry |
+| Sync persistence | ✅ **2026-08-16** — `synced_entities` + `sync_checkpoints`, forced RLS, closing the seam open since 1.8. An entity is stored as its **canonical document** in `jsonb`, not as a second schema ([ADR-0021](architecture/adr/0021-synced-entities-are-documents.md)), so `neura-domain` gained zero lines. Proved by running `make sync-check` **twice** against the real shop: 46 entities the first time, **0 re-downloaded** the second |
 | Platform independence | ✅ proved: a fictional platform integrates with **zero** core changes |
-| Migrations | ✅ Alembic configured; three revisions applied, each reversible, no model drift (`alembic check`) |
+| Migrations | ✅ Alembic configured; **seven** revisions applied, each reversible, no model drift (`alembic check`) |
 | Database seam | ✅ `neura_core.db` — pooled async engine, `tenant_session()` setting `app.tenant_id` per transaction |
-| Multi-tenant isolation | ✅ **RLS live and verified** — forced on all **eight** `tenant_id` tables; cross-tenant read returns nothing, cross-tenant write is rejected. A test fails if any `tenant_id` table lacks a forced policy |
+| Multi-tenant isolation | ✅ **RLS live and verified** — forced on all **sixteen** `tenant_id` tables; cross-tenant read returns nothing, cross-tenant write is rejected. A test fails if any `tenant_id` table lacks a forced policy |
 | **Tenancy** | ✅ **1.13** — `tenants` · `api_keys` · `tenant_stores` · `tenant_usage`, all forced-RLS. Entitlements (`enabled_agents`), per-tenant config, envelope-encrypted store credentials, the budget ladder, and a usage rollup per (tenant, day, agent) |
 | API keys | ✅ `fn_sk_`/`fn_pk_`, 256 random bits, SHA-256 at rest, scoped · expirable · revocable · `last_used_at`. Public keys are **inert** until origin-locked. **The lookup runs before the tenant is known** — a read-only session that can see exactly the row whose hash it presented ([ADR-0014](architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
 | Budgets | ✅ soft → fewer tool calls, hard → **empty tool allowlist**, so every turn escalates. No new graph branch: it reuses policy check 4. **Untriggerable until 1.14 records usage (P5)** |
@@ -146,7 +155,7 @@ the better buy of the two. Do not restart either without reading that entry firs
 | Guard, measured | ✅ **precision 1.00 (0 of 40 benign blocked), recall 0.85 (34 of 40)** on a balanced corpus, run free in CI. And `make eval-guard-off` — the suite with every rule disabled, injection resistance still 1.00, which is what stops the guard being credited with the gate |
 | **Widget** | ✅ **1.16** — `<neura-chat>`, one dependency-free custom element with a Shadow root, served by the API at `GET /v1/widget/widget.js`. **No build step and no `package.json` anywhere** ([ADR-0019](architecture/adr/0019-widget-no-build-step.md)); a test fails if one appears. WebSocket first with a REST fallback, `ai_disclosure` on every message, and a withheld turn renders the server's words rather than nothing ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)). **Driven in real headless Chrome** (`make widget-check`) — 4 stub scenarios free of models, plus 2 live turns against the real shop, one of them shadowed. Chrome only |
 | CORS | ✅ **1.16** — decided by the **presented key**, not by a deployment-wide list. A preflight is answered for any valid origin because it carries no credential and grants nothing; `Access-Control-Allow-Origin` is withheld until the key's own allowlist permits it. Onboarding a merchant's domain is a key issue, not a redeploy |
-| Tests | ✅ **665 unit + 119 integration + 12 widget (JS)** passing (1.16 added 35 + 8 + 12) |
+| Tests | ✅ **672 unit + 138 integration + 12 widget (JS)** passing (sync persistence added 7 + 19) |
 | CI | ✅ **and now actually green — 1.16 read the results for the first time.** It had been red on every push since the workflow landed, for two reasons that were both *configuration*, not code: the typecheck line had drifted from the Makefile's (missing `evals`, which hides `neura_evals`' own types and reports two errors in the agent that imports it), and the integration job connected as `neura` — a **superuser**, which PostgreSQL exempts from every RLS policy. `Database.ping` refused to start, which is the ADR-0008 control working exactly as designed. CI now runs the same `infra/docker/init-db.sql` the dev stack mounts, migrates, and connects as `neura_app`. Four tests in `test_architecture.py` pin all of it, and each was proved to fail when its bug is reintroduced |
 | Design partner | ❌ None — top project risk |
 
@@ -197,7 +206,7 @@ the wild rather than a new finding.
 1.17 Deploy                     ⬜
 ```
 
-**Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for **all thirteen** `tenant_id` tables; each new table is covered by the same test, which is why 1.14's five came with it for free) · **end-to-end conversation working ✅ — now over REST and over a WebSocket** (`make api-check` against the real shop).
+**Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for **all sixteen** `tenant_id` tables; each new table is covered by the same test, which is why 1.14's five and sync persistence's two came with it for free) · **end-to-end conversation working ✅ — now over REST and over a WebSocket** (`make api-check` against the real shop).
 
 Remaining: **shadow mode producing *graded* conversations** — every part except the people is built (the queue records turns, the API grades them, the scorecard counts them). What is missing is real traffic to shadow and somebody to grade it (**B2**, **A4**), and a path from a graded turn into a golden case (**E1**) · evals green on both role maps (**not green on either** — 31–32 of the original 35 on `ollama-dev`, with escalation *precision* the one gate still unmet at 0.78–0.88 against 0.85; the cloud map has no model configured) · injection resistance 1.00 (**met, including with the guard disabled — a gate that has to stay met, not one to tick off**) · shadow mode producing graded conversations.
 
@@ -229,6 +238,7 @@ Remaining: **shadow mode producing *graded* conversations** — every part excep
 | The `GUARD` model must be able to refuse, and is chosen by measurement | [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md) |
 | The widget is a dependency-free custom element, served by the API | [ADR-0019](architecture/adr/0019-widget-no-build-step.md) |
 | A withheld turn says so, and the server supplies the words | [ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md) |
+| A synced entity is stored as its canonical document, not as a second schema | [ADR-0021](architecture/adr/0021-synced-entities-are-documents.md) |
 
 Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
 
@@ -293,6 +303,98 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-16 (later) — Sync persistence: the 1.8 seam, closed
+
+**The synced catalogue now survives a restart.** `synced_entities` and `sync_checkpoints`,
+both forced-RLS, filling the `EntityStore` / `SyncStateStore` Protocols that have had only
+in-memory implementations since milestone 1.8. **Not a numbered milestone** — 1.17 is deploy,
+and this was taken out of order because it was the last place in the system where real
+merchant data was lost on a redeploy.
+
+**The decision is [ADR-0021](architecture/adr/0021-synced-entities-are-documents.md), and the
+fork it settles is where the canonical model is *defined*.** An entity is stored as its
+canonical document in one `jsonb` column, not as a column per field across five typed tables.
+The alternative fails on cost rather than on capability: it makes PostgreSQL a second
+definition of the domain model, so every field added to `Product` becomes a migration — and
+three of the five tables would have been empty, because orders and customers are read live
+through the adapter and are not synced at all (§6.1). **Nothing queries a synced entity's
+contents.** Every read in the Protocol filters on `EntityKey` or a prefix of it; semantic
+search over that same text is `document_chunks`, which is a different table for a different
+question.
+
+**The accepted cost is stated rather than buried:** PostgreSQL cannot check that a row is a
+valid `Product`. Pydantic does, on both sides, and a document that fails validation raises
+`StoredEntityInvalidError` — it is **not skipped**. A store that quietly dropped rows it could
+not parse would report a shrinking catalogue, and "the agent stopped knowing about twelve
+products" is a defect found by a shopper.
+
+**Both primary keys are natural and composite** — `EntityKey` and `SyncKey` exactly. A
+surrogate id would permit two rows for one entity, which is the single failure the store
+contract says must be structurally impossible, given that webhooks arrive twice and backfills
+overlap incrementals. Neither table has a secondary index, because every read is a primary-key
+prefix; adding one out of habit would be an index nothing uses.
+
+**Building it found a defect that only durability could expose.** An adapter mints a fresh
+`neura_id` on every fetch, and the in-memory store wrote the incoming one — so a product got a
+**new permanent identity every time a merchant edited its title**, contradicting the stated
+purpose of `identity.py`. In memory nothing outlived the process holding the ids, so nothing
+could observe it. Both implementations now keep the id they recorded first and stamp it onto
+the document, so a reader cannot get one id from the row and a different one from the object
+inside it. **This is the fifth time this project has found a field that nothing consumed** —
+`pii_leaked`, `guard.block`, usage rows, the audit column, `reply: ""` — with the variation
+that here the *reader* did not exist yet either, and durability is what created one.
+
+**One thing that is defended but not tested, said plainly:** `neura_id` is omitted from the
+`ON CONFLICT` SET clause to protect against two workers inserting the same new entity at once,
+where the loser holds an id minted before the winner's row existed. The ordinary case is
+handled in Python and *is* tested; the race is not reproduced by this suite.
+
+**Measured.** 7 new unit tests and **19 new integration tests against real PostgreSQL**:
+cross-tenant read returns nothing on all four read methods, a cross-tenant *write* raises
+`CrossTenantWriteError` (the `WITH CHECK` half — filtering reads alone would let a bug write
+one merchant's products into another's catalogue and then correctly display them), a
+cross-tenant delete is a silent no-op *and the row is still there afterwards*, a Decimal price
+survives the round trip as a Decimal, a corrupted document raises rather than vanishing, and a
+cursor comes back as a cursor. **672 unit + 138 integration + 12 widget green**, ruff, mypy
+strict, 7 import contracts kept, platform independence clean, eval-fast 47/47, `alembic check`
+clean, migration reversed and re-applied.
+
+**Three tests were proved to fail when the property is removed**, which is this project's own
+rule applied to the thing being claimed: swapping the stores back to in-memory fails all three
+restart tests, and reverting the id-preservation line fails the identity test. Putting
+`neura_id` back into the SET clause **did not** fail anything — that is the untested race
+above, found by trying to falsify it.
+
+**No models were run, and Rule 4 is satisfied structurally rather than by spending heat.**
+`git status` under `agents/`, `packages/neura-agent-core/`, `neura-llm/` and **`neura-domain/`**
+is empty — the entire diff is `neura-commerce`, one migration, tests, a script and docs. The
+eval harness imports no `neura_commerce.sync`, and the canonical model gained zero lines, which
+was the explicit constraint on this work.
+
+**Proved against the real shop, and the proof is the second run.** `make sync-check` now writes
+to PostgreSQL and reports whether the run was **cold** or **warm** — a cold run reporting
+"nothing changed" would mean it synced nothing, and printing one as the other is how a check
+comes to measure its own fallback (the 1.16 transport bug, in a second place). Run one, cold:
+**+29 products, +6 categories, +11 policies**. Run two, a separate process: **`WARM — 46
+entities already held`, 0 created, 0 updated, 46 unchanged, 0 re-downloaded** — and the shop
+was still asked, so this is persistence rather than a skipped network call. Reconcile still
+repairs a deliberately deleted product on both runs.
+
+**What was deliberately NOT built.**
+
+- **The identity map is still in memory.** `synced_entities.neura_id` is the durable half for
+  synced types; `EntityMap.reverse` is not persisted and nothing reads it yet.
+- **Nothing schedules a sync.** The catalogue is durable and an operator still has to trigger
+  it, because a worker cannot enumerate tenants under RLS — **P7**, unchanged by this.
+- **No offboarding fan-out.** security-model.md §6.2 requires deletion to reach every table
+  holding a tenant's data. These two are now on that list; the fan-out itself remains unbuilt.
+- **`POST /v1/stores/{id}/sync`.** api-design.md §13 excluded it because the results vanished.
+  That reason is now gone and a new one has been written down in its place: a synchronous
+  endpoint that crawls a catalogue is a request that times out, so it needs the worker.
+
+- **Next:** unchanged — **1.17 and X2**. The deploy milestone now has one fewer excuse: a
+  redeployed worker no longer loses the catalogue it just downloaded.
 
 ### 2026-08-16 — CI was red on every push, and both causes were configuration
 

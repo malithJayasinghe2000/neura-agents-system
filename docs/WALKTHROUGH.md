@@ -177,8 +177,11 @@ make sync-check   URL=$SHOP TOKEN=$TOKEN       # needs the shop
 **What you should see:** conformance passes with 0 failures and 0 warnings against Bagisto.
 That single result is the proof that the whole platform-independence claim is real.
 
-> ⚠️ **Known gap.** Synced data is still held **in memory** — it disappears on restart. This
-> must be fixed before a paying merchant.
+Synced data lands in PostgreSQL — `synced_entities` and `sync_checkpoints`, both under the same
+forced Row-Level Security as everything else ([ADR-0021](architecture/adr/0021-synced-entities-are-documents.md)).
+**Run `make sync-check` twice**: the first run downloads the catalogue, the second finds
+everything unchanged and writes nothing. That second run is the whole feature, and it is the one
+thing an in-memory store can never show you.
 
 ---
 
@@ -456,7 +459,7 @@ Work down it. **Free** means no models and no laptop heat.
 | 2 | Tenant isolation, real PostgreSQL | `uv run pytest tests/integration -m integration` | Free |
 | 3 | The conformance checker itself | `make conformance-self-test` | Free |
 | 4 | A real shop passes the spec | `make conformance URL=$SHOP TOKEN=$TOKEN` | Free |
-| 5 | Sync from a real shop | `make sync-check URL=$SHOP TOKEN=$TOKEN` | Free |
+| 5 | Sync from a real shop — **run it twice**, the second must re-download nothing | `make sync-check URL=$SHOP TOKEN=$TOKEN` | Free |
 | 6 | Indexing for search | `make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1` | Models (embeddings only — light) |
 | 7 | Search quality | `make rag-ask Q="..." SHOW=1` | Light |
 | 8 | The widget in a real browser | `make widget-check` | **Free** |
@@ -573,7 +576,7 @@ scripts/              every `make *-check` you ran above
 | ❌ **No real merchant** | The top risk. Everything is proved against a test shop |
 | ❌ **All 47 test conversations are invented** | They prove the machinery, **not** that the agent is good |
 | ❌ **Never deployed** | It runs on one laptop |
-| ⚠️ **Synced data does not survive a restart** | Must be fixed before a paying merchant |
+| ❌ **Nothing schedules a sync** | The catalogue is durable now, but a worker still cannot enumerate tenants under RLS to know whose to run (**P7**) |
 | ⚠️ **One quality gate unmet** | Escalation precision — it hands over slightly too often |
 | ❌ **No screen for the merchant** | Grading is API calls today |
 | ❌ **4 of 5 planned agents do not exist** | Only CARE is even designed |
