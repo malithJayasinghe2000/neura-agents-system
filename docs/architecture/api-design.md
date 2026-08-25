@@ -315,8 +315,12 @@ Breaking changes require `/v2`, with `/v1` supported for **12 months minimum**, 
    Not MVP.
 4. **GraphQL.** Regularly requested, rarely needed. Not planned; revisit only if
    an integrator is genuinely blocked.
-5. **Background work cannot enumerate tenants under Row-Level Security.** New in
-   1.14 and general rather than webhook-specific — open question **P7**.
+5. ~~**Background work cannot enumerate tenants under Row-Level Security.**~~
+   **Answered on 2026-08-26** ([ADR-0022](adr/0022-scheduling-under-rls.md)).
+   `job_queue` is an ordinary tenant table; `neura_due_tenants()` is one
+   `SECURITY DEFINER` function returning a list of tenant ids and nothing else,
+   and everything after that call is an ordinary scoped session. The webhook
+   outbox has **not** moved onto it yet — see §13.
 
 ---
 
@@ -329,14 +333,17 @@ nobody could read (S5) were both discovered exactly that way.
 
 | Not built | Why |
 |:--|:--|
-| `POST /v1/stores/{id}/sync` and its status | **The reason this gave has been removed.** Entity persistence landed on 2026-08-16 ([ADR-0021](adr/0021-synced-entities-are-documents.md)), so a triggered sync now writes results that survive. What is still missing is somewhere for the *job* to run and be reported on: a synchronous endpoint that crawls a catalogue is a request that times out. That needs the worker, and a status endpoint needs run records this schema does not hold. |
+| `POST /v1/stores/{id}/sync` and its status | **Both reasons this gave are now gone, and the endpoint is still not built.** Entity persistence landed on 2026-08-16 ([ADR-0021](adr/0021-synced-entities-are-documents.md)) so results survive, and the worker landed on 2026-08-26 ([ADR-0022](adr/0022-scheduling-under-rls.md)) so there is somewhere for the job to run and a `job_queue` row to report on. What is missing is now only the route: `enqueue_sync()` exists and is called by `make job-check`, not by an authenticated request. That is a small, deliberate gap and it should be closed with the route rather than by widening the helper. |
 | `POST /v1/care/conversations/{id}/feedback` | It is described here as the highest-value signal we receive, and it becomes a golden case. Nothing ingests golden cases from a table yet; shadow mode is 1.15. A feedback endpoint today records a merchant's most valuable input into a place nobody reads. |
 | Knowledge-base document upload and reindex | RAG indexes what the sync engine syncs. Merchant-uploaded documents need a document store that does not exist, and catalogue and policies already arrive by sync. |
 
 Also not built, and lower stakes: auto-generated SDKs, the Postman/Bruno
 collection, `llms.txt` and the sandbox tenant (§10 — all Phase 2), and a durable
-scheduler for webhook retries, which needs a worker process (1.17) and is the
-subject of P7.
+scheduler for webhook retries. That last one no longer needs anything to be
+*designed* — the worker and the durable queue exist ([ADR-0022](adr/0022-scheduling-under-rls.md))
+— it needs the drainer's Redis index replaced by a `webhook.drain` job enqueued
+in the same transaction as the delivery rows, which was kept out of that change
+on purpose so a delivery regression could not be blamed on two changes at once.
 
 `POST /v1/care/conversations/{id}/escalate` is also absent. A merchant forcing a
 handover has to hand it *to* something, and there is no ticketing seam; the

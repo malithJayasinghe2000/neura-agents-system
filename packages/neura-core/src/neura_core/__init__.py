@@ -1,8 +1,9 @@
 """neura-core — shared infrastructure.
 
 Config, structured logging, the error hierarchy, request context, telemetry,
-identifiers, envelope encryption, and the database seam. The bottom of the
-dependency graph: this package imports nothing else from the workspace.
+identifiers, envelope encryption, the database seam, and the background job
+queue. The bottom of the dependency graph: this package imports nothing else
+from the workspace.
 """
 
 from neura_core.config import Environment, Settings, get_settings

@@ -576,7 +576,7 @@ scripts/              every `make *-check` you ran above
 | ❌ **No real merchant** | The top risk. Everything is proved against a test shop |
 | ❌ **All 47 test conversations are invented** | They prove the machinery, **not** that the agent is good |
 | ❌ **Never deployed** | It runs on one laptop |
-| ❌ **Nothing schedules a sync** | The catalogue is durable now, but a worker still cannot enumerate tenants under RLS to know whose to run (**P7**) |
+| ◐ **A sync can now be queued, but nothing queues one on a timer** | The worker exists and finds work for tenants it was never told about ([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)); `make job-check` proves it against the real shop. What is missing is a recurring trigger and a route to ask for one |
 | ⚠️ **One quality gate unmet** | Escalation precision — it hands over slightly too often |
 | ❌ **No screen for the merchant** | Grading is API calls today |
 | ❌ **4 of 5 planned agents do not exist** | Only CARE is even designed |

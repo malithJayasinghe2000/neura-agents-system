@@ -25,6 +25,9 @@ DOCUMENT: Final = "doc"
 CHUNK: Final = "chk"
 EVENT: Final = "evt"
 IDEMPOTENCY: Final = "idk"
+#: One unit of background work. Prefixed like everything else so a job id in a
+#: log is never mistaken for the conversation that scheduled it.
+JOB: Final = "job"
 NEURA_ENTITY: Final = "ne"
 WEBHOOK: Final = "whk"
 #: One (event, endpoint) pair in the outbox — distinct from the event itself,

@@ -4,12 +4,25 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-16 (sync persistence — the 1.8 seam closed)
-**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence
+**Last updated:** 2026-08-26 (the scheduler — P7 answered, ADR-0022)
+**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence and the scheduler
 **Next action:** **Milestone 1.17 — deploy.** Dockerfiles, a staging deploy, Langfuse, alerting,
 a runbook. **X2 is the thing to answer first**: the deployment target is still undecided, and
 Railway — the earlier plan — has no GPU path. Production inference is a cloud API, so the
 API/worker host is a separate choice from the model host and should be made as one.
+
+**The scheduler landed on 2026-08-26, and it closes P7** — the question that had been met
+three times and answered generally none of them. It is **not** 1.17, which remains deploy and
+remains on hold. `job_queue` is an ordinary forced-RLS tenant table; the half that was actually
+open is `neura_due_tenants()`, one `SECURITY DEFINER` function owned by a `NOLOGIN` role with no
+grant on `payload`, returning a list of tenant ids and nothing else
+([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)). **The one to carry forward:** *a job
+table with a `tenant_id` column does not answer P7* — it makes the data safe and leaves the
+dispatch exactly as impossible. Every answer has two halves and only the second was ever open.
+**Proved against the real shop:** `make job-check` starts a worker process *before* the tenant
+exists, then creates one and enqueues a sync from a second process — 46 entities synced for a
+tenant the worker was never told about, in 1.5s. Zero model calls; `git status` under
+`neura-domain/`, `neura-llm/` and `agents/` is empty.
 
 **Sync persistence landed on 2026-08-16, out of milestone order and deliberately so.** It is
 not 1.17 and it is not a numbered milestone at all — it is the `EntityStore` / `SyncStateStore`
@@ -58,6 +71,10 @@ the better buy of the two. Do not restart either without reading that entry firs
 > **Starting 1.17 cold?** Read [`../CLAUDE.md`](../CLAUDE.md) first, then this file, then the
 > 1.14 and 1.12 entries below.
 >
+> **P7 is now closed** ([ADR-0022](architecture/adr/0022-scheduling-under-rls.md), 2026-08-26).
+> The two entries below are the sightings that shaped the answer and are kept because the
+> reasoning is the answer's justification — read them before reopening anything about it.
+>
 > **The one thing to carry forward from 1.16.** **P7 was met a second time, and the webhook
 > answer was the wrong one for it.** A CORS preflight carries no credential and RLS forbids
 > reading every tenant's origins, which is the same wall the webhook outbox hit — but losing
@@ -76,10 +93,14 @@ the better buy of the two. Do not restart either without reading that entry firs
 > as evidence rather than as a principle: **a control nothing calls is not a control that
 > works, it is a control nobody has run.**
 >
-> **And one that is newly open.** No transaction can enumerate tenants under RLS, so any
-> background sweeper needs an index of "which tenants have work" kept outside PostgreSQL.
-> 1.14 took that route rather than a `BYPASSRLS` role or a policy exemption, and the cost is
-> recorded as **P7**: lose the index and the rows are safe but the schedule is not.
+> **And one that was newly open then, and is closed now.** No transaction can enumerate tenants
+> under RLS, so 1.14 kept an index of "which tenants have work" outside PostgreSQL — a Redis
+> set — rather than taking a `BYPASSRLS` role or a policy exemption, at the recorded cost that
+> losing the index loses the schedule. **The webhook drainer still uses that Redis set.** It was
+> deliberately left there by ADR-0022: its outbox rows are already durable and only the *index*
+> is wrong, and the fair test of a new dispatch mechanism is a surface that has none. The
+> migration is one change — `note()` enqueues a `webhook.drain` job in the same transaction as
+> the delivery rows, and `PENDING_TENANTS_KEY` is deleted.
 >
 > **The one thing to carry forward from 1.12.** Injection resistance is 1.00 because the defence
 > is **structural** — no WRITE tool exists to invoke, every call is authorised in code, an unowned
@@ -126,10 +147,11 @@ the better buy of the two. Do not restart either without reading that entry firs
 | Signed webhooks | ✅ verified end to end over Redis: shop signs → client verifies; forged, unsigned and replayed requests all rejected |
 | Sync engine | ✅ backfill (resumable) · incremental · webhook refresh · reconciliation · per-tenant rate limiting. Verified against the real shop (`make sync-check`) |
 | Sync persistence | ✅ **2026-08-16** — `synced_entities` + `sync_checkpoints`, forced RLS, closing the seam open since 1.8. An entity is stored as its **canonical document** in `jsonb`, not as a second schema ([ADR-0021](architecture/adr/0021-synced-entities-are-documents.md)), so `neura-domain` gained zero lines. Proved by running `make sync-check` **twice** against the real shop: 46 entities the first time, **0 re-downloaded** the second |
+| **Scheduler** | ✅ **2026-08-26 — P7 closed.** `job_queue` (forced RLS, natural retry ladder, lease, dedupe key, dead letters) plus **one** cross-tenant read: `neura_due_tenants()`, a `SECURITY DEFINER` function owned by `neura_scheduler` — **NOLOGIN, no BYPASSRLS, no grant on `payload`** — returning tenant ids and nothing else ([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)). Reached through `Database.dispatch_session()`: READ ONLY, no `app.tenant_id`, so every table returns nothing to it. A `JobRunner` runs in the API process (ADR-0002) with a `sync.store` handler. Proved by `make job-check` — 46 entities synced for a tenant the worker was never told about |
 | Platform independence | ✅ proved: a fictional platform integrates with **zero** core changes |
-| Migrations | ✅ Alembic configured; **seven** revisions applied, each reversible, no model drift (`alembic check`) |
+| Migrations | ✅ Alembic configured; **eight** revisions applied, each reversible, no model drift (`alembic check`) |
 | Database seam | ✅ `neura_core.db` — pooled async engine, `tenant_session()` setting `app.tenant_id` per transaction |
-| Multi-tenant isolation | ✅ **RLS live and verified** — forced on all **sixteen** `tenant_id` tables; cross-tenant read returns nothing, cross-tenant write is rejected. A test fails if any `tenant_id` table lacks a forced policy |
+| Multi-tenant isolation | ✅ **RLS live and verified** — forced on all **seventeen** `tenant_id` tables; cross-tenant read returns nothing, cross-tenant write is rejected. A test fails if any `tenant_id` table lacks a forced policy |
 | **Tenancy** | ✅ **1.13** — `tenants` · `api_keys` · `tenant_stores` · `tenant_usage`, all forced-RLS. Entitlements (`enabled_agents`), per-tenant config, envelope-encrypted store credentials, the budget ladder, and a usage rollup per (tenant, day, agent) |
 | API keys | ✅ `fn_sk_`/`fn_pk_`, 256 random bits, SHA-256 at rest, scoped · expirable · revocable · `last_used_at`. Public keys are **inert** until origin-locked. **The lookup runs before the tenant is known** — a read-only session that can see exactly the row whose hash it presented ([ADR-0014](architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
 | Budgets | ✅ soft → fewer tool calls, hard → **empty tool allowlist**, so every turn escalates. No new graph branch: it reuses policy check 4. **Untriggerable until 1.14 records usage (P5)** |
@@ -203,6 +225,9 @@ the wild rather than a new finding.
                                     (no console to grade in — Phase 2)
 1.16 Widget                     ✅  hosted element · per-tenant CORS · a withheld
                                     turn says so · driven in real Chrome
+ —   Sync persistence           ✅  out of order: the 1.8 seam (ADR-0021)
+ —   Scheduler                  ✅  out of order: P7 (ADR-0022). A worker runs
+                                    work for tenants it was never told about
 1.17 Deploy                     ⬜
 ```
 
@@ -239,6 +264,7 @@ Remaining: **shadow mode producing *graded* conversations** — every part excep
 | The widget is a dependency-free custom element, served by the API | [ADR-0019](architecture/adr/0019-widget-no-build-step.md) |
 | A withheld turn says so, and the server supplies the words | [ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md) |
 | A synced entity is stored as its canonical document, not as a second schema | [ADR-0021](architecture/adr/0021-synced-entities-are-documents.md) |
+| A durable job queue, and **one** function that reads a single column across tenants | [ADR-0022](architecture/adr/0022-scheduling-under-rls.md) |
 
 Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
 
@@ -303,6 +329,115 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-26 — The scheduler, and the one read that crosses tenants (P7, closed)
+
+**A worker now runs work for a tenant nobody told it about.** `job_queue` plus
+`neura_due_tenants()`, decided in [ADR-0022](architecture/adr/0022-scheduling-under-rls.md).
+**Not a numbered milestone** — 1.17 is deploy and is on hold — and not agent #2. This is **P7**,
+the question met three times and answered generally none of them.
+
+**The reframing is the whole result, and it is what a fresh session should read first.** The
+project's own notes said the likely shape was "a durable job table with a tenant column". That
+shape is right and it **does not answer P7**: `job_queue` is under the same forced-RLS policy as
+the other sixteen tables, so it makes the *data* safe and leaves the *dispatch* exactly as
+impossible. Every answer has two halves and only the second was ever open. The real question was
+never *job table or Redis* — it was **how narrow can the one cross-tenant read be, and how loudly
+does it fail?**
+
+**The answer: `neura_due_tenants(as_of)`.** A `SECURITY DEFINER` function returning `SETOF text`,
+owned by `neura_scheduler` — a role with **no LOGIN and no BYPASSRLS**, holding a **column-level**
+grant that excludes `payload` and `last_error`. Column grant and row policy must both pass, so
+even total compromise of that role yields tenant ids and timing, never what a job is about. It is
+reached through `Database.dispatch_session()` — `READ ONLY`, sets no `app.tenant_id`, so every
+policy-protected table returns nothing to it and the function call is the only statement in that
+transaction that can answer anything. Everything after it is an ordinary `tenant_session`. The
+shape is the ADR-0014 bootstrap applied a second time: where a genuine chicken-and-egg exists, the
+answer is a session that can ask exactly one narrow question, not a session that has been let off.
+
+**Why `BYPASSRLS` was the shape to argue against, stated as a comparison rather than a principle.**
+A bypass role sees every row of every table on every query the worker ever makes, and a missing
+`WHERE tenant_id` becomes a leak instead of an empty result — it would be `assert_isolation_applies`
+refusing to run, by design. A GUC-gated policy exemption exposes whole rows, payload included, to
+any application session that sets the GUC. This exposes one column-set of one table, for the
+duration of one call, through a role nothing connects as.
+
+**The cost changed shape rather than going away, and the new one is stated as plainly as the old.**
+1.14's was: *lose the Redis set and the rows are safe but the schedule is not* — silently, because
+an empty `SMEMBERS` is indistinguishable from "nothing to do". There is now no separate index to
+lose: the schedule and the work are rows in the same database, written in the **same transaction**,
+which a `sadd` after a commit structurally cannot be. In its place is a real exemption — a role
+that can see, for every tenant, that a job is pending and when. **And the failures that remain are
+loud:** a missing migration raises `UndefinedFunction` on every poll instead of returning an empty
+list; a bad payload or an unknown `kind` dead-letters visibly rather than sitting pending forever.
+
+**The genuinely new cost:** a lease means **at-least-once**. A stalled worker and its replacement
+can both run one job. Free for sync — ADR-0021's `ON CONFLICT` on the natural key already makes a
+repeated crawl converge — and something any future job with an external side effect must argue for
+itself rather than inherit.
+
+**The integration suite found a real defect in the first version of the dispatch function**, which
+is worth recording because it is the same class of bug this project keeps finding. The function
+originally selected only `status = 'pending'`. A worker killed mid-job leaves its row in
+`running` — so the dispatcher would never name that tenant again, and the job would be **stranded
+forever by the lease that exists to recover it**. The rule is one sentence — *the time has come
+and no live lease holds it* — and it is now stated three times, in the function, in
+`JobQueue.claim` and in `Job.is_claimable`, with an integration test that checks the SQL and the
+Python against **each other** rather than each against a hand-written expectation.
+
+**Measured.** 13 new unit tests and **34 new integration tests against real PostgreSQL**: a tenant
+cannot read, write or **claim** another tenant's jobs; the dispatch session reads **zero** rows
+from `job_queue`, `tenants`, `synced_entities` and `conversations`; it cannot write; the widening
+policy is scoped `TO neura_scheduler` and does not reach `neura_app`; the function is not
+executable by `PUBLIC`; `FOR UPDATE SKIP LOCKED` stops two workers taking one job; an attempt is
+charged at claim rather than at failure, so a job that crashes the process still dead-letters.
+**685 unit + 172 integration + 12 widget green**, ruff, mypy strict, 7 import contracts kept,
+platform independence clean, eval-fast 47/47, `alembic check` clean, migration reversed and
+re-applied twice.
+
+**Four properties were proved to fail when removed** — this project's own rule applied to the
+security claim rather than to a feature. Dropping the `scheduler_dispatch` policy fails ten of the thirty-four;
+granting `payload` to the scheduler role fails the column test; adding `BYPASSRLS` fails the bounds
+test; reverting the function to `pending`-only fails the expired-lease test.
+
+**No models were run, and Rule 4 is satisfied structurally rather than by spending heat.**
+`git status` under `agents/`, `packages/neura-llm/`, `packages/neura-agent-core/` and
+**`packages/neura-domain/`** is empty. The queue's `kind` is a string and its `payload` is `jsonb`
+for exactly the ADR-0021 reason: a typed column per job kind would make PostgreSQL a second
+definition of what a job is.
+
+**Proved against the real shop, and the proof is the *first* check.** `make job-check` starts a
+worker in a **separate OS process** before the tenant exists, and prints what
+`neura_due_tenants()` returns at that moment — **nobody**. A run that reported a successful sync
+without that line having been empty would prove nothing; it would be equally consistent with a
+worker handed the tenant all along. Then a second process creates a brand-new tenant, registers
+the real shop, and enqueues one `sync.store` job. The worker discovers it, decrypts that
+merchant's credentials, and crawls: **46 entities synced in 1.5s for a tenant it was never told
+about.** Asked twice, still one job — the dedupe key holds.
+
+**The first run of that script reported a timeout and printed nothing about why**, because the
+worker's stdout was a pipe nobody read. Fixed the same way the 1.16 transport bug was: the demo
+now drains the worker continuously and prints its last words on failure. The original cause was
+the shop's own MySQL being down — which the script could not say, and now can.
+
+**What was deliberately NOT built.**
+
+- **The webhook drainer has not moved.** Its outbox rows are already durable; only the *index* is
+  wrong. The migration is one change — `note()` enqueues a `webhook.drain` job in the same
+  transaction as the delivery rows, and `PENDING_TENANTS_KEY` is deleted. Kept separate on purpose:
+  the fair test of a dispatch mechanism is a surface that has none, and a delivery regression in a
+  commit that changed both could not be attributed.
+- **Nothing enqueues a job on a timer.** A recurring schedule is a `cron`-shaped table and a later
+  decision, not a column added quietly to `job_queue`.
+- **`POST /v1/stores/{id}/sync` is still not built.** Both reasons api-design.md §13 gave are now
+  gone; what is missing is only the route. `enqueue_sync()` exists and is called by the check
+  script, not by an authenticated request.
+- **No retention, budget-reset or approval-queue jobs.** P7 named all three as the work this
+  unblocks. This decides how they will be *dispatched*; none of them is designed.
+- **No priority and no per-tenant quota** beyond the claim limit. Fairness is coarse and ADR-0022
+  says so rather than implying otherwise.
+
+- **Next:** unchanged — **1.17 and X2**.
 
 ### 2026-08-16 (later) — Sync persistence: the 1.8 seam, closed
 

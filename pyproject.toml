@@ -82,12 +82,24 @@ ignore = [
 # order to prove that real ones are redacted and rejected.
 "tests/**" = ["S101", "S105", "S106"]
 "evals/**" = ["S101", "S105", "S106"]
+# The job queue's integration tests build their SQL from the table name defined
+# in `neura_core.jobs.schema` rather than from a literal. That is deliberate: a
+# renamed table must break these tests rather than have them quietly assert
+# nothing. The interpolated value is a module constant and never input.
+"tests/integration/test_jobs_postgres.py" = ["S101", "S105", "S106", "S608"]
 # `widget_check.py` launches a browser it found on this machine and polls it
 # over the DevTools Protocol. Popen of a known-good path, a `timeout=` argument
 # on a poll loop and a swallowed exception while waiting for a port to open are
 # what that job *is* — the alternative is an async subprocess wrapper and an
 # Event around a process this script does not own.
 "scripts/widget_check.py" = ["ASYNC109", "ASYNC110", "ASYNC220", "S110", "S603"]
+# `job_check.py` starts a real worker in a real second process and then polls
+# the database from outside it, which is the demonstration rather than an
+# implementation detail: the point is that the worker learns of a tenant it was
+# never handed. It cannot signal an Event across a process boundary, its table
+# names are module constants and never input, and the `assert` is a narrowing
+# for mypy on a pipe that was just opened.
+"scripts/job_check.py" = ["ASYNC110", "S101", "S608"]
 
 [tool.ruff.lint.isort]
 known-first-party = [

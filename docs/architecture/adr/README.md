@@ -28,3 +28,4 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0019](0019-widget-no-build-step.md) | The widget is a dependency-free custom element, served by the API | Accepted |
 | [0020](0020-a-withheld-turn-says-so.md) | A withheld turn says so, and the server supplies the words | Accepted |
 | [0021](0021-synced-entities-are-documents.md) | A synced entity is stored as its canonical document, not as a second schema | Accepted |
+| [0022](0022-scheduling-under-rls.md) | A durable job queue, and the one read that crosses tenants | Accepted |

@@ -155,6 +155,32 @@ class Database:
             )
             yield session
 
+    @asynccontextmanager
+    async def dispatch_session(self) -> AsyncIterator[AsyncSession]:
+        """The transaction a background worker uses to find out *whom* to work for.
+
+        The second chicken-and-egg in this design, and the same answer as the
+        first. Background work has no request and no credential, so it cannot
+        name a tenant — and a transaction that names no tenant sees nothing,
+        which is the whole point of ADR-0008. A sweeper therefore has no way to
+        ask "which rows across every tenant are due?".
+
+        This session sets **no** ``app.tenant_id``, so every policy-protected
+        table returns nothing to it. The one useful statement it can make is
+        ``neura_due_tenants()`` — a ``SECURITY DEFINER`` function owned by a
+        ``NOLOGIN`` role, holding a column grant that excludes ``payload``, and
+        returning a list of tenant ids and nothing else. The caller then opens an
+        ordinary :meth:`tenant_session` for each id it was given
+        (docs/architecture/adr/0022-scheduling-under-rls.md).
+
+        ``READ ONLY`` makes that structural rather than careful: dispatch cannot
+        become a way to mutate anything before a tenant has been named.
+        """
+        async with self._sessions() as session, session.begin():
+            # First statement in the transaction, or PostgreSQL rejects it.
+            await session.execute(text("SET TRANSACTION READ ONLY"))
+            yield session
+
     async def assert_isolation_applies(self) -> None:
         """Verify that Row-Level Security actually applies to this connection.
 

@@ -60,6 +60,9 @@ agents/                     PRODUCTS — one folder per sellable agent
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
                             auth · rate limits · idempotency · metering ·
                             chat + WebSocket · webhook outbox drainer
+  jobs/                     the worker loop and its handlers. Finds work through
+                            neura_due_tenants() — the ONE read in this system
+                            that crosses a tenant boundary (ADR-0022)
   widget/                   the embeddable chat element. THE ONLY JAVASCRIPT
                             IN THIS REPOSITORY — one file, no build step, no
                             package.json anywhere (ADR-0019). A test fails if

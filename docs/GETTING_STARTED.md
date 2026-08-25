@@ -276,6 +276,7 @@ make check             # everything CI runs
 # checking against a real shop (needs URL= and TOKEN=)
 make conformance URL=… TOKEN=…   # does the shop implement our spec?
 make sync-check   URL=… TOKEN=…   # can we copy its catalogue?
+make job-check    URL=… TOKEN=…   # can a worker sync a tenant nobody told it about?
 make rag-check    URL=… TOKEN=…   # can we search that catalogue by meaning?
 make care-check   URL=… TOKEN=…   # can the agent hold a conversation about it?
 make api-check    URL=… TOKEN=…   # can a shopper reach it over HTTP and a socket?

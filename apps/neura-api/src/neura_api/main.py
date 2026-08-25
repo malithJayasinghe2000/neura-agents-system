@@ -21,6 +21,7 @@ from fastapi import FastAPI
 
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
+from neura_api.jobs import SYNC_STORE, JobRunner, SyncStoreHandler
 from neura_api.middleware.cors import TenantCorsMiddleware
 from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.ratelimit import RateLimiter
@@ -31,6 +32,7 @@ from neura_api.stores import StoreDirectory
 from neura_api.turns import TurnService
 from neura_api.webhooks import WebhookDrainer
 from neura_core import (
+    Database,
     Environment,
     configure_logging,
     configure_telemetry,
@@ -86,6 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.idempotency = Idempotency(database)
     app.state.stores = StoreDirectory(database)
     app.state.drainer = WebhookDrainer(database, app.state.redis)
+    app.state.jobs = _job_runner(database, app.state.stores)
     app.state.turns = TurnService(database, _llm(), app.state.stores)
 
     # Agents are mounted here rather than in `create_app`, because discovery is
@@ -93,6 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # silently serve 404s for every agent.
     _mount_agents(app)
     app.state.drainer.start()
+    app.state.jobs.start()
 
     log.info(
         "api_started",
@@ -100,10 +104,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         role_map=settings.role_map,
         agents=sorted(app.state.agents),
         runners=sorted(app.state.runners),
+        job_kinds=sorted(app.state.jobs.kinds),
     )
     try:
         yield
     finally:
+        await app.state.jobs.stop()
         await app.state.drainer.stop()
         if app.state.redis is not None:
             await app.state.redis.aclose()
@@ -115,6 +121,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await get_database().dispose()
         get_database.cache_clear()
         log.info("api_stopped")
+
+
+def _job_runner(database: Database, stores: StoreDirectory) -> JobRunner:
+    """The worker loop, with its handlers attached.
+
+    Handlers are registered here rather than discovered, because the queue must
+    not import the things it runs — a queue that knew about syncing would be a
+    queue that changes every time a new kind of work appears (ADR-0022).
+
+    It runs inside the API process. ADR-0002 says one deployable, and a second
+    container to run a five-second poll would be a microservice bought for the
+    price of a `create_task`. The day a sync starves a shopper's turn of a
+    connection, that is a measured reason to split it out and this function is
+    what moves.
+    """
+    runner = JobRunner(database)
+    runner.register(SYNC_STORE, SyncStoreHandler(stores))
+    return runner
 
 
 def _llm() -> Any:

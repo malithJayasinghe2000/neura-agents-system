@@ -6,7 +6,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
         test-integration test-widget widget-check widget-check-live widget-demo tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
-        spec conformance conformance-self-test sync-check sync-watch rag-check rag-ask agent-check \
+        spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
         api-check verify-probe router-probe
@@ -105,6 +105,12 @@ conformance-self-test:  ## Verify the conformance tool itself against a built-in
 sync-check:  ## Sync a REAL shop into PostgreSQL: make sync-check URL=... TOKEN=... [RESET=1]
 	uv run python scripts/sync_smoke_test.py --url $(URL) --token $(TOKEN) \
 	  $(if $(TENANT),--tenant-id $(TENANT),) $(if $(RESET),--reset,)
+
+job-check:  ## Schedule a REAL sync for a tenant the worker was never told about: make job-check URL=... TOKEN=... [KEEP=1]
+	uv run python scripts/job_check.py --url $(URL) --token $(TOKEN) $(if $(KEEP),--keep,)
+
+job-drop:  ## Remove a tenant left by `make job-check KEEP=1`: make job-drop TENANT=tn_...
+	uv run python scripts/job_check.py --drop $(TENANT)
 
 sync-watch:  ## Sync, then edit the shop and re-run to see exactly what changed
 	uv run python scripts/sync_watch.py --url $(URL) --token $(TOKEN)
