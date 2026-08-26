@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **Screens 1 (sign in) and 3 (Review) built 2026-08-27** — `make console-check`. Screens 2, 4 and 5 not written. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **Screens 1 (sign in), 2 (Conversations) and 3 (Review) built 2026-08-27** — `make console-check`. Screens 4 and 5 not written. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -23,7 +23,7 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | # | Screen | Reads | Ships in v1 |
 |:--|:--|:--|:--|
 | 1 | **Sign in** | `users`, `login_tokens` | ✅ **built 2026-08-27** |
-| 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ |
+| 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ **built 2026-08-27** |
 | 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
 | 4 | **Shops** | `tenant_stores`, `sync_checkpoints` | ✅ |
 | 5 | **Usage** | `tenant_usage` | ✅ |
@@ -107,6 +107,32 @@ Transcript list, filter by escalated / blocked / declined. Read-only.
 > discovering it at the top of the file: either the merchant gets tokens and this
 > paragraph is rewritten, or the transcript starts holding real addresses and
 > security-model.md §6.2 is reopened. Nothing has been changed here on either side.
+
+#### Built 2026-08-27, and it shipped against the tokens
+
+**The screen shows what is stored and explains it.** `[EMAIL_1]` rendered bare
+reads to a merchant as data the product lost, so the note appears in the same
+place the token does: *"a personal detail the guard replaced before the model saw
+it… the real value was never stored here."* That is what is **true today**; it is
+not the resolution of the paragraph above, and the integration suite pins it, so
+the day somebody changes the storage a test goes red and the change gets an ADR
+rather than happening quietly.
+
+**The five states stay five, and the filter defaults to hiding none of them.** A
+list that opened on *Answered* would report a healthier product than the merchant
+has — the interesting rows here are the refusals. `blocked` and `escalated` are
+labelled as different things because [ADR-0012](architecture/adr/0012-blocking-is-about-cost.md)
+says they cost different things, and `blocked` is deliberately **not** painted as
+an error: a recognised attack ended cheaply is the defence working, and colouring
+it red teaches a merchant to read their best outcome as a problem.
+
+**An unknown `?state=` is a 400, not a shrug.** A silently dropped filter returns
+everything while looking filtered, which is how a merchant concludes they have no
+escalations.
+
+**Building it found a live defect in the transcript itself** — see
+[PROJECT_STATE](PROJECT_STATE.md). `append_turn` had been silently discarding
+`intent`, `state` and `prompt_revision` from every agent message ever written.
 
 ### 3.4 Shops
 

@@ -62,8 +62,8 @@ export function VerifyLink() {
         <div className="space-y-1.5">
           <CardTitle className="text-xl">That link didn&apos;t work</CardTitle>
           <CardDescription>
-            Sign-in links expire after 15 minutes and can only be used once.
-            Ask for a fresh one and it&apos;ll work.
+            Sign-in links expire after 15 minutes and can only be used once. Ask for a fresh one and
+            it&apos;ll work.
           </CardDescription>
         </div>
       </CardHeader>

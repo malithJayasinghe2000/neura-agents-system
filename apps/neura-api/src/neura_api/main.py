@@ -33,7 +33,15 @@ from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.ratelimit import RateLimiter
 from neura_api.registry import discover_agent_routes, discover_agents, discover_runners
 from neura_api.routes import agent as agent_routes
-from neura_api.routes import console, console_review, health, stores, webhooks, widget
+from neura_api.routes import (
+    console,
+    console_conversations,
+    console_review,
+    health,
+    stores,
+    webhooks,
+    widget,
+)
 from neura_api.stores import StoreDirectory
 from neura_api.turns import TurnService
 from neura_api.webhooks import WebhookDrainer
@@ -234,6 +242,7 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
     app.include_router(console.router, prefix="/v1")
     app.include_router(console_review.router, prefix="/v1")
+    app.include_router(console_conversations.router, prefix="/v1")
     app.include_router(health.router, prefix="/v1")
     app.include_router(widget.router, prefix="/v1")
     app.include_router(stores.router, prefix="/v1")

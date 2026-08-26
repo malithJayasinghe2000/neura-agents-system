@@ -51,6 +51,7 @@ from widget_check import Chrome, find_chrome
 
 from neura_agent_core.conversations import (
     ConversationRepository,
+    ConversationState,
     conversation_messages,
     conversations,
 )
@@ -119,7 +120,7 @@ async def main() -> int:
             held = await memberships_for(session, minted.user_id)
 
         if held:
-            seeded = await _seed_review(db, held[0].tenant_id)
+            seeded = await _seed_shop(db, held[0].tenant_id)
         else:
             print(f"  {DIM}no membership — the Review checks below are skipped, not passed{OFF}")
 
@@ -173,6 +174,9 @@ async def main() -> int:
                 print(f"\n  {BOLD}review — grading what the agent would have said{OFF}")
                 await _check_review(browser, console, seeded, failures)
 
+                print(f"\n  {BOLD}conversations — what it actually said{OFF}")
+                await _check_conversations(browser, console, seeded, failures)
+
             # 6. The link is single use. Reloading it must not sign anyone in again.
             await browser.goto(minted.url)
             await asyncio.sleep(3)
@@ -186,14 +190,14 @@ async def main() -> int:
             )
     finally:
         if seeded:
-            await _unseed_review(db, seeded)
+            await _unseed_shop(db, seeded)
         await db.dispose()
 
     print()
     if failures:
         print(f"  {RED}{len(failures)} check(s) failed.{OFF}\n")
         return 1
-    print(f"  {GREEN}Sign-in and review work in a real browser.{OFF}")
+    print(f"  {GREEN}The console works in a real browser.{OFF}")
     print(f"  {DIM}Evidence about THIS build and THIS browser, and nothing more.{OFF}\n")
     return 0
 
@@ -206,6 +210,14 @@ SEEDED_QUESTION = "can I return these boots after 20 days?"
 #: The merchant's own words, which is what "show the evidence" means. The check
 #: below fails unless this exact sentence is rendered on the review screen.
 SEEDED_POLICY = "Returns are accepted within 30 days of delivery, unworn."
+
+#: A reply a shopper genuinely received, for the Conversations screen. Review
+#: holds what the agent *would* have said; this is what it *did* say.
+SEEDED_REPLY = "Unworn boots can be returned within 30 days of delivery."
+
+#: A message carrying the guard's placeholders. On the screen these must be
+#: **explained** — `[EMAIL_1]` left bare reads to a merchant as lost data.
+SEEDED_TOKENISED = "my email is [EMAIL_1] and my address is [ADDRESS_1] — where is my order?"
 
 
 async def _check_review(
@@ -291,8 +303,65 @@ _CLICK_VERDICT = """
 """
 
 
-async def _seed_review(db: Database, tenant_id: str) -> dict[str, str]:
-    """Two shadowed turns and one policy for them to cite.
+async def _check_conversations(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """Screen 2, against a rendered page.
+
+    The claims here are all about **not flattening** something the data keeps
+    apart. A transcript screen is the easiest place in the product to turn five
+    conversation states into "done" and a tokenised message into what looks like
+    lost data, and neither shows up in a JSON assertion.
+    """
+    await browser.goto(f"{console}/console/{seeded['tenant']}/conversations")
+    await asyncio.sleep(3)
+
+    page = await browser.evaluate("document.body.innerText")
+
+    _check("the conversation list renders", "Conversations" in page, failures)
+
+    # ADR-0012: an escalation costs a person's time and a withheld turn costs
+    # nobody anything. A screen that called both "done" would hide the only
+    # distinction a merchant acts on.
+    _check(
+        "an escalated thread says a person was handed it",
+        "Handed to a person" in page,
+        failures,
+    )
+    _check(
+        "a shadowed thread says it was withheld, not answered",
+        "Withheld" in page,
+        failures,
+    )
+
+    _check(
+        "no credential reached the list",
+        "MUST-NEVER" not in page and "fn_sk_" not in page,
+        failures,
+    )
+
+    # One transcript, opened the way a merchant opens one.
+    await browser.goto(
+        f"{console}/console/{seeded['tenant']}/conversations/{seeded['answered_conversation']}"
+    )
+    await asyncio.sleep(3)
+    thread = await browser.evaluate("document.body.innerText")
+
+    _check("the transcript shows both sides", SEEDED_REPLY in thread, failures)
+    _check("the shopper's own words are there", "where is my order?" in thread, failures)
+
+    # The tokens. Left bare, `[EMAIL_1]` reads to a merchant as data the product
+    # lost — so the screen has to say what it is, in the same place it appears.
+    _check("a tokenised message is rendered", "[EMAIL_1]" in thread, failures)
+    _check(
+        "and the screen explains what the token is",
+        "replaced before the model saw it" in thread,
+        failures,
+    )
+
+
+async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
+    """Two shadowed turns, one real conversation, and one policy to cite.
 
     Two, because one would not exercise the rule that matters: an **answered**
     turn proves the evidence is rendered, and a **declined** one proves the queue
@@ -303,6 +372,7 @@ async def _seed_review(db: Database, tenant_id: str) -> dict[str, str]:
     made = {
         "tenant": tenant_id,
         "conversation": ids.new_id(ids.CONVERSATION),
+        "answered_conversation": ids.new_id(ids.CONVERSATION),
         "chunk": ids.new_id(ids.CHUNK),
     }
 
@@ -311,6 +381,23 @@ async def _seed_review(db: Database, tenant_id: str) -> dict[str, str]:
         await conversations.start(tenant_id, conversation_id=made["conversation"], agent_key="care")
         message_id = await conversations.append_shopper_message(
             tenant_id, made["conversation"], shopper=SEEDED_QUESTION
+        )
+
+        # A second thread, this one the shopper actually read — and it ends
+        # **escalated**, because a Conversations screen that only ever showed
+        # answered threads would let a build collapsing five states into "done"
+        # pass every check here.
+        await conversations.start(
+            tenant_id, conversation_id=made["answered_conversation"], agent_key="care"
+        )
+        await conversations.append_turn(
+            tenant_id,
+            made["answered_conversation"],
+            shopper=SEEDED_TOKENISED,
+            reply=SEEDED_REPLY,
+            state=ConversationState.ESCALATED,
+            intent="order_status",
+            citations=[{"type": "policy", "id": "console-check-returns"}],
         )
 
         await session.execute(
@@ -363,7 +450,7 @@ async def _seed_review(db: Database, tenant_id: str) -> dict[str, str]:
     return made
 
 
-async def _unseed_review(db: Database, seeded: dict[str, str]) -> None:
+async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
     """Remove exactly the rows above, by id.
 
     By id and never by tenant: this runs against a developer's own database,
@@ -380,14 +467,13 @@ async def _unseed_review(db: Database, seeded: dict[str, str]) -> None:
         await session.execute(
             delete(document_chunks).where(document_chunks.c.id == seeded["chunk"])
         )
+        threads = [seeded["conversation"], seeded["answered_conversation"]]
         await session.execute(
             delete(conversation_messages).where(
-                conversation_messages.c.conversation_id == seeded["conversation"]
+                conversation_messages.c.conversation_id.in_(threads)
             )
         )
-        await session.execute(
-            delete(conversations).where(conversations.c.id == seeded["conversation"])
-        )
+        await session.execute(delete(conversations).where(conversations.c.id.in_(threads)))
 
 
 def _check(what: str, passed: bool, failures: list[str]) -> None:

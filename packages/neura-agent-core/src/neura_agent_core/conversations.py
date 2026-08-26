@@ -353,6 +353,19 @@ class ConversationRepository:
         shopper_id = new_id(MESSAGE)
         agent_id = new_id(MESSAGE)
 
+        # **Both rows carry every key, including the ones only one of them uses.**
+        # A multi-row `insert().values([...])` renders its column list from the
+        # *first* mapping and silently discards anything that appears only in a
+        # later one — no error, no warning, a successful INSERT. Written as two
+        # dictionaries with different keys, this dropped `intent`, `state` and
+        # `prompt_revision` from every agent message ever stored, while
+        # `citations` survived purely because the shopper's row also happened to
+        # set it. `prompt_revision` exists so that a reply can be traced back to
+        # the prompt that wrote it six weeks later; for as long as this was
+        # wrong, it never held anything to trace.
+        #
+        # So the shopper's row states its `None`s explicitly. They are not
+        # padding: they are what makes the column list complete.
         await self._session.execute(
             conversation_messages.insert().values(
                 [
@@ -363,8 +376,13 @@ class ConversationRepository:
                         "sequence": next_sequence,
                         "role": Role.SHOPPER.value,
                         "content": shopper,
-                        "trace_id": trace_id,
+                        # A question has no outcome, no intent of its own and no
+                        # prompt behind it. The reply is what carries all three.
+                        "intent": None,
+                        "state": None,
                         "citations": [],
+                        "trace_id": trace_id,
+                        "prompt_revision": None,
                     },
                     {
                         "tenant_id": tenant_id,

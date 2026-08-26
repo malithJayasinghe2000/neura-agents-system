@@ -52,8 +52,8 @@ export default async function ConsolePage() {
               <CardTitle className="text-lg">No shop yet</CardTitle>
               <CardDescription>
                 Your account is active, but it isn&apos;t connected to a shop — so there&apos;s
-                nothing to show. Ask whoever set this up to grant you access, and this
-                page will fill in.
+                nothing to show. Ask whoever set this up to grant you access, and this page will
+                fill in.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -71,21 +71,35 @@ export default async function ConsolePage() {
                           {membership.role}
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        // A link wearing a button's clothes — see the same note
-                        // on the Review screen's filters.
-                        nativeButton={false}
-                        render={
-                          <Link
-                            href={`/console/${encodeURIComponent(membership.tenant_id)}/review`}
-                          />
-                        }
-                      >
-                        <ClipboardCheck className="size-3.5" aria-hidden />
-                        Review drafts
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          // A link wearing a button's clothes — see the same
+                          // note on the Review screen's filters.
+                          nativeButton={false}
+                          render={
+                            <Link
+                              href={`/console/${encodeURIComponent(membership.tenant_id)}/review`}
+                            />
+                          }
+                        >
+                          <ClipboardCheck className="size-3.5" aria-hidden />
+                          Review drafts
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          nativeButton={false}
+                          render={
+                            <Link
+                              href={`/console/${encodeURIComponent(membership.tenant_id)}/conversations`}
+                            />
+                          }
+                        >
+                          Open shop
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 </li>
@@ -98,8 +112,9 @@ export default async function ConsolePage() {
           <CardHeader>
             <CardTitle className="text-base">Not built yet</CardTitle>
             <CardDescription>
-              Conversations, Shops and Usage are designed and not written. Review is built —
-              it&apos;s where you grade what the agent drafted before any shopper sees it.
+              Shop and Usage are designed and not written. Conversations and Review are built —
+              Review is where you grade what the assistant drafted before any shopper sees it, and
+              it is the screen that earns the rest.
             </CardDescription>
           </CardHeader>
         </Card>

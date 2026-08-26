@@ -115,18 +115,13 @@ export function TurnCard({
 
         {tokenised ? (
           <p className="text-xs text-muted-foreground">
-            Text like <code className="text-foreground">[EMAIL_1]</code> is a personal detail
-            the guard replaced before the model saw it. The real value was never stored here.
+            Text like <code className="text-foreground">[EMAIL_1]</code> is a personal detail the
+            guard replaced before the model saw it. The real value was never stored here.
           </p>
         ) : null}
 
         <footer className="space-y-3 border-t pt-4">
-          <GradeForm
-            tenantId={tenantId}
-            turnId={turn.id}
-            verdict={turn.verdict}
-            note={turn.note}
-          />
+          <GradeForm tenantId={tenantId} turnId={turn.id} verdict={turn.verdict} note={turn.note} />
           {turn.verdict ? (
             <p className="text-xs text-muted-foreground">
               Graded {VERDICT_LABELS[turn.verdict].toLowerCase()}

@@ -87,9 +87,7 @@ export function GradeForm({
         ))}
       </div>
 
-      {chosen ? (
-        <p className="text-xs text-muted-foreground">{VERDICT_HELP[chosen]}</p>
-      ) : null}
+      {chosen ? <p className="text-xs text-muted-foreground">{VERDICT_HELP[chosen]}</p> : null}
     </div>
   );
 }

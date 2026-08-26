@@ -4,18 +4,47 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-27 — console screen 3 (Review) built, grading proved in a real browser
+**Last updated:** 2026-08-27 — console screens 2 (Conversations) and 3 (Review) built
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **Console screen 2 — Conversations**, and it has one decision to make first
-(see *"the paragraph that is not deliverable"* below). Screens **1 (sign in)** and **3 (Review)**
-are built and working in a real browser; `make console-check EMAIL=…` drives headless Chrome
-through a real link, a real evidence panel and a real verdict, and passes **16/16**.
+**Next action:** **Console screens 4 (Shop, read-only) and 5 (Usage)** — the last two of v1.
+Screens **1, 2 and 3** are built and working in a real browser; `make console-check EMAIL=…`
+drives headless Chrome through a real link, an evidence panel, a verdict and a transcript, and
+passes **24/24**.
 
-**What exists now.** `apps/neura-console` — Next.js 16, Tailwind 4, shadcn/ui, self-hosted Geist.
-Sign-in, verify, a shop list, sign out, **and the Review queue**. Backend: three identity tables,
-`neura_core.identity`, `neura_core.email`, four `/v1/console` auth endpoints plus **three
-console-authenticated review endpoints**, `neura_agent_core.review`, `scripts/console_admin.py`.
-**35 unit + 33 integration tests on the console alone**, and the browser check.
+**What exists now.** `apps/neura-console` — Next.js 16, Tailwind 4, shadcn/ui, self-hosted Geist,
+and now a shared shell: `console/layout.tsx` for the frame and `[tenantId]/layout.tsx` + `ShopNav`
+for one shop's tabs. Screens: sign in, shop list, **Conversations** (list + transcript) and
+**Review**. Backend: three identity tables, four `/v1/console` auth endpoints, **three review
+endpoints and two conversation endpoints**, all behind `acting_for()`. Prettier now formats the
+JS half at the same 100 columns the code was already written to, with shadcn's vendored `ui/`
+excluded so a re-pull stays diffable.
+
+**The night's most valuable output was not a screen.**
+
+**`append_turn` had been silently discarding three columns from every agent message ever
+written — including `prompt_revision`, whose entire purpose is to answer "which prompt wrote
+this?" six weeks later.** The two messages of a turn were written as one multi-row
+`insert().values([shopper, agent])`, and SQLAlchemy renders that statement's column list from the
+**first** mapping: anything appearing only in a later one is dropped, with no error and a
+successful INSERT. The shopper's row had no `intent`, `state` or `prompt_revision` key, so none of
+the three was ever stored. `citations` survived by luck — the shopper's row happened to set it
+too. Found by writing a Conversations test that asserted what the schema's own docstring
+promises; nothing else in the system reads those columns yet, so nothing else would have noticed.
+Fixed by giving both rows the full key set, with the `None`s stated explicitly and a comment
+saying why they are not padding. Pinned by an integration test.
+
+**Screen 2 shipped against the tokens rather than around them.** `console.md §3.3` promises the
+merchant unredacted PII; `append_turn` stores the shopper's message **as the guard left it**
+(security-model.md §6.2), so the transcript holds `[EMAIL_1]`. The screen renders that and
+explains it in the same place it appears — a bare token reads as data the product lost. **The ADR
+is still yours to write.** The suite pins today's behaviour so a change to it goes red rather
+than quiet.
+
+**Screen 2's other three decisions.** The five conversation states stay five and the default
+filter hides none of them (a list opening on *Answered* reports a healthier product than the
+merchant has); `blocked` is deliberately not painted as an error, because ADR-0012 says a
+recognised attack ended cheaply is the defence working; and an unknown `?state=` is a **400**, not
+a silently ignored parameter — a dropped filter returns everything while looking filtered.
 
 **Screen 3 is the one the console was built for**, and the reason has not changed: it is the only
 screen that produces something this project does not have — **real graded turns**, the sole route

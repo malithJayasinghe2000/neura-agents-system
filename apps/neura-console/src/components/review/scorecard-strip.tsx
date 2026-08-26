@@ -24,7 +24,11 @@ export function ScorecardStrip({ card }: { card: Scorecard }) {
     <Card size="sm">
       <CardContent className="space-y-3">
         <dl className="flex flex-wrap gap-x-8 gap-y-3">
-          <Stat label="recorded" value={card.recorded} hint="turns the agent drafted and withheld" />
+          <Stat
+            label="recorded"
+            value={card.recorded}
+            hint="turns the agent drafted and withheld"
+          />
           <Stat label="graded" value={card.graded} hint="turns a person has judged" />
           <Stat label="left to review" value={card.ungraded} />
           <Stat label="would have escalated" value={card.escalated} />
@@ -34,8 +38,8 @@ export function ScorecardStrip({ card }: { card: Scorecard }) {
           // The honest empty scorecard. Not "0% agreement", which would read as
           // a measured failure of a queue nobody has opened.
           <p className="text-sm text-muted-foreground">
-            Nothing has been graded yet, so there is no agreement figure to show. There will be
-            one after the first verdict — reported beside the number of turns it is based on.
+            Nothing has been graded yet, so there is no agreement figure to show. There will be one
+            after the first verdict — reported beside the number of turns it is based on.
           </p>
         ) : (
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -63,8 +67,8 @@ export function ScorecardStrip({ card }: { card: Scorecard }) {
         )}
 
         <p className="text-xs text-muted-foreground">
-          These are counts from this shop&apos;s own shadow traffic. Every turn recorded is
-          listed — nothing is sampled.
+          These are counts from this shop&apos;s own shadow traffic. Every turn recorded is listed —
+          nothing is sampled.
         </p>
       </CardContent>
     </Card>

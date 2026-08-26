@@ -25,9 +25,8 @@ export function EvidencePanel({ evidence }: { evidence: Evidence[] }) {
     // draft — very often the most important one on the card.
     return (
       <div className="rounded-lg border border-dashed px-3 py-2.5 text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">Nothing was cited.</span> The agent
-        answered without retrieving a document or calling a lookup — so this draft rests on
-        the model alone.
+        <span className="font-medium text-foreground">Nothing was cited.</span> The agent answered
+        without retrieving a document or calling a lookup — so this draft rests on the model alone.
       </div>
     );
   }
@@ -57,8 +56,8 @@ export function EvidencePanel({ evidence }: { evidence: Evidence[] }) {
                 </p>
               ) : null}
               <p className="mt-2 text-xs text-muted-foreground">
-                This is the source the reply cited, not the exact passage the search
-                returned. The passage isn&apos;t recorded.
+                This is the source the reply cited, not the exact passage the search returned. The
+                passage isn&apos;t recorded.
               </p>
             </div>
           ) : (

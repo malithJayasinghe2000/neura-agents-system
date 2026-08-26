@@ -43,8 +43,7 @@ type Envelope<T> = { data: T; meta?: PageMeta; error?: { message?: string } };
 export type PageMeta = { next_cursor?: string | null; has_more?: boolean };
 
 export type ServerResult<T> =
-  | { ok: true; data: T; meta: PageMeta }
-  | { ok: false; status: number; message: string };
+  { ok: true; data: T; meta: PageMeta } | { ok: false; status: number; message: string };
 
 /**
  * Fetch one console endpoint as the signed-in person.

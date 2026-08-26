@@ -1,0 +1,10 @@
+# Vendored shadcn/ui components. ADR-0026 §1 chose shadcn because the component
+# code is *copied in* rather than imported — which means these files are meant to
+# be diffable against upstream when a component is re-pulled. Reformatting them
+# turns every future re-pull into a whole-file conflict, for no gain: nobody edits
+# them by hand.
+src/components/ui/
+
+.next/
+node_modules/
+package-lock.json

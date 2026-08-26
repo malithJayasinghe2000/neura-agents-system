@@ -75,7 +75,9 @@ export function requestSignInLink(email: string): Promise<{ message: string }> {
 }
 
 /** Redeem a one-time link. The session cookie is set by the response itself. */
-export function verifySignInToken(token: string): Promise<{ signed_in: boolean; message?: string }> {
+export function verifySignInToken(
+  token: string,
+): Promise<{ signed_in: boolean; message?: string }> {
   return call("/auth/verify", { method: "POST", body: JSON.stringify({ token }) });
 }
 

@@ -23,9 +23,7 @@
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
-import { Brand } from "@/components/brand";
-import { SignOutButton } from "@/components/sign-out-button";
+import { ShopNav } from "@/components/shop/shop-nav";
 import { ScorecardStrip } from "@/components/review/scorecard-strip";
 import { TurnCard } from "@/components/review/turn-card";
 import { fromApi, hasSession } from "@/lib/server-api";
@@ -78,112 +76,93 @@ export default async function ReviewPage({
   const failure = !card.ok ? card : !queue.ok ? queue : null;
 
   return (
-    <div className="min-h-dvh">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <Brand />
-          <SignOutButton />
-        </div>
-      </header>
+    <>
+      <ShopNav tenantId={tenantId} current="review" />
 
-      <main className="mx-auto max-w-4xl space-y-6 px-6 py-10">
-        <div className="space-y-1.5">
-          <Link
-            href="/console"
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" aria-hidden />
-            All shops
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
-          <p className="text-muted-foreground">
-            Replies your assistant drafted while in shadow mode. Nobody was shown any of them.
-            Your verdicts are what decide whether it is safe to go live — and they become the
-            examples it is tested against.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Shop <code className="text-foreground">{tenantId}</code>
-          </p>
-        </div>
+      <div className="space-y-1.5">
+        <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
+        <p className="text-muted-foreground">
+          Replies your assistant drafted while in shadow mode. Nobody was shown any of them. Your
+          verdicts are what decide whether it is safe to go live — and they become the examples it
+          is tested against.
+        </p>
+      </div>
 
-        {/* A failed read is a screen, not a blank. `fromApi` returns a status
-            rather than throwing precisely so these stay distinguishable. */}
-        {failure || !card.ok || !queue.ok ? (
-          <Unreachable failure={failure} />
-        ) : (
-          <>
-            <ScorecardStrip card={card.data} />
+      {failure || !card.ok || !queue.ok ? (
+        <Unreachable failure={failure} />
+      ) : (
+        <>
+          <ScorecardStrip card={card.data} />
 
-            <nav className="flex flex-wrap gap-2" aria-label="Filter the queue">
-              {FILTERS.map((option) => (
-                <Button
-                  key={option.key || "all"}
-                  size="sm"
-                  variant={option.key === filter.key ? "secondary" : "ghost"}
-                  // These render an <a>, and Base UI assumes a native <button>
-                  // unless told otherwise — the mismatch strips the element's
-                  // semantics from a screen reader. shadcn was chosen partly so
-                  // accessibility ships in the defaults (ADR-0026 §1), so this is
-                  // the fix rather than a silenced warning.
-                  nativeButton={false}
-                  render={
-                    <Link
-                      href={`/console/${encodeURIComponent(tenantId)}/review${
-                        option.key ? `?show=${option.key}` : ""
-                      }`}
-                    />
-                  }
-                >
-                  {option.label}
-                </Button>
-              ))}
-            </nav>
+          <nav className="flex flex-wrap gap-2" aria-label="Filter the queue">
+            {FILTERS.map((option) => (
+              <Button
+                key={option.key || "all"}
+                size="sm"
+                variant={option.key === filter.key ? "secondary" : "ghost"}
+                // These render an <a>, and Base UI assumes a native <button>
+                // unless told otherwise — the mismatch strips the element's
+                // semantics from a screen reader. shadcn was chosen partly so
+                // accessibility ships in the defaults (ADR-0026 §1), so this is
+                // the fix rather than a silenced warning.
+                nativeButton={false}
+                render={
+                  <Link
+                    href={`/console/${encodeURIComponent(tenantId)}/review${
+                      option.key ? `?show=${option.key}` : ""
+                    }`}
+                  />
+                }
+              >
+                {option.label}
+              </Button>
+            ))}
+          </nav>
 
-            {queue.data.length === 0 ? (
-              <EmptyQueue recorded={card.data.recorded} filtered={filter.key !== ""} />
-            ) : (
-              <>
-                <ul className="space-y-4">
-                  {queue.data.map((turn) => (
-                    <li key={turn.id}>
-                      <TurnCard turn={turn} tenantId={tenantId} viewerId={me.data.user_id ?? ""} />
-                    </li>
-                  ))}
-                </ul>
+          {queue.data.length === 0 ? (
+            <EmptyQueue recorded={card.data.recorded} filtered={filter.key !== ""} />
+          ) : (
+            <>
+              <ul className="space-y-4">
+                {queue.data.map((turn) => (
+                  <li key={turn.id}>
+                    <TurnCard turn={turn} tenantId={tenantId} viewerId={me.data.user_id ?? ""} />
+                  </li>
+                ))}
+              </ul>
 
-                {/* Every recorded turn has to be reachable, or the queue is
+              {/* Every recorded turn has to be reachable, or the queue is
                     sampling by omission — which is the one thing this screen's
                     design forbids (A4). The cursor is the whole of the answer:
                     it walks backwards through `(created_at, id)`, so a turn
                     recorded while somebody is reading cannot push another one
                     past them unseen. */}
-                {queue.meta.next_cursor ? (
-                  <div className="flex justify-center pt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      nativeButton={false}
-                      render={
-                        <Link
-                          href={`/console/${encodeURIComponent(tenantId)}/review?${new URLSearchParams(
-                            {
-                              ...(filter.key ? { show: filter.key } : {}),
-                              cursor: queue.meta.next_cursor,
-                            },
-                          )}`}
-                        />
-                      }
-                    >
-                      Older turns
-                    </Button>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </>
-        )}
-      </main>
-    </div>
+              {queue.meta.next_cursor ? (
+                <div className="flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    nativeButton={false}
+                    render={
+                      <Link
+                        href={`/console/${encodeURIComponent(tenantId)}/review?${new URLSearchParams(
+                          {
+                            ...(filter.key ? { show: filter.key } : {}),
+                            cursor: queue.meta.next_cursor,
+                          },
+                        )}`}
+                      />
+                    }
+                  >
+                    Older turns
+                  </Button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </>
+      )}
+    </>
   );
 }
 
@@ -216,14 +195,14 @@ function EmptyQueue({ recorded, filtered }: { recorded: number; filtered: boolea
       <CardHeader>
         <CardTitle className="text-base">Nothing to review yet</CardTitle>
         <CardDescription>
-          This queue fills up while your assistant runs in <strong>shadow mode</strong>: it
-          answers real questions in full, nobody is shown the answer, and the draft lands here
-          for you to judge.
+          This queue fills up while your assistant runs in <strong>shadow mode</strong>: it answers
+          real questions in full, nobody is shown the answer, and the draft lands here for you to
+          judge.
         </CardDescription>
       </CardHeader>
       <CardContent className="text-sm text-muted-foreground">
-        If it stays empty, shadow mode is probably off for this shop — an assistant that is
-        already live has nothing to withhold, so there is nothing to grade.
+        If it stays empty, shadow mode is probably off for this shop — an assistant that is already
+        live has nothing to withhold, so there is nothing to grade.
       </CardContent>
     </Card>
   );

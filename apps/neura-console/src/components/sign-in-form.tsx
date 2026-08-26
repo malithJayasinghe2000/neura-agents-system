@@ -21,13 +21,7 @@ import { Brand } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type State = "idle" | "sending" | "sent" | "error";
 
@@ -59,8 +53,8 @@ export function SignInForm() {
           <div className="space-y-1.5">
             <CardTitle className="text-xl">Check your email</CardTitle>
             <CardDescription>
-              If <span className="font-medium text-foreground">{email}</span> has an account,
-              a sign-in link is on its way. It works once and expires in 15 minutes.
+              If <span className="font-medium text-foreground">{email}</span> has an account, a
+              sign-in link is on its way. It works once and expires in 15 minutes.
             </CardDescription>
           </div>
         </CardHeader>
@@ -86,9 +80,7 @@ export function SignInForm() {
         <Brand />
         <div className="space-y-1.5">
           <CardTitle className="text-xl">Sign in</CardTitle>
-          <CardDescription>
-            We&apos;ll email you a link. No password to remember.
-          </CardDescription>
+          <CardDescription>We&apos;ll email you a link. No password to remember.</CardDescription>
         </div>
       </CardHeader>
       <CardContent>
