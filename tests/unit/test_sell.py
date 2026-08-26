@@ -13,10 +13,14 @@ surface, when it exists, is graded by `make eval` like CARE's.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from decimal import Decimal
+
 import pytest
 
 from neura_agent_sell import MANIFEST
-from neura_domain import Capability
+from neura_agent_sell.feed import build, canonical, jsonld, publishable
+from neura_domain import Capability, Money, Product, ProductStatus, ProductVariant
 
 
 class TestManifest:
@@ -122,3 +126,324 @@ def test_sell_names_no_commerce_platform(forbidden: str) -> None:
         str(p.relative_to(src)) for p in src.rglob("*.py") if forbidden in p.read_text().lower()
     ]
     assert not hits, f"{forbidden!r} appears in {hits}"
+
+
+# ── The feed ─────────────────────────────────────────────────────────────────
+#
+# Deterministic throughout. No model, no database, no clock.
+
+SYNCED = datetime(2026, 8, 20, 9, 30, tzinfo=UTC)
+OLDER = datetime(2026, 8, 18, 9, 30, tzinfo=UTC)
+
+
+def _product(
+    *,
+    external_id: str = "p_1",
+    title: str = "Waterproof Hiking Shoe",
+    status: ProductStatus = ProductStatus.ACTIVE,
+    variants: list[ProductVariant] | None = None,
+    synced_at: datetime = SYNCED,
+    **kwargs: object,
+) -> Product:
+    """A product as the sync engine would have stored it — provenance included."""
+    return Product(
+        neura_id="prd_internal_9f2",
+        tenant_id="tn_secret",
+        external_id=external_id,
+        platform="acme-commerce",
+        synced_at=synced_at,
+        raw={"cost_price": "12.00", "supplier": "Northwind Ltd", "internal_flag": True},
+        title=title,
+        status=status,
+        variants=variants if variants is not None else [],
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def _variant(
+    external_id: str = "v_1",
+    *,
+    price: str | None = "89.99",
+    currency: str = "GBP",
+    in_stock: bool | None = True,
+    barcode: str | None = None,
+    **kwargs: object,
+) -> ProductVariant:
+    return ProductVariant(
+        external_id=external_id,
+        price=Money(amount=Decimal(price), currency=currency) if price else None,
+        in_stock=in_stock,
+        barcode=barcode,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def _render_both(products: list[Product], *, availability: bool = True) -> str:
+    """Every renderer's output, as one searchable string.
+
+    The leak tests assert against *all* renderings at once on purpose. A test
+    that checked only the one it was written for would pass while a second
+    renderer published the same secret.
+    """
+    import json
+
+    items = publishable(products, may_assert_availability=availability)
+    doc = build(items, availability_asserted=availability)
+    return json.dumps(canonical.render(doc)) + json.dumps(jsonld.render(doc))
+
+
+class TestNothingInternalIsPublished:
+    """The allowlist. If any of these fail, something private is public forever."""
+
+    def test_the_platforms_raw_payload_never_reaches_a_document(self) -> None:
+        """`raw` is unbounded and we do not know what is in it.
+
+        The fixture puts a cost price and a supplier name in there, which is
+        exactly the shape of thing a real platform includes and a merchant would
+        never publish.
+        """
+        rendered = _render_both([_product()])
+        assert "cost_price" not in rendered
+        assert "Northwind" not in rendered
+        assert "internal_flag" not in rendered
+
+    def test_the_commerce_platform_is_not_named(self) -> None:
+        """Free reconnaissance for anyone deciding what to attack."""
+        assert "acme-commerce" not in _render_both([_product()])
+
+    def test_our_internal_identifiers_are_not_published(self) -> None:
+        """The merchant's id is published; ours are meaningless outside here."""
+        rendered = _render_both([_product()])
+        assert "tn_secret" not in rendered
+        assert "prd_internal_9f2" not in rendered
+        assert "p_1" in rendered
+
+    def test_stock_quantity_has_no_field_to_leak_through(self) -> None:
+        """Not dropped at render time — absent from the type entirely.
+
+        A field that exists but is skipped is one careless edit from being
+        emitted. `PublishableVariant` has nowhere to put it.
+
+        Asserted on the parsed structure, not on a substring of the JSON: a
+        quantity of 3 also appears inside a timestamp, and a check that matches
+        that is a check that fails for the wrong reason.
+        """
+        from neura_agent_sell.feed.publishable import PublishableVariant
+
+        assert "stock_quantity" not in PublishableVariant.model_fields
+
+        items = publishable(
+            [_product(variants=[_variant(stock_quantity=3)])], may_assert_availability=True
+        )
+        rendered = canonical.render(build(items))["products"][0]["variants"][0]
+        assert not [k for k in rendered if "quantity" in k or "stock_q" in k]
+        assert 3 not in rendered.values()
+
+    def test_a_new_canonical_field_is_not_published_until_somebody_adds_it(self) -> None:
+        """The reason the allowlist is a type rather than an `exclude=` argument.
+
+        `PublishableProduct` must not simply mirror `Product`. If this ever
+        fails, someone has made the projection inherit from the canonical model
+        and a denylist has quietly replaced the allowlist.
+        """
+        from neura_agent_sell.feed.publishable import PublishableProduct
+
+        assert not set(Product.model_fields) <= set(PublishableProduct.model_fields)
+        for private in ("raw", "platform", "tenant_id", "neura_id"):
+            assert private not in PublishableProduct.model_fields
+
+
+class TestWhatMayBePublished:
+    def test_only_active_products_are_published(self) -> None:
+        """A higher bar than the agent applies in conversation, deliberately."""
+        products = [
+            _product(external_id="live", status=ProductStatus.ACTIVE),
+            _product(external_id="wip", status=ProductStatus.DRAFT),
+            _product(external_id="gone", status=ProductStatus.ARCHIVED),
+            _product(external_id="dunno", status=ProductStatus.UNKNOWN),
+        ]
+        items = publishable(products, may_assert_availability=True)
+        assert [p.product_id for p in items] == ["live"]
+
+    def test_an_unmappable_status_is_withheld_rather_than_assumed_for_sale(self) -> None:
+        """`UNKNOWN` means the adapter could not map it.
+
+        Publishing on the strength of not knowing, into a document that is
+        cached and cannot be recalled, asserts something nobody established.
+        """
+        assert (
+            publishable([_product(status=ProductStatus.UNKNOWN)], may_assert_availability=True)
+            == []
+        )
+
+
+class TestAvailabilityIsNeverGuessed:
+    def test_availability_is_omitted_when_it_cannot_be_asserted(self) -> None:
+        """No live inventory feed, or a stale sync. Absent, never `OutOfStock`.
+
+        On the parsed documents rather than on their text. `availability` is a
+        substring of `availability_asserted`, which is a legitimate and
+        deliberately different field — a naive `not in` here fails a correct
+        document, which is worse than no check because it trains a reader to
+        ignore the case.
+        """
+        items = publishable(
+            [_product(variants=[_variant(in_stock=True)])], may_assert_availability=False
+        )
+        doc = build(items, availability_asserted=False)
+
+        variant = canonical.render(doc)["products"][0]["variants"][0]
+        assert "in_stock" not in variant
+
+        offer = jsonld.render(doc)["itemListElement"][0]["item"]["offers"]
+        assert "availability" not in offer
+
+    def test_out_of_stock_is_stated_when_it_is_known(self) -> None:
+        """ "We do not know" and "we do not have it" are different claims."""
+        items = publishable(
+            [_product(variants=[_variant(in_stock=False)])], may_assert_availability=True
+        )
+        offers = jsonld.render(build(items))["itemListElement"][0]["item"]["offers"]
+        assert offers["availability"] == jsonld.OUT_OF_STOCK
+
+    def test_an_empty_catalogue_is_not_read_as_a_store_with_no_inventory_feed(self) -> None:
+        """`availability_asserted` is stated rather than inferred from the items."""
+        doc = build([], availability_asserted=True)
+        assert canonical.render(doc)["availability_asserted"] is True
+
+
+class TestTheTimestampIsTheSyncs:
+    def test_it_is_derived_from_the_data_not_from_a_clock(self) -> None:
+        """Serve-time cannot leak in, because there is nowhere to pass it."""
+        items = publishable(
+            [_product(external_id="a", synced_at=OLDER), _product(external_id="b")],
+            may_assert_availability=True,
+        )
+        doc = build(items)
+        assert doc.synced_at == SYNCED
+        assert canonical.render(doc)["synced_at"] == SYNCED.isoformat()
+        assert jsonld.render(doc)["dateModified"] == SYNCED.isoformat()
+
+    def test_build_accepts_no_timestamp_argument_at_all(self) -> None:
+        """The structural half of the rule. A comment would not have held."""
+        import inspect
+
+        from neura_agent_sell.feed.document import build as build_fn
+
+        params = set(inspect.signature(build_fn).parameters)
+        assert not params & {"generated_at", "synced_at", "now", "timestamp"}
+
+    def test_an_empty_document_claims_no_date(self) -> None:
+        assert canonical.render(build([]))["synced_at"] is None
+        assert "dateModified" not in jsonld.render(build([]))
+
+
+class TestPricesSurviveTheRoundTrip:
+    def test_money_is_a_string_never_a_json_number(self) -> None:
+        """A consumer parsing `1099.90` as a float has already lost the price."""
+        items = publishable(
+            [_product(variants=[_variant(price="1099.90")])], may_assert_availability=True
+        )
+        offer = jsonld.render(build(items))["itemListElement"][0]["item"]["offers"]
+        assert offer["price"] == "1099.90"
+        assert isinstance(offer["price"], str)
+        variant = canonical.render(build(items))["products"][0]["variants"][0]
+        assert variant["price"] == "1099.90"
+
+    def test_a_trailing_zero_is_not_lost(self) -> None:
+        """`Decimal("18.00")` is a price; `18.0` is a rounding of one."""
+        items = publishable(
+            [_product(variants=[_variant(price="18.00")])], may_assert_availability=True
+        )
+        assert canonical.render(build(items))["products"][0]["variants"][0]["price"] == "18.00"
+
+
+class TestSchemaOrgMapping:
+    def test_one_offer_per_priced_variant(self) -> None:
+        """The shape that answers "have you got it in a UK 9, and how much"."""
+        items = publishable(
+            [
+                _product(
+                    variants=[
+                        _variant("v_8", price="89.99", options={"size": "UK 8"}),
+                        _variant("v_9", price="94.99", options={"size": "UK 9"}),
+                    ]
+                )
+            ],
+            may_assert_availability=True,
+        )
+        offers = jsonld.render(build(items))["itemListElement"][0]["item"]["offers"]
+        assert [o["price"] for o in offers] == ["89.99", "94.99"]
+
+    def test_mixed_currencies_never_collapse_into_one_aggregate_offer(self) -> None:
+        """An `AggregateOffer` carries a single `priceCurrency`.
+
+        Emitting one for a product priced in two currencies would pick a
+        currency on the merchant's behalf. A list of offers cannot be wrong
+        about it.
+        """
+        items = publishable(
+            [
+                _product(
+                    variants=[
+                        _variant("v_gbp", price="89.99", currency="GBP"),
+                        _variant("v_eur", price="99.99", currency="EUR"),
+                    ]
+                )
+            ],
+            may_assert_availability=True,
+        )
+        offers = jsonld.render(build(items))["itemListElement"][0]["item"]["offers"]
+        assert {o["priceCurrency"] for o in offers} == {"GBP", "EUR"}
+        assert all(o["@type"] == "Offer" for o in offers)
+
+    def test_a_product_level_price_range_becomes_an_aggregate_offer(self) -> None:
+        """Some platforms carry price at product level only.
+
+        Without this the item is published with no price and is useless to every
+        consumer that reads the document.
+        """
+        items = publishable(
+            [
+                _product(
+                    price_range_min=Money(amount=Decimal("18.00"), currency="GBP"),
+                    price_range_max=Money(amount=Decimal("24.00"), currency="GBP"),
+                )
+            ],
+            may_assert_availability=True,
+        )
+        offer = jsonld.render(build(items))["itemListElement"][0]["item"]["offers"]
+        assert offer["@type"] == "AggregateOffer"
+        assert (offer["lowPrice"], offer["highPrice"]) == ("18.00", "24.00")
+
+    def test_no_ratings_are_ever_synthesised(self) -> None:
+        """We hold no review data. Inventing one is the thing GUARD detects."""
+        assert "aggregateRating" not in _render_both([_product()])
+        assert "review" not in _render_both([_product()]).lower()
+
+    def test_a_barcode_is_published_only_when_it_is_really_a_gtin(self) -> None:
+        """A malformed `gtin` gets the item rejected, not merely ignored.
+
+        The merchant is then absent from the channel they paid for, with
+        nothing saying why.
+        """
+        good = publishable(
+            [_product(variants=[_variant(barcode="5012345678900")])],
+            may_assert_availability=True,
+        )
+        assert good[0].variants[0].gtin == "5012345678900"
+
+        for junk in ("SHELF-42", "978-0-13-235088-4-X", "12345"):
+            items = publishable(
+                [_product(variants=[_variant(barcode=junk)])], may_assert_availability=True
+            )
+            assert items[0].variants[0].gtin is None, junk
+
+    def test_the_document_is_valid_json_ld_with_one_root_context(self) -> None:
+        items = publishable([_product()], may_assert_availability=True)
+        body = jsonld.render(build(items, store_name="Acme Outdoors"))
+        assert body["@context"] == "https://schema.org"
+        assert body["@type"] == "ItemList"
+        assert body["name"] == "Acme Outdoors"
+        assert body["itemListElement"][0]["position"] == 1
+        assert body["itemListElement"][0]["item"]["@type"] == "Product"
