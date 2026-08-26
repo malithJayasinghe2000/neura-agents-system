@@ -155,9 +155,7 @@ def test_no_agent_imports_another_agent() -> None:
                     continue
                 for found in _AGENT_IMPORT.findall(line):
                     if found != own:
-                        offenders.append(
-                            f"{path.relative_to(REPO_ROOT)}:{lineno}  {line.strip()}"
-                        )
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}  {line.strip()}")
     assert not offenders, "an agent imports another agent:\n" + "\n".join(offenders)
 
 
