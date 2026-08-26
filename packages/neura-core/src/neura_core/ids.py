@@ -16,6 +16,18 @@ from typing import Final
 from ulid import ULID
 
 TENANT: Final = "tn"
+#: A person (ADR-0026). Distinct from `TENANT` because the two are not the same
+#: thing and conflating them is the mistake the console's whole identity design
+#: exists to avoid: one human may own two merchants, and one merchant may
+#: eventually be worked by two humans.
+USER: Final = "usr"
+#: A person's access to one merchant.
+MEMBERSHIP: Final = "mem"
+#: A sign-in link in flight. Short-lived, single-use.
+# S105 reads this as a hardcoded password. It is a three-letter id prefix, and
+# the value it prefixes is a ULID, never a secret — the secret is the token
+# itself, which is hashed before it reaches any column (`identity/login.py`).
+LOGIN_TOKEN: Final = "lgt"  # noqa: S105
 API_KEY: Final = "key"
 CONVERSATION: Final = "cnv"
 MESSAGE: Final = "msg"

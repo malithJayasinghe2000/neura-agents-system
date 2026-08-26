@@ -45,6 +45,12 @@ TENANT_SETTING = "app.tenant_id"
 #: tenant is known. See :meth:`Database.credential_session` and ADR-0014.
 CREDENTIAL_SETTING = "app.api_key_hash"
 
+#: The person a transaction is acting as, for the sign-in bootstrap only
+#: (ADR-0026). Read by the ``membership_lookup`` policy on ``memberships``.
+#: **Never a substitute for** ``app.tenant_id`` — it grants sight of which
+#: tenants a person belongs to, and nothing belonging to any of them.
+USER_SETTING = "app.user_id"
+
 #: Predictable constraint and index names. Without this, Alembic autogenerate
 #: emits migrations that cannot drop an unnamed constraint, and a schema becomes
 #: hard to change some months after nobody remembers why.
@@ -153,6 +159,44 @@ class Database:
                 text("SELECT set_config(:name, :value, true)"),
                 {"name": CREDENTIAL_SETTING, "value": token_hash},
             )
+            yield session
+
+    @asynccontextmanager
+    async def identity_session(self, user_id: str = "") -> AsyncIterator[AsyncSession]:
+        """Sign-in, before any tenant is known (ADR-0026).
+
+        The third chicken-and-egg in this design, and the sharpest one. A person
+        clicking a login link has not yet told us which merchant they act for —
+        working that out is the entire purpose of the request. So this
+        transaction sets **no** ``app.tenant_id`` and every tenant-scoped table
+        returns nothing to it.
+
+        What it can reach is deliberately tiny:
+
+        * ``users`` and ``login_tokens``, which carry no ``tenant_id`` and hold
+          no business data — an email, a display name, a token *hash*.
+        * once ``user_id`` is supplied, the caller's own rows in ``memberships``,
+          via the ``membership_lookup`` policy. That is the answer to *"which
+          merchants may this person act for?"* and it is the last thing this
+          session is for. Every subsequent read opens an ordinary
+          :meth:`tenant_session` for one of the ids it returned.
+
+        **``user_id`` is passed only after it has been proved** — by redeeming a
+        one-time token or by verifying a signed session cookie. Passing an
+        unverified id here is the mistake this whole design exists to prevent,
+        and it would be indistinguishable from working (`AGENTS.md` rule 3).
+
+        Not ``READ ONLY``, unlike the other two bootstrap sessions, and the
+        reason is specific: redeeming a login token must **mark it consumed in
+        the same transaction that reads it**, or two requests from a forwarded
+        link both see an unconsumed row and both sign in.
+        """
+        async with self._sessions() as session, session.begin():
+            if user_id:
+                await session.execute(
+                    text("SELECT set_config(:name, :value, true)"),
+                    {"name": USER_SETTING, "value": user_id},
+                )
             yield session
 
     @asynccontextmanager

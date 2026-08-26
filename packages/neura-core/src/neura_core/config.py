@@ -140,6 +140,28 @@ class Settings(BaseSettings):
     #: derived from an incoming request, because the request that asks for the
     #: snippet is usually not the one a shopper's browser will make.
     public_base_url: str = Field(default="http://localhost:8000", alias="PUBLIC_BASE_URL")
+
+    # ── Email (ADR-0026, open question K1) ────────────────────────────────────
+    #
+    # Plain SMTP rather than a hosted provider's SDK, and that is the sovereign
+    # tier's requirement rather than a preference: a customer running everything
+    # inside their own perimeter can point this at their own mail server, and
+    # cannot point it at an API key for a service in another country. A hosted
+    # provider may be added ALONGSIDE this; it must never replace it.
+    #
+    # Empty `smtp_host` is not a misconfiguration — it is the ordinary state of
+    # every developer machine and every test run. Sending is skipped and said so
+    # out loud; see `neura_core.email`.
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_password: str = Field(default="", alias="SMTP_PASS")
+    smtp_from: str = Field(default="FiveNeurals <no-reply@example.com>", alias="SMTP_FROM")
+
+    #: Where sign-in links point. **Must** match where the console is actually
+    #: served or every link 404s — and a login link that 404s is indistinguishable
+    #: from a broken product to the person holding it.
+    console_base_url: str = Field(default="http://localhost:3000", alias="CONSOLE_BASE_URL")
     #: What a shopper is shown when the reply is withheld and the tenant has
     #: configured no wording of its own (ADR-0020). **It promises nothing**: a
     #: shadowed turn tells no person, so a default about somebody getting back
