@@ -6,10 +6,19 @@
 
 **Last updated:** 2026-08-26 (later — A14 answered; S9 found and mostly closed by ADR-0025)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **The Rule 4 evidence for [ADR-0025](architecture/adr/0025-verify-sees-only-what-the-draft-cites.md)** — n≥3 either side plus
-`make eval-guard-off AGENT=sell`. Then `recommend_002`'s missing tool call, then 1.17 (deploy).
-**The code is written, tested and probed; what it does not yet have is the measurement that lets it
-merge.** Do not treat the probe as that measurement — it is one node against eight sets of strings.
+**Next action:** **1.17 — deploy. Answer [X2](open-questions.md) first.** The deployment target is
+still undecided, Railway (the earlier plan) has **no GPU path**, and production inference is a cloud
+API — so the API/worker host and the model host are **one choice** and should be made as one.
+
+**ADR-0025 is PARKED on its Rule 4 evidence, by the project owner, on 2026-08-26 — and the reason is
+not only budget.** The measurement is n≥3 either side plus `make eval-guard-off AGENT=sell`: seven
+suite runs, ~2h of local inference. It waits for a **cloud model**, because `llama3.1:8b` in the
+`GUARD` role is the *development* verifier and production runs a cloud API
+([ADR-0006](architecture/adr/0006-llm-model-roles.md)) — n≥3 on this laptop would measure a model no
+merchant will ever meet. **The trigger is the first cloud model reaching the `GUARD` role.** Until
+then the code is written, tested and probed, and **is not validated**; do not report it as merged on
+evidence. This also makes X2 slightly larger than it looks: whatever answers it decides which cloud
+model is reachable, and that is what unparks this.
 
 **S9 was found and mostly answered on 2026-08-26, and it was not on anybody's list that morning.**
 *Indirect injection does not make SELL lie — it makes SELL refuse.* Arm E of
