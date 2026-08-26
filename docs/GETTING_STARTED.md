@@ -32,6 +32,7 @@ Everything built so far runs with **Ollama only**. There is no connection to any
 | **Docker Desktop** | Runs the database | `docker info` |
 | **uv** | Installs Python packages | `uv --version` |
 | **git** | Version control | `git --version` |
+| **Node.js 20+** | Runs the merchant console only — nothing else here needs it | `node --version` |
 
 All four are already installed on this machine. On a fresh machine:
 
@@ -218,6 +219,87 @@ Contracts: 5 kept, 0 broken                 ← architecture rules
 
 ---
 
+## 4b. Seeing the merchant console
+
+Everything above is the *shopper's* side and the API. The **merchant console** is the screen a shop
+owner logs into ([ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md),
+[console.md](console.md)). Only **screen 1, sign in**, is built so far.
+
+It is two processes, and both must be running.
+
+### Terminal 1 — the API
+
+```bash
+make up          # database, if it is not already running
+make api         # http://localhost:8000
+```
+
+> **If port 8000 is taken** by something else on your machine, run the API somewhere else and tell
+> the console where it went:
+>
+> ```bash
+> NEURA_API_PORT=8010 uv run neura-api
+> ```
+>
+> then set `API_BASE_URL=http://localhost:8010` in `apps/neura-console/.env.local`. Getting this
+> wrong is quiet rather than loud — the console talks to whatever is on that port, even if it is a
+> different application entirely.
+
+### Terminal 2 — the console
+
+```bash
+cd apps/neura-console
+npm install      # first time only
+npm run dev      # http://localhost:3000
+```
+
+### Then give yourself an account
+
+There is **no sign-up page**, deliberately: an open form on the sign-in screen would let anyone
+create an account for any address. Accounts are made from the command line.
+
+```bash
+make tenant-new NAME="My Test Shop" AGENTS=care     # prints tn_...
+make user-new EMAIL=you@example.com NAME="You" TENANT=tn_...
+```
+
+Now open <http://localhost:3000>, type that address, and click the link in your inbox.
+
+**No email arriving?** Two possibilities, and it is worth knowing which:
+
+```bash
+make user-link EMAIL=you@example.com    # prints a working link, bypassing mail
+```
+
+If that link signs you in, the login flow is fine and the problem is **delivery** — check
+`SMTP_*` in `.env`, and check your spam folder. If it does not, the problem is the flow.
+The sign-in screen deliberately cannot tell you which, because it must answer identically for an
+address that has an account and one that does not (otherwise it becomes a way to discover which
+merchants use us). **The API's log is where a delivery failure shows up**, as
+`sign_in_mail_not_delivered`.
+
+### Proving it works without watching
+
+```bash
+make console-check EMAIL=you@example.com
+```
+
+Drives **real headless Chrome** through a real emailed link: seven assertions, no models, no cost.
+It checks things a request library cannot — that the session cookie is invisible to JavaScript, that
+no API key ever reaches the browser, and that a used link is refused the second time.
+
+### Useful
+
+```bash
+make user-show EMAIL=you@example.com                    # account + which shops
+make user-revoke EMAIL=you@example.com TENANT=tn_...    # withdraw access
+```
+
+Revocation takes effect on that person's **next request** — the session cookie is never recalled,
+because it grants no authority by itself.
+
+---
+
 ## 5. The one idea worth understanding
 
 Everything else follows from this: **the code never names a model.** It names a *job*.
@@ -286,6 +368,13 @@ make lint              # code style
 make typecheck         # type errors
 make arch              # architecture rules
 make test              # unit tests
+
+# the merchant console (see section 4b)
+make api                                       # terminal 1
+cd apps/neura-console && npm run dev           # terminal 2
+make user-new EMAIL=you@example.com TENANT=tn_...   # no sign-up page, on purpose
+make user-link EMAIL=you@example.com           # a working link, when mail is not arriving
+make console-check EMAIL=you@example.com       # real Chrome, 7 assertions, free
 
 # tenants — how a merchant comes into being. Every command runs under the same
 # row-level security a request does, and since milestone 1.14 the key it issues
