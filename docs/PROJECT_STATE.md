@@ -4,11 +4,49 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-26 (later — A14 answered; S9 found and mostly closed by ADR-0025)
+**Last updated:** 2026-08-26 (later — the merchant console designed; deploy held behind it)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **1.17 — deploy. Answer [X2](open-questions.md) first.** The deployment target is
-still undecided, Railway (the earlier plan) has **no GPU path**, and production inference is a cloud
-API — so the API/worker host and the model host are **one choice** and should be made as one.
+**Next action:** **Build the merchant console — screen 1 (sign in), then screen 3 (Review).**
+Designed 2026-08-26 in [`console.md`](console.md), decided in
+[ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md).
+**No code written yet.** **Deploy (1.17) is deliberately held behind this** by the project owner:
+a merchant cannot be sold something they cannot see, and today the only user interface in this
+repository is the *shopper's* chat widget.
+
+**Why the console and not a feature — the ratio.** It unblocks **four** recorded open questions
+(**A4** grading has nowhere to grade in, **E1** every golden case is synthetic, **S5** nobody reads
+the audit log in aggregate, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+writes via the approval queue). Nothing else in the backlog comes close, and it is the only large
+item that needs **no spec change, no external approval, no cloud model and no design partner**.
+
+**The two facts the design turned on, both found by reading the code.** The schema has **fifteen
+tables and not one describes a person** — authentication is a bearer token presented by a *program*.
+So this is less a dashboard than **the first human identity in a system whose entire security model
+is tenant isolation**. And **nothing here can send an email** (no SMTP, no provider, no queue), which
+makes magic-link login undeployable until **K1** is answered — a failure mode nothing else in this
+system has: *the software is fine and the user still cannot get in.*
+
+**The four decisions, and the one a fresh session will reverse by accident.** Next.js at
+`apps/neura-console` with Tailwind + shadcn/ui; magic-link sign-in **built, not bought**, because a
+hosted auth vendor cannot run inside a sovereign customer's perimeter and would delete a product tier
+in a `package.json`; three new tables where **`users` and `login_tokens` are deliberately NOT
+tenant-scoped** (at the moment someone clicks a login link we do not yet know their tenant — that is
+what the lookup is *for*), containing no business data, with every reachable row still going through
+tenant-scoped `memberships`. **And the one to guard: the browser never holds a tenant API key.** The
+hurried alternative — mint a key at login and let the console use the existing API — puts the
+tenant's full machine authority into every extension, crash report and screenshot. Session cookie →
+person → membership → tenant → RLS, which is the lock that already exists; the console adds a
+doorman, not a new lock.
+
+**Build order is 1 → 3 → 2 → 4 → 5, and Review is second on purpose.** It is the only screen that
+produces something the project does not have: **real graded turns**, the sole route out of E1. A
+console that shipped analytics first would look finished and change nothing. **The approval queue is
+designed and deliberately not built** — nothing can yet change a merchant's store, so it would be a
+screen with nothing to approve.
+
+**Rule 4 has no obvious meaning for a surface with no model of ours in it — that is E8, not a new
+question**, and `console.md §6` writes out the console's own minimum bar so it cannot become the
+reason Rule 4 is quietly skipped.
 
 **ADR-0025 is PARKED on its Rule 4 evidence, by the project owner, on 2026-08-26 — and the reason is
 not only budget.** The measurement is n≥3 either side plus `make eval-guard-off AGENT=sell`: seven
