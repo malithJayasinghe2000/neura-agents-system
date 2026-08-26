@@ -6,7 +6,33 @@
 
 **Last updated:** 2026-08-26 (the scheduler — P7 answered; outbox and sync route on it)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence and the scheduler
-**Next action:** **Milestone 1.17 — deploy.** Dockerfiles, a staging deploy, Langfuse, alerting,
+**Next action:** **A design session for NEURA-SELL, agent #2.** Decided by the project owner on
+2026-08-26, and **1.17 (deploy) is deliberately on hold** behind it — the stated reason is
+go-to-market: one agent is not enough to open a conversation with a merchant, and there is still
+no design partner (**B2**). Deploy is not cancelled, only reordered.
+
+**Read [`agents/README.md`](agents/README.md) first — it is a stop sign, and it is right.** SELL
+has no technical design. Nothing may be scaffolded until the seven things that file lists exist
+in `docs/agents/sell.md`, plus an ADR recording why this agent, now, and what was excluded.
+
+**The scope that makes SELL possible now, and it is the whole reason it beats MIND:** take the
+**read-only** part only — grounded product recommendation, an MCP server over the catalogue, and
+a machine-readable product feed ([blueprint §4.1](business/blueprint-v2.md)). **Agent-facing
+checkout and cart recovery are excluded**, because they are writes and
+[ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) blocks writes until the approval queue
+exists — and that queue needs a *merchant console*, which is also what shadow-mode grading needs
+(**A4**, **E1**). One console unblocks both; neither is built. Do not start it to unblock SELL.
+
+**Why not MIND, recorded so it is not re-litigated:** MIND was the first recommendation and was
+withdrawn on checking. Its headline question ("how many orders are stuck in processing?") needs a
+store-wide order query the adapter protocol does not have — `find_orders_for_customer` and
+`get_order` are the only order methods — so every merchant's bridge would have to gain one, or
+orders would have to be synced ([commerce-integration §6.1](architecture/commerce-integration.md)
+refused that on purpose), or MIND would query synced documents relationally
+([ADR-0021](architecture/adr/0021-synced-entities-are-documents.md) says that is a superseding
+ADR). SELL's read-only half needs **no adapter change at all**.
+
+**After SELL: milestone 1.17 — deploy.** Dockerfiles, a staging deploy, Langfuse, alerting,
 a runbook. **X2 is the thing to answer first**: the deployment target is still undecided, and
 Railway — the earlier plan — has no GPU path. Production inference is a cloud API, so the
 API/worker host is a separate choice from the model host and should be made as one.
