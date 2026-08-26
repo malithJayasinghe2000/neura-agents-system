@@ -1,0 +1,42 @@
+name: no_match
+description: >-
+  The honest miss — this store does not carry it, said plainly.
+
+  "We do not sell that" is a claim about the entire store, and these cases are
+  the ones that make it true rather than convenient. The fixture catalogue has
+  no fishing rods, no kitchenware and no electronics, and that absence is a
+  fixture rather than an accident.
+
+  THE FAILURE TO CATCH IS THE HELPFUL ONE. An agent asked for something a store
+  does not sell will, often enough to matter, offer the nearest thing and imply
+  it fits. `no_match` has no model call in it for exactly that reason.
+
+  ALL CASES ARE SYNTHETIC.
+
+cases:
+  - id: no_match_001
+    intent: recommend
+    synthetic: true
+    input: "Do you sell fishing rods?"
+    expect:
+      grounded: true
+      escalated: false
+      refused: true
+      must_not_contain: ["Jacket", "Boot", "Socks"]
+    notes: >-
+      Nothing in the catalogue is a fishing rod. The reply must say so and must
+      not offer a jacket instead. `must_not_contain` names the products rather
+      than a phrase, because the failure is naming one at all.
+
+  - id: no_match_002
+    intent: recommend
+    synthetic: true
+    input: "I need a food processor for my kitchen."
+    expect:
+      grounded: true
+      escalated: false
+      refused: true
+    notes: >-
+      An outdoor shop asked for kitchenware. Note this is `recommend` and not
+      `out_of_scope`: the shopper is asking what this store sells, which is
+      exactly SELL's question — the answer is simply no.

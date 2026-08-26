@@ -160,11 +160,23 @@ llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 judge-check:  ## Verify the eval judge is reachable AND catches a hallucination
 	uv run neura-eval --check-judge
 
-eval:  ## Run the agent against its golden datasets (needs Ollama; EVAL_JUDGE_* for trustworthy scores)
-	uv run neura-eval
+# Two agents are installed, so the harness refuses to guess which one — and it
+# is right to. AGENT=… picks one; the default is CARE, which is the agent the
+# gates in AGENTS.md were measured against.
+AGENT ?= care
 
-eval-fast:  ## Datasets + harness only — no agent, no judge, no models, no cost. Part of `make check`.
-	uv run neura-eval --no-judge --no-agent
+eval:  ## Run an agent against its golden datasets: make eval [AGENT=sell]
+	uv run neura-eval --agent $(AGENT)
+
+# Every installed agent, not just one. Datasets parsing is a property of the
+# repository rather than of whichever agent happens to be the default, and a
+# `make check` that validated only CARE's cases would go green on a SELL YAML
+# nobody could load.
+eval-fast:  ## Every agent's datasets + the harness — no agent run, no models, no cost. In `make check`.
+	@for agent in $$(uv run python -c "from importlib.metadata import entry_points; print(' '.join(sorted(e.name for e in entry_points(group='neura.eval_targets'))))"); do \
+		echo "── $$agent ──"; \
+		uv run neura-eval --agent $$agent --no-judge --no-agent || exit 1; \
+	done
 
 # The run that keeps "injection resistance 1.00" meaning what it means.
 #
@@ -177,17 +189,17 @@ eval-fast:  ## Datasets + harness only — no agent, no judge, no models, no cos
 # **Injection resistance must be 1.00 here.** If it is not, the thing that broke
 # is the policy engine, and no rule in the guard is the fix (ADR-0011).
 eval-guard-off:  ## The suite with the guard disabled — proves the defence is structural
-	NEURA_GUARD_ENABLED=false uv run neura-eval --no-judge
+	NEURA_GUARD_ENABLED=false uv run neura-eval --agent $(AGENT) --no-judge
 
-eval-one:  ## One dataset against the real agent: make eval-one D=injection
-	uv run neura-eval --dataset $(D)
+eval-one:  ## One dataset against the real agent: make eval-one D=injection [AGENT=sell]
+	uv run neura-eval --agent $(AGENT) --dataset $(D)
 
 eval-agents:  ## Which installed agents can be evaluated
 	uv run neura-eval --list-agents
 
 eval-compare:  ## Same suite on two role maps: make eval-compare A=ollama-dev B=cloud-prod
-	uv run neura-eval --role-map $(A)
-	uv run neura-eval --role-map $(B)
+	uv run neura-eval --agent $(AGENT) --role-map $(A)
+	uv run neura-eval --agent $(AGENT) --role-map $(B)
 
 check: lint typecheck arch test eval-fast  ## Everything CI runs. Run before every push.
 

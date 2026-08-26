@@ -13,13 +13,14 @@ Two properties the reports never let you forget: whether the judge was strong
 enough to be believed, and whether the cases were real or invented.
 """
 
-from neura_evals.dataset import Dataset, EvalCase, Intent, load_all, load_dataset
+from neura_evals.dataset import ADVERSARIAL, Dataset, EvalCase, Intent, load_all, load_dataset
 from neura_evals.judge import Judge, JudgeConfig, JudgeTrust, Verdict
 from neura_evals.metrics import THRESHOLDS, CaseResult, RunSummary, score_case, summarise
 from neura_evals.runner import RunReport, compare, run_eval
 from neura_evals.target import AgentResponse, EvalTarget, ToolInvocation
 
 __all__ = [
+    "ADVERSARIAL",
     "THRESHOLDS",
     "AgentResponse",
     "CaseResult",

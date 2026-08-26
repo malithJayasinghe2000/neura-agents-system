@@ -1,0 +1,172 @@
+"""Running SELL against a golden case.
+
+Two things it must get right, and they pull in opposite directions:
+
+* **It must run the real graph.** A target that reimplemented the flow "for
+  testing" would grade a second agent no shopper talks to, and would pass on the
+  day the real one broke. So this builds SELL exactly as a served conversation
+  does, through :func:`build_runtime`, and invokes the compiled graph.
+* **It must be reproducible.** The store is fixtures, not the live shop, and the
+  temperature is pinned by the nodes.
+
+**``authorised`` is read from the policy engine's decisions**, never from
+whether a tool produced output and never from the reply text. That is the design
+of the injection suite: a reply can sound like a refusal while a tool was quietly
+invoked, so ``injection_resistance`` is asserted against what the engine
+recorded (evaluation-strategy.md §3).
+
+**And ``recommended`` is read from ``promises``**, not from the reply. The
+shortlist is what the graph *permitted*; parsing product names out of prose
+would grade the agent on our ability to write a regex over English.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from neura_evals.dataset import EvalCase
+from neura_evals.target import AgentResponse, ToolInvocation
+
+from neura_agent_core.audit import AuditEvent, InMemoryAuditLog
+from neura_agent_core.graph import CONFIG_KEY, initial_state
+from neura_agent_core.policy import Outcome
+from neura_agent_core.tools import SessionIdentity
+from neura_agent_sell.evals.store import ALL_CAPABILITIES, load_store
+from neura_agent_sell.graph import compile_graph
+from neura_agent_sell.runtime import build_runtime
+from neura_agent_sell.tools import TOOL_SCOPES
+from neura_core import get_logger
+
+log = get_logger(__name__)
+
+#: One tenant for the whole suite. Isolation is proved by the RLS integration
+#: tests against real PostgreSQL, not here — an eval that also tried to test
+#: tenancy would be measuring two things and diagnosing neither.
+EVAL_TENANT = "tn_eval_sell"
+
+
+class SellTarget:
+    """NEURA-SELL, wired for evaluation."""
+
+    def __init__(self, llm: Any, *, tenant_id: str = EVAL_TENANT) -> None:
+        self._llm = llm
+        self._tenant_id = tenant_id
+        # Compiled once. Building the graph per case would measure graph
+        # construction as if it were agent latency.
+        self._graph = compile_graph()
+
+    @property
+    def name(self) -> str:
+        return f"sell@{getattr(self._llm, 'role_map_name', 'unknown')}"
+
+    async def run(self, case: EvalCase) -> AgentResponse:
+        """One case, start to finish, through the real graph."""
+        store = load_store(self._tenant_id, case.fixtures)
+        audit = InMemoryAuditLog()
+
+        runtime = build_runtime(
+            tenant_id=self._tenant_id,
+            conversation_id=f"cnv_{case.id}",
+            adapter=store,
+            llm=self._llm,
+            capabilities=ALL_CAPABILITIES,
+            scopes=TOOL_SCOPES,
+            identity=SessionIdentity(customer_external_id=case.session.verified_customer_id),
+            # No retriever. The catalogue is reachable through tools here, and
+            # standing up pgvector per case would make the suite depend on a
+            # database to answer a question about the agent's reasoning.
+            retriever=None,
+            audit=audit,
+        )
+
+        try:
+            final = await self._graph.ainvoke(
+                initial_state(
+                    tenant_id=self._tenant_id,
+                    conversation_id=f"cnv_{case.id}",
+                    message=case.input,
+                    history=case.session.history,
+                ),
+                {"configurable": {CONFIG_KEY: runtime, "thread_id": f"cnv_{case.id}"}},
+            )
+        except Exception as exc:
+            # Reported as an execution failure, which the harness scores as a
+            # failed case rather than a plausible empty reply. A crash that
+            # scored as "the agent refused" would be the most flattering
+            # possible bug.
+            log.error("sell_case_crashed", case_id=case.id, error=str(exc))
+            return AgentResponse(reply="", error=f"SELL raised: {type(exc).__name__}: {exc}")
+
+        return _response(final, audit)
+
+
+def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
+    """Map SELL's final state onto what the harness scores."""
+    decisions = final.get("decisions", [])
+    refused_tools = {d.tool_name for d in decisions if d.outcome is not Outcome.ALLOW}
+
+    tools_called = [
+        ToolInvocation(
+            name=invocation.tool_name,
+            authorised=invocation.tool_name not in refused_tools or invocation.ok,
+            error=invocation.error,
+        )
+        for invocation in final.get("invocations", [])
+        # A refused call never ran. Listing it as a tool call would make every
+        # correctly-blocked injection case fail its own safety assertion.
+        if invocation.ok
+    ]
+
+    escalated = bool(final.get("escalated"))
+    blocked = bool(final.get("blocked")) and any(
+        entry.event_type is AuditEvent.GUARD_BLOCK for entry in audit.for_tenant(EVAL_TENANT)
+    )
+
+    return AgentResponse(
+        reply=final.get("reply", ""),
+        intent=final.get("intent"),
+        tools_called=tools_called,
+        retrieved_context=_evidence(final),
+        escalated=escalated,
+        draft=final.get("draft", ""),
+        verify_reason=final.get("verify_reason", ""),
+        infrastructure_error=final.get("infrastructure_error"),
+        blocked=blocked,
+        pii_leaked=bool(final.get("pii_leaks")),
+        # Three ways to be a refusal, and they are different outcomes. `decline`
+        # is the A5 path — out of scope, nobody needed. `no_match` is the honest
+        # miss. `blocked` is the S4 path. The fourth is a policy refusal that
+        # ended in a handover, and only that one costs a human.
+        refused=bool(final.get("refused")) or (escalated and _was_refused(decisions)),
+        tokens_used=int(final.get("usage", {}).get("tokens", 0)),
+    )
+
+
+def _evidence(final: dict[str, Any]) -> list[str]:
+    """What the groundedness judge scores the reply against.
+
+    Exactly what ``verify`` was given — the shortlist and any retrieved context.
+    Handing the judge more than the agent had would grade a different
+    conversation, and handing it the *unfiltered* tool results would grade the
+    agent as though `shortlist` had not run.
+    """
+    evidence = []
+    if context := final.get("context"):
+        evidence.append(str(context))
+    return evidence
+
+
+def _was_refused(decisions: list[Any]) -> bool:
+    return any(d.outcome in (Outcome.REJECT, Outcome.ESCALATE) for d in decisions)
+
+
+def build_target(llm: Any) -> SellTarget:
+    """Entry point the eval CLI resolves. Registered in ``pyproject.toml``.
+
+    Discovered rather than imported by name: ``neura-evals`` must not learn that
+    an agent called "sell" exists.
+    """
+    return SellTarget(llm)
+
+
+__all__ = ["EVAL_TENANT", "SellTarget", "build_target"]

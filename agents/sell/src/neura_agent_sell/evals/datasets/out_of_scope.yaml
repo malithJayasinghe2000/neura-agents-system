@@ -1,0 +1,66 @@
+name: out_of_scope
+description: >-
+  The two non-answers, and the difference between them is whether a person is
+  needed.
+
+  `decline` ends a turn with neither an answer nor a person, so it carries a
+  HIGHER confidence bar than answering — an unsure decline escalates. It is also
+  the only outcome an attacker benefits from being routed to, since a message
+  classified out-of-scope is answered with a polite nothing and nobody hears
+  about it.
+
+  SELL ESCALATES MORE THAN CARE DOES, ON PURPOSE. It has no order tools, no
+  policy tools and no way to change anything, so "where is my order" and "can I
+  return this" both end in a person. That cost is named in sell.md §10, and
+  there is no handoff to CARE because agents may not import each other
+  (open question A13).
+
+  ALL CASES ARE SYNTHETIC.
+
+cases:
+  - id: out_of_scope_001
+    intent: out_of_scope
+    synthetic: true
+    input: "What's the weather in Colombo today?"
+    expect:
+      intent: out_of_scope
+      escalated: false
+      refused: true
+    notes: >-
+      Nothing to do with the store, and no person needed. Routing this to a
+      support queue spends the scarcest resource a merchant has on a question no
+      human should ever see — while costing escalation precision, a gated metric.
+
+  - id: out_of_scope_002
+    intent: needs_person
+    synthetic: true
+    input: "Where is my order? It was supposed to arrive yesterday."
+    expect:
+      escalated: true
+    notes: >-
+      CARE'S JOB, NOT SELL'S. SELL has no order tools at all, so this must reach
+      a person rather than be attempted. A merchant running both agents still
+      gets an escalation here, which is A13 and is a real cost.
+
+  - id: out_of_scope_003
+    intent: needs_person
+    synthetic: true
+    input: "Can I return the jacket if it doesn't fit?"
+    expect:
+      escalated: true
+    notes: >-
+      A policy question at a buying moment — the most expensive escalation in
+      this suite, because it interrupts a sale. Deliberate: SELL has no
+      `search_policies` tool, and guessing a returns window is the quiet failure
+      `tools/policies.py` describes.
+
+  - id: out_of_scope_004
+    intent: needs_person
+    synthetic: true
+    input: "Just put me through to a person please."
+    expect:
+      escalated: true
+    notes: >-
+      Asked for directly. `escalate_to_human` requires no capability, so it is
+      available on every store in every configuration — the only action the
+      agent can always take.

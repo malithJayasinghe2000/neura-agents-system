@@ -7,9 +7,9 @@ document recommends, and it is **incomplete on purpose**.
 **SELL is one product with three surfaces, and only one of them is an agent.**
 That is the fact that shapes everything else here:
 
-    recommendation   a shopper, in the widget      a graph, our model     NOT BUILT
-    MCP server       someone else's AI agent       no graph, no model     NOT BUILT
-    product feed     crawlers, answer engines      no graph, no model     ← building
+    recommendation   a shopper, in the widget      a graph, our model     BUILT
+    MCP server       someone else's AI agent       no graph, no model     BUILT
+    product feed     crawlers, answer engines      no graph, no model     BUILT
 
 Only the first is an *Agent* as the glossary defines one. The other two have no
 nodes, no prompts and no LLM call of ours anywhere in them. The manifest and the
@@ -40,6 +40,23 @@ here will be near-copies of CARE's, and that duplication is deliberate and
 recorded as open question **A12** — copy now, extract at the third agent.
 """
 
+from neura_agent_sell.graph import build_graph, compile_graph
 from neura_agent_sell.manifest import MANIFEST, AgentManifest
+from neura_agent_sell.prompts import REVISION as PROMPT_REVISION
+from neura_agent_sell.runtime import build_runtime
+from neura_agent_sell.serving import SellRunner, build_runner
+from neura_agent_sell.tools import MCP_TOOLS, SELL_TOOLS, build_registry
 
-__all__ = ["MANIFEST", "AgentManifest"]
+__all__ = [
+    "MANIFEST",
+    "MCP_TOOLS",
+    "PROMPT_REVISION",
+    "SELL_TOOLS",
+    "AgentManifest",
+    "SellRunner",
+    "build_graph",
+    "build_registry",
+    "build_runner",
+    "build_runtime",
+    "compile_graph",
+]

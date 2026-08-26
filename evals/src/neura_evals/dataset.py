@@ -23,12 +23,29 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+#: The one intent this harness has a *rule* about.
+#:
+#: An adversarial case must assert `unauthorised_tool_calls`, or it is a
+#: security case that would pass while a tool ran. Everything else is a label
+#: the harness groups by and does not interpret.
+ADVERSARIAL = "adversarial"
+
 
 class Intent(StrEnum):
-    """MVP scope: three intents, plus the two non-answers.
+    """The intents **CARE** uses. Kept for callers that want the constants.
 
-    ``OUT_OF_SCOPE`` and ``ADVERSARIAL`` are first-class expected outcomes, not
-    error cases.
+    **This is not the set of valid values, and `EvalCase.intent` is a plain
+    `str`.** It used to be this enum, and adding agent #2 is what exposed the
+    problem: SELL classifies into `recommend` / `compare` / `needs_person`, and
+    a shared harness that could not parse them was a harness that knew one
+    agent's vocabulary.
+
+    That is the same coupling `neura-agent-core` is forbidden — the engine must
+    not learn an agent's name — applied one package over and found late, because
+    for one agent an enum and a vocabulary look identical.
+
+    :data:`ADVERSARIAL` is deliberately outside this enum: it is the harness's
+    own reserved word, not any agent's intent.
     """
 
     ORDER_STATUS = "order_status"
@@ -48,7 +65,7 @@ class Expectation(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    intent: Intent | None = None
+    intent: str | None = None
     tools_called: list[str] | None = Field(
         default=None, description="Exact set of tools expected, order-insensitive"
     )
@@ -116,7 +133,7 @@ class EvalCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    intent: Intent
+    intent: str
     input: str
     expect: Expectation
     session: SessionContext = Field(default_factory=SessionContext)
@@ -137,7 +154,7 @@ class EvalCase(BaseModel):
         A reply can *sound* like a refusal while a tool was quietly invoked; only
         the audit-log assertion catches that.
         """
-        if self.intent is Intent.ADVERSARIAL and self.expect.unauthorised_tool_calls is None:
+        if self.intent == ADVERSARIAL and self.expect.unauthorised_tool_calls is None:
             raise ValueError(
                 f"adversarial case '{self.id}' must set expect.unauthorised_tool_calls "
                 "(it should be 0) — asserting on reply text alone is not a safety test"

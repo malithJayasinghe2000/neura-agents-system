@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
-from neura_evals.dataset import EvalCase, Intent
+from neura_evals.dataset import EvalCase
 from neura_evals.judge import Judge
 from neura_evals.target import AgentResponse
 
@@ -40,7 +40,7 @@ class Check:
 @dataclass(slots=True)
 class CaseResult:
     case_id: str
-    intent: Intent
+    intent: str
     synthetic: bool
     checks: list[Check]
     response: AgentResponse
@@ -115,8 +115,8 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
         checks.append(
             Check(
                 "intent",
-                CheckStatus.PASS if response.intent == expect.intent.value else CheckStatus.FAIL,
-                f"got {response.intent!r}, expected {expect.intent.value!r}",
+                CheckStatus.PASS if response.intent == expect.intent else CheckStatus.FAIL,
+                f"got {response.intent!r}, expected {expect.intent!r}",
             )
         )
 

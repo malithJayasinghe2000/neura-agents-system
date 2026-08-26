@@ -91,29 +91,33 @@ class TestDiscovery:
         assert "sell" in agents
         assert agents["sell"].route_prefix == "/v1/sell"
 
-    def test_sell_has_no_runner_yet_and_that_is_the_honest_state(self) -> None:
-        """`AGENT_NOT_RUNNABLE`, not a 500 and not a 404.
+    def test_sell_is_runnable_now_that_a_graph_exists(self) -> None:
+        """It deliberately was not, until there was something to run.
 
-        The graph does not exist, so no runner is registered. A runner wired to
-        a graph that is not there would mount `/v1/sell/chat` and answer every
-        shopper with an exception — "we have it and it is broken" reported as
-        though it were working. Absent is the true state, and the API already
-        distinguishes it from "we do not have it".
+        A runner registered before the graph existed would have mounted
+        `/v1/sell/chat` and answered every shopper with an exception — "we have
+        it and it is broken" presented as though it were working. Until this
+        commit the route answered `AGENT_NOT_RUNNABLE`, which was the true state.
         """
         from neura_api.registry import discover_runners
 
-        assert "sell" not in discover_runners()
+        assert "sell" in discover_runners()
 
-    def test_sell_declares_no_eval_target_yet(self) -> None:
-        """No graph, nothing to grade.
+    def test_sell_is_measured_by_the_eval_harness(self) -> None:
+        """ "No agent ships without one" (AGENTS.md).
 
-        Registering a target early would let `make eval` report a suite that
-        measures nothing — this project has recorded that shape of failure
-        enough times to check for it.
+        Registered only now that there is behaviour to grade — a target wired
+        earlier would have let `make eval` report a suite measuring nothing.
         """
         from importlib.metadata import entry_points
 
-        assert "sell" not in {ep.name for ep in entry_points(group="neura.eval_targets")}
+        assert "sell" in {ep.name for ep in entry_points(group="neura.eval_targets")}
+
+    def test_sell_supplies_its_own_routes(self) -> None:
+        """The feed and MCP, mounted without the API importing this package."""
+        from neura_api.registry import discover_agent_routes
+
+        assert "sell" in discover_agent_routes()
 
 
 @pytest.mark.parametrize("forbidden", ["bagisto", "shopify", "woocommerce", "magento"])
@@ -679,3 +683,293 @@ class TestMcpExposure:
         source = inspect.getsource(McpServer)
         for forbidden in ('params.get("tenant', 'params.get("store', 'params.get("scope'):
             assert forbidden not in source
+
+
+# ── The graph ────────────────────────────────────────────────────────────────
+
+
+def _invocation(tool: str, value: str, *, ok: bool = True) -> Any:
+    from neura_agent_core.tools import ToolInvocation
+
+    return ToolInvocation(
+        tool_name=tool,
+        ok=ok,
+        value=value if ok else None,
+        error=None if ok else "the store did not answer",
+        latency_ms=1,
+    )
+
+
+def _runtime() -> Any:
+    """A real `Runtime`, with no model and no store.
+
+    `runtime_of` requires the genuine type, and rightly — a duck-typed stand-in
+    would let a node be tested against a shape the graph never actually passes.
+    Nothing here calls a model: these are the deterministic nodes.
+    """
+    from neura_agent_sell.runtime import build_runtime
+
+    return build_runtime(
+        tenant_id="tn_test",
+        conversation_id="cnv_test",
+        adapter=None,
+        llm=None,
+        capabilities=frozenset(),
+        scopes=frozenset(),
+    )
+
+
+def _config() -> dict[str, Any]:
+    from neura_agent_core.graph import CONFIG_KEY
+
+    return {"configurable": {CONFIG_KEY: _runtime()}}
+
+
+SEARCH_RESULT = """Product p_jacket_1: Fell Waterproof Jacket
+  price: 149.00 GBP
+  availability: in stock
+  description: A 2.5-layer waterproof shell with taped seams.
+
+Product p_jacket_3: Summit Expedition Hardshell
+  price: 220.00 GBP
+  availability: in stock
+  description: A 3-layer expedition hardshell."""
+
+
+class TestTheGraphShape:
+    def test_it_compiles_with_every_node_the_design_names(self) -> None:
+        from neura_agent_sell import compile_graph
+
+        nodes = set(compile_graph().get_graph().nodes)
+        assert {
+            "guard",
+            "route",
+            "retrieve",
+            "plan",
+            "act",
+            "shortlist",
+            "compose",
+            "verify",
+            "respond",
+            "decline",
+            "no_match",
+            "escalate",
+            "blocked",
+        } <= nodes
+
+    def test_guard_runs_before_anything_reads_the_message(self) -> None:
+        """A guard reached after routing has already shown the raw message to a
+        model, so its redaction is redaction of something already disclosed —
+        and it looks exactly like a guard that works.
+
+        Asserted on the compiled graph's own first edge rather than by
+        constructing a violation: the builder's contract check is
+        `neura-agent-core`'s to test, and what SELL owes is that its graph
+        satisfies it.
+        """
+        from neura_agent_sell import compile_graph
+
+        edges = compile_graph().get_graph().edges
+        first = {e.target for e in edges if e.source == "__start__"}
+        assert first == {"guard"}
+
+
+class TestShortlistDecidesWhatMayBeRecommended:
+    """The node with no CARE counterpart, and the one carrying the product."""
+
+    async def test_a_price_ceiling_is_enforced_in_code_not_in_prose(self) -> None:
+        """ "Under 150" is the one thing a shopper will check.
+
+        A model that includes a 220.00 jacket because it is otherwise perfect
+        has produced the most embarrassing possible answer, so the filter runs
+        before the composer sees anything.
+        """
+        from neura_agent_sell.nodes import shortlist
+
+        out = await shortlist(
+            {
+                "invocations": [_invocation("search_products", SEARCH_RESULT)],
+                "entities": {"max_price": "150"},
+            },
+            {},
+        )
+        assert out["promises"] == ["p_jacket_1"]
+        assert "220.00" not in out["context"]
+
+    async def test_a_rejected_candidate_never_reaches_the_composer(self) -> None:
+        """A model shown eleven products and told to use four will use five."""
+        from neura_agent_sell.nodes import shortlist
+
+        out = await shortlist(
+            {
+                "invocations": [_invocation("search_products", SEARCH_RESULT)],
+                "entities": {"max_price": "150"},
+            },
+            {},
+        )
+        assert "Summit" not in out["context"]
+
+    async def test_an_unparsable_ceiling_does_not_empty_the_shortlist(self) -> None:
+        """A bad extraction must not turn into "we sell nothing"."""
+        from neura_agent_sell.nodes import shortlist
+
+        out = await shortlist(
+            {
+                "invocations": [_invocation("search_products", SEARCH_RESULT)],
+                "entities": {"max_price": "about a hundred quid"},
+            },
+            {},
+        )
+        assert len(out["promises"]) == 2
+
+
+class TestWeDoNotSellThatIsAClaimAboutTheWholeStore:
+    """The rule the whole design rests on, tested from both directions."""
+
+    async def test_an_unanswered_catalogue_escalates_rather_than_denying(self) -> None:
+        """A cold index or a timed-out adapter is NOT an empty catalogue.
+
+        Collapsing the two tells a shopper that a fully stocked store is bare.
+        """
+        from neura_agent_sell.nodes import shortlist
+
+        out = await shortlist(
+            {"invocations": [_invocation("search_products", "", ok=False)], "entities": {}},
+            {},
+        )
+        assert out["escalated"] is True
+        assert "unknown" in out["escalation_reason"]
+
+    async def test_no_tool_ran_at_all_escalates(self) -> None:
+        from neura_agent_sell.nodes import shortlist
+
+        out = await shortlist({"invocations": [], "entities": {}}, {})
+        assert out["escalated"] is True
+
+    async def test_a_searched_catalogue_that_returned_nothing_is_an_honest_miss(self) -> None:
+        """The store WAS asked and DID answer. Now "we don't carry it" is true."""
+        from neura_agent_sell.nodes import shortlist
+
+        out = await shortlist(
+            {
+                "invocations": [
+                    _invocation("search_products", "The catalogue returned no available products.")
+                ],
+                "entities": {},
+            },
+            {},
+        )
+        assert out["promises"] == []
+        assert "escalated" not in out
+
+    def test_the_branch_cannot_reach_no_match_without_the_evidence(self) -> None:
+        """Belt and braces, and they fail for different reasons.
+
+        The node already refuses to leave `escalated` unset when the catalogue
+        was not reached, so this is redundant today. It is the line that keeps
+        the claim true if someone later adds a path into the branch that skips
+        the node's reasoning.
+        """
+        from neura_agent_sell.graph import _after_shortlist
+
+        assert _after_shortlist({"promises": [], "invocations": []}) == "escalate"
+        assert (
+            _after_shortlist(
+                {"promises": [], "invocations": [_invocation("search_products", "none")]}
+            )
+            == "no_match"
+        )
+        assert _after_shortlist({"promises": ["p_1"], "invocations": []}) == "compose"
+
+    def test_an_escalated_turn_cannot_fall_through_to_no_match(self) -> None:
+        """Ordering in the branch is load-bearing."""
+        from neura_agent_sell.graph import _after_shortlist
+
+        assert (
+            _after_shortlist(
+                {
+                    "escalated": True,
+                    "promises": [],
+                    "invocations": [_invocation("search_products", "x")],
+                }
+            )
+            == "escalate"
+        )
+
+
+class TestAFabricatedProductCannotReachAShopper:
+    """Set membership, not a model grading a model. Gated at 1.00."""
+
+    async def test_a_draft_naming_a_product_that_was_not_shortlisted_escalates(self) -> None:
+        from neura_agent_sell.nodes import respond
+
+        out = await respond(
+            {
+                "grounded": True,
+                "draft": "I'd suggest the Summit Expedition Hardshell (p_jacket_3).",
+                "promises": ["p_jacket_1"],
+                "invocations": [_invocation("search_products", SEARCH_RESULT)],
+            },
+            _config(),
+        )
+        assert out["escalated"] is True
+        assert "p_jacket_3" in out["escalation_reason"]
+
+    def test_ordinary_prose_is_not_mistaken_for_a_citation(self) -> None:
+        """The check is deliberately narrow.
+
+        Only ids the store actually returned this turn are considered. A word
+        that resembles an id but appeared in no tool result is prose, and
+        flagging it would make the gate fire on correct replies.
+        """
+        from neura_agent_sell.nodes.respond import _invented_ids
+
+        state = {
+            "promises": ["p_jacket_1"],
+            "invocations": [_invocation("search_products", SEARCH_RESULT)],
+        }
+        assert _invented_ids("The Fell jacket is waterproof and packs away.", state) == set()
+        assert _invented_ids("Try p_jacket_3 instead.", state) == {"p_jacket_3"}
+
+
+class TestTheTerminalNodesGenerateNothing:
+    """`decline` and `no_match` skip `verify`, so nothing in them may be composed."""
+
+    async def test_no_match_says_only_what_a_human_wrote_and_the_store_said(self) -> None:
+        from neura_agent_sell.nodes import no_match
+
+        out = await no_match(
+            {
+                "invocations": [
+                    _invocation("list_categories", "This store's categories: Footwear, Outerwear")
+                ]
+            },
+            _config(),
+        )
+        assert out["grounded"] is True
+        assert out["refused"] is True
+        assert out["escalated"] is False
+        assert "Footwear, Outerwear" in out["reply"]
+
+    async def test_no_match_stands_alone_when_the_store_publishes_no_categories(self) -> None:
+        """`CATEGORY_READ` is optional, and this is the degradation sell.md names."""
+        from neura_agent_sell.nodes import no_match
+        from neura_agent_sell.prompts import load_prompts
+
+        out = await no_match({"invocations": []}, _config())
+        assert out["reply"] == load_prompts()["no_match"]
+
+
+class TestPrompts:
+    def test_every_prompt_the_graph_asks_for_exists(self) -> None:
+        from neura_agent_sell.prompts import REQUIRED, load_prompts
+
+        assert load_prompts().keys() >= REQUIRED
+
+    def test_the_revision_changes_when_a_prompt_changes(self) -> None:
+        """Six weeks after a complaint, "which prompt wrote this?" needs an
+        exact answer."""
+        from neura_agent_sell.prompts import REVISION, prompt_hashes
+
+        assert len(REVISION) == 64
+        assert len(prompt_hashes()) >= 5

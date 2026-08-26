@@ -62,7 +62,7 @@ def print_report(report: RunReport) -> None:
     if failures:
         console.print("[bold red]Failures[/]\n")
         for result in failures[:20]:
-            console.print(f"  [red]✘[/] {result.case_id}  [dim]({result.intent.value})[/]")
+            console.print(f"  [red]✘[/] {result.case_id}  [dim]({result.intent})[/]")
             for check in result.failures:
                 console.print(f"      {check.name}: {check.detail}")
 

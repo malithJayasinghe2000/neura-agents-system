@@ -1,0 +1,79 @@
+name: recommend
+description: >-
+  The core intent — a shopper describes a need and names no product, and SELL
+  returns a shortlist grounded in the catalogue.
+
+  The failure mode here is quieter than CARE's and costs the merchant more. A
+  shopper told a false fact about a named product often catches it; a shopper
+  handed a confident shortlist has no way to know the third item is on it
+  because the model liked the sound of it.
+
+  ALL CASES ARE SYNTHETIC, written against ../fixtures/store.json. They prove
+  the harness works, not that the agent does (docs/open-questions.md E1).
+
+cases:
+  - id: recommend_001
+    intent: recommend
+    synthetic: true
+    input: "I need a waterproof jacket for hill walking."
+    expect:
+      intent: recommend
+      tools_called: [search_products]
+      grounded: true
+      escalated: false
+      must_contain: ["Waterproof Jacket"]
+    notes: >-
+      The straightforward case. Two jackets match; either or both is a correct
+      shortlist. Anonymous is fine — a catalogue is public and SELL reads no
+      customer record at all.
+
+  - id: recommend_002
+    intent: recommend
+    synthetic: true
+    input: "Looking for a waterproof jacket, budget is under 150."
+    expect:
+      intent: recommend
+      grounded: true
+      escalated: false
+      must_not_contain: ["220"]
+    notes: >-
+      THE PRICE CEILING, AND IT IS ENFORCED IN CODE. The Summit Expedition
+      Hardshell is 220.00 and must not appear. `shortlist` filters it before the
+      composer sees it, so this cannot fail because a model was persuasive about
+      an otherwise-perfect jacket.
+
+      The assertion is on the NUMBER, not on the product name: a reply that
+      mentions the Summit while saying it is over budget would be arguably fine,
+      but quoting 220 to someone who said 150 is not.
+
+  - id: recommend_003
+    intent: recommend
+    synthetic: true
+    input: "What have you got for keeping my feet warm on a walk?"
+    expect:
+      intent: recommend
+      grounded: true
+      escalated: false
+      must_contain: ["Merino"]
+    notes: >-
+      A need expressed with none of the catalogue's vocabulary. "Keeping my feet
+      warm" is not a word in any product record; the socks are the answer.
+
+  - id: recommend_004
+    intent: recommend
+    synthetic: true
+    input: "I'm after walking boots in a UK 9."
+    expect:
+      intent: recommend
+      grounded: true
+      escalated: false
+      must_contain: ["UK 9"]
+    notes: >-
+      The variant-level case. UK 9 is OUT OF STOCK in the fixture and UK 8 is
+      not. An agent that answers about the product rather than the variant says
+      "yes, in stock" and is wrong in the way that costs a return.
+
+      Deliberately NOT asserted as `must_not_contain: ["in stock"]` — CARE
+      recorded that exact mistake. "We have the Moor Walking Boot, but not in a
+      UK 9" contains the forbidden phrase while being exactly right, and a check
+      that fails a correct reply teaches whoever reads the report to ignore it.

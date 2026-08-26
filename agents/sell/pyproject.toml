@@ -19,15 +19,18 @@ dependencies = [
 [project.entry-points."neura.agents"]
 sell = "neura_agent_sell:MANIFEST"
 
-# DELIBERATELY ABSENT until the graph exists:
-#
-#   [project.entry-points."neura.eval_targets"]
-#   [project.entry-points."neura.agent_runners"]
-#
-# A runner registered before there is a graph to run would mount `/v1/sell/chat`
-# and answer every shopper with an exception. Absent, the route answers
-# AGENT_NOT_RUNNABLE — "we have it and it is broken" is a different problem from
-# "we do not have it", and only the second one is true today.
+# How `make eval` finds something real to measure. The harness resolves targets
+# and datasets by entry point rather than importing an agent by name, so adding
+# agent #2 needed no edit to it.
+[project.entry-points."neura.eval_targets"]
+sell = "neura_agent_sell.evals:build_target"
+
+# How the API turns a request into a turn. Registered only now that a graph
+# exists to run — a runner wired to a missing graph would mount `/v1/sell/chat`
+# and answer every shopper with an exception, which is worse than the honest
+# AGENT_NOT_RUNNABLE it reported until this commit.
+[project.entry-points."neura.agent_runners"]
+sell = "neura_agent_sell.serving:build_runner"
 
 # The fourth group (ADR-0024 §8), and SELL is the first agent to need it. Chat,
 # conversations and the shadow queue are the same for any agent and are built
