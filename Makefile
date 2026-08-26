@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        api-check verify-probe router-probe
+        api-check verify-probe router-probe console-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -68,6 +68,12 @@ test-integration:  ## Integration tests (requires: make up)
 
 test-widget:  ## The widget's pure logic (Node's built-in runner — no npm, no install)
 	node --test "tests/widget/*.test.js"
+
+# The console's half of the deterministic bar in docs/console.md §6. A browser
+# and not curl, because __Host- and HttpOnly are enforced by the browser and by
+# nothing else — a cookie Chrome refuses is a sign-in that silently does nothing.
+console-check:  ## Sign in to the console in REAL headless Chrome: make console-check EMAIL=...
+	uv run python scripts/console_check.py "$(EMAIL)"
 
 widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no cost.
 	uv run python scripts/widget_check.py

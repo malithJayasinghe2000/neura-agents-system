@@ -183,11 +183,30 @@ class TestTheWidgetShipsAsItsOwnSource:
     """ADR-0019 §1. No build step, so what a browser runs is this file."""
 
     def test_there_is_no_javascript_toolchain(self) -> None:
+        """No build step anywhere the WIDGET can reach.
+
+        **Narrowed on 2026-08-27, and narrowed rather than deleted.** The
+        merchant console is a Next.js application under `apps/neura-console`
+        ([ADR-0026](../../docs/architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md)),
+        so a `package.json` now exists in this repository — deliberately, with an
+        ADR, which is precisely the condition the original assertion's own
+        message named.
+
+        What it protected is untouched and is what still matters: the widget is
+        pasted into a merchant's own page, so **what a browser runs must be the
+        file in this repository** and not the output of a toolchain nobody
+        reviews (ADR-0019 §1). The console is served by us, to a merchant, and
+        carries none of that argument.
+
+        The exclusion is a single named directory rather than a pattern, so the
+        next `package.json` to appear anywhere else still fails this test.
+        """
         root = Path(__file__).parents[2]
+        console = root / "apps" / "neura-console"
         stray = [
             p
             for p in root.rglob("package.json")
-            if ".venv" not in p.parts and "node_modules" not in p.parts
+            if ".venv" not in p.parts and "node_modules" not in p.parts and console not in p.parents
         ]
         assert stray == [], f"a JS toolchain appeared without an ADR: {stray}"
 

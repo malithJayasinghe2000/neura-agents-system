@@ -4,16 +4,46 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-26 (later — the merchant console designed; deploy held behind it)
+**Last updated:** 2026-08-27 — console screen 1 (sign in) built, working in a real browser
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **Build the merchant console — screen 1 (sign in), then screen 3 (Review).**
-Designed 2026-08-26 in [`console.md`](console.md), decided in
-[ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md).
-**No code written yet.** **Deploy (1.17) is deliberately held behind this** by the project owner:
-a merchant cannot be sold something they cannot see, and today the only user interface in this
-repository is the *shopper's* chat widget.
+**Next action:** **Console screen 3 — Review (shadow-mode grading).** Screen 1 (sign in) is
+**built and working in a real browser**; `make console-check EMAIL=…` drives headless Chrome through
+a real link and passes 7/7. Review is next on purpose: it is the only screen that produces something
+this project does not have — **real graded turns**, the sole route out of **E1**.
 
-**Why the console and not a feature — the ratio.** It unblocks **four** recorded open questions
+**What exists now.** `apps/neura-console` — Next.js 16, Tailwind 4, shadcn/ui, self-hosted Geist.
+Sign-in, verify, a landing screen, sign out. Backend: three tables (`users`, `memberships`,
+`login_tokens`), `neura_core.identity`, `neura_core.email` (plain SMTP), four `/v1/console`
+endpoints, `scripts/console_admin.py` + `make user-new|show|revoke|link`. 14 unit + 23 integration
+tests, and the browser check. **Proved end to end against real SMTP**: a link was mailed, clicked,
+redeemed, and the session listed exactly one merchant.
+
+**Three things found by building it, each worth more than the screen.**
+
+**1. The console must never be cross-origin to the API.** `middleware/cors.py` sets
+`allow_credentials: false` and says why: *"the credential is a bearer token, so there are no ambient
+credentials for a hostile page to ride on."* **A session cookie is exactly such a credential.**
+Serving the console from another origin would have required flipping that flag, which makes **every
+endpoint in the API CSRF-able** — bought for a dev-time convenience. So the browser talks only to the
+console's own origin and `next.config.ts` rewrites `/api/*` server-side. Same shape in development
+and production, no CORS involved, cookie first-party. **Do not "simplify" this by pointing the
+browser at the API.**
+
+**2. `apps/*` broke the entire Python workspace.** A directory with no `pyproject.toml` under that
+glob makes *every* `uv` command fail, `make check` and the API included. `exclude` in the root
+`pyproject.toml` fixes it; the symptom is total and the cause is invisible.
+
+**3. A guard test caught the new toolchain, and was narrowed rather than deleted.**
+`test_there_is_no_javascript_toolchain` enforces [ADR-0019](architecture/adr/0019-widget-no-build-step.md)
+— the widget is pasted into a merchant's own page, so what a browser runs must be the file in this
+repository. The console carries none of that argument. The exclusion is one named directory, so the
+next stray `package.json` still fails.
+
+**Still open and blocking launch: K1.** Gmail SMTP works and is a development answer. A production
+one needs deliverability (login mail in spam reads as a broken product) and an SMTP path for the
+sovereign tier. Tangled with **X2**.
+
+**Why the console at all — the ratio, unchanged.** It unblocks **four** recorded open questions
 (**A4** grading has nowhere to grade in, **E1** every golden case is synthetic, **S5** nobody reads
 the audit log in aggregate, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 writes via the approval queue). Nothing else in the backlog comes close, and it is the only large
