@@ -11,6 +11,10 @@ dependencies = [
     "neura-adapters",
     "neura-agent-core",
     "fastapi>=0.115",
+    # Console sign-in validates the address before it reaches a query (ADR-0026).
+    # A typo would otherwise be a lookup that matches nothing, shown to the
+    # merchant as "check your inbox" — the one screen that cannot report failure.
+    "email-validator>=2.2",
     "uvicorn[standard]>=0.34",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",

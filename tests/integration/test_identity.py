@@ -58,10 +58,10 @@ async def people(db: Database):
                 [
                     {
                         "id": made["alice"],
-                        "email": f"{made['alice']}@test.invalid",
+                        "email": f"{made['alice']}@example.com",
                         "name": "Alice",
                     },
-                    {"id": made["bob"], "email": f"{made['bob']}@test.invalid", "name": "Bob"},
+                    {"id": made["bob"], "email": f"{made['bob']}@example.com", "name": "Bob"},
                 ]
             )
         )
@@ -91,7 +91,7 @@ class TestSignIn:
     async def test_a_link_is_minted_for_a_known_address(self, db: Database, people) -> None:
         async with db.identity_session() as s:
             request = await request_sign_in_link(
-                s, email=f"{people['alice']}@test.invalid", console_base_url=CONSOLE
+                s, email=f"{people['alice']}@example.com", console_base_url=CONSOLE
             )
         assert request.minted
         assert request.user_id == people["alice"]
@@ -101,7 +101,7 @@ class TestSignIn:
         """The anti-enumeration rule. Same return value, so the caller cannot leak."""
         async with db.identity_session() as s:
             request = await request_sign_in_link(
-                s, email="nobody@test.invalid", console_base_url=CONSOLE
+                s, email="nobody@example.com", console_base_url=CONSOLE
             )
         assert not request.minted
         assert request.user_id == ""
@@ -111,14 +111,14 @@ class TestSignIn:
         second one silently has no access to the first one's shop."""
         async with db.identity_session() as s:
             request = await request_sign_in_link(
-                s, email=f"{people['alice']}@TEST.INVALID".upper(), console_base_url=CONSOLE
+                s, email=f"{people['alice']}@example.com".upper(), console_base_url=CONSOLE
             )
         assert request.user_id == people["alice"]
 
     async def test_the_plaintext_token_is_never_stored(self, db: Database, people) -> None:
         async with db.identity_session() as s:
             request = await request_sign_in_link(
-                s, email=f"{people['alice']}@test.invalid", console_base_url=CONSOLE
+                s, email=f"{people['alice']}@example.com", console_base_url=CONSOLE
             )
         async with db.identity_session() as s:
             stored = (
@@ -140,7 +140,7 @@ class TestSignIn:
         """The forwarded-link case. Two redemptions, exactly one winner."""
         async with db.identity_session() as s:
             request = await request_sign_in_link(
-                s, email=f"{people['alice']}@test.invalid", console_base_url=CONSOLE
+                s, email=f"{people['alice']}@example.com", console_base_url=CONSOLE
             )
 
         async with db.identity_session() as s:
@@ -154,7 +154,7 @@ class TestSignIn:
     async def test_an_expired_token_is_refused(self, db: Database, people) -> None:
         async with db.identity_session() as s:
             request = await request_sign_in_link(
-                s, email=f"{people['alice']}@test.invalid", console_base_url=CONSOLE
+                s, email=f"{people['alice']}@example.com", console_base_url=CONSOLE
             )
         later = datetime.now(UTC) + login_service.TOKEN_TTL + timedelta(minutes=1)
 

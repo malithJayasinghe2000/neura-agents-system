@@ -220,6 +220,25 @@ migrate:  ## Apply migrations
 # a request is — creating a tenant works only because the insert is scoped to
 # the id being created.
 
+# The merchant console's accounts (ADR-0026). There is no sign-up page on
+# purpose — an open form on the sign-in screen would let anyone create an
+# account for any address. These are also why no login credential is seeded in a
+# migration, where it would live in version control.
+user-new:  ## Console account: make user-new EMAIL=owner@shop.com NAME="Jane" [TENANT=tn_...]
+	uv run python scripts/console_admin.py create --email "$(EMAIL)" \
+	  --name "$(NAME)" --tenant "$(TENANT)"
+
+user-show:  ## An account and the merchants it may act for: make user-show EMAIL=...
+	uv run python scripts/console_admin.py show --email "$(EMAIL)"
+
+user-revoke:  ## Withdraw access: make user-revoke EMAIL=... TENANT=tn_...
+	uv run python scripts/console_admin.py revoke --email "$(EMAIL)" --tenant "$(TENANT)"
+
+# Prints a working sign-in link. Use it when mail is not arriving and you need to
+# know whether the fault is delivery or the login flow.
+user-link:  ## Print a sign-in link instead of mailing it: make user-link EMAIL=...
+	uv run python scripts/console_admin.py link --email "$(EMAIL)"
+
 tenant-new:  ## Create a tenant: make tenant-new NAME="Acme Store" AGENTS=care
 	uv run python scripts/tenant_admin.py create-tenant --name "$(NAME)" --agents "$(AGENTS)"
 
