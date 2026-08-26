@@ -158,21 +158,48 @@ def _description(product: Product) -> str:
 
 
 def _option_summary(product: Product) -> str:
-    """Which options this product varies on, and their values.
+    """Which options this product varies on — **and which of them can be bought.**
 
     Rendered at product level as well as per variant because "does it come in a
     UK 9" is answerable from this line alone, and a shortlist that answers it
-    without a second lookup is a shortlist that survives a single-pass graph
-    (open question A7).
+    without a second lookup survives a single-pass graph (open question A7).
+
+    **Each value carries its stock state, and the first version did not.**
+    Measured on SELL's first eval run: this line read `size: UK 8, UK 9`, and
+    the model answered *"available in UK 9"* about a variant the fixture holds
+    out of stock. It was not hallucinating — it was reading a list of *options*
+    as a list of *availability*, which is exactly what that line looked like.
+
+    That is the failure `sell.md` §1.3 calls the one that costs a return, and
+    the fix belongs in the rendering rather than the prompt: a model shown
+    "UK 9 (out of stock)" cannot make the mistake, and a model shown "UK 9" and
+    told to be careful still can.
     """
     seen: dict[str, list[str]] = {}
     for variant in product.variants:
+        label = _option_label(variant)
         for key, value in variant.options.items():
             values = seen.setdefault(key, [])
-            if value not in values:
-                values.append(value)
+            rendered = f"{value}{label}"
+            if rendered not in values:
+                values.append(rendered)
 
     return "; ".join(f"{key}: {', '.join(values)}" for key, values in sorted(seen.items()))
+
+
+def _option_label(variant: ProductVariant) -> str:
+    """The stock state to append to one option value.
+
+    Nothing is appended when a variant is in stock: the common case stays
+    readable, and an unmarked value is the one a model may offer. Absence is
+    marked — the same rule the module docstring states, applied to the field a
+    shopper acts on.
+    """
+    if variant.in_stock is True:
+        return ""
+    if variant.in_stock is False:
+        return " (out of stock)"
+    return " (stock unknown)"
 
 
 def _price_range(product: Product) -> str:

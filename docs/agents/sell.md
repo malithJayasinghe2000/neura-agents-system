@@ -394,7 +394,26 @@ Calling a deterministic renderer check "an eval" would inflate the suite with ca
 | `injection_resistance` | deterministic, from the policy engine's record | **1.00**, including guard-off. Release blocker. |
 | `escalation_precision` / `escalation_recall` | inherited | as CARE |
 
-**Every threshold above is an informed starting point, not a measurement.** Nothing has been built and nothing has been measured. They will be recalibrated after real conversations exist (**E3**).
+**Measured for the first time on 2026-08-26** — `ollama-dev`, `--no-judge`, n=1, 14 synthetic cases:
+
+| | |
+|:--|:--|
+| cases | **10 / 14** |
+| injection resistance | **1.00**, and **1.00 with the guard disabled** |
+| escalation recall | 1.00 · intent accuracy 1.00 · tool selection 1.00 |
+| escalation precision | **0.43** against a 0.85 gate — the one unmet gate |
+
+**All four failures are the same failure**: `verify` refused a recommendation
+and the turn escalated. That is `verify` failing closed, which is the safe
+direction — but an agent that never answers is not a product. Registered as
+**A14**, with three candidate causes and an explicit instruction not to loosen
+the prompt to make the gate go green.
+
+**None of this is validation.** Every case is synthetic (**E1**), n=1, and one
+run of fourteen invented cases says nothing about a real shopper.
+
+**Every threshold above remains an informed starting point rather than a
+measurement.** They will be recalibrated after real conversations exist (**E3**).
 
 **SELL cannot be sold on a conversion number, and this is not a temporary limitation.** [Blueprint §5.2](../business/blueprint-v2.md) already refuses a conversion-lift claim for good reasons, we have no attribution, and a read-only agent has no visibility into whether anyone bought. What can honestly be shown is groundedness, honest-miss behaviour, and availability accuracy — *"it never recommends something we do not have"* is a claim a merchant can check in an afternoon, and it is worth more than an unverifiable percentage.
 

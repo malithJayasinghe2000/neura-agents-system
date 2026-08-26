@@ -27,7 +27,7 @@
 | Agent | Folder | Product scope | Technical design | Built | Notes |
 |:--|:--|:--|:--|:--|:--|
 | **NEURA-CARE** | `agents/care/` | ✅ [blueprint §5.1](../business/blueprint-v2.md) | ✅ [agent-runtime.md](../architecture/agent-runtime.md) | ✅ **milestone 1.11** | 3 intents, 7 tools, read-only. `guard`/`blocked` land in 1.12 |
-| **NEURA-SELL** | `agents/sell/` | ✅ [blueprint §5.2](../business/blueprint-v2.md) + [§4.1](../business/blueprint-v2.md) | ✅ [sell.md](sell.md) | ❌ **not built** | **Agent #2**, decided 2026-08-26 ([ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)). 2 intents, 5 tools, 3 surfaces, read-only. Writes excluded |
+| **NEURA-SELL** | `agents/sell/` | ✅ [blueprint §5.2](../business/blueprint-v2.md) + [§4.1](../business/blueprint-v2.md) | ✅ [sell.md](sell.md) | ✅ **2026-08-26** | **Agent #2** ([ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)). 2 intents, 5 tools, 3 surfaces, read-only. Feed + MCP + graph all built. **10/14 golden, escalation precision unmet (A14)** |
 | **NEURA-MIND** | `agents/mind/` | ⚠️ tiers only | ❌ **none** | ❌ | **Considered as agent #2 and rejected** — needs an adapter-protocol change SELL does not |
 | **NEURA-GROW** | `agents/grow/` | ⚠️ tiers only | ❌ **none** | ❌ | Phase 4+ |
 | **NEURA-GUARD** | `agents/guard/` | ⚠️ tiers only | ❌ **none** | ❌ | MVP portion is *platform infrastructure*, not an agent — see below |

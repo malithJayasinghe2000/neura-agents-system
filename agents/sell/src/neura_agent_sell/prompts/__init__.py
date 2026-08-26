@@ -29,10 +29,20 @@ PROMPT_DIR = Path(__file__).resolve().parent
 #: globbed, so a renamed file fails at import in front of a developer rather
 #: than at answer time as a node quietly running with no system prompt.
 #:
-#: `verify`, `escalation_message` and `blocked_message` are absent because they
-#: are the *engine's* prompts, supplied by `neura-agent-core` along with the
-#: nodes that use them.
-REQUIRED = frozenset({"route", "plan", "compose", "decline", "no_match"})
+#: **`verify` is here, and leaving it out was a real bug the eval caught.**
+#:
+#: `verify` is an *inherited node* but not an inherited prompt: it runs
+#: `runtime.prompt("verify")`, and a runtime is built from its agent's own
+#: prompt set. The first SELL eval run escalated every answerable case with
+#: "verification could not be completed: KeyError" — the graph was correct, the
+#: node was correct, and the agent had simply never been given the words.
+#:
+#: Recorded rather than quietly fixed, because the mistake is instructive: an
+#: inherited node can still have an agent-supplied dependency, and the failure
+#: presents as the agent being cautious rather than as anything being broken.
+#: Every case escalated, which is `verify` failing closed exactly as designed —
+#: which is also why nothing looked alarming until the gate was read.
+REQUIRED = frozenset({"route", "plan", "compose", "decline", "no_match", "verify"})
 
 
 class PromptError(RuntimeError):

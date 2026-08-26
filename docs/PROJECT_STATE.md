@@ -4,10 +4,13 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-26 (SELL designed — agent #2 decided, docs only, no code)
-**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and SELL's design
-**Next action:** **Scaffold `agents/sell/`, or return to 1.17 (deploy).** Either is now legitimate;
-the design session that was blocking the choice is **done**.
+**Last updated:** 2026-08-26 (SELL built — all three surfaces, first eval baseline)
+**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
+**Next action:** **Answer A14, then 1.17 (deploy).** SELL is built and measured; its one unmet
+gate is escalation precision 0.43 against 0.85, and **every miss is the same miss** — `verify`
+refusing a recommendation. **Do not loosen the prompt to make it green**; 2026-07-30 records that
+exact attempt being measured and reverted. Discriminate first: run CARE's suite on the same box
+as a control, then `make verify-probe` with SELL's prompt.
 
 **The design session completed on 2026-08-26 and produced exactly what
 [`agents/README.md`](agents/README.md) demanded:** all seven things in

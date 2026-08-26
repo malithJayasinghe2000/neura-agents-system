@@ -966,6 +966,24 @@ class TestPrompts:
 
         assert load_prompts().keys() >= REQUIRED
 
+    def test_an_inherited_node_can_still_need_an_agent_supplied_prompt(self) -> None:
+        """`verify` is inherited; its prompt is not, and leaving it out was a bug.
+
+        The first SELL eval run escalated every answerable case with
+        "verification could not be completed: KeyError". The graph was right and
+        the node was right — SELL had simply never been given the words. It
+        presents as the agent being cautious rather than as anything being
+        broken, because `verify` fails closed exactly as designed, so nothing
+        looked alarming until the gate was read.
+
+        Pinned by importing the node's own constant: a future agent copying
+        SELL's prompt list must not inherit the same omission.
+        """
+        from neura_agent_core.graph.nodes.verify import PROMPT_NAME
+        from neura_agent_sell.prompts import load_prompts
+
+        assert PROMPT_NAME in load_prompts()
+
     def test_the_revision_changes_when_a_prompt_changes(self) -> None:
         """Six weeks after a complaint, "which prompt wrote this?" needs an
         exact answer."""
