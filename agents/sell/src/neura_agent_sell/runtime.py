@@ -26,6 +26,7 @@ from neura_agent_core.graph import Runtime, guard_enabled_by_default
 from neura_agent_core.policy import ConversationBudget, PolicyEngine
 from neura_agent_core.rag.retrieval import Retriever
 from neura_agent_core.tools import SessionIdentity, ToolContext
+from neura_agent_sell.evidence import hide_uncited_descriptions
 from neura_agent_sell.prompts import load_prompts
 from neura_agent_sell.tools import build_registry
 from neura_domain import Capability
@@ -93,6 +94,11 @@ def build_runtime(
         audit=audit,
         llm=llm,
         prompts=load_prompts(),
+        # ADR-0025. SELL's evidence is a catalogue, and a catalogue carries
+        # merchant-written prose that a payload can live in. `verify` is asked
+        # about the products the draft cites; every other product keeps its
+        # price and availability and loses only its description.
+        evidence_filter=hide_uncited_descriptions,
         guard_enabled=guard_enabled_by_default() if guard_enabled is None else guard_enabled,
         # `vault` is deliberately not a parameter: every turn starts with a
         # fresh, empty redaction map, and a caller able to pass one in is a

@@ -125,8 +125,26 @@ async def verify(state: AgentState, config: RunnableConfig) -> AgentState:
     if runtime.llm is None:
         return _ungrounded("no verifier is configured")
 
+    # ADR-0025. The agent may narrow what the model is asked to check claims
+    # against — SELL withholds the free-text description of any product the
+    # draft does not cite, because that is where an indirect injection lives and
+    # a payload in a product nobody recommended was measured refusing legitimate
+    # drafts 10/10 (open question S9).
+    #
+    # Deliberately AFTER both checks above, and that ordering is the decision:
+    #
+    #   * the PII filter accounts against the FULL evidence, or a contact detail
+    #     that really was retrieved looks unaccounted-for and this node escalates
+    #     on it;
+    #   * the empty-evidence test reads the FULL evidence, or a draft citing no
+    #     product at all narrows to nothing, lands in the branch above and is
+    #     judged by its length — which turns a filter into a bypass.
+    checkable = evidence
+    if runtime.evidence_filter is not None:
+        checkable = runtime.evidence_filter(draft, evidence)
+
     try:
-        result = await _ask(runtime, draft, evidence)
+        result = await _ask(runtime, draft, checkable)
     except Exception as exc:
         # Fails closed. A verifier that lets answers through when it breaks is
         # worse than no verifier, because it looks like protection.

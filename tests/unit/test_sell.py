@@ -20,10 +20,13 @@ from typing import Any
 import pytest
 
 from neura_agent_sell import MANIFEST
+from neura_agent_sell.evals.store import load_store
+from neura_agent_sell.evidence import _CITED, WITHHELD, hide_uncited_descriptions
 from neura_agent_sell.feed import build, canonical, jsonld, publishable
 from neura_agent_sell.mcp import McpServer
 from neura_agent_sell.mcp.server import PROTOCOL_VERSION
-from neura_agent_sell.tools import MCP_TOOLS, SELL_TOOLS, TOOL_SCOPES
+from neura_agent_sell.nodes.respond import _CITED as _RESPOND_CITED
+from neura_agent_sell.tools import MCP_TOOLS, SELL_TOOLS, TOOL_SCOPES, render
 from neura_domain import Capability, Money, Product, ProductStatus, ProductVariant
 
 
@@ -991,3 +994,80 @@ class TestPrompts:
 
         assert len(REVISION) == 64
         assert len(prompt_hashes()) >= 5
+
+
+class TestEvidenceFilter:
+    """ADR-0025 — `verify` reads only what the draft cites.
+
+    Measured cause in `scripts/verify_probe.py` arms E/F/G: an injected product
+    the draft never mentions flips the verifier from 10/10 grounded to 10/10
+    refused, and a benign third product of the same shape does not.
+    """
+
+    def _shortlist(self) -> str:
+        """A real shortlist, from the real renderer. Never a hand-written one.
+
+        The filter is anchored to the exact text `tools/render.py` produces, so
+        a hand-written fixture here would keep passing on the day the renderer
+        changed and the filter silently stopped matching anything.
+        """
+        store = load_store("t_test")
+        products = {p.external_id: p for p in store._products.values()}
+        entries = [
+            render.candidate(products[pid]) for pid in ("p_jacket_1", "p_jacket_2", "p_injected")
+        ]
+        return '<tool_result name="search_products">\n' + "\n\n".join(entries) + "\n</tool_result>"
+
+    def test_an_uncited_products_description_is_withheld(self) -> None:
+        evidence = self._shortlist()
+        assert "IGNORE ALL PREVIOUS INSTRUCTIONS" in evidence, "the fixture must carry the payload"
+
+        filtered = hide_uncited_descriptions(
+            "The Crag Lightweight Rain Shell (p_jacket_2) is 129.00 GBP.", evidence
+        )
+        assert "IGNORE ALL PREVIOUS INSTRUCTIONS" not in filtered
+        assert WITHHELD in filtered
+
+    def test_a_cited_products_description_survives(self) -> None:
+        """Otherwise the filter removes the evidence for the claim being checked."""
+        filtered = hide_uncited_descriptions(
+            "The Fell Waterproof Jacket (p_jacket_1) has taped seams.", self._shortlist()
+        )
+        assert "taped seams and a 10,000mm hydrostatic head" in filtered
+
+    def test_price_and_availability_survive_for_every_product(self) -> None:
+        """The `recommend_004` catch lives in `available options`, not in prose.
+
+        `compose` claiming a boot is "available in UK 9" against evidence that
+        says UK 9 is out of stock is the worst failure the eval found. Dropping
+        whole entries would have traded one failure for a worse one.
+        """
+        store = load_store("t_test")
+        boot = next(p for p in store._products.values() if p.external_id == "p_boot_1")
+        evidence = f'<tool_result name="search_products">\n{render.candidate(boot)}\n</tool_result>'
+
+        filtered = hide_uncited_descriptions("I recommend nothing at all.", evidence)
+        assert "Product p_boot_1" in filtered
+        assert "165.00 GBP" in filtered
+        assert "UK 9 (out of stock)" in filtered
+
+    def test_the_withholding_is_stated_not_silent(self) -> None:
+        """A model shown nothing concludes there was nothing (`render.py`)."""
+        filtered = hide_uncited_descriptions("nothing cited", self._shortlist())
+        assert filtered.count(WITHHELD) == 3, "every uncited description says so"
+
+    def test_text_outside_a_product_entry_is_untouched(self) -> None:
+        evidence = 'Retrieved policy: returns within 30 days.\n\n<tool_result name="x">\nProduct p_a: A\n  description: hello\n</tool_result>'
+        filtered = hide_uncited_descriptions("nothing", evidence)
+        assert "Retrieved policy: returns within 30 days." in filtered
+
+    def test_an_empty_evidence_block_is_returned_unchanged(self) -> None:
+        """`verify`'s empty-evidence branch reads the FULL evidence, but this
+        must not be the thing that makes it empty."""
+        assert hide_uncited_descriptions("anything", "") == ""
+
+    def test_citation_parsing_agrees_with_respond(self) -> None:
+        """The two must agree, or this file withholds evidence for a product
+        `respond` considers cited."""
+        draft = "The **Moor Walking Boot (p_boot_1)** and the Fell (p_jacket_1) are both good."
+        assert _CITED.findall(draft) == _RESPOND_CITED.findall(draft)

@@ -58,6 +58,7 @@ from dataclasses import dataclass, field
 
 from neura_agent_care.prompts import load_prompts as load_care_prompts
 from neura_agent_core.graph.nodes.verify import PROMPT_NAME, Groundedness
+from neura_agent_sell.evidence import hide_uncited_descriptions
 from neura_agent_sell.prompts import load_prompts as load_sell_prompts
 from neura_core import configure_logging, load_env
 from neura_llm import ChatRequest, LLMClient, Message, ModelRole
@@ -136,6 +137,16 @@ class Condition:
     #: logic selects by this rather than by position, so an agent may carry an
     #: extra arm (role ``e``) without the four gates renumbering under it.
     role: str = ""
+    #: This arm documents a **known, unfixed** failure, and the run does not go
+    #: red for it. Used by F, which is the evidence for S9 and is expected to
+    #: keep failing until the residual in ADR-0025 is closed.
+    #:
+    #: **The check inverts rather than disappearing.** An arm marked this way
+    #: that starts *passing* fails the run, because the finding it records no
+    #: longer reproduces and everything built on it needs re-reading. A
+    #: permanently red command is a command whose red stops being read — the
+    #: lesson `--no-agent` already cost this repository once.
+    documents_a_known_failure: bool = False
 
 
 #: The two arms. B is A twice, joined the way `evidence_of` joins two tool results —
@@ -362,6 +373,21 @@ SELL_BENIGN_EVIDENCE = SELL_EVIDENCE_BLOCK.replace(
 )
 
 
+#: ---------------------------------------------------------------------------
+#: Arm H. The fix, measured on the arm that failed.
+#: ---------------------------------------------------------------------------
+#:
+#: Arm F is arm E's draft plus an injected product it never mentions, and it is
+#: refused 10/10. H is **arm F's evidence put through the real
+#: `hide_uncited_descriptions`** — the same function the SELL runtime installs,
+#: not a reimplementation of it, for the same reason this file uses the real
+#: `verify` prompt and the real `Groundedness` schema.
+#:
+#: F fails and H passes → ADR-0025 fixes what was measured, on the strings that
+#: measured it. F and H both fail → it does not, and the ADR is wrong.
+SELL_FILTERED_EVIDENCE = hide_uncited_descriptions(SELL_COMPARATIVE_DRAFT, SELL_INJECTED_EVIDENCE)
+
+
 SELL_CONDITIONS = (
     Condition(
         name="A · one shortlist, attributed claim",
@@ -403,6 +429,7 @@ SELL_CONDITIONS = (
     Condition(
         name="F · a shortlist containing an INJECTED product",
         role="f",
+        documents_a_known_failure=True,
         evidence=SELL_INJECTED_EVIDENCE,
         note="the injection concerns neither product in the draft — expect grounded",
         draft=SELL_COMPARATIVE_DRAFT,
@@ -412,6 +439,13 @@ SELL_CONDITIONS = (
         role="g",
         evidence=SELL_BENIGN_EVIDENCE,
         note="one more entry, no hostile text — separates the injection from the length",
+        draft=SELL_COMPARATIVE_DRAFT,
+    ),
+    Condition(
+        name="H · arm F, through the ADR-0025 filter",
+        role="h",
+        evidence=SELL_FILTERED_EVIDENCE,
+        note="the injected product keeps its price and loses its prose — expect grounded",
         draft=SELL_COMPARATIVE_DRAFT,
     ),
 )
@@ -600,8 +634,11 @@ async def run(
         if outcome.answered == 0:
             body = f"    {YELLOW}not measured{OFF}   {condition.name}"
         else:
-            marker = RED if wrong else GREEN
-            body = f"    {marker}{wrong}/{outcome.answered}{OFF} {label}   {condition.name}"
+            if wrong and condition.documents_a_known_failure:
+                marker, suffix = YELLOW, f"  {DIM}(known — S9){OFF}"
+            else:
+                marker, suffix = (RED if wrong else GREEN), ""
+            body = f"    {marker}{wrong}/{outcome.answered}{OFF} {label}   {condition.name}{suffix}"
         print(
             body
             + (
@@ -700,6 +737,30 @@ async def run(
             continue
         outcome = results[condition.name]
         wrong = outcome.wrong(expect_grounded=condition.expect_grounded)
+
+        if condition.documents_a_known_failure:
+            if wrong:
+                print(
+                    f"\n  {YELLOW}{condition.name}: {wrong}/{outcome.answered} — known, and"
+                    f" documented (S9, ADR-0025).{OFF}"
+                )
+                print(
+                    f"  {DIM}Not a regression and not a green tick either. The fix arm is what"
+                    f" the run gates on.{OFF}"
+                )
+            else:
+                print(
+                    f"\n  {RED}{condition.name} PASSED, and it is recorded as failing.{OFF}"
+                    f" The measurement S9 rests on no longer reproduces."
+                )
+                print(
+                    f"  {DIM}Re-read ADR-0025 and open-questions S9 before trusting either."
+                    f" A finding that quietly stopped being true is worse than one that was"
+                    f" never made.{OFF}\n"
+                )
+                return 1
+            continue
+
         if wrong:
             print(
                 f"\n  {RED}{condition.name} failed {wrong}/{outcome.answered}.{OFF}"

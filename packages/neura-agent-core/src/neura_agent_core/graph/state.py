@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import operator
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 
@@ -260,6 +261,22 @@ class Runtime:
     #: The LLM client. Typed loosely so `neura-agent-core` does not force a
     #: particular client on an agent that stubs it in tests.
     llm: Any = None
+    #: Narrows the evidence `verify` asks the model about, given ``(draft,
+    #: evidence)`` and returning the text to check claims against.
+    #: ``None`` — the default — hands over the evidence unchanged, which is what
+    #: CARE does and what every agent did before ADR-0025.
+    #:
+    #: **The seam is here rather than in the node because a product id is not a
+    #: concept this package has.** `neura-agent-core` supplies the machinery and
+    #: never learns which product it is running; SELL supplies a callable because
+    #: SELL is the agent whose evidence is a catalogue.
+    #:
+    #: **It narrows what the verifier is *asked*, and nothing else.** The
+    #: outbound PII check still accounts against the full evidence, and so does
+    #: the empty-evidence test — see `nodes/verify.py`, where mixing the two up
+    #: turns a filter into a bypass.
+    evidence_filter: Callable[[str, str], str] | None = None
+
     #: Per-node prompt text, supplied by the agent. Never inline strings here —
     #: prompts are versioned files in the agent's `prompts/` (AGENTS.md).
     prompts: dict[str, str] = field(default_factory=dict)
