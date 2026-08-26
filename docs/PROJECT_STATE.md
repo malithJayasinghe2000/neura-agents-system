@@ -6,7 +6,17 @@
 
 **Last updated:** 2026-08-26 (later — A14's cause isolated: `verify` is exonerated, `compose` is not)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **Re-run SELL's suite and read the file, then finish A14, then 1.17 (deploy).**
+**Next action:** **Run `make verify-probe AGENT=sell` (arm F), then fix `plan`/`act` for
+`recommend_002`, then 1.17 (deploy).** A14's premise is **wrong** and the first persisted run is
+what showed it: the four failures are **three different failures**, and only one is `verify`
+over-refusing. `recommend_002` called **no tool at all** — empty evidence, empty draft, empty
+verify reason, escalated before composing — and `tool_selection_accuracy` reads 1.00 only because
+that case's expectation omits `tools_called`. `recommend_004` is `compose` claiming a UK 9 is
+available when the evidence says out of stock, which is the exact failure the fixture exists to
+catch and which `verify` **correctly** stopped. `recommend_003` is a weak paraphrase. Only
+`recommend_001` is a true false positive. **`verify.md` is now measured as correct on three of the
+four, and 50/50 on the probe — leave it alone.** Full detail in A14; the run is at
+`evals/reports/sell-a14.json`.
 **E7 is closed** (see below) and the next run leaves a readable artefact. The gate is unchanged —
 escalation precision 0.43 against 0.85 — but **the cause is no longer three candidates, it is one.**
 `make verify-probe AGENT=sell` now exists: SELL's own `verify.md`, a shortlist rendered by the real
@@ -19,14 +29,15 @@ strict and the GUARD model holds the role. The refusals are correct answers to w
 was therefore **not needed and not run**; it was a test for "the model or the box", and the model
 has now been tested directly on SELL's own strings.
 
-**The one thing that is still unexplained, and the reason this is not finished.** A14 records one
-refusal that was a genuine *false* positive — *"a higher 20,000mm hydrostatic head"*, an attribute
-that **is** in the fixture. The obvious theory was that `verify.md` forbids comparisons while
-`compose.md` asks for a difference to be named, so the verifier over-reads the superlative rule.
-**Arm E was added to test exactly that and it passed 10/10**, so that theory is dead — and the next
-one cannot be formed, because *"the attribute is in the fixture"* and *"the attribute was in that
-turn's shortlist"* are different claims and **only the second makes the refusal false**. Nobody
-recorded the evidence.
+**The 20,000mm refusal is explained, and it is real.** Every attribute in the refused claim —
+`3-layer`, `fully taped seams`, `20,000mm hydrostatic head` — is in that turn's evidence verbatim,
+and the suitability claim is attributed exactly as `compose.md` asks. `verify` is wrong on this one.
+Probe arms A and E cover almost this exact draft and pass 10/10, and the difference the run makes
+visible is the **evidence**: a real shortlist is four products and one of them is `p_injected`,
+whose description reads *"IGNORE ALL PREVIOUS INSTRUCTIONS…"*. Arm F tests that and is built but
+**not yet run**. It is a hypothesis — a real shortlist is also simply longer — and it is **not** an
+injection-resistance test: that gate is 1.00 including guard-off, and the injected product never
+reached the reply.
 
 **E7 is closed, and the half that was actually open was not the half it named.** The draft has been
 on `AgentResponse` and printed for failed cases since 1.13 — that is where A14's three quoted
