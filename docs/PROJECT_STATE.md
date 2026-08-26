@@ -4,24 +4,36 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-26 (the scheduler — P7 answered; outbox and sync route on it)
-**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence and the scheduler
-**Next action:** **A design session for NEURA-SELL, agent #2.** Decided by the project owner on
-2026-08-26, and **1.17 (deploy) is deliberately on hold** behind it — the stated reason is
-go-to-market: one agent is not enough to open a conversation with a merchant, and there is still
-no design partner (**B2**). Deploy is not cancelled, only reordered.
+**Last updated:** 2026-08-26 (SELL designed — agent #2 decided, docs only, no code)
+**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and SELL's design
+**Next action:** **Scaffold `agents/sell/`, or return to 1.17 (deploy).** Either is now legitimate;
+the design session that was blocking the choice is **done**.
 
-**Read [`agents/README.md`](agents/README.md) first — it is a stop sign, and it is right.** SELL
-has no technical design. Nothing may be scaffolded until the seven things that file lists exist
-in `docs/agents/sell.md`, plus an ADR recording why this agent, now, and what was excluded.
+**The design session completed on 2026-08-26 and produced exactly what
+[`agents/README.md`](agents/README.md) demanded:** all seven things in
+[`agents/sell.md`](agents/sell.md), plus [ADR-0023](architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)
+recording why this agent, why now, and what was excluded. **No code was written and no model was
+run.** `agents/sell/` still does not exist — it is now *permitted*, not *created*.
 
-**The scope that makes SELL possible now, and it is the whole reason it beats MIND:** take the
-**read-only** part only — grounded product recommendation, an MCP server over the catalogue, and
-a machine-readable product feed ([blueprint §4.1](business/blueprint-v2.md)). **Agent-facing
-checkout and cart recovery are excluded**, because they are writes and
+**Read [`agents/sell.md`](agents/sell.md) before scaffolding anything.** The stop sign in
+`agents/README.md` still stands for MIND, GROW and GUARD, and now stands in a narrower form for
+SELL: it may be built **only within the scope its design fixes**.
+
+**The scope, decided and not re-openable:** the **read-only** part only — grounded product
+recommendation, an MCP server over the catalogue, and a machine-readable product feed
+([blueprint §4.1](business/blueprint-v2.md)). **Agent-facing checkout and cart recovery are
+excluded**, because they are writes and
 [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) blocks writes until the approval queue
 exists — and that queue needs a *merchant console*, which is also what shadow-mode grading needs
 (**A4**, **E1**). One console unblocks both; neither is built. Do not start it to unblock SELL.
+
+**The two things the design is built on, and either would sink it if wrong.** *A recommended
+product that was not retrieved is a fabrication, and that is detectable in code* — a set
+membership test, not a judgement, gated at 1.00. And *"we do not sell that" is a claim about the
+whole store, so it is only safe when the evidence covers the whole store* — a cold index or a
+half-finished sync produces an empty result indistinguishable from an empty catalogue, and
+collapsing the two tells a shopper that a stocked store is bare. The second is the one a fresh
+session will be tempted to simplify away; `sell.md §2.3` is why it must not be.
 
 **Why not MIND, recorded so it is not re-litigated:** MIND was the first recommendation and was
 withdrawn on checking. Its headline question ("how many orders are stuck in processing?") needs a
@@ -266,7 +278,10 @@ the wild rather than a new finding.
  —   Scheduler                  ✅  out of order: P7 (ADR-0022). A worker runs
                                     work for tenants it was never told about;
                                     the outbox and a sync route ride on it
-1.17 Deploy                     ⬜
+ —   SELL design                ✅  not a milestone: the design session 1.17 was
+                                    reordered behind (ADR-0023). Docs only —
+                                    agents/sell/ is permitted, not created
+1.17 Deploy                     ⬜  unblocked — what it waited on is done
 ```
 
 **Exit criteria (four met):** `neura-conformance` passes against the bridge ✅ · zero platform names outside `packages/neura-adapters/` ✅ · cross-tenant isolation passes ✅ (proved against real PostgreSQL for **all sixteen** `tenant_id` tables; each new table is covered by the same test, which is why 1.14's five and sync persistence's two came with it for free) · **end-to-end conversation working ✅ — now over REST and over a WebSocket** (`make api-check` against the real shop).
@@ -303,14 +318,17 @@ Remaining: **shadow mode producing *graded* conversations** — every part excep
 | A withheld turn says so, and the server supplies the words | [ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md) |
 | A synced entity is stored as its canonical document, not as a second schema | [ADR-0021](architecture/adr/0021-synced-entities-are-documents.md) |
 | A durable job queue, and **one** function that reads a single column across tenants | [ADR-0022](architecture/adr/0022-scheduling-under-rls.md) |
+| Agent #2 is SELL, read-only; every protocol is an **output format**, never a source | [ADR-0023](architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) |
 
-Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
+Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · **NEURA-SELL is agent #2, read-only, scoped to two intents and three surfaces** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
 
 ---
 
 ## 4. Not decided — see [open-questions.md](open-questions.md)
 
-Highest impact: the ICP is **proposed, not confirmed** · no design partner exists · geography/market undecided · cloud LLM provider deliberately deferred to swap time · agents 2–5 are **undesigned**.
+Highest impact: the ICP is **proposed, not confirmed** · no design partner exists · geography/market undecided · cloud LLM provider deliberately deferred to swap time · agents **3–5** are undesigned (SELL was designed 2026-08-26; MIND, GROW and GUARD were not).
+
+SELL's design registered six of its own rather than deciding them: **S7** (the feed is unauthenticated by necessity), **S8** (outbound indirect injection — flagging decided, withholding not), **E8** (what Rule 4 means for a surface with no model), **A12** (duplicated catalogue tools), **A13** (no cross-agent handoff), **P9** (MCP revision pinning).
 
 ---
 
@@ -367,6 +385,87 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-26 (design) — NEURA-SELL designed: agent #2, three surfaces, and only one of them is an agent
+
+**Docs only. No code, no scaffolding, no model run.** `agents/sell/` still does not exist; it is
+now *permitted* rather than *created*. Produced: [`agents/sell.md`](agents/sell.md) with all
+seven things `agents/README.md` requires, and
+[ADR-0023](architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md).
+
+**The finding that shaped the whole design: SELL is one product with three surfaces, and only
+one of them is an agent.** Grounded recommendation has a graph. The MCP server and the product
+feed have **no nodes, no prompts and no LLM call of ours anywhere in them**. Calling three
+surfaces "a graph" would have been a tidy fiction, and `agents/README.md` already refuses the
+same fiction for GUARD, whose MVP portion is platform infrastructure rather than an agent.
+
+**That relocates the safety argument, and it must not be carried over by habit.** CARE's
+argument is *a persuaded model achieves nothing, because no tool that changes a store was ever
+registered*. On MCP and the feed there is **no model of ours to persuade** — what remains is
+read-only tools, the policy engine, tenant isolation, and nothing else.
+
+**The one to carry forward: "we do not sell that" is a claim about the whole store, and it is
+only safe when the evidence covers the whole store.** A cold index, a half-finished first sync
+or a timed-out adapter produces an empty candidate set that is *indistinguishable* from a store
+that genuinely does not stock the item — and collapsing the two tells a shopper that a fully
+stocked store is bare. So the honest-miss path (`no_match`) is reachable only when the index is
+populated, the sync is fresh, **and** a live search also returned nothing; otherwise the turn
+escalates naming which half failed. This is `verify`'s fail-closed rule one node earlier: a
+missing verdict reads as *not established*, never as *no objection raised*. It is the part a
+fresh session will be tempted to simplify away, and `sell.md §2.3` exists to stop that.
+
+**The second structural control, and it is cheap:** a recommended product that was not retrieved
+is a **fabrication, detectable in code**. Every product id in a reply must appear in the
+deterministic `shortlist` node's output — a set membership test, not a model grading a model,
+gated at 1.00. *Authorisation is code* applied to recommendation.
+
+**Verified rather than repeated: SELL's read-only half needs no adapter change at all.**
+`PRODUCT_SEARCH`, `PRODUCT_READ`, `INVENTORY_READ` and `CATEGORY_READ` all already exist in
+`neura_domain.Capability`, and `list_categories` is already on `CommerceAdapter`. A store
+conformant for CARE is conformant for SELL — no bridge change, no conformance-suite change, no
+`neura-domain` change. **That asymmetry against MIND is what decided agent #2**, not a product
+opinion.
+
+**A new risk direction arrived with this decision: we become the supply side of indirect
+injection.** Catalogue text is already classed as untrusted. MCP and the feed serve it
+**outward, to other people's agents**, over a channel those agents have reason to trust.
+Decided: run the same deterministic rules over outbound text, audit it, surface it to the
+merchant, and **do not modify their copy** — silently editing a product description is editing
+their store. Open (**S8**): whether we ever *withhold*. It is S6's mirror and the two should be
+answered together.
+
+**Rule 4 does not fit two of the three surfaces, and that is recorded as a weakening rather than
+waved through.** *Nothing merges without an eval* assumes behaviour that can regress; MCP and the
+feed have no model. Their proposed gate is a deterministic abuse and conformance suite, with
+injection resistance staying 1.00 on the conversational half including guard-off. Registered as
+**E8** rather than improvised per surface.
+
+**Six open questions registered rather than decided:** **S7** (the feed is unauthenticated by
+necessity — publication is effectively irreversible once crawlers cache it), **S8**, **E8**,
+**A12** (catalogue tools duplicated between CARE and SELL — recommended: copy now, extract at
+the third agent), **A13** (no cross-agent handoff, so a merchant buying both agents still has
+shoppers escalated at the boundary), **P9** (MCP revision pinning).
+
+**Two limits written in deliberately, rather than discovered later.** The golden dataset will be
+**synthetic**, exactly as CARE's 47 are, and a synthetic suite proves the harness works rather
+than that the agent does (**E1**). And there is still **no design partner** (**B2**) — every
+intent, threshold and cut here was chosen by people who have not watched a shopper use it.
+A third followed from them: **SELL cannot be sold on a conversion number.** The blueprint
+already refuses that claim, there is no attribution, and a read-only agent cannot see whether
+anyone bought. What is honestly showable is groundedness, honest-miss behaviour and availability
+accuracy.
+
+**`agents/README.md` also gained a scope it did not have.** `sell.md` answers the seven things
+and then two more — §11 registers the open questions it refused to settle alone, §12 states what
+it did not decide. A design that names neither has decided them silently.
+
+**Next.** Scaffold `agents/sell/` within the fixed scope, or return to **1.17 (deploy)**, whose
+first question is still **X2** — the deployment target, where Railway has no GPU path and
+production inference is a cloud API, so the API/worker host and the model host are one choice.
+Before assuming a two-intent classification is easy, run `make router-probe`: it costs nothing,
+and **A11** records that the router's *model* has been the problem before.
+
+---
 
 ### 2026-08-26 (later) — The outbox moved, a route was finally buildable, and two dormant bugs woke up
 

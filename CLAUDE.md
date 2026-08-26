@@ -27,7 +27,8 @@ Concretely:
 
 | If asked to… | Correct response |
 |:--|:--|
-| Build NEURA-SELL / MIND / GROW / GUARD | **These are not designed.** See [`docs/agents/README.md`](docs/agents/README.md). Say so and propose a design session first. |
+| Build NEURA-MIND / GROW / GUARD | **These are not designed.** See [`docs/agents/README.md`](docs/agents/README.md). Say so and propose a design session first. |
+| Build NEURA-SELL | **Designed 2026-08-26** — [`docs/agents/sell.md`](docs/agents/sell.md), [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md). It may be built, but **only within the scope that design fixes**: read-only, two intents, five tools, three surfaces. Checkout and cart recovery are excluded and are not re-openable. |
 | Add a write/refund/cancel tool | Blocked by [ADR-0010](docs/architecture/adr/0010-read-only-mvp-tools.md). Requires the approval queue, which does not exist. |
 | Pick a cloud LLM provider | Deliberately undecided ([ADR-0006](docs/architecture/adr/0006-llm-model-roles.md)). Decided by eval results at swap time, not in advance. |
 | Add a native Shopify/Woo adapter | Phase 2 ([ADR-0009](docs/architecture/adr/0009-generic-commerce-interface.md)). Tier 2 comes first, on purpose. |
@@ -64,7 +65,8 @@ Nothing has been built or measured. Every figure below is illustrative or a targ
 - **Bagisto is a test harness, not a customer and not a target platform.** It lives at `/Users/malithjayasinghe/Developer/bagisto`. We do **not** write a `BagistoAdapter` — Bagisto conforms to *our* spec via a bridge package. The reasoning is in [commerce-integration.md §5](docs/architecture/commerce-integration.md).
 - **Ollama is for development and for the sovereign product tier.** It is not a placeholder to be ripped out. Production uses a cloud API; both paths ship.
 - **Python is pinned to 3.12**, though 3.14 is installed on this machine. Deliberate — library wheel availability.
-- **The MVP agent is read-only.** It cannot change anything in a store. That is a feature.
+- **The MVP agent is read-only.** It cannot change anything in a store. That is a feature — and **so is agent #2**: SELL's whole designed scope stays inside [ADR-0010](docs/architecture/adr/0010-read-only-mvp-tools.md).
+- **SELL is one product with three surfaces, and only one of them is an agent.** Recommendation has a graph; the MCP server and the product feed have no nodes, no prompts and no LLM call of ours in them. The safety argument on those two is the policy engine and tenant isolation, never "a persuaded model achieves nothing".
 - **One deployable process**, not microservices ([ADR-0002](docs/architecture/adr/0002-modular-monolith.md)) — the earlier plan said otherwise and was changed.
 - **There is no design partner and no real merchant yet.** The top project risk.
 

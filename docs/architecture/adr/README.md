@@ -29,3 +29,5 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0020](0020-a-withheld-turn-says-so.md) | A withheld turn says so, and the server supplies the words | Accepted |
 | [0021](0021-synced-entities-are-documents.md) | A synced entity is stored as its canonical document, not as a second schema | Accepted |
 | [0022](0022-scheduling-under-rls.md) | A durable job queue, and the one read that crosses tenants | Accepted |
+| [0023](0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) | Agent #2 is SELL, read-only, and every protocol is an output format | Accepted |
+| [0024](0024-the-feed-is-opt-in-and-addressed-by-a-rotatable-secret.md) | The product feed is opt-in, and addressed by a rotatable secret | Accepted |

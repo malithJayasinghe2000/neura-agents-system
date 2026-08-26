@@ -54,8 +54,12 @@ packages/                   LIBRARIES — shared, no product identity
   neura-adapters/           the only place platform names live
 
 agents/                     PRODUCTS — one folder per sellable agent
-  care/                     ✅ the only designed agent
-  sell/ mind/ grow/ guard/  ⬜ NOT DESIGNED — see docs/agents/README.md
+  care/                     ✅ designed and built
+  sell/                     ✅ DESIGNED, not built — docs/agents/sell.md +
+                            ADR-0023. Read-only, 2 intents, 5 tools, and
+                            3 surfaces of which only one has a graph.
+                            Scaffold within that scope, not beyond it
+  mind/ grow/ guard/        ⬜ NOT DESIGNED — see docs/agents/README.md
 
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
                             auth · rate limits · idempotency · metering ·
@@ -177,7 +181,7 @@ The policy engine, capability filtering, audit logging and budget accounting com
 
 ### Add an agent
 
-> **First check [`docs/agents/README.md`](docs/agents/README.md).** Only CARE is designed. If the agent has no design document, stop and propose a design session — do not invent one.
+> **First check [`docs/agents/README.md`](docs/agents/README.md).** CARE and SELL are designed; MIND, GROW and GUARD are not. If the agent has no design document, stop and propose a design session — do not invent one. If it *has* one, build inside it: SELL's excluded scope (checkout, cart recovery, behavioural ranking) is excluded by [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) and reopening it is a superseding ADR, not a pull request.
 
 Once designed, create `agents/<name>/` with the standard five parts:
 

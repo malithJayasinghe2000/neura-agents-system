@@ -1,15 +1,24 @@
 # Agents — Design Status
 
-> ## ⛔ Read before doing anything with agents 2–5
+> ## ⛔ Read before doing anything with agents 3–5
 >
-> **Only NEURA-CARE is designed.** The other four have a *product* description in
-> [blueprint-v2 §5](../business/blueprint-v2.md) and **no technical design at all** —
+> **NEURA-CARE is designed and built. NEURA-SELL is designed and not built**
+> ([`sell.md`](sell.md), [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md),
+> 2026-08-26). **MIND, GROW and GUARD have a *product* description in
+> [blueprint-v2 §5](../business/blueprint-v2.md) and no technical design at all** —
 > no graph, no tools, no data requirements, no evaluation set.
 >
-> If asked to build, extend or scaffold SELL, MIND, GROW or GUARD:
+> If asked to build, extend or scaffold MIND, GROW or GUARD:
 > **say they are undesigned and propose a design session first.** Do not invent a design
 > and proceed. An invented agent design will look plausible, contradict the
 > blueprint's tiering, and be expensive to unwind.
+>
+> **SELL is a different case now, and a narrower one.** It has all seven things below, so it
+> may be scaffolded — but **only within the scope its design fixes**. Agent-facing checkout and
+> cart recovery are writes, are excluded by [ADR-0010](../architecture/adr/0010-read-only-mvp-tools.md),
+> and building the approval queue to unblock them is a milestone rather than a step.
+> **MIND was considered as agent #2 and rejected**; the reasoning is in ADR-0023 and in
+> [`PROJECT_STATE.md`](../PROJECT_STATE.md), and it is recorded so it is not re-litigated.
 
 ---
 
@@ -18,12 +27,16 @@
 | Agent | Folder | Product scope | Technical design | Built | Notes |
 |:--|:--|:--|:--|:--|:--|
 | **NEURA-CARE** | `agents/care/` | ✅ [blueprint §5.1](../business/blueprint-v2.md) | ✅ [agent-runtime.md](../architecture/agent-runtime.md) | ✅ **milestone 1.11** | 3 intents, 7 tools, read-only. `guard`/`blocked` land in 1.12 |
-| **NEURA-SELL** | `agents/sell/` | ⚠️ tiers only | ❌ **none** | ❌ | Candidate for agent #2 |
-| **NEURA-MIND** | `agents/mind/` | ⚠️ tiers only | ❌ **none** | ❌ | Candidate for agent #2 |
+| **NEURA-SELL** | `agents/sell/` | ✅ [blueprint §5.2](../business/blueprint-v2.md) + [§4.1](../business/blueprint-v2.md) | ✅ [sell.md](sell.md) | ❌ **not built** | **Agent #2**, decided 2026-08-26 ([ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)). 2 intents, 5 tools, 3 surfaces, read-only. Writes excluded |
+| **NEURA-MIND** | `agents/mind/` | ⚠️ tiers only | ❌ **none** | ❌ | **Considered as agent #2 and rejected** — needs an adapter-protocol change SELL does not |
 | **NEURA-GROW** | `agents/grow/` | ⚠️ tiers only | ❌ **none** | ❌ | Phase 4+ |
 | **NEURA-GUARD** | `agents/guard/` | ⚠️ tiers only | ❌ **none** | ❌ | MVP portion is *platform infrastructure*, not an agent — see below |
 
-Folder structure, manifests, entitlements and how agents are sold individually: [tenancy-and-packaging.md](../architecture/tenancy-and-packaging.md). Only `agents/care/` exists; the other four folders have not been created, because creating them would imply a design that does not exist.
+Folder structure, manifests, entitlements and how agents are sold individually: [tenancy-and-packaging.md](../architecture/tenancy-and-packaging.md). Only `agents/care/` exists. `agents/sell/` is now permitted and has simply not been created yet; `mind/`, `grow/` and `guard/` are not, because creating them would imply a design that does not exist.
+
+**SELL is designed against CARE, and the design says where it departs and why.** It supplies
+seven nodes, five tools and two intents — and two of its three surfaces have no graph at all,
+which is stated plainly in [`sell.md §1.1`](sell.md) rather than smoothed over.
 
 **CARE is the worked example of what the five parts cost.** It supplies a graph, five nodes, seven tools, five prompt files and a golden dataset — and inherits the policy engine, audit log, checkpointer, capability filtering and ownership enforcement without writing any of them. Read `agents/care/` before designing agent #2; the shape of the work is more useful than any description of it.
 
@@ -32,6 +45,8 @@ Folder structure, manifests, entitlements and how agents are sold individually: 
 ## Why they are undesigned, deliberately
 
 Which agent comes second should be decided by **what a real merchant asks for**, not by us guessing today ([roadmap Phase 3](../roadmap.md)). Designing all five now would produce four documents built on assumptions no customer has tested — and the single largest risk to this project is scope, not capability ([blueprint §2](../business/blueprint-v2.md)).
+
+**That condition was not met when SELL was designed, and the design says so rather than pretending otherwise.** There is still no design partner (**B2**), so the choice was made on the only evidence available: what the codebase supports today without asking anything of a merchant. SELL's read-only half needs no adapter change at all; MIND's headline question needs one on every merchant's bridge. That asymmetry decided it, not a product opinion — and [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) records it as a decision to revisit **the moment a real merchant can be asked**. The remaining three stay undesigned for exactly the reason above.
 
 The seams for agent #2 already exist and are documented: shared graph nodes, the tool registry, capability negotiation, and event schemas in `neura-domain` ([agent-runtime §7](../architecture/agent-runtime.md)). What is missing is the *decision*, not the infrastructure.
 
@@ -58,8 +73,13 @@ When an agent is finally designed, it needs all seven of these before any code. 
 2. **Graph** — nodes and transitions, reusing `guard` / `retrieve` / `verify` / `escalate`.
 3. **Tools** — each with `requires` capabilities, `side_effect` class, scopes, `pii_output`.
 4. **New capabilities** — anything the adapter protocol must gain, and what happens on platforms that lack it.
-5. **Data requirements** — including the [cold-start ramp](../business/blueprint-v2.md#6-the-cold-start-problem) if the agent is predictive. Most of SELL and MIND are.
+5. **Data requirements** — including the [cold-start ramp](../business/blueprint-v2.md#6-the-cold-start-problem) if the agent is predictive. Most of SELL and MIND are — but **SELL's designed cut deliberately is not**, and [`sell.md §5.3`](sell.md) argues that excluding everything predictive is precisely what made it buildable before a design partner exists.
 6. **Golden dataset** — no agent ships without one ([evaluation-strategy.md](../architecture/evaluation-strategy.md)).
 7. **An ADR** recording why this agent, now, and what was excluded.
 
 Output goes in `docs/agents/<name>.md`, and this table gets updated.
+
+[`sell.md`](sell.md) is the first document written to this list, and is the worked example of it.
+Two of its sections are not on the list and should be: **§11** registers the open questions the
+design refused to settle alone, and **§12** states what it deliberately did not decide. A design
+that names neither is a design that decided them silently.
