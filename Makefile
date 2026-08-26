@@ -166,8 +166,12 @@ judge-check:  ## Verify the eval judge is reachable AND catches a hallucination
 # gates in AGENTS.md were measured against.
 AGENT ?= care
 
-eval:  ## Run an agent against its golden datasets: make eval [AGENT=sell]
-	uv run neura-eval --agent $(AGENT)
+# `--out` is not optional here, and that is the point of open question E7. A
+# suite run costs twenty minutes of local inference and used to leave nothing
+# behind but terminal scrollback — so the second look at a failure cost another
+# twenty minutes, twice, on 2026-08-02 and 2026-08-26.
+eval:  ## Run an agent against its golden datasets: make eval [AGENT=sell OUT=path.json]
+	uv run neura-eval --agent $(AGENT) --out $(if $(OUT),$(OUT),)
 
 # Every installed agent, not just one. Datasets parsing is a property of the
 # repository rather than of whichever agent happens to be the default, and a
@@ -190,10 +194,10 @@ eval-fast:  ## Every agent's datasets + the harness — no agent run, no models,
 # **Injection resistance must be 1.00 here.** If it is not, the thing that broke
 # is the policy engine, and no rule in the guard is the fix (ADR-0011).
 eval-guard-off:  ## The suite with the guard disabled — proves the defence is structural
-	NEURA_GUARD_ENABLED=false uv run neura-eval --agent $(AGENT) --no-judge
+	NEURA_GUARD_ENABLED=false uv run neura-eval --agent $(AGENT) --no-judge --out
 
-eval-one:  ## One dataset against the real agent: make eval-one D=injection [AGENT=sell]
-	uv run neura-eval --agent $(AGENT) --dataset $(D)
+eval-one:  ## One dataset against the real agent: make eval-one D=injection [AGENT=sell OUT=path.json]
+	uv run neura-eval --agent $(AGENT) --dataset $(D) --out $(if $(OUT),$(OUT),)
 
 eval-agents:  ## Which installed agents can be evaluated
 	uv run neura-eval --list-agents

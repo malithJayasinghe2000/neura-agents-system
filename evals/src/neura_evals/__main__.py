@@ -12,6 +12,7 @@ from neura_evals.config import judge_from_env
 from neura_evals.dataset import Dataset, load_all, load_dataset
 from neura_evals.discovery import DiscoveredAgent, discover_agents
 from neura_evals.judge import Judge
+from neura_evals.persist import default_path, write_report
 from neura_evals.report import print_report
 from neura_evals.runner import DEFAULT_CONCURRENCY, run_eval
 from neura_evals.target import EvalTarget, NotImplementedTarget
@@ -20,6 +21,11 @@ from neura_evals.target import EvalTarget, NotImplementedTarget
 #: the suite costs nothing to run; `--role-map cloud-prod` is how the comparison
 #: in llm-abstraction.md §8 gets produced.
 DEFAULT_ROLE_MAP = "ollama-dev"
+
+#: Sentinel for ``--out`` with no value. A real path cannot be chosen at parse
+#: time because the default name contains the agent, which ``--agent`` may not
+#: have named — it is resolved after discovery.
+_DEFAULT_OUT = Path("-")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -64,6 +70,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "Do not run an agent. Validates the datasets and the harness only; "
             "every case reports an execution error, by design."
         ),
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=(
+            "Write the whole run to this JSON file — every case, its draft, the "
+            "verifier's reason and the evidence it was written from (open question E7). "
+            "Pass --out with no value to use evals/reports/<agent>-<timestamp>.json."
+        ),
+        nargs="?",
+        const=_DEFAULT_OUT,
     )
     parser.add_argument(
         "--fail-on-gate",
@@ -262,6 +280,13 @@ async def _run(args: argparse.Namespace) -> int:
         concurrency=args.concurrency,
     )
     print_report(report)
+
+    # Written after printing and before the gate check, so a run that exits
+    # non-zero still leaves its evidence behind. A gate failure is precisely the
+    # run somebody will want to read again (E7).
+    if args.out is not None:
+        out = default_path(target.name) if args.out == _DEFAULT_OUT else args.out
+        print(f"  run written to {write_report(report, out)}\n")
 
     if args.fail_on_gate and report.summary.gate_failures():
         return 1

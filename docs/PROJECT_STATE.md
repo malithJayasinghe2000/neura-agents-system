@@ -6,7 +6,8 @@
 
 **Last updated:** 2026-08-26 (later — A14's cause isolated: `verify` is exonerated, `compose` is not)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **E7, then finish A14, then 1.17 (deploy).** The gate is unchanged —
+**Next action:** **Re-run SELL's suite and read the file, then finish A14, then 1.17 (deploy).**
+**E7 is closed** (see below) and the next run leaves a readable artefact. The gate is unchanged —
 escalation precision 0.43 against 0.85 — but **the cause is no longer three candidates, it is one.**
 `make verify-probe AGENT=sell` now exists: SELL's own `verify.md`, a shortlist rendered by the real
 `tools/render.py`, five arms, n=10 each. `llama3.1:8b` answered **50/50 correctly** — it passed an
@@ -20,11 +21,25 @@ has now been tested directly on SELL's own strings.
 
 **The one thing that is still unexplained, and the reason this is not finished.** A14 records one
 refusal that was a genuine *false* positive — *"a higher 20,000mm hydrostatic head"*, an attribute
-that **is** in the evidence. The obvious theory was that `verify.md` forbids comparisons while
+that **is** in the fixture. The obvious theory was that `verify.md` forbids comparisons while
 `compose.md` asks for a difference to be named, so the verifier over-reads the superlative rule.
-**Arm E was added to test exactly that and it passed 10/10**, so the theory is dead and there is no
-second theory — because **nobody has ever seen the draft**. The harness discards it (**E7**). E7 is
-now A14's blocker, costs **zero model calls**, and should be done before any prompt is touched.
+**Arm E was added to test exactly that and it passed 10/10**, so that theory is dead — and the next
+one cannot be formed, because *"the attribute is in the fixture"* and *"the attribute was in that
+turn's shortlist"* are different claims and **only the second makes the refusal false**. Nobody
+recorded the evidence.
+
+**E7 is closed, and the half that was actually open was not the half it named.** The draft has been
+on `AgentResponse` and printed for failed cases since 1.13 — that is where A14's three quoted
+fragments came from. What was never kept was **the run**: twenty minutes of local inference went to
+a terminal, and the second reading found only hand-transcribed fragments missing the one field that
+decides the question. `neura-eval --out` now writes the whole run to JSON — every case, its checks,
+its draft, its verifier reason and **the evidence it was written from** — and `make eval`,
+`make eval-one` and `make eval-guard-off` always pass it, *before* the gate check, because a run
+that exits non-zero is the one somebody will want to read again. Zero model calls; `evals/reports/`
+is gitignored. **The one to carry forward:** *a field that is printed is not a field that is kept.*
+**And newly open:** the file redacts nothing, which is right while every case is `synthetic: true`
+and wrong the day a real conversation enters a dataset (**E1**, **B2**) — a change that is an edit
+to a YAML file and will not look like it touches `persist.py`.
 
 **Do not loosen `verify.md`.** 2026-07-30 records that move being measured and reverted, and the
 probe has now independently shown there is nothing there to loosen. Any `compose.md` change is a

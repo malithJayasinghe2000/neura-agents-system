@@ -7,12 +7,14 @@ without an agent, and the real agent plugs into the same interface later.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from neura_evals.dataset import Dataset, EvalCase, Expectation, Intent, load_all
 from neura_evals.judge import JudgeTrust
 from neura_evals.metrics import CheckStatus, score_case, summarise
+from neura_evals.persist import default_path, write_report
 from neura_evals.runner import dataset_dirs, run_eval
 from neura_evals.target import AgentResponse, ToolInvocation
 
@@ -436,3 +438,62 @@ class TestJudgeTrust:
         for var in ("EVAL_JUDGE_BASE_URL", "EVAL_JUDGE_API_KEY", "EVAL_JUDGE_MODEL"):
             monkeypatch.delenv(var, raising=False)
         assert judge_from_env().trust is JudgeTrust.UNTRUSTED_WEAK_MODEL
+
+
+class TestPersistence:
+    """Open question E7. A run that is printed and not kept costs a second run.
+
+    The three assertions that matter are on ``draft``, ``verify_reason`` and
+    ``evidence``. Everything else in the file is convenience; those three are the
+    reason it exists, and each has already been the missing field once — the
+    draft on 2026-08-02, the evidence on 2026-08-26 when A14 could not tell
+    whether the attribute the verifier refused was in *that turn's* shortlist or
+    merely in the fixture.
+    """
+
+    async def test_the_draft_the_reason_and_the_evidence_survive_the_round_trip(
+        self, tmp_path: Path
+    ) -> None:
+        response = AgentResponse(
+            reply="",
+            escalated=True,
+            draft="It's a 3-layer shell with a 20,000mm hydrostatic head, so it sheds rain.",
+            verify_reason="a higher 20,000mm hydrostatic head",
+            retrieved_context=["Product p_jacket_2: 20,000mm hydrostatic head"],
+        )
+        dataset = Dataset(name="d", cases=[_case("c1", Expectation(escalated=False))])
+        report = await run_eval(target=FakeTarget({"c1": response}), datasets=[dataset])
+
+        path = write_report(report, tmp_path / "run.json")
+        case = json.loads(path.read_text())["cases"][0]
+
+        assert case["draft"] == response.draft, "the composer's words must survive"
+        assert case["verify_reason"] == response.verify_reason
+        assert "20,000mm hydrostatic head" in case["evidence"], (
+            "a draft is only judgeable against what the turn was allowed to rely on"
+        )
+
+    async def test_passed_cases_are_kept_too(self, tmp_path: Path) -> None:
+        """A file of failures alone cannot answer "did this regress"."""
+        dataset = Dataset(name="d", cases=[_case("c1", Expectation()), _case("c2", Expectation())])
+        report = await run_eval(
+            target=FakeTarget({"c1": AgentResponse(reply="a"), "c2": AgentResponse(reply="b")}),
+            datasets=[dataset],
+        )
+        cases = json.loads(write_report(report, tmp_path / "r.json").read_text())["cases"]
+        assert {c["case_id"] for c in cases} == {"c1", "c2"}
+        assert all(c["passed"] for c in cases)
+
+    async def test_a_synthetic_run_says_so_in_the_file(self, tmp_path: Path) -> None:
+        """Read six weeks later, a number without this is a number somebody quotes."""
+        dataset = Dataset(name="d", cases=[_case("c1", Expectation())])
+        report = await run_eval(
+            target=FakeTarget({"c1": AgentResponse(reply="x")}), datasets=[dataset]
+        )
+        written = json.loads(write_report(report, tmp_path / "r.json").read_text())
+        assert written["is_validation"] is False
+
+    def test_the_default_path_does_not_overwrite_the_previous_run(self) -> None:
+        """Rule 4 asks for n>=3 either side. A path that overwrites gives n=1."""
+        assert default_path("sell").name.startswith("sell-")
+        assert default_path("sell").suffix == ".json"

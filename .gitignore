@@ -42,3 +42,8 @@ dist/
 
 # Local state for the sync demo (scripts/sync_watch.py)
 .sync-demo-state.json
+
+# Eval runs (open question E7). Kept out of git: they are large, they are
+# regenerable, and the day a real conversation enters a dataset they contain
+# customer data — see evals/src/neura_evals/persist.py.
+evals/reports/
