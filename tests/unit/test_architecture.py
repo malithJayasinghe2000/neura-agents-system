@@ -7,6 +7,7 @@ These correspond to docs/architecture/overview.md §8.
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -116,16 +117,48 @@ def test_domain_is_pure() -> None:
     assert not offenders, "neura_domain is not pure:\n" + "\n".join(offenders)
 
 
+#: Any agent package, not one of them by name.
+#:
+#: This pattern used to be the literal string ``neura_agent_care``, which was
+#: correct while CARE was the only agent and became a hole the moment SELL
+#: existed — a check that names what it forbids stops working when somebody adds
+#: the thing it did not know about. `neura_agent_core` itself is excluded, since
+#: that is the engine rather than an agent.
+_AGENT_IMPORT = re.compile(r"\bneura_agent_(?!core\b)[a-z_]+")
+
+
 def test_agent_core_does_not_know_any_agent() -> None:
-    """The engine must never learn an agent's name."""
+    """The engine must never learn an agent's name — any agent's."""
     core_src = REPO_ROOT / "packages/neura-agent-core/src/neura_agent_core"
     offenders = [
-        f"{path.relative_to(REPO_ROOT)}:{lineno}"
+        f"{path.relative_to(REPO_ROOT)}:{lineno}  {line.strip()}"
         for path in core_src.rglob("*.py")
         for lineno, line in enumerate(path.read_text().splitlines(), start=1)
-        if line.strip().startswith(("import ", "from ")) and "neura_agent_care" in line
+        if line.strip().startswith(("import ", "from ")) and _AGENT_IMPORT.search(line)
     ]
     assert not offenders, "neura_agent_core imports an agent:\n" + "\n".join(offenders)
+
+
+def test_no_agent_imports_another_agent() -> None:
+    """A hard rule in AGENTS.md, and now there are two agents to break it with.
+
+    Cross-agent communication goes through the event bus (Phase 3), never a
+    direct import. The duplication this forces — SELL's catalogue tools will be
+    near-copies of CARE's — is deliberate and recorded as open question A12.
+    """
+    offenders = []
+    for agent_src in sorted((REPO_ROOT / "agents").glob("*/src/neura_agent_*")):
+        own = agent_src.name
+        for path in agent_src.rglob("*.py"):
+            for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+                if not line.strip().startswith(("import ", "from ")):
+                    continue
+                for found in _AGENT_IMPORT.findall(line):
+                    if found != own:
+                        offenders.append(
+                            f"{path.relative_to(REPO_ROOT)}:{lineno}  {line.strip()}"
+                        )
+    assert not offenders, "an agent imports another agent:\n" + "\n".join(offenders)
 
 
 def test_the_engine_imports_cleanly_from_either_direction() -> None:

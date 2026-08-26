@@ -1,0 +1,45 @@
+[project]
+name = "neura-agent-sell"
+version = "0.1.0"
+description = "NEURA-SELL — agent-readiness (grounded recommendation, MCP server, product feed)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "neura-agent-core",
+    "neura-commerce",
+    "neura-domain",
+    "neura-core",
+    "neura-llm",
+    "neura-evals",
+]
+
+# Discovery, the same three groups CARE registers plus one this agent is the
+# first to need. All four are resolved by entry point rather than imported by
+# name, so `neura-api` never learns that an agent called "sell" exists
+# (AGENTS.md, "Add an agent").
+[project.entry-points."neura.agents"]
+sell = "neura_agent_sell:MANIFEST"
+
+# DELIBERATELY ABSENT until the graph exists:
+#
+#   [project.entry-points."neura.eval_targets"]
+#   [project.entry-points."neura.agent_runners"]
+#
+# A runner registered before there is a graph to run would mount `/v1/sell/chat`
+# and answer every shopper with an exception. Absent, the route answers
+# AGENT_NOT_RUNNABLE — "we have it and it is broken" is a different problem from
+# "we do not have it", and only the second one is true today.
+
+#   [project.entry-points."neura.agent_routes"]   ← the fourth group (ADR-0024 §8)
+#
+# Also absent until it has something to mount. Chat routes are generic and come
+# from the manifest's route_prefix; a product feed is not generic, and no other
+# agent has one — so this is how an agent contributes its own surface without
+# the deployable importing it. Registered when `routes.py` exists, not before:
+# an entry point resolving to an empty router is a seam that looks wired.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neura_agent_sell"]
