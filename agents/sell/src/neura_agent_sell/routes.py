@@ -11,6 +11,8 @@ of ADR-0024:
     GET  /feed/{token}/products.json     PUBLIC. No key. The token IS the access
     GET  /feed/{token}/products.jsonld   control, and it is in the URL.
 
+    POST /mcp                            an external AI agent, `sell:mcp:connect`
+
     POST   /feed                         merchant, `sell:feed:manage`
     GET    /feed                         merchant, `sell:feed:manage`
     POST   /feed/{id}/rotate             merchant, `sell:feed:manage`
@@ -38,6 +40,7 @@ from sqlalchemy.engine import CursorResult
 from neura_agent_sell.feed import build, canonical, jsonld, publishable
 from neura_agent_sell.feed import tokens as feed_tokens
 from neura_agent_sell.feed.schema import sell_feeds
+from neura_agent_sell.mcp import protocol as mcp_protocol
 from neura_commerce.identity import EntityType
 from neura_commerce.sync import DatabaseEntityStore
 from neura_core import NotFoundError, get_logger
@@ -127,6 +130,52 @@ def build_routes(agent_key: str) -> APIRouter:
         after: Annotated[str | None, Query()] = None,
     ) -> Response:
         return await _serve(request, token, after=after, renderer=jsonld)
+
+    # ── MCP ───────────────────────────────────────────────────────────────────
+
+    @router.post("/mcp", summary="Model Context Protocol endpoint for external AI agents")
+    async def mcp_endpoint(request: Request) -> Response:
+        """One JSON-RPC message over Streamable HTTP.
+
+        **Authenticated, unlike the feed.** The caller presents a key holding
+        `sell:mcp:connect`, and that key is the only thing that decides which
+        tenant's catalogue is reachable. There is no tenant, store or scope
+        parameter anywhere in the protocol, so an external agent cannot ask
+        about a catalogue other than the one their key names — the abuse is
+        unexpressible rather than refused.
+
+        **No runner is required**, for the same reason the feed needs none: MCP
+        is not a conversation and has no graph.
+
+        Plain JSON, not SSE. The spec permits either; a streaming response would
+        mean holding a connection per external agent for calls that complete in
+        one round trip, and nothing here streams.
+        """
+        import json
+
+        caller = await _mcp_caller(request, agent_key)
+
+        try:
+            message = json.loads(await request.body())
+        except ValueError:
+            return _json(mcp_protocol.parse_error(), status=400)
+
+        ctx = await _mcp_context(request, caller)
+        try:
+            response = await _mcp_server().handle(message, ctx)
+        finally:
+            # The adapter holds an HTTP client. One built per request and
+            # abandoned leaks a connection pool per external agent, and an MCP
+            # client polls.
+            await _close(ctx.adapter)
+
+        # A notification gets no body. 202 rather than 200 with an empty object:
+        # the protocol says a notification has no response, and inventing one is
+        # the violation a strict client rejects.
+        if response is None:
+            return Response(status_code=202)
+
+        return _json(response)
 
     # ── Merchant ──────────────────────────────────────────────────────────────
 
@@ -307,6 +356,87 @@ def build_routes(agent_key: str) -> APIRouter:
         }
 
     return router
+
+
+# ── MCP plumbing ─────────────────────────────────────────────────────────────
+
+_MCP_SERVER: Any = None
+
+
+def _mcp_server() -> Any:
+    """One server per process.
+
+    It compiles nothing and holds no per-caller state, but it does build a tool
+    registry, and doing that per request would put registry construction inside
+    an external agent's latency for no benefit.
+    """
+    global _MCP_SERVER
+    if _MCP_SERVER is None:
+        from neura_agent_sell.mcp import McpServer
+
+        _MCP_SERVER = McpServer()
+    return _MCP_SERVER
+
+
+async def _mcp_caller(request: Request, agent_key: str) -> Any:
+    """Authenticate an external AI agent.
+
+    `sell:mcp:connect` and not `sell:chat:write`: an agent reading a catalogue
+    and a shopper holding a conversation are different callers with different
+    powers, and one scope for both would make the narrower one unexpressible.
+    """
+    from neura_api.dependencies import authenticate_request
+    from neura_core.tenancy.auth import require_agent, require_scopes
+
+    caller = await authenticate_request(request)
+    require_scopes(caller, "sell:mcp:connect")
+    require_agent(caller, agent_key)
+    return caller
+
+
+async def _mcp_context(request: Request, caller: Any) -> Any:
+    """The security boundary's input — none of which the caller chooses.
+
+    The tenant, the store, the capabilities and the scopes all come from the
+    authenticated key. **`identity` is left at its anonymous default and that is
+    deliberate**: an external AI agent has proven nothing about any shopper, so
+    it must start having proven nothing. None of SELL's tools is
+    session-scoped today, and if one ever is, this is the line that keeps it
+    unreachable from here.
+    """
+    from neura_agent_core.tools import ToolContext
+
+    connection = await request.app.state.stores.connect(caller.tenant_id)
+
+    return ToolContext(
+        tenant_id=caller.tenant_id,
+        conversation_id=f"mcp_{uuid.uuid4().hex[:12]}",
+        capabilities=connection.capabilities,
+        scopes=caller.scopes,
+        adapter=connection.adapter,
+    )
+
+
+async def _close(adapter: Any) -> None:
+    closer = getattr(adapter, "aclose", None) or getattr(adapter, "close", None)
+    if closer is None:
+        return
+    try:
+        result = closer()
+        if hasattr(result, "__await__"):
+            await result
+    except Exception as exc:  # pragma: no cover — cleanup must never mask a reply
+        log.warning("mcp_adapter_not_closed", error=str(exc))
+
+
+def _json(body: dict[str, Any], *, status: int = 200) -> Response:
+    import json
+
+    return Response(
+        content=json.dumps(body),
+        media_type="application/json",
+        status_code=status,
+    )
 
 
 # ── Serving a public document ────────────────────────────────────────────────

@@ -15,11 +15,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
 from neura_agent_sell import MANIFEST
 from neura_agent_sell.feed import build, canonical, jsonld, publishable
+from neura_agent_sell.mcp import McpServer
+from neura_agent_sell.mcp.server import PROTOCOL_VERSION
+from neura_agent_sell.tools import MCP_TOOLS, SELL_TOOLS, TOOL_SCOPES
 from neura_domain import Capability, Money, Product, ProductStatus, ProductVariant
 
 
@@ -447,3 +451,231 @@ class TestSchemaOrgMapping:
         assert body["name"] == "Acme Outdoors"
         assert body["itemListElement"][0]["position"] == 1
         assert body["itemListElement"][0]["item"]["@type"] == "Product"
+
+
+# ── Tools ────────────────────────────────────────────────────────────────────
+
+
+class TestToolsCannotChangeAStore:
+    def test_every_tool_is_read_only(self) -> None:
+        """ADR-0010, asserted rather than asserted-in-a-docstring.
+
+        A checkout tool is not disabled or hidden here — it does not exist, so
+        the most persuasive injection imaginable has nothing to invoke.
+        """
+        from neura_domain import SideEffect
+
+        assert {spec.side_effect for spec in SELL_TOOLS} == {SideEffect.READ}
+
+    def test_the_registry_refuses_a_write_tool(self) -> None:
+        """The structural half. The list above is what we wrote; this is what
+        the engine would accept if somebody wrote something else."""
+        from neura_agent_core.tools import ToolRegistrationError, ToolRegistry, tool
+        from neura_domain import SideEffect
+
+        @tool(
+            name="place_order",
+            description="Buy it.",
+            side_effect=SideEffect.WRITE,
+            scopes=["sell:catalogue:read"],
+        )
+        async def place_order(product_ref: str, ctx: object) -> str: ...  # pragma: no cover
+
+        with pytest.raises(ToolRegistrationError):
+            ToolRegistry([place_order])
+
+    def test_no_tool_declares_pii_output(self) -> None:
+        """A catalogue is public, and SELL never reads a customer record.
+
+        Over-declaring is its own bug: it would evict a public search from the
+        semantic cache for nothing and make the flag meaningless where it
+        matters, which is CARE's order tools.
+        """
+        assert not [spec.name for spec in SELL_TOOLS if spec.pii_output]
+
+    def test_the_manifest_declares_every_scope_the_tools_require(self) -> None:
+        """Otherwise a correctly-provisioned key is refused at the policy
+        engine's third check while looking perfectly configured — a failure that
+        reads as "the agent never calls any tool"."""
+        assert MANIFEST.scopes >= TOOL_SCOPES
+
+    def test_escalate_is_available_on_every_store(self) -> None:
+        """The only action the agent can always take, by design."""
+        from neura_agent_sell.tools import escalate_to_human
+
+        assert escalate_to_human.requires == frozenset()
+
+
+class TestWhatAnExternalAgentMayReach:
+    def test_mcp_is_an_allowlist_not_a_subtraction(self) -> None:
+        """The default for a new tool is private.
+
+        If this were `SELL_TOOLS - {escalate}`, adding a tool would expose it to
+        third parties the moment it was written, and nobody would notice until
+        it was already public.
+        """
+        assert {spec.name for spec in SELL_TOOLS} > MCP_TOOLS
+        assert "escalate_to_human" not in MCP_TOOLS
+
+    def test_no_exposed_tool_can_write(self) -> None:
+        from neura_domain import SideEffect
+
+        exposed = [spec for spec in SELL_TOOLS if spec.name in MCP_TOOLS]
+        assert exposed
+        assert {spec.side_effect for spec in exposed} == {SideEffect.READ}
+
+    def test_no_exposed_tool_reads_a_person(self) -> None:
+        """An external AI agent must not be a route to a merchant's customers.
+
+        Asserted against capabilities rather than a list of tool names, so a
+        future tool that requires `CUSTOMER_READ` or `ORDER_READ` fails here
+        rather than shipping quietly.
+        """
+        from neura_domain import Capability
+
+        personal = {Capability.CUSTOMER_READ, Capability.ORDER_READ, Capability.ORDER_SEARCH}
+        for spec in SELL_TOOLS:
+            if spec.name in MCP_TOOLS:
+                assert not (spec.requires & personal), spec.name
+
+
+# ── MCP ──────────────────────────────────────────────────────────────────────
+
+
+def _ctx(capabilities: frozenset[Capability] | None = None, **kwargs: object) -> Any:
+    from neura_agent_core.tools import ToolContext
+
+    return ToolContext(
+        tenant_id="tn_mcp",
+        conversation_id="mcp_test",
+        capabilities=(
+            capabilities
+            if capabilities is not None
+            else frozenset(
+                {
+                    Capability.PRODUCT_SEARCH,
+                    Capability.PRODUCT_READ,
+                    Capability.INVENTORY_READ,
+                    Capability.CATEGORY_READ,
+                }
+            )
+        ),
+        scopes=frozenset(TOOL_SCOPES),
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+class TestMcpProtocol:
+    async def test_a_notification_gets_no_response(self) -> None:
+        """Answering one is a violation a lenient client tolerates and a strict
+        one rejects — the worst kind, because it works in testing."""
+        server = McpServer()
+        assert await server.handle({"jsonrpc": "2.0", "method": "ping"}, _ctx()) is None
+
+    async def test_a_wrong_jsonrpc_version_is_an_invalid_request(self) -> None:
+        server = McpServer()
+        out = await server.handle({"jsonrpc": "1.0", "id": 1, "method": "ping"}, _ctx())
+        assert out is not None
+        assert out["error"]["code"] == -32600
+
+    async def test_an_unknown_method_uses_the_standard_code(self) -> None:
+        """Not our own number. A client's error handling is written against the
+        JSON-RPC table, and a bespoke code arrives as "unknown error"."""
+        server = McpServer()
+        out = await server.handle({"jsonrpc": "2.0", "id": 1, "method": "wat"}, _ctx())
+        assert out is not None
+        assert out["error"]["code"] == -32601
+
+    async def test_initialize_serves_the_pinned_revision_not_the_requested_one(self) -> None:
+        """Echoing a client's version claims conformance we have not tested."""
+        server = McpServer()
+        out = await server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "1999-01-01"},
+            },
+            _ctx(),
+        )
+        assert out is not None
+        assert out["result"]["protocolVersion"] == PROTOCOL_VERSION
+
+    async def test_no_capability_is_advertised_that_is_not_implemented(self) -> None:
+        """A capability advertised and unimplemented is worse than one absent,
+        because a client will try it. Notably: no `sampling`, which would put
+        someone else's model in our request path with no eval and no verify."""
+        server = McpServer()
+        out = await server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"}, _ctx())
+        assert out is not None
+        assert set(out["result"]["capabilities"]) == {"tools"}
+
+
+class TestMcpExposure:
+    async def test_it_lists_only_tools_the_store_can_satisfy(self) -> None:
+        """A store with no live inventory feed never learns `check_stock` exists.
+
+        Stronger than refusing the call: you cannot talk a model into invoking a
+        tool it was never shown.
+        """
+        server = McpServer()
+        out = await server.handle(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            _ctx(frozenset({Capability.PRODUCT_SEARCH, Capability.PRODUCT_READ})),
+        )
+        assert out is not None
+        names = {t["name"] for t in out["result"]["tools"]}
+        assert names == {"search_products", "get_product_details"}
+
+    async def test_escalate_is_never_listed(self) -> None:
+        """No human in an MCP session to escalate to, and a tool that files into
+        a merchant's support queue on a bot's say-so is a DoS with a nice name."""
+        server = McpServer()
+        out = await server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, _ctx())
+        assert out is not None
+        assert "escalate_to_human" not in {t["name"] for t in out["result"]["tools"]}
+
+    async def test_calling_an_unexposed_tool_reports_unknown_not_refused(self) -> None:
+        """ "Not available here" and "you may not" tell a caller different
+        things, and only the first is true."""
+        server = McpServer()
+        out = await server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "escalate_to_human", "arguments": {"reason": "x"}},
+            },
+            _ctx(),
+        )
+        assert out is not None
+        assert out["error"]["code"] == -32602
+        assert "Unknown tool" in out["error"]["message"]
+
+    async def test_a_tool_the_store_cannot_satisfy_cannot_be_called(self) -> None:
+        """Listed or not, the policy engine is the boundary."""
+        server = McpServer()
+        out = await server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "check_stock", "arguments": {"variant_refs": ["v1"]}},
+            },
+            _ctx(frozenset({Capability.PRODUCT_SEARCH, Capability.PRODUCT_READ})),
+        )
+        assert out is not None
+        assert "error" in out or out["result"]["isError"] is True
+
+    async def test_the_protocol_carries_no_way_to_name_another_tenant(self) -> None:
+        """The isolation argument for this surface, stated as a property.
+
+        Every method takes its tenant from the resolved `ToolContext`. If a
+        parameter ever appeared that could name a tenant, store or scope, an
+        external agent could ask about a catalogue their key does not cover.
+        """
+        import inspect
+
+        source = inspect.getsource(McpServer)
+        for forbidden in ('params.get("tenant', 'params.get("store', 'params.get("scope'):
+            assert forbidden not in source
