@@ -72,7 +72,13 @@ test-widget:  ## The widget's pure logic (Node's built-in runner — no npm, no 
 # The console's half of the deterministic bar in docs/console.md §6. A browser
 # and not curl, because __Host- and HttpOnly are enforced by the browser and by
 # nothing else — a cookie Chrome refuses is a sign-in that silently does nothing.
-console-check:  ## Sign in to the console in REAL headless Chrome: make console-check EMAIL=...
+#
+# Covers screen 3 (Review) too, for the same class of reason: "show the evidence",
+# "a withheld turn says so" and "no invented numbers" are all claims about what a
+# rendered page contains, and no assertion on a JSON body can make them. It seeds
+# two shadow turns for the shop, drives the grading, and removes exactly the rows
+# it created.
+console-check:  ## Sign in AND grade, in REAL headless Chrome: make console-check EMAIL=...
 	uv run python scripts/console_check.py "$(EMAIL)"
 
 widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no cost.

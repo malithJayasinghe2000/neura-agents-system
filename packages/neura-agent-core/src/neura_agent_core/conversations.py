@@ -28,6 +28,7 @@ whichever agent ran, exactly as it does in the usage meter.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -280,6 +281,33 @@ class ConversationRepository:
             )
         ).all()
         return [_message_from_row(row) for row in rows]
+
+    async def by_ids(self, tenant_id: str, ids: Sequence[str]) -> dict[str, Message]:
+        """Specific messages, by id, keyed by id. Missing ids are simply absent.
+
+        The review queue's reason for existing: a shadowed turn records the
+        ``message_id`` of the question it answers and not the question itself,
+        because the question genuinely was said and belongs in the transcript
+        (shadow.py). Grading needs both, and one query for a page of turns is
+        the difference between a screen and a hundred round trips.
+
+        Absent rather than raising, because a message can legitimately be gone —
+        a merchant's retention policy deletes transcripts and leaves the graded
+        queue behind. The caller renders "no longer in the transcript", which is
+        true, instead of failing to render a turn somebody already graded.
+        """
+        wanted = [i for i in dict.fromkeys(ids) if i]
+        if not wanted:
+            return {}
+
+        rows = (
+            await self._session.execute(
+                select(conversation_messages)
+                .where(conversation_messages.c.tenant_id == tenant_id)
+                .where(conversation_messages.c.id.in_(wanted))
+            )
+        ).all()
+        return {str(row.id): _message_from_row(row) for row in rows}
 
     async def history(
         self, tenant_id: str, conversation_id: str, *, turns: int = 6

@@ -4,21 +4,80 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-27 — console screen 1 (sign in) built, working in a real browser
+**Last updated:** 2026-08-27 — console screen 3 (Review) built, grading proved in a real browser
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **Console screen 3 — Review (shadow-mode grading).** Screen 1 (sign in) is
-**built and working in a real browser**; `make console-check EMAIL=…` drives headless Chrome through
-a real link and passes 7/7. Review is next on purpose: it is the only screen that produces something
-this project does not have — **real graded turns**, the sole route out of **E1**.
+**Next action:** **Console screen 2 — Conversations**, and it has one decision to make first
+(see *"the paragraph that is not deliverable"* below). Screens **1 (sign in)** and **3 (Review)**
+are built and working in a real browser; `make console-check EMAIL=…` drives headless Chrome
+through a real link, a real evidence panel and a real verdict, and passes **16/16**.
 
 **What exists now.** `apps/neura-console` — Next.js 16, Tailwind 4, shadcn/ui, self-hosted Geist.
-Sign-in, verify, a landing screen, sign out. Backend: three tables (`users`, `memberships`,
-`login_tokens`), `neura_core.identity`, `neura_core.email` (plain SMTP), four `/v1/console`
-endpoints, `scripts/console_admin.py` + `make user-new|show|revoke|link`. 14 unit + 23 integration
-tests, and the browser check. **Proved end to end against real SMTP**: a link was mailed, clicked,
-redeemed, and the session listed exactly one merchant.
+Sign-in, verify, a shop list, sign out, **and the Review queue**. Backend: three identity tables,
+`neura_core.identity`, `neura_core.email`, four `/v1/console` auth endpoints plus **three
+console-authenticated review endpoints**, `neura_agent_core.review`, `scripts/console_admin.py`.
+**35 unit + 33 integration tests on the console alone**, and the browser check.
 
-**Three things found by building it, each worth more than the screen.**
+**Screen 3 is the one the console was built for**, and the reason has not changed: it is the only
+screen that produces something this project does not have — **real graded turns**, the sole route
+out of **E1**. It has produced none yet, because that needs real shadow traffic and therefore a
+merchant (**B2**). What changed is that E1 is now blocked on one thing instead of two.
+
+**Four things found by building it.**
+
+**1. "Show the evidence" was a join nobody had noticed was missing — and the missing piece was
+the question.** `shadow_turns` holds the draft, the citations and the verifier's verdict, and
+**not the shopper's message**, which lives in `conversation_messages` because it genuinely was
+said. The row *looks* complete without it. A queue that skipped the join would render a confident
+paragraph with nothing to judge it against — which is exactly the failure **E7** is about,
+arriving in a different layer. `neura_agent_core.review` joins the question and resolves cited
+documents to the merchant's own text.
+
+**2. Zero is not a measurement, and a dashboard is where that dies.** `PriceTable.cost` returns
+`0` for a **local** model *and* `0` for a cloud model with no configured price — two entirely
+different facts, and nothing below the screen can tell them apart. So the API returns the figure
+with a flag saying it is unattributed and the screen writes **"not priced"**, never `$0.00`. The
+browser check fails if a `$0` ever appears. This is `CLAUDE.md §4` meeting a real widget.
+
+**3. A citation names a source, not the passage.** The chunk index is stripped before a citation
+reaches the row, so the screen shows the *document* an answer came from and says on the card that
+the exact passage is not recorded. Widening citations would change what every integrator is
+promised (api-design.md §7); showing a document while implying it was the passage would be
+invented evidence. Neither was done.
+
+**4. The paragraph in `console.md §3.3` that is not deliverable — and it blocks screen 2.**
+The design says *"PII is shown to the merchant unredacted"*. `append_turn` writes the shopper's
+message **as the guard left it**, tokenised, because a transcript under a retention policy must not
+become a store of card numbers (security-model.md §6.2), and the rehydrated text existed only in
+the reply the shopper saw. So Review shows `[EMAIL_1]` and explains it — **and Conversations will
+show the same thing.** One of those two rules has to give way, in an ADR, and it is written up in
+`console.md §3.3` so the next session meets it before writing the screen rather than at the top of
+the file.
+
+**Grading finally records a person.** `shadow_turns.reviewed_by` was a free string because there
+was no user table. The console writes the **authenticated** user id and **refuses** a `reviewed_by`
+in the request body, so one reviewer cannot sign another's opinion — the first grade in this system
+that answers *"who approved this?"* with something nobody could type in.
+
+**Two rules held that a hurried session would have broken.** Sampling was not added (**A4** is
+unanswered and `page()` has no state filter that could hide a decline), and the turns the agent
+**declined** are in the queue and explain themselves rather than rendering an empty card — ADR-0020's
+lesson pointed at the merchant instead of the shopper. Both are asserted in pytest *and* in Chrome.
+
+**Screen 3 got its own door rather than reusing the agent's.** `GET /v1/care/shadow` already
+serves this queue to a bearer key. The console cannot use it, and the shortcut that would let it —
+mint a tenant key at sign-in — is exactly what ADR-0026 §3 refuses. So there is a second set of
+endpoints behind a **session cookie → person → membership → tenant** check, over the same
+repository and the same RLS. `acting_for()` in `dependencies.py` is the whole of it, and a tenant
+the person cannot act for is a **404**, never a 403: a 403 would confirm the id exists.
+
+**`next dev` was writing its own `AGENTS.md` and `CLAUDE.md` into `apps/neura-console`.** Those two
+filenames are this repository's operating manual and its entry point; a second pair inside the
+console means a session working there loads Next's release notes where the project expects its own
+rules. Turned off with `agentRules: false`, and the one fact worth keeping — **Next 16 has breaking
+changes and the real guides are in `node_modules/next/dist/docs/`** — is now a comment in
+`next.config.ts`.
+
+**Three things found by building screen 1, each worth more than the screen.**
 
 **1. The console must never be cross-origin to the API.** `middleware/cors.py` sets
 `allow_credentials: false` and says why: *"the credential is a bearer token, so there are no ambient

@@ -26,6 +26,8 @@
  */
 const BASE = "/api";
 
+import type { ReviewTurn, Verdict } from "@/lib/review";
+
 /** The API's envelope: `{ data, meta }`, on success and on error alike. */
 type Envelope<T> = { data: T; error?: { message?: string } };
 
@@ -84,4 +86,24 @@ export function fetchMe(): Promise<Me> {
 
 export function signOut(): Promise<{ signed_out: boolean }> {
   return call("/auth/sign-out", { method: "POST" });
+}
+
+/**
+ * Record this person's verdict on one withheld turn.
+ *
+ * **No `reviewed_by`.** The machine endpoint takes a free string because it
+ * cannot know who is calling; here the person *is* the thing that was
+ * authenticated, and letting the browser name a reviewer would let one person
+ * sign another's opinion. The API reads it from the session.
+ */
+export function gradeTurn(
+  tenantId: string,
+  turnId: string,
+  verdict: Verdict,
+  note: string,
+): Promise<ReviewTurn> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/review/${encodeURIComponent(turnId)}/grade`, {
+    method: "POST",
+    body: JSON.stringify({ verdict, note }),
+  });
 }

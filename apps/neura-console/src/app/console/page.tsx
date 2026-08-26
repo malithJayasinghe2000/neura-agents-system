@@ -1,41 +1,33 @@
 /**
- * Where a signed-in merchant lands. ADR-0026, and deliberately almost empty.
+ * Where a signed-in merchant lands. ADR-0026.
  *
- * Screens 2–5 (Conversations, Review, Shops, Usage) are not built yet, and this
- * page says so in plain words rather than showing disabled buttons or invented
- * numbers. `docs/console.md §5` is explicit that a dashboard is exactly where
- * this project's honesty about unmeasured figures usually dies — so there are no
- * figures here at all until there is something real to show.
+ * Still deliberately small. It lists the shops this person may act for and the
+ * one screen that is built — no figures, because `docs/console.md §5` is
+ * explicit that a dashboard is where this project's honesty about unmeasured
+ * numbers usually dies, and nothing here has been measured.
  */
-import { cookies } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ClipboardCheck } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { SignOutButton } from "@/components/sign-out-button";
+import { fromApi, hasSession } from "@/lib/server-api";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Membership = { tenant_id: string; role: string };
+type Me = { signed_in: boolean; memberships?: Membership[] };
 
 export default async function ConsolePage() {
-  const jar = await cookies();
-  const session = jar.get("__Host-fn_session");
-  if (!session) redirect("/");
-
-  // Server-to-server, so this one is the API's real address rather than the
-  // proxy path: there is no browser here, and therefore no origin to be cross.
-  const base = process.env.API_BASE_URL ?? "http://localhost:8010";
-  const response = await fetch(`${base}/v1/console/me`, {
-    headers: { Cookie: `${session.name}=${session.value}` },
-    cache: "no-store",
-  }).catch(() => null);
-
-  const body = response?.ok ? await response.json() : null;
+  if (!(await hasSession())) redirect("/");
 
   // Asked fresh on every load rather than trusted from the cookie. That is the
   // whole reason the cookie carries no tenant: revoking access has to bite on
   // the next request, and a cookie cannot be recalled (ADR-0026 §3).
-  if (!body?.data?.signed_in) redirect("/");
+  const me = await fromApi<Me>("/me");
+  if (!me.ok || !me.data.signed_in) redirect("/");
 
-  const memberships: Membership[] = body.data.memberships ?? [];
+  const memberships: Membership[] = me.data.memberships ?? [];
 
   return (
     <div className="min-h-dvh">
@@ -72,11 +64,28 @@ export default async function ConsolePage() {
               {memberships.map((membership) => (
                 <li key={membership.tenant_id}>
                   <Card>
-                    <CardContent className="flex items-center justify-between gap-4 py-4">
-                      <code className="text-sm">{membership.tenant_id}</code>
-                      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                        {membership.role}
-                      </span>
+                    <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
+                      <div className="space-y-1">
+                        <code className="text-sm">{membership.tenant_id}</code>
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          {membership.role}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        // A link wearing a button's clothes — see the same note
+                        // on the Review screen's filters.
+                        nativeButton={false}
+                        render={
+                          <Link
+                            href={`/console/${encodeURIComponent(membership.tenant_id)}/review`}
+                          />
+                        }
+                      >
+                        <ClipboardCheck className="size-3.5" aria-hidden />
+                        Review drafts
+                      </Button>
                     </CardContent>
                   </Card>
                 </li>
@@ -89,9 +98,8 @@ export default async function ConsolePage() {
           <CardHeader>
             <CardTitle className="text-base">Not built yet</CardTitle>
             <CardDescription>
-              Conversations, Review, Shops and Usage are designed and not written.
-              Review comes next — it&apos;s the screen where you grade what the agent
-              drafted before any shopper sees it.
+              Conversations, Shops and Usage are designed and not written. Review is built —
+              it&apos;s where you grade what the agent drafted before any shopper sees it.
             </CardDescription>
           </CardHeader>
         </Card>

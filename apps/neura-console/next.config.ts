@@ -23,6 +23,23 @@ import type { NextConfig } from "next";
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:8010";
 
 const nextConfig: NextConfig = {
+  /**
+   * `next dev` otherwise writes its own `AGENTS.md` and `CLAUDE.md` into this
+   * directory on every start.
+   *
+   * **Those two filenames are taken.** This repository's `AGENTS.md` is its
+   * operating manual and `CLAUDE.md` is the entry point every fresh session is
+   * told to read first; a second pair inside `apps/neura-console` means a
+   * session working on the console loads Next's release notes where the project
+   * expects its own rules. That is a collision, not a duplicate.
+   *
+   * The content they carry is still worth knowing and is not lost: **Next 16
+   * has breaking changes from Next 15**, and the authoritative guides ship in
+   * `apps/neura-console/node_modules/next/dist/docs/`. Read those before writing
+   * against an API you remember rather than one you have checked.
+   */
+  agentRules: false,
+
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API_BASE}/:path*` }];
   },

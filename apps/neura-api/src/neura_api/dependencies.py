@@ -15,6 +15,9 @@ fail with different words:
 * the agent dependency — *has this tenant bought this agent?* 403
   ``AGENT_NOT_ENABLED``, which is an entitlement and not a bug
   (tenancy-and-packaging.md §3).
+* :func:`acting_for` — the console's equivalent, and the only one that
+  authenticates a **person**: cookie → user → membership → tenant
+  ([ADR-0026](../../../../docs/architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) §3).
 
 None of them is the security boundary. The policy engine authorises every tool
 call again, in code, at the point of use. These exist so a caller gets a clean
@@ -37,7 +40,14 @@ from neura_core import (
     NotFoundError,
     get_database,
     get_logger,
+    get_settings,
 )
+
+# Aliased on import: `verify` in this repository otherwise reads as the
+# groundedness check the agent graph runs, which is an entirely different
+# thing to find in an authentication path.
+from neura_core.identity import COOKIE_NAME, memberships_for
+from neura_core.identity import verify as verify_session
 from neura_core.tenancy import AuthenticatedCaller, authenticate, require_agent, require_scopes
 
 log = get_logger(__name__)
@@ -225,6 +235,59 @@ async def agent_context_for_socket(
     return AgentContext(caller=authenticated, agent_key=agent_key, runner=runner, manifest=manifest)
 
 
+@dataclass(frozen=True, slots=True)
+class ConsoleActor:
+    """A signed-in human, and the one merchant this request is about.
+
+    Both halves are derived on the request. Neither is anything the browser
+    said about itself.
+    """
+
+    user_id: str
+    tenant_id: str
+
+
+def console_user(request: Request) -> str:
+    """Who is signed in, from the session cookie. 401 if nobody is.
+
+    The cookie names a person and grants nothing else — no tenant, no role, no
+    scopes (``neura_core.identity.session``). Everything a person may do is
+    re-derived below, on every request, which is why revoking a membership bites
+    immediately rather than at cookie expiry.
+    """
+    signed_in = verify_session(request.cookies.get(COOKIE_NAME, ""), get_settings().secret_key)
+    if signed_in is None:
+        raise AuthenticationError("Sign in to continue.")
+    return signed_in.user_id
+
+
+async def acting_for(request: Request, tenant_id: str) -> ConsoleActor:
+    """Session → person → membership → tenant. `AGENTS.md` rule 3, in code.
+
+    ``tenant_id`` arrives in the URL, and a URL is something the browser writes.
+    That makes it a **suggestion**; :func:`~neura_core.identity.may_act_for` is
+    what turns it into a decision, and it reads ``memberships`` fresh — the lock
+    that already existed, with the doorman in front of it (ADR-0026).
+
+    **404, not 403, for a tenant this person cannot act for.** The two are the
+    same answer on purpose: a 403 would confirm that a tenant id exists, which
+    turns this route into a way of asking whether a given merchant is a customer.
+    The shadow grading endpoint already collapses the same pair for the same
+    reason.
+    """
+    user_id = console_user(request)
+
+    db = get_database()
+    async with db.identity_session(user_id) as session:
+        held = await memberships_for(session, user_id)
+
+    if not any(membership.tenant_id == tenant_id for membership in held):
+        log.info("console_tenant_refused", user_id=user_id)
+        raise NotFoundError("No such shop.", details={"tenant_id": tenant_id})
+
+    return ConsoleActor(user_id=user_id, tenant_id=tenant_id)
+
+
 def database() -> Database:
     return get_database()
 
@@ -235,12 +298,15 @@ DatabaseDep = Annotated[Database, Depends(database)]
 __all__ = [
     "AgentContext",
     "CallerDep",
+    "ConsoleActor",
     "DatabaseDep",
+    "acting_for",
     "agent_context",
     "authenticate_request",
     "bearer_token",
     "caller",
     "client_address",
+    "console_user",
     "database",
     "require",
     "resolve_agent",

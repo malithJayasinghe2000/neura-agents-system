@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **Screen 1 (sign in) built 2026-08-27** — `make console-check`. Screens 2–5 not written. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **Screens 1 (sign in) and 3 (Review) built 2026-08-27** — `make console-check`. Screens 2, 4 and 5 not written. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -24,7 +24,7 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 |:--|:--|:--|:--|
 | 1 | **Sign in** | `users`, `login_tokens` | ✅ **built 2026-08-27** |
 | 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ |
-| 3 | **Review** (shadow grading) | `shadow_turns` | ✅ **the one that earns its keep** |
+| 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
 | 4 | **Shops** | `tenant_stores`, `sync_checkpoints` | ✅ |
 | 5 | **Usage** | `tenant_usage` | ✅ |
 | 6 | Security | `audit_log` | v1.1 — closes **S5** |
@@ -51,11 +51,62 @@ A queue of turns the agent drafted while in shadow mode: the shopper's question,
 * **A withheld turn must look withheld.** 1.16 found that a shopper shown an empty panel is a bug report within a day ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)); the merchant-facing version of the same mistake is a grading queue that silently omits the turns the agent declined to answer. Those are the interesting ones.
 * **Do not add sampling.** **A4** is unanswered, and a sampling rate chosen before anyone has graded for an hour is a rate invented to fit an imaginary constraint.
 
+#### Built 2026-08-27, and the four things building it settled
+
+**1. "The evidence" was not in the row, and the missing piece was the question.**
+`shadow_turns` records the draft, the citations and what `verify` thought — and
+*not the shopper's message*, which lives in `conversation_messages` because it
+genuinely was said. **The row looks complete without it**, which is what makes
+this the easy mistake: a queue that forgot the join renders a confident paragraph
+with nothing to judge it against. `neura_agent_core.review` does the join, and
+resolves cited documents to the merchant's own text out of `document_chunks`.
+
+**2. A citation names a source, not the passage.** `type:id`, with the chunk
+index stripped before it ever reaches the row — so the screen can show the
+*document* an answer came from and cannot show the paragraph the retriever
+returned. It says so on the card. Widening citations back to chunk precision
+would change what every integrator is promised (api-design.md §7), and showing a
+document while implying it was the passage is the invented-evidence version of
+the same shortcut.
+
+**3. A tool citation can only ever be a name**, and that is a decision made
+earlier and kept here: the record a tool returned is the shopper's own data and
+belongs in the audit log under its retention policy, not in a queue read for six
+weeks. So the card names the lookup and states plainly that the result is not
+here — because an empty panel is [ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)'s
+silence wearing a merchant's clothes.
+
+**4. Zero is not a measurement, and this screen is where that bites.**
+`PriceTable.cost` returns `0` for a **local** model and `0` for a cloud model
+whose price is not configured — two entirely different facts that no layer below
+the screen can tell apart. So the API returns the figure with a flag saying it is
+unattributed, and the screen writes *"not priced"* rather than **$0.00**. This is
+§5 and [CLAUDE.md §4](../CLAUDE.md) meeting an actual widget, and it is the exact
+place a dashboard usually starts lying.
+
+**Grading now records a person.** `shadow_turns.reviewed_by` was a free string
+because there was no user table; the console writes the **authenticated** user
+id and refuses a `reviewed_by` in the request body, so one reviewer cannot sign
+another's opinion. It is the first grade in this system that can answer *"who
+approved this?"* with something nobody could type in.
+
 ### 3.3 Conversations
 
 Transcript list, filter by escalated / blocked / declined. Read-only.
 
 **PII is shown to the merchant unredacted, and this is a decision rather than an oversight** — they are the data controller for their own customers, and a support conversation with the addresses starred out is useless for the purpose they need it for. The redaction that matters is on what reaches the *model* (`PiiVault`, per-turn, never persisted), and that is unchanged.
+
+> **Found while building Review, 2026-08-27: the paragraph above is not currently
+> deliverable, and the reason is storage rather than policy.** `append_turn` writes
+> the shopper's message **as the guard left it** — tokenised — because a transcript
+> kept under a merchant's retention policy must not become a long-term store of card
+> numbers (security-model.md §6.2). The rehydrated text existed only in the reply the
+> shopper saw and was never persisted anywhere. So Review shows `[EMAIL_1]` and
+> explains what it is, and **Conversations will show the same thing.** Whoever builds
+> screen 2 must decide which of the two rules gives way, in an ADR, rather than
+> discovering it at the top of the file: either the merchant gets tokens and this
+> paragraph is rewritten, or the transcript starts holding real addresses and
+> security-model.md §6.2 is reopened. Nothing has been changed here on either side.
 
 ### 3.4 Shops
 
@@ -134,6 +185,15 @@ The last two steps are the ones that already exist and are already trusted. **Th
 5. Sign-in **cannot be used to enumerate** which emails have accounts.
 6. No credential and no API key appears in any response body, ever.
 
+**All six are asserted, and two of them twice.** `tests/integration/test_console_review.py`
+covers 1, 2, 4 and 6 against real PostgreSQL with **two populated tenants**;
+`tests/integration/test_console_auth.py` covers 3 and 5. `make console-check`
+then re-asserts 6 and the three rules of §3.2 **in real headless Chrome**,
+because *"show the evidence"*, *"a withheld turn says so"* and *"no invented
+numbers"* are claims about what a rendered page contains — a server that offered
+the material and a screen that displayed it are not the same thing, and only one
+of them is the product.
+
 ---
 
 ## 7. Known limits, stated before anyone hits them
@@ -144,7 +204,7 @@ The last two steps are the ones that already exist and are already trusted. **Th
 | **Node and npm enter a pure-Python repo** | Second toolchain in `make check`; two ways to have a stale dependency. |
 | **One role, `owner`** | A merchant who wants to give a support agent read-only access cannot, until somebody asks and it is designed. |
 | **No approval queue** | Every write feature stays blocked. This is by design and is the next thing the console unlocks. |
-| **Shadow mode must be on to have anything to review** | A merchant who goes live immediately sees an empty Review screen forever. The empty state has to say so. |
+| **Shadow mode must be on to have anything to review** | A merchant who goes live immediately sees an empty Review screen forever. **Done 2026-08-27** — the empty state says exactly that, and distinguishes it from a filter that matched nothing. |
 
 ---
 

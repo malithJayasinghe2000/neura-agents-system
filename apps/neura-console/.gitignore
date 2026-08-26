@@ -39,3 +39,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Agent instructions vendored in by tooling, not authored here.
+#
+# `shadcn` pulls `.agents/skills/frontend-design/` from `anthropics/skills` and
+# records it in `skills-lock.json`. It is not committed, for the same reason
+# `agentRules: false` is set in `next.config.ts`: this repository's agent
+# instructions are `AGENTS.md` and `CLAUDE.md` at the root, and a second set
+# further down the tree competes with them.
+#
+# In this case it also *contradicts* one — the skill asks for a distinctive
+# visual identity and "one real aesthetic risk", while `docs/console.md §8` says
+# shadcn/ui defaults until there is something to be consistent with. Re-created
+# by the tool on demand if anybody wants to read it.
+/.agents/
+/skills-lock.json
