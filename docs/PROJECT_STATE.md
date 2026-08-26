@@ -389,6 +389,83 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
 
+### 2026-08-26 (build) — NEURA-SELL built: three surfaces, and two bugs the eval found
+
+**Agent #2 exists.** All three surfaces of the read-only scope
+([ADR-0023](architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)):
+a product feed, an MCP server, and a recommendation graph. `agents/sell/` is
+7 nodes, 5 tools, 6 prompts, 2 renderers, 14 golden cases.
+
+**Built in the order the design recommended, and the order mattered.** The feed
+and MCP cost **zero model runs** — deterministic, testable without a model
+server. Two thirds of the agent existed and was covered by tests before a single
+inference was paid for.
+
+**The one to carry forward: an inherited node can still have an
+agent-supplied dependency, and the failure looks like caution.** `verify` is
+inherited from `neura-agent-core` but its *prompt* is not — it calls
+`runtime.prompt("verify")`, and a runtime is built from its own agent's prompt
+set. SELL shipped without one. Every answerable case escalated with
+"verification could not be completed: KeyError", and **nothing looked alarming**,
+because `verify` failing closed is exactly what it is supposed to do. It was
+only visible when the gate was read. A test pins it now by importing the node's
+own constant.
+
+**The second bug is the one a merchant would have felt.** The option summary
+rendered `size: UK 8, UK 9` and the model answered *"available in UK 9"* about a
+variant that is out of stock. It was not hallucinating — it was reading a list
+of **options** as a list of **availability**, which is what that line looked
+like. Fixed in the *rendering*, not the prompt: a model shown "UK 9 (out of
+stock)" cannot make the mistake, and one shown "UK 9" and told to be careful
+still can.
+
+**First measured baseline** — `ollama-dev`, `--no-judge`, n=1, 14 synthetic cases:
+
+```
+cases                  10/14
+injection resistance   1.00   AND 1.00 with the guard disabled
+escalation recall      1.00   intent accuracy 1.00   tool selection 1.00
+escalation precision   0.43   against 0.85 — the one unmet gate
+```
+
+**The guard-off number is the one that matters.** The release blocker holds
+structurally. SELL adds a second structural defence CARE does not have —
+`respond` refuses a draft naming a product that was not on the shortlist — and
+`injection_003` puts the attack in the *merchant's own product description*,
+which is where the threat model says indirect injection arrives from.
+
+**All four failures are the same failure** (**A14**): `verify` refused a
+recommendation and the turn escalated. Safe direction; an agent that never
+answers is still not a product. **Not chased here, deliberately** — 2026-07-30
+records an A8/A9 prompt fix being attempted, measured and reverted, and
+loosening `verify.md` until a gate goes green is that mistake with a different
+filename. A14 names the discriminating runs: CARE's suite on the same box as a
+control, then `make verify-probe` with SELL's prompt.
+
+**Two holes agent #2 found in shared code, which is what agent #2 was for.**
+The eval harness had CARE's intent vocabulary in an *enum*, so SELL's datasets
+would not parse — the coupling `neura-agent-core` is forbidden, one package
+over, invisible for as long as there was one agent. `intent` is a plain `str`
+now; `adversarial` stays reserved because the harness has a *rule* about it. And
+`make eval-fast` ran one agent, so `make check` would have failed the moment a
+second was installed; it iterates every installed agent now.
+
+**New this session:** [ADR-0024](architecture/adr/0024-the-feed-is-opt-in-and-addressed-by-a-rotatable-secret.md)
+(the feed is opt-in, its address is a hashed rotatable secret — resolving **S7**),
+the `neura.agent_routes` entry-point group, `sell_feeds` with its RLS policies,
+`EntityStore.page()`, and **A14**.
+
+**Next.** Answer **A14** with the two discriminating runs above. Then **1.17
+(deploy)**, whose first question is still **X2** — the deployment target, where
+Railway has no GPU path and production inference is a cloud API, so the
+API/worker host and the model host are one choice.
+
+**Still true and still the top risk:** every SELL case is synthetic (**E1**) and
+there is no design partner (**B2**). Fourteen invented cases say nothing about a
+real shopper.
+
+---
+
 ### 2026-08-26 (design) — NEURA-SELL designed: agent #2, three surfaces, and only one of them is an agent
 
 **Docs only. No code, no scaffolding, no model run.** `agents/sell/` still does not exist; it is
