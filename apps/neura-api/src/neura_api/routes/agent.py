@@ -184,7 +184,12 @@ def build_router(agent_key: str) -> APIRouter:
             await idempotency.release(claim)
             raise
 
-        await _note_webhooks(request, context.tenant_id)
+        # No webhook bookkeeping here any more. Until 2026-08-26 this line told
+        # a Redis index the tenant had queued work — after the turn's
+        # transaction, because an index entry for a transaction that then rolled
+        # back would send the drainer looking for rows that do not exist. The
+        # drain job is now written *inside* that transaction (ADR-0022), so
+        # there is nothing left for the route to remember to do.
         payload = _chat_payload(request, result)
         await idempotency.complete(claim, status=200, body=payload)
         return payload
@@ -524,18 +529,6 @@ def _conversation_payload(conversation: Any) -> dict[str, Any]:
         "started_at": conversation.started_at.isoformat() if conversation.started_at else None,
         "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else None,
     }
-
-
-async def _note_webhooks(request: Request | WebSocket, tenant_id: str) -> None:
-    """Tell the drainer this tenant has queued work.
-
-    After the turn's transaction, never inside it: an index entry written for a
-    transaction that then rolled back would send the drainer looking for rows
-    that do not exist.
-    """
-    drainer = getattr(request.app.state, "drainer", None)
-    if drainer is not None:
-        await drainer.note(tenant_id)
 
 
 __all__ = [

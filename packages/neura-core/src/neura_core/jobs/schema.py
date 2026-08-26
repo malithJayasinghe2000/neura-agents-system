@@ -20,17 +20,7 @@ The handler validates its own payload.
 
 from __future__ import annotations
 
-from sqlalchemy import (
-    Column,
-    DateTime,
-    Index,
-    Integer,
-    String,
-    Table,
-    Text,
-    UniqueConstraint,
-    func,
-)
+from sqlalchemy import Column, DateTime, Index, Integer, String, Table, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from neura_core.db import metadata
@@ -45,6 +35,12 @@ DUE_TENANTS_FUNCTION = "neura_due_tenants"
 #: The role that owns it. Nothing connects as this — it has no LOGIN, and no
 #: BYPASSRLS. Named here for the same reason.
 SCHEDULER_ROLE = "neura_scheduler"
+
+#: The predicate on the dedupe index, written once because the index and every
+#: ``ON CONFLICT`` that infers it must agree exactly — PostgreSQL matches them by
+#: predicate, and two copies of this string is how a dedupe silently stops
+#: deduplicating.
+LIVE_DEDUPE_PREDICATE = "status IN ('pending', 'running')"
 
 job_queue = Table(
     JOB_QUEUE_TABLE,
@@ -66,14 +62,27 @@ job_queue = Table(
     # claimable again — which is why ADR-0022 §5 is at-least-once and says so.
     Column("locked_until", DateTime(timezone=True), nullable=True),
     Column("last_error", Text, nullable=False, server_default=""),
-    # Optional. When set, one live job per (tenant, kind, key) — so "sync this
-    # store" enqueued twice while the first is still pending is one job, and a
-    # NULL key means "always a distinct job" because PostgreSQL treats NULLs as
-    # distinct in a unique constraint.
+    # Optional. When set, one *live* job per (tenant, kind, key) — see
+    # LIVE_DEDUPE_PREDICATE below. A NULL key means "always a distinct job",
+    # because PostgreSQL treats NULLs in a unique index as distinct.
     Column("dedupe_key", String(128), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    UniqueConstraint("tenant_id", "kind", "dedupe_key", name="uq_job_queue_tenant_kind_dedupe"),
+    # **Partial, and the predicate is the whole point.** A plain unique
+    # constraint would make the dedupe key permanent: once a job finished, its
+    # row would forever block the next one with the same key, so a store could
+    # be synced exactly once and a merchant's second webhook burst would queue
+    # no drain at all. Scoping it to live rows says what was actually meant —
+    # *one job in flight per key* — and lets a finished or dead row stay as
+    # history without standing in the way.
+    Index(
+        "uq_job_queue_live_dedupe",
+        "tenant_id",
+        "kind",
+        "dedupe_key",
+        unique=True,
+        postgresql_where=text(LIVE_DEDUPE_PREDICATE),
+    ),
     # The dispatch scan: which tenants are due, across every tenant. Read only
     # by neura_due_tenants().
     Index("ix_job_queue_status_run_after", "status", "run_after"),
@@ -85,6 +94,7 @@ job_queue = Table(
 __all__ = [
     "DUE_TENANTS_FUNCTION",
     "JOB_QUEUE_TABLE",
+    "LIVE_DEDUPE_PREDICATE",
     "SCHEDULER_ROLE",
     "job_queue",
 ]

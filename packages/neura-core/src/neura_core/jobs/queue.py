@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from neura_core.errors import ConflictError, NeuraError
 from neura_core.ids import JOB, new_id
 from neura_core.jobs.models import DEFAULT_LEASE, Job, JobStatus, backoff_for
-from neura_core.jobs.schema import job_queue
+from neura_core.jobs.schema import LIVE_DEDUPE_PREDICATE, job_queue
 
 _JOBS = job_queue.c
 
@@ -70,12 +70,14 @@ class JobQueue:
         strands the work if the process dies in between, and here the job row and
         the reason for it commit together or not at all.
 
-        With a ``dedupe_key``, a second enqueue while the first is still live
-        returns the *existing* job rather than adding a duplicate — "sync this
-        store" asked for twice in a minute is one sync. Without one, every call
-        is a distinct job, because PostgreSQL treats NULLs in a unique constraint
-        as distinct and that is the behaviour wanted here rather than a quirk
-        being tolerated.
+        With a ``dedupe_key``, a second enqueue **while the first is still
+        live** returns the existing job rather than adding a duplicate — "sync
+        this store" asked for twice in a minute is one sync. Once that job
+        finishes, the key is free again: the uniqueness is on in-flight rows
+        only, because a permanent one would mean a store could be synced exactly
+        once. Without a key, every call is a distinct job, because PostgreSQL
+        treats NULLs in a unique index as distinct and that is the behaviour
+        wanted here rather than a quirk being tolerated.
         """
         record_id = job_id or new_id(JOB)
         values: dict[str, Any] = {
@@ -98,12 +100,19 @@ class JobQueue:
                     .values(**values)
                     .on_conflict_do_nothing(
                         index_elements=["tenant_id", "kind", "dedupe_key"],
+                        # Must match the index predicate exactly: PostgreSQL
+                        # infers a *partial* unique index by its predicate, and
+                        # omitting this raises rather than silently using the
+                        # wrong index.
+                        index_where=text(LIVE_DEDUPE_PREDICATE),
                     )
                     .returning(_JOBS.id)
                 )
                 won = result.first()
                 if won is None:
-                    existing = await self.find_by_dedupe(tenant_id, kind, dedupe_key)
+                    existing = await self.find_by_dedupe(
+                        tenant_id, kind, dedupe_key, live_only=True
+                    )
                     if existing is not None:
                         return existing
                     # The row that won the conflict has since been cleared. Rare,
@@ -185,9 +194,19 @@ class JobQueue:
         return sorted((_job_from_row(row) for row in rows), key=lambda job: job.run_after)
 
     async def complete(self, job_id: str, *, at: datetime | None = None) -> None:
+        """Finish a job — but only if this worker still holds it.
+
+        The ``running`` guard is what lets a handler decide its own next state.
+        A standing task that re-arms itself sets the row back to ``pending``
+        inside its own transaction, and the runner's completion afterwards must
+        then do nothing rather than quietly finish a job that is queued again.
+        Completing a job you no longer hold is a no-op everywhere else too,
+        which is the right answer for an expired lease as well.
+        """
         await self._session.execute(
             update(job_queue)
             .where(_JOBS.id == job_id)
+            .where(_JOBS.status == JobStatus.RUNNING.value)
             .values(
                 status=JobStatus.DONE.value,
                 locked_until=None,
@@ -230,19 +249,66 @@ class JobQueue:
         )
         return status
 
+    async def reschedule(
+        self,
+        job_id: str,
+        *,
+        run_after: datetime,
+        at: datetime | None = None,
+    ) -> None:
+        """Put a job back in the queue for later. **Not a failure.**
+
+        For a standing task that finished a pass and knows there is more to do —
+        the webhook outbox with a delivery still inside its backoff, for
+        instance. ``attempts`` resets to zero and ``last_error`` clears, because
+        the counter exists to dead-letter work that *keeps failing* and a
+        completed pass is the opposite of that. A drain that re-armed itself
+        forty times would otherwise dead-letter for being useful.
+
+        Done in the handler's own transaction, alongside whatever it read to
+        decide. That is the whole point: if the decision and the read were in
+        different transactions, work arriving between them would land on a job
+        about to be closed, and nothing would point at it.
+        """
+        await self._session.execute(
+            update(job_queue)
+            .where(_JOBS.id == job_id)
+            .values(
+                status=JobStatus.PENDING.value,
+                run_after=run_after,
+                locked_until=None,
+                attempts=0,
+                last_error="",
+                updated_at=at or func.now(),
+            )
+        )
+
     async def get(self, job_id: str) -> Job | None:
         row = (await self._session.execute(select(job_queue).where(_JOBS.id == job_id))).first()
         return None if row is None else _job_from_row(row)
 
-    async def find_by_dedupe(self, tenant_id: str, kind: str, dedupe_key: str) -> Job | None:
-        row = (
-            await self._session.execute(
-                select(job_queue)
-                .where(_JOBS.tenant_id == tenant_id)
-                .where(_JOBS.kind == kind)
-                .where(_JOBS.dedupe_key == dedupe_key)
+    async def find_by_dedupe(
+        self, tenant_id: str, kind: str, dedupe_key: str, *, live_only: bool = False
+    ) -> Job | None:
+        """The job holding this key.
+
+        ``live_only`` restricts it to the in-flight rows the unique index
+        actually covers — which is what :meth:`enqueue` needs, since a finished
+        row with the same key is history rather than a duplicate. The default is
+        the broad read, because "what happened to that sync?" is a fair question
+        to ask about a job that is over.
+        """
+        query = (
+            select(job_queue)
+            .where(_JOBS.tenant_id == tenant_id)
+            .where(_JOBS.kind == kind)
+            .where(_JOBS.dedupe_key == dedupe_key)
+        )
+        if live_only:
+            query = query.where(
+                _JOBS.status.in_((JobStatus.PENDING.value, JobStatus.RUNNING.value))
             )
-        ).first()
+        row = (await self._session.execute(query.order_by(_JOBS.created_at.desc()))).first()
         return None if row is None else _job_from_row(row)
 
     async def list_for(

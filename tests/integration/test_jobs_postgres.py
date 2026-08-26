@@ -24,6 +24,7 @@ isolating nothing, so ``ping()`` is asserted first.
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -31,9 +32,12 @@ from sqlalchemy import text
 
 from neura_api.jobs.runner import JobContext, JobRunner
 from neura_api.jobs.sync import SYNC_STORE, enqueue_sync
-from neura_core import Database
+from neura_api.jobs.webhooks import WEBHOOK_DRAIN, WebhookDrainHandler, enqueue_drain
+from neura_api.webhooks import WebhookDrainer
+from neura_core import Database, get_settings
 from neura_core.jobs import CrossTenantJobWriteError, JobQueue, JobStatus, due_tenants
 from neura_core.jobs.schema import DUE_TENANTS_FUNCTION, JOB_QUEUE_TABLE, SCHEDULER_ROLE
+from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
 
 pytestmark = pytest.mark.integration
 
@@ -45,9 +49,20 @@ TENANT_QUIET = "tn_ijob_quiet"
 
 KIND = "probe"
 
+#: 32 random bytes, base64. Webhook signing secrets are envelope-encrypted and
+#: the placeholder KEK is refused on purpose.
+KEK = "iC0hbmk6b18lBhVRDDeQZ6mXpvNhpjJUM7ScE3wp0Ss="
+
 
 @pytest.fixture
 async def db():
+    # A real KEK before anything encrypts a webhook signing secret, and settings
+    # are cached for the process lifetime. Set here rather than relied upon from
+    # another module's fixture: a suite that only passes in a particular file
+    # order is a suite that fails the first time someone runs one test.
+    os.environ["NEURA_KEK"] = KEK
+    get_settings.cache_clear()
+
     database = Database.from_settings()
 
     # A database that is not running is a skip: not everyone has Docker up.
@@ -66,9 +81,10 @@ async def db():
 async def _clear(database: Database) -> None:
     for tenant in (TENANT_A, TENANT_B, TENANT_QUIET):
         async with database.tenant_session(tenant) as session:
-            await session.execute(
-                text(f"DELETE FROM {JOB_QUEUE_TABLE} WHERE tenant_id = :t"), {"t": tenant}
-            )
+            for table in (JOB_QUEUE_TABLE, "webhook_deliveries", "webhook_endpoints"):
+                await session.execute(
+                    text(f"DELETE FROM {table} WHERE tenant_id = :t"), {"t": tenant}
+                )
 
 
 async def enqueue(db: Database, tenant: str, **kwargs: object) -> object:
@@ -426,6 +442,56 @@ class TestDeduplication:
         async with db.tenant_session(TENANT_A) as session:
             assert len(await JobQueue(session).list_for(TENANT_A)) == 1
 
+    async def test_a_finished_job_frees_its_key(self, db: Database) -> None:
+        """The defect a plain unique constraint shipped with.
+
+        "One job per key" and "one job per key, *ever*" look identical while the
+        first job is still live, and the first surface only ever asked twice in
+        that window — so the check passed for the wrong reason. Under the
+        permanent constraint a store could be synced exactly once: every later
+        enqueue would find the completed row and report success while queueing
+        nothing.
+        """
+        first = await enqueue(db, TENANT_A, dedupe_key="store-1")
+        async with db.tenant_session(TENANT_A) as session:
+            queue = JobQueue(session)
+            claimed = await queue.claim(TENANT_A)
+            await queue.complete(claimed[0].id)
+
+        second = await enqueue(db, TENANT_A, dedupe_key="store-1")
+        assert second.id != first.id  # type: ignore[attr-defined]
+        assert await due_tenants(db) == [TENANT_A]
+
+    async def test_a_dead_job_also_frees_its_key(self, db: Database) -> None:
+        """A dead letter is a record, not a block.
+
+        It stays readable — that is the whole reason it is kept — but a merchant
+        whose endpoint has been fixed must be able to queue the next attempt.
+        """
+        first = await enqueue(db, TENANT_A, dedupe_key="store-1", max_attempts=1)
+        async with db.tenant_session(TENANT_A) as session:
+            queue = JobQueue(session)
+            claimed = await queue.claim(TENANT_A)
+            assert await queue.fail(claimed[0], error="gone") is JobStatus.DEAD
+
+        second = await enqueue(db, TENANT_A, dedupe_key="store-1")
+        assert second.id != first.id  # type: ignore[attr-defined]
+
+        async with db.tenant_session(TENANT_A) as session:
+            rows = await JobQueue(session).list_for(TENANT_A)
+        assert {r.status for r in rows} == {JobStatus.DEAD, JobStatus.PENDING}
+
+    async def test_a_live_job_still_holds_its_key(self, db: Database) -> None:
+        """The property the partial index must not have lost."""
+        first = await enqueue(db, TENANT_A, dedupe_key="store-1")
+        second = await enqueue(db, TENANT_A, dedupe_key="store-1")
+        assert first.id == second.id  # type: ignore[attr-defined]
+
+        async with db.tenant_session(TENANT_A) as session:
+            await JobQueue(session).claim(TENANT_A)
+        third = await enqueue(db, TENANT_A, dedupe_key="store-1")
+        assert third.id == first.id  # type: ignore[attr-defined]
+
     async def test_two_tenants_may_use_the_same_dedupe_key(self, db: Database) -> None:
         """The constraint is per tenant. Two merchants both syncing "their first
         store" must not collide on a shared string."""
@@ -489,6 +555,163 @@ class TestTheSyncJob:
 
         assert first.id == second.id
         assert other.id != first.id
+
+
+class TestRescheduling:
+    """A standing task that finished a pass and knows there is more to do."""
+
+    async def test_a_reschedule_is_not_a_failure(self, db: Database) -> None:
+        """``attempts`` resets, because the counter exists to dead-letter work
+        that keeps failing and a completed pass is the opposite of that.
+
+        Without the reset, a drain that re-armed five times would dead-letter
+        for being useful.
+        """
+        await enqueue(db, TENANT_A)
+        later = datetime.now(UTC) + timedelta(minutes=5)
+
+        async with db.tenant_session(TENANT_A) as session:
+            queue = JobQueue(session)
+            claimed = await queue.claim(TENANT_A)
+            assert claimed[0].attempts == 1
+            await queue.reschedule(claimed[0].id, run_after=later)
+            after = await queue.get(claimed[0].id)
+
+        assert after is not None
+        assert after.status is JobStatus.PENDING
+        assert after.attempts == 0
+        assert after.locked_until is None
+        assert after.run_after == later
+
+    async def test_completing_a_job_you_no_longer_hold_does_nothing(self, db: Database) -> None:
+        """The guard that lets a handler decide its own next state.
+
+        The runner completes every job whose handler returned. A handler that
+        put its own row back to ``pending`` must not then have it quietly
+        finished — the work it queued itself for would vanish.
+        """
+        await enqueue(db, TENANT_A)
+        async with db.tenant_session(TENANT_A) as session:
+            queue = JobQueue(session)
+            claimed = await queue.claim(TENANT_A)
+            await queue.reschedule(claimed[0].id, run_after=datetime.now(UTC))
+            await queue.complete(claimed[0].id)
+            after = await queue.get(claimed[0].id)
+
+        assert after is not None
+        assert after.status is JobStatus.PENDING
+
+
+class TestTheWebhookDrainJob:
+    """The 1.14 Redis index, replaced. The outbox itself is unchanged."""
+
+    async def test_the_drain_job_commits_with_the_deliveries(self, db: Database) -> None:
+        """The property a Redis ``sadd`` structurally could not have.
+
+        The old index had to be written *after* the transaction, or a rollback
+        would point the drainer at rows that do not exist — so a process that
+        died in between stranded the deliveries permanently. Here neither can
+        exist without the other.
+        """
+        try:
+            async with db.tenant_session(TENANT_A) as session:
+                repository = WebhookRepository(session, kek=KEK)
+                await repository.register(
+                    TENANT_A,
+                    url="https://127.0.0.1:9/hooks",
+                    events=[WebhookEvent.CONVERSATION_RESOLVED],
+                )
+                await repository.enqueue(
+                    TENANT_A, PendingEvent(event=WebhookEvent.CONVERSATION_RESOLVED)
+                )
+                await enqueue_drain(session, TENANT_A)
+                raise RuntimeError("the turn failed after queuing")
+        except RuntimeError:
+            pass
+
+        async with db.tenant_session(TENANT_A) as session:
+            assert await JobQueue(session).list_for(TENANT_A) == []
+            assert await WebhookRepository(session).list_deliveries(TENANT_A) == []
+        assert await due_tenants(db) == []
+
+    async def test_a_burst_of_events_queues_one_drain(self, db: Database) -> None:
+        async with db.tenant_session(TENANT_A) as session:
+            repository = WebhookRepository(session, kek=KEK)
+            await repository.register(
+                TENANT_A,
+                url="https://127.0.0.1:9/hooks",
+                events=[WebhookEvent.CONVERSATION_RESOLVED],
+            )
+            for _ in range(5):
+                await repository.enqueue(
+                    TENANT_A, PendingEvent(event=WebhookEvent.CONVERSATION_RESOLVED)
+                )
+                await enqueue_drain(session, TENANT_A)
+
+            jobs = await JobQueue(session).list_for(TENANT_A)
+            deliveries = await WebhookRepository(session).list_deliveries(TENANT_A)
+
+        assert len(deliveries) == 5
+        assert len(jobs) == 1
+
+    async def test_it_re_arms_while_the_outbox_still_holds_something(self, db: Database) -> None:
+        """A delivery inside its backoff is not due *now* and is still
+        outstanding. A job that finished on "nothing due this second" would
+        leave it with nothing pointing at it."""
+        async with db.tenant_session(TENANT_A) as session:
+            repository = WebhookRepository(session, kek=KEK)
+            await repository.register(
+                TENANT_A,
+                # Port 9 is discard: the connection is refused immediately, so
+                # this is a real failed attempt and not a test waiting on a
+                # timeout.
+                url="https://127.0.0.1:9/hooks",
+                events=[WebhookEvent.CONVERSATION_RESOLVED],
+            )
+            await repository.enqueue(
+                TENANT_A, PendingEvent(event=WebhookEvent.CONVERSATION_RESOLVED)
+            )
+            job = await enqueue_drain(session, TENANT_A)
+
+        drainer = WebhookDrainer(db)
+        runner = JobRunner(db)
+        runner.register(WEBHOOK_DRAIN, WebhookDrainHandler(drainer))
+        try:
+            assert await runner.run_once() == 1
+        finally:
+            await drainer.aclose()
+
+        async with db.tenant_session(TENANT_A) as session:
+            after = await JobQueue(session).get(job.id)
+            [delivery] = await WebhookRepository(session).list_deliveries(TENANT_A)
+
+        assert delivery.attempts == 1, "the endpoint was never actually tried"
+        assert after is not None
+        assert after.status is JobStatus.PENDING, "the outbox is not empty; the job must re-arm"
+        assert after.run_after > datetime.now(UTC)
+        assert after.attempts == 0, "a re-arm is not a failed attempt"
+
+    async def test_it_finishes_when_the_outbox_is_empty(self, db: Database) -> None:
+        """And only then — which is the moment the dedupe key frees itself and
+        the next burst of events can queue a new drain."""
+        async with db.tenant_session(TENANT_A) as session:
+            job = await enqueue_drain(session, TENANT_A)
+
+        drainer = WebhookDrainer(db)
+        runner = JobRunner(db)
+        runner.register(WEBHOOK_DRAIN, WebhookDrainHandler(drainer))
+        try:
+            await runner.run_once()
+        finally:
+            await drainer.aclose()
+
+        async with db.tenant_session(TENANT_A) as session:
+            after = await JobQueue(session).get(job.id)
+            following = await enqueue_drain(session, TENANT_A)
+
+        assert after is not None
+        assert after.status is JobStatus.DONE
+        assert following.id != job.id, "a finished drain must not block the next one"
 
 
 class TestTheRunner:

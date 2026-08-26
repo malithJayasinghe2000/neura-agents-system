@@ -4,27 +4,25 @@ The queue itself is ``neura_core.webhooks``; this is the part that needs an HTTP
 client and a clock, both of which belong to the deployable rather than to shared
 infrastructure.
 
-**How a drainer finds work under Row-Level Security.** No transaction can ask
-"which deliveries are due?" across tenants — a session that has not named a
-tenant matches no row anywhere (ADR-0008), and that is the property, not a
-limitation to route around. The three ways out were a second database role with
-``BYPASSRLS``, a policy exemption, or an index of *which tenants have work* kept
-outside PostgreSQL. This takes the third: enqueuing adds the tenant id to a Redis
-set, and the drainer opens one scoped session per tenant named in it.
+**This class used to own a loop and a Redis set; it owns neither now.** No
+transaction can ask "which deliveries are due?" across tenants (ADR-0008), so
+1.14 kept an index of *which tenants have work* outside PostgreSQL and polled it
+every five seconds. That index is gone: a ``webhook.drain`` job is written **in
+the same transaction as the deliveries**, and the scheduler of
+[ADR-0022](../../../../docs/architecture/adr/0022-scheduling-under-rls.md) finds
+it. See ``neura_api.jobs.webhooks`` for what replaced it and why the two costs it
+carried — a silently lost schedule, and a ``sadd`` that could only happen *after*
+the commit — are both gone rather than moved.
 
-The cost is stated rather than hidden. If Redis loses that set, undelivered rows
-are stranded until that tenant's next event re-registers them — the rows are
-safe, the *schedule* is not. That is open question **P7**, and
-``make webhook-drain TENANT=…`` is the repair.
+What is left here is exactly what a deployable owes the outbox: an HTTP client, a
+signature, and the arithmetic of one attempt. ``make webhook-drain TENANT=…``
+still forces a pass by hand.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
 
 import httpx
 
@@ -44,15 +42,6 @@ from neura_core.webhooks.signing import (
 )
 
 log = get_logger(__name__)
-
-#: The Redis set naming tenants with queued deliveries.
-PENDING_TENANTS_KEY = "neura:webhooks:tenants"
-
-#: How often the drainer wakes. Deliveries are not latency-critical — a merchant
-#: reacting to `conversation.escalated` is opening a support queue, not steering
-#: a robot — and a tighter loop would spend most of its time asking Redis for an
-#: empty set.
-POLL_INTERVAL_S = 5.0
 
 #: A merchant's endpoint gets this long to acknowledge. Short, because a slow
 #: endpoint must not be able to occupy the drainer: we retry, they recover.
@@ -120,43 +109,9 @@ async def deliver(
 class WebhookDrainer:
     """Sends what the outbox holds, one tenant at a time."""
 
-    def __init__(
-        self,
-        db: Database,
-        redis: Any | None,
-        *,
-        poll_interval_s: float = POLL_INTERVAL_S,
-    ) -> None:
+    def __init__(self, db: Database) -> None:
         self._db = db
-        self._redis: Any | None = redis
-        self._poll_interval_s = poll_interval_s
         self._client = httpx.AsyncClient(follow_redirects=False)
-        self._task: asyncio.Task[None] | None = None
-        # A process-local fallback for the tenant index, so a deployment
-        # without Redis still delivers the events it queued while it was up.
-        # Deliberately not a substitute: it does not survive a restart, which is
-        # exactly what the Redis set is for.
-        self._local: set[str] = set()
-
-    async def note(self, tenant_id: str) -> None:
-        """Record that this tenant has queued work. Called after enqueuing."""
-        self._local.add(tenant_id)
-        if self._redis is None:
-            return
-        try:
-            await self._redis.sadd(PENDING_TENANTS_KEY, tenant_id)
-        except Exception as exc:  # the rows are safe either way
-            log.error("webhook_index_write_failed", tenant_id=tenant_id, error=str(exc))
-
-    async def pending_tenants(self) -> set[str]:
-        tenants = set(self._local)
-        if self._redis is not None:
-            try:
-                members = await self._redis.smembers(PENDING_TENANTS_KEY)
-                tenants |= {m.decode() if isinstance(m, bytes) else str(m) for m in members}
-            except Exception as exc:
-                log.error("webhook_index_read_failed", error=str(exc))
-        return tenants
 
     async def drain_tenant(self, tenant_id: str, *, limit: int = 50) -> int:
         """Attempt every due delivery for one tenant. Returns how many were sent.
@@ -217,64 +172,12 @@ class WebhookDrainer:
         )
         return attempt.ok
 
-    async def run_once(self) -> int:
-        total = 0
-        for tenant_id in await self.pending_tenants():
-            try:
-                total += await self.drain_tenant(tenant_id)
-            except Exception as exc:  # one tenant must not stop the rest
-                log.error("webhook_drain_failed", tenant_id=tenant_id, error=str(exc))
-                continue
-            await self._forget_if_idle(tenant_id)
-        return total
-
-    async def _forget_if_idle(self, tenant_id: str) -> None:
-        """Drop a tenant from the index once nothing is pending for them.
-
-        Without this the drainer opens a transaction per registered tenant per
-        poll forever, which is a slow leak that only shows up on a busy
-        deployment.
-        """
-        async with self._db.tenant_session(tenant_id) as session:
-            outstanding = await WebhookRepository(session).list_deliveries(
-                tenant_id, status=DeliveryStatus.PENDING, limit=1
-            )
-        if outstanding:
-            return
-
-        self._local.discard(tenant_id)
-        if self._redis is not None:
-            with contextlib.suppress(Exception):
-                await self._redis.srem(PENDING_TENANTS_KEY, tenant_id)
-
-    # ── Lifecycle ────────────────────────────────────────────────────────────
-
-    def start(self) -> None:
-        if self._task is None:
-            self._task = asyncio.create_task(self._loop())
-
-    async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
+    async def aclose(self) -> None:
+        """Release the HTTP client. There is no loop left to stop."""
         await self._client.aclose()
-
-    async def _loop(self) -> None:
-        while True:
-            try:
-                await self.run_once()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # the loop must outlive a bad poll
-                log.error("webhook_drainer_error", error=str(exc))
-            await asyncio.sleep(self._poll_interval_s)
 
 
 __all__ = [
-    "PENDING_TENANTS_KEY",
-    "POLL_INTERVAL_S",
     "RETAIN_DELIVERED",
     "TIMEOUT_S",
     "Attempt",

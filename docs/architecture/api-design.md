@@ -206,9 +206,11 @@ POST   /v1/stores                      // register a store + credentials
 GET    /v1/stores                      // list, without secrets
 GET    /v1/stores/{id}                 // includes negotiated capabilities
 GET    /v1/stores/{id}/health          // live check, bypasses the cache
+POST   /v1/stores/{id}/sync            // queue a catalogue sync -> 202 + job id
+GET    /v1/stores/{id}/sync/{job_id}   // how that sync is going
 ```
 
-`POST /v1/stores/{id}/sync` and its status endpoint are **not built** — see §13.
+`POST /v1/stores/{id}/sync` **queues** a sync and returns `202` with a job id; `GET /v1/stores/{id}/sync/{job_id}` reports on it. It is deliberately not synchronous — a request that crawls a merchant's catalogue is a request that times out ([ADR-0022](adr/0022-scheduling-under-rls.md)). Pressing it twice while a sync is live returns the same job.
 
 `GET /v1/stores/{id}` returning the **negotiated capability list** is important for integrator sanity — it is where a developer sees, concretely, which agent abilities their platform does and does not support.
 
@@ -320,7 +322,8 @@ Breaking changes require `/v2`, with `/v1` supported for **12 months minimum**, 
    `job_queue` is an ordinary tenant table; `neura_due_tenants()` is one
    `SECURITY DEFINER` function returning a list of tenant ids and nothing else,
    and everything after that call is an ordinary scoped session. The webhook
-   outbox has **not** moved onto it yet — see §13.
+   outbox moved onto it the same day, so nothing in this system now keeps a
+   schedule outside PostgreSQL.
 
 ---
 
@@ -333,17 +336,16 @@ nobody could read (S5) were both discovered exactly that way.
 
 | Not built | Why |
 |:--|:--|
-| `POST /v1/stores/{id}/sync` and its status | **Both reasons this gave are now gone, and the endpoint is still not built.** Entity persistence landed on 2026-08-16 ([ADR-0021](adr/0021-synced-entities-are-documents.md)) so results survive, and the worker landed on 2026-08-26 ([ADR-0022](adr/0022-scheduling-under-rls.md)) so there is somewhere for the job to run and a `job_queue` row to report on. What is missing is now only the route: `enqueue_sync()` exists and is called by `make job-check`, not by an authenticated request. That is a small, deliberate gap and it should be closed with the route rather than by widening the helper. |
+| ~~`POST /v1/stores/{id}/sync` and its status~~ | **Built 2026-08-26.** Both reasons this gave are gone — results survive ([ADR-0021](adr/0021-synced-entities-are-documents.md)) and there is somewhere for the work to run ([ADR-0022](adr/0022-scheduling-under-rls.md)). It queues and returns `202`; the status route polls the `job_queue` row. Still not synchronous, and that is the design rather than a limitation. |
 | `POST /v1/care/conversations/{id}/feedback` | It is described here as the highest-value signal we receive, and it becomes a golden case. Nothing ingests golden cases from a table yet; shadow mode is 1.15. A feedback endpoint today records a merchant's most valuable input into a place nobody reads. |
 | Knowledge-base document upload and reindex | RAG indexes what the sync engine syncs. Merchant-uploaded documents need a document store that does not exist, and catalogue and policies already arrive by sync. |
 
 Also not built, and lower stakes: auto-generated SDKs, the Postman/Bruno
-collection, `llms.txt` and the sandbox tenant (§10 — all Phase 2), and a durable
-scheduler for webhook retries. That last one no longer needs anything to be
-*designed* — the worker and the durable queue exist ([ADR-0022](adr/0022-scheduling-under-rls.md))
-— it needs the drainer's Redis index replaced by a `webhook.drain` job enqueued
-in the same transaction as the delivery rows, which was kept out of that change
-on purpose so a delivery regression could not be blamed on two changes at once.
+collection, `llms.txt` and the sandbox tenant (§10 — all Phase 2). The durable
+scheduler for webhook retries **is** built: the drainer's Redis index was
+replaced on 2026-08-26 by a `webhook.drain` job enqueued in the same transaction
+as the delivery rows ([ADR-0022](adr/0022-scheduling-under-rls.md)), and Redis
+now backs rate limiting and nothing else.
 
 `POST /v1/care/conversations/{id}/escalate` is also absent. A merchant forcing a
 handover has to hand it *to* something, and there is no ticketing seam; the

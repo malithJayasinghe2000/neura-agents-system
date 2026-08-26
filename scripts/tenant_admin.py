@@ -148,25 +148,26 @@ async def show_usage(db: Database, tenant_id: str) -> int:
 async def drain_webhooks(tenant_id: str) -> int:
     """Send whatever is queued for one tenant, now.
 
-    The repair for open question **P7**. The drainer finds work through a Redis
-    set naming tenants with queued deliveries, because no transaction can ask
-    "which deliveries are due?" across tenants — a session that has not named a
-    tenant matches no row anywhere (ADR-0008), and the alternatives were a
-    ``BYPASSRLS`` role or a policy exemption.
+    **This used to be the repair for a lost schedule; it is now a way to skip
+    the wait.** Until 2026-08-26 the drainer found work through a Redis set, and
+    losing that set stranded undelivered rows until the tenant's next event
+    re-registered them — the cost recorded as open question **P7**. The schedule
+    now lives in ``job_queue``, in the same transaction as the deliveries
+    (ADR-0022), so there is no index left to lose.
 
-    If that Redis set is lost, the *rows* are safe and the *schedule* is not:
-    they wait until the tenant's next event re-registers them. This is the
-    command that unsticks them without either of the two exemptions.
+    What remains useful is impatience: a delivery inside its backoff, or a
+    merchant who has just fixed their endpoint and would rather not wait out the
+    ladder. Nothing here bypasses Row-Level Security — the tenant is named on
+    the command line, which is the one thing a background sweep cannot do.
     """
     from neura_api.webhooks import WebhookDrainer
 
     database = Database.from_settings()
-    drainer = WebhookDrainer(database, None)
+    drainer = WebhookDrainer(database)
     try:
-        await drainer.note(tenant_id)
         sent = await drainer.drain_tenant(tenant_id)
     finally:
-        await drainer.stop()
+        await drainer.aclose()
         await database.dispose()
 
     print(f"\n  delivered {sent} queued event(s) for {tenant_id}\n")

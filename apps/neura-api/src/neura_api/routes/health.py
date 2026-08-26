@@ -80,7 +80,8 @@ async def readiness(request: Request, response: Response) -> ReadinessResponse:
 async def _redis_status(request: Request) -> ComponentStatus:
     """Reachable? Reported as **degraded**, never ``down``, when it is not.
 
-    Redis backs rate limiting and the webhook drainer's tenant index. Both fail
+    Redis backs rate limiting, and since 2026-08-26 nothing else — the webhook
+    drainer's tenant index moved into PostgreSQL (ADR-0022). Rate limiting fails
     open by design (ADR-0017 §3) — a rate limiter is not an access control, and
     the *cost* ceiling is a PostgreSQL rollup that is unaffected. So a Redis
     outage must not take a healthy process out of rotation and deny every

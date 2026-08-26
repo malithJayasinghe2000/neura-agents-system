@@ -197,10 +197,6 @@ async def run_streamed_turn(
                 },
             )
 
-            drainer = getattr(websocket.app.state, "drainer", None)
-            if drainer is not None:
-                await drainer.note(context.tenant_id)
-
     except WebSocketDisconnect:
         log.info("stream_closed", agent=agent_key)
     except Exception as exc:  # a socket must not take the app down

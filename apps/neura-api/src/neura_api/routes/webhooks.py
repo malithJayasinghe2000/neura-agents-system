@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from neura_api.dependencies import require
 from neura_api.envelopes import envelope
+from neura_api.jobs.webhooks import enqueue_drain
 from neura_core import ValidationError, get_logger
 from neura_core.tenancy import AuthenticatedCaller
 from neura_core.webhooks import (
@@ -151,10 +152,10 @@ async def send_test(
             payload={"test": True, "webhook_id": webhook_id},
         )
         deliveries = await repository.enqueue(caller.tenant_id, pending)
-
-    drainer = getattr(request.app.state, "drainer", None)
-    if drainer is not None:
-        await drainer.note(caller.tenant_id)
+        # In the same transaction as the deliveries, so the two cannot disagree
+        # about whether this event exists (ADR-0022).
+        if deliveries:
+            await enqueue_drain(session, caller.tenant_id)
 
     return envelope(
         {

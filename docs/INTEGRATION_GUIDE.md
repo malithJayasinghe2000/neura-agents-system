@@ -247,7 +247,8 @@ Stated plainly, so nobody plans around something that does not exist:
 | Upload a CSV instead of building endpoints | **Phase 3** |
 | A web page for the merchant to grade shadow answers in | **Phase 2.** Today grading is API calls |
 | Merchant self-service signup | Not built — account setup is an operator command |
-| A sync that runs on a schedule | ◐ **Half built.** A worker now runs a queued sync for any tenant without being told the tenant exists ([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)); what is missing is anything that *enqueues* one on a timer, and the route to ask for one |
+| A sync you can ask for | ✅ `POST /v1/stores/{id}/sync` queues one and returns `202`; `GET /v1/stores/{id}/sync/{job_id}` reports on it |
+| A sync that runs on a **timer** | ⚠️ **Not built.** A worker runs whatever is queued ([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)); nothing yet enqueues one on a schedule, so a merchant or an operator has to ask |
 | Anything that changes your shop | Deliberately never, in this phase ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)) |
 
 ---

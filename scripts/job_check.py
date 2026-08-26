@@ -28,6 +28,13 @@ own dispatch call must name *nobody*. A run that reported a successful sync
 without that line having been empty would prove nothing — it would be consistent
 with a worker that had been handed the tenant all along.
 
+**The second act is the outbox.** The webhook drainer had its own five-second
+poll over a Redis set until 2026-08-26; it is a job now. This starts a real HTTP
+endpoint on this machine, registers it as a merchant would, queues an event, and
+watches the same worker deliver a **signed** POST to it — verified here with the
+same HMAC a merchant would use. That whole path had never run end to end: the
+old drainer was driven by an index no test could produce.
+
 Nothing is written to the shop. Every operation against it is a read.
 No models are called: this touches no agent, no graph and no LLM.
 """
@@ -42,13 +49,29 @@ from datetime import UTC, datetime
 
 from sqlalchemy import text
 
-from neura_api.jobs import SYNC_STORE, JobRunner, SyncStoreHandler, enqueue_sync
+from neura_api.jobs import (
+    SYNC_STORE,
+    WEBHOOK_DRAIN,
+    JobRunner,
+    SyncStoreHandler,
+    WebhookDrainHandler,
+    enqueue_drain,
+    enqueue_sync,
+)
 from neura_api.stores import StoreDirectory
+from neura_api.webhooks import WebhookDrainer
 from neura_commerce.sync import SYNCED_TYPES, DatabaseEntityStore
 from neura_core import Database, configure_logging, new_id
 from neura_core.ids import TENANT
 from neura_core.jobs import JobQueue, JobStatus, due_tenants
 from neura_core.tenancy import StoreConnectionRepository, TenantRepository
+from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
+from neura_core.webhooks.signing import (
+    EVENT_TYPE_HEADER,
+    SIGNATURE_HEADER,
+    TIMESTAMP_HEADER,
+    matches,
+)
 
 #: How long the demo waits for the worker to notice and finish. A real catalogue
 #: crawl at ten requests a second takes a few seconds; the ceiling is here so a
@@ -92,8 +115,10 @@ async def run_worker(poll_interval_s: float) -> int:
         print("worker: no database at DATABASE_URL", file=sys.stderr)
         return 1
 
+    drainer = WebhookDrainer(db)
     runner = JobRunner(db, poll_interval_s=poll_interval_s)
     runner.register(SYNC_STORE, SyncStoreHandler(StoreDirectory(db)))
+    runner.register(WEBHOOK_DRAIN, WebhookDrainHandler(drainer))
     print(f"worker: up, handling {sorted(runner.kinds)}, knowing no tenants", flush=True)
 
     runner.start()
@@ -104,8 +129,55 @@ async def run_worker(poll_interval_s: float) -> int:
         pass
     finally:
         await runner.stop()
+        await drainer.aclose()
         await db.dispose()
     return 0
+
+
+class Merchant:
+    """A merchant's webhook endpoint, on this machine, answering for real.
+
+    Minimal on purpose — one POST, one 200 — because what is being proved is our
+    side of the wire. It keeps the raw body byte for byte, since re-serialising
+    parsed JSON before verifying is the classic way to make a correct signature
+    look broken.
+    """
+
+    def __init__(self) -> None:
+        self.received: list[tuple[dict[str, str], bytes]] = []
+        self._server: asyncio.AbstractServer | None = None
+        self.port = 0
+
+    async def start(self) -> None:
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+        self.port = self._server.sockets[0].getsockname()[1]
+
+    async def stop(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/hooks"
+
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+            headers = {}
+            for line in head.decode("latin-1").split("\r\n")[1:]:
+                if ":" in line:
+                    name, _, value = line.partition(":")
+                    headers[name.strip().lower()] = value.strip()
+            length = int(headers.get("content-length", "0"))
+            body = await reader.readexactly(length) if length else b""
+            self.received.append((headers, body))
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            await writer.drain()
+        except Exception:  # a merchant's endpoint misbehaving is not our failure
+            pass
+        finally:
+            writer.close()
 
 
 async def provision(db: Database, tenant_id: str, url: str, token: str) -> str:
@@ -124,6 +196,8 @@ async def forget(db: Database, tenant_id: str) -> None:
     async with db.tenant_session(tenant_id) as session:
         for table in (
             "job_queue",
+            "webhook_deliveries",
+            "webhook_endpoints",
             "synced_entities",
             "sync_checkpoints",
             "tenant_stores",
@@ -244,13 +318,21 @@ async def demo(url: str, token: str, *, keep: bool) -> int:
         ok = ok and synced
 
         # ── One live sync per store, not one per request ─────────────────────
-        print("\n  ASKED TWICE — must still be one sync")
+        print("\n  ASKED AGAIN, AFTER THE FIRST FINISHED — must be a NEW sync")
         async with db.tenant_session(tenant_id) as session:
             again = await enqueue_sync(session, tenant_id, store_id=store_id)
             rows = await JobQueue(session).list_for(tenant_id)
-        one = len(rows) == 1 and again.id == job.id
-        print(f"    {tick(one)} {len(rows)} job row for this store, not {len(rows) + 1}")
+        # The first job has finished by now, so this must be a *new* one — the
+        # dedupe key covers live rows only. A permanent constraint here would
+        # mean this store could never be synced again, which is exactly the
+        # defect this check missed on the day the queue shipped.
+        one = len(rows) == 2 and again.id != job.id
+        print(f"    {tick(one)} the finished job freed its key, so a second sync could be queued")
         ok = ok and one
+
+        # ── The outbox, on the same queue ────────────────────────────────────
+        print("\n  THE OUTBOX — the Redis index, replaced")
+        ok = await drain_act(db, tenant_id) and ok
 
     finally:
         draining.cancel()
@@ -265,13 +347,66 @@ async def demo(url: str, token: str, *, keep: bool) -> int:
 
     print()
     if ok:
-        print("  \033[32mA sync ran for a tenant the worker did not know existed.\033[0m")
+        print("  \033[32mA sync ran for a tenant the worker did not know existed,\033[0m")
+        print("  \033[32mand a signed webhook reached a merchant off the same queue.\033[0m")
         print(dim("  That is P7. The schedule is a row in the same database as the work,"))
         print(dim("  and the only thing that crossed a tenant boundary was a list of ids."))
     else:
         print("  \033[31mThe scheduler did not do what ADR-0022 says it does.\033[0m")
     print()
     return 0 if ok else 1
+
+
+async def drain_act(db: Database, tenant_id: str) -> bool:
+    """Queue a real webhook and watch the worker sign and deliver it."""
+    merchant = Merchant()
+    await merchant.start()
+    ok = True
+    try:
+        async with db.tenant_session(tenant_id) as session:
+            repository = WebhookRepository(session)
+            endpoint, secret = await repository.register(
+                tenant_id,
+                url=merchant.url,
+                events=[WebhookEvent.CONVERSATION_RESOLVED],
+            )
+            event = PendingEvent(event=WebhookEvent.CONVERSATION_RESOLVED)
+            deliveries = await repository.enqueue(tenant_id, event)
+            # In the same transaction as the deliveries. The old Redis `sadd`
+            # could only happen *after* the commit, so a process that died in
+            # between stranded them permanently.
+            drain = await enqueue_drain(session, tenant_id)
+        print(f"    {tick(bool(deliveries))} endpoint {endpoint.id} registered · event queued")
+        print(f"    {tick(True)} drain job {drain.id} written in the same transaction")
+
+        status, error, elapsed = await wait_for(db, tenant_id, drain.id)
+        done = status is JobStatus.DONE
+        print(
+            f"    {tick(done)} drain {status.value} after {elapsed:.1f}s"
+            + (f" — {error}" if error else "")
+        )
+        ok = ok and done
+
+        arrived = bool(merchant.received)
+        print(f"    {tick(arrived)} the merchant's endpoint received {len(merchant.received)} POST")
+        ok = ok and arrived
+
+        if arrived:
+            headers, body = merchant.received[0]
+            signed = matches(
+                body,
+                headers.get(SIGNATURE_HEADER.lower(), ""),
+                secret,
+                timestamp=int(headers.get(TIMESTAMP_HEADER.lower(), "0")),
+            )
+            print(
+                f"    {tick(signed)} the signature verifies against the merchant's own secret "
+                f"· {headers.get(EVENT_TYPE_HEADER.lower(), '?')}"
+            )
+            ok = ok and signed
+    finally:
+        await merchant.stop()
+    return ok
 
 
 async def drop(tenant_id: str) -> int:

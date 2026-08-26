@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-26 (the scheduler — P7 answered, ADR-0022)
+**Last updated:** 2026-08-26 (the scheduler — P7 answered; outbox and sync route on it)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence and the scheduler
 **Next action:** **Milestone 1.17 — deploy.** Dockerfiles, a staging deploy, Langfuse, alerting,
 a runbook. **X2 is the thing to answer first**: the deployment target is still undecided, and
@@ -21,8 +21,18 @@ table with a `tenant_id` column does not answer P7* — it makes the data safe a
 dispatch exactly as impossible. Every answer has two halves and only the second was ever open.
 **Proved against the real shop:** `make job-check` starts a worker process *before* the tenant
 exists, then creates one and enqueues a sync from a second process — 46 entities synced for a
-tenant the worker was never told about, in 1.5s. Zero model calls; `git status` under
-`neura-domain/`, `neura-llm/` and `agents/` is empty.
+tenant the worker was never told about, in 1.5s, plus a signed webhook delivered to a real HTTP
+endpoint off the same queue. Zero model calls; `git status` under `neura-domain/`, `neura-llm/`
+and `agents/` is empty.
+
+**Both follow-ups landed the same day** (see the 2026-08-26 *later* entry): the webhook drainer
+is off Redis — one background loop in the process now, not two — and `POST /v1/stores/{id}/sync`
+exists, returning `202` with a job id. Taking the queue to a second surface found **two dormant
+defects**: the dedupe key was permanent, so a store could be synced exactly once; and
+`record_endpoint_result` used `func.case`, raising on every execution in three weeks of code
+nothing had ever run. **The one to carry forward:** the first check passed for the wrong reason —
+it asked twice *while the job was still live*, the one window where "one job per key" and "one
+job per key ever" agree.
 
 **Sync persistence landed on 2026-08-16, out of milestone order and deliberately so.** It is
 not 1.17 and it is not a numbered milestone at all — it is the `EntityStore` / `SyncStateStore`
@@ -96,11 +106,10 @@ the better buy of the two. Do not restart either without reading that entry firs
 > **And one that was newly open then, and is closed now.** No transaction can enumerate tenants
 > under RLS, so 1.14 kept an index of "which tenants have work" outside PostgreSQL — a Redis
 > set — rather than taking a `BYPASSRLS` role or a policy exemption, at the recorded cost that
-> losing the index loses the schedule. **The webhook drainer still uses that Redis set.** It was
-> deliberately left there by ADR-0022: its outbox rows are already durable and only the *index*
-> is wrong, and the fair test of a new dispatch mechanism is a surface that has none. The
-> migration is one change — `note()` enqueues a `webhook.drain` job in the same transaction as
-> the delivery rows, and `PENDING_TENANTS_KEY` is deleted.
+> losing the index loses the schedule. **That set is gone.** The drainer moved onto `job_queue`
+> the same day (see the 2026-08-26 entries): a `webhook.drain` job is written in the same
+> transaction as the delivery rows, which the `sadd` structurally could not be. Redis now backs
+> rate limiting and nothing else.
 >
 > **The one thing to carry forward from 1.12.** Injection resistance is 1.00 because the defence
 > is **structural** — no WRITE tool exists to invoke, every call is authorised in code, an unowned
@@ -147,9 +156,11 @@ the better buy of the two. Do not restart either without reading that entry firs
 | Signed webhooks | ✅ verified end to end over Redis: shop signs → client verifies; forged, unsigned and replayed requests all rejected |
 | Sync engine | ✅ backfill (resumable) · incremental · webhook refresh · reconciliation · per-tenant rate limiting. Verified against the real shop (`make sync-check`) |
 | Sync persistence | ✅ **2026-08-16** — `synced_entities` + `sync_checkpoints`, forced RLS, closing the seam open since 1.8. An entity is stored as its **canonical document** in `jsonb`, not as a second schema ([ADR-0021](architecture/adr/0021-synced-entities-are-documents.md)), so `neura-domain` gained zero lines. Proved by running `make sync-check` **twice** against the real shop: 46 entities the first time, **0 re-downloaded** the second |
+| Webhook delivery | ✅ **2026-08-26 — off Redis.** The 1.14 tenant index is gone; a `webhook.drain` job is written **in the same transaction as the delivery rows**, which the old `sadd`-after-commit structurally could not be. One live drain per tenant, re-arming itself while the outbox still holds anything. Redis now backs rate limiting and nothing else |
+| Store sync API | ✅ **2026-08-26** — `POST /v1/stores/{id}/sync` queues and returns **202**; `GET /v1/stores/{id}/sync/{job_id}` polls. Not synchronous by design: a request that crawls a catalogue is a request that times out |
 | **Scheduler** | ✅ **2026-08-26 — P7 closed.** `job_queue` (forced RLS, natural retry ladder, lease, dedupe key, dead letters) plus **one** cross-tenant read: `neura_due_tenants()`, a `SECURITY DEFINER` function owned by `neura_scheduler` — **NOLOGIN, no BYPASSRLS, no grant on `payload`** — returning tenant ids and nothing else ([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)). Reached through `Database.dispatch_session()`: READ ONLY, no `app.tenant_id`, so every table returns nothing to it. A `JobRunner` runs in the API process (ADR-0002) with a `sync.store` handler. Proved by `make job-check` — 46 entities synced for a tenant the worker was never told about |
 | Platform independence | ✅ proved: a fictional platform integrates with **zero** core changes |
-| Migrations | ✅ Alembic configured; **eight** revisions applied, each reversible, no model drift (`alembic check`) |
+| Migrations | ✅ Alembic configured; **nine** revisions applied, each reversible, no model drift (`alembic check`) |
 | Database seam | ✅ `neura_core.db` — pooled async engine, `tenant_session()` setting `app.tenant_id` per transaction |
 | Multi-tenant isolation | ✅ **RLS live and verified** — forced on all **seventeen** `tenant_id` tables; cross-tenant read returns nothing, cross-tenant write is rejected. A test fails if any `tenant_id` table lacks a forced policy |
 | **Tenancy** | ✅ **1.13** — `tenants` · `api_keys` · `tenant_stores` · `tenant_usage`, all forced-RLS. Entitlements (`enabled_agents`), per-tenant config, envelope-encrypted store credentials, the budget ladder, and a usage rollup per (tenant, day, agent) |
@@ -227,7 +238,8 @@ the wild rather than a new finding.
                                     turn says so · driven in real Chrome
  —   Sync persistence           ✅  out of order: the 1.8 seam (ADR-0021)
  —   Scheduler                  ✅  out of order: P7 (ADR-0022). A worker runs
-                                    work for tenants it was never told about
+                                    work for tenants it was never told about;
+                                    the outbox and a sync route ride on it
 1.17 Deploy                     ⬜
 ```
 
@@ -329,6 +341,95 @@ The bridge itself lives in the shop's repository at `packages/Webkul/NeuraBridge
 ## 7. Session log
 
 Newest first. One short entry per session — what changed, what was decided, what is next.
+
+### 2026-08-26 (later) — The outbox moved, a route was finally buildable, and two dormant bugs woke up
+
+**Two things that were named as "next" in the entry below, both done.** The webhook drainer is
+off Redis, and `POST /v1/stores/{id}/sync` exists. Taking the scheduler to a second surface is
+what found the interesting part, which is the two defects.
+
+**Defect one: the dedupe key was permanent.** `job_queue` shipped with a plain
+`UNIQUE (tenant_id, kind, dedupe_key)`. That reads as *one job per key* and means *one job per
+key, ever* — a finished row keeps the key forever. So **a store could be synced exactly once**:
+every later `enqueue_sync` would find the completed row and return it, reporting success while
+queueing nothing. The first surface hid it perfectly, because `make job-check` asked twice
+*while the first job was still live*, which is the one window where both readings agree. The
+check passed for the wrong reason. Fixed by a **partial** unique index scoped to
+`status IN ('pending','running')` — one job *in flight* per key, which is what was meant, with
+finished and dead rows kept as history. Migration `7b3e5a2c81d4`, and the check now asks again
+*after* the first job finishes, which is the question that discriminates.
+
+**Defect two: `func.case` instead of `case`, in code three weeks old that had never executed.**
+`record_endpoint_result` disables an endpoint after twenty consecutive failures. `func.<name>`
+builds a call to a SQL function of that name and does not take `else_`, so it raised `TypeError`
+on **every** execution. Nothing had ever run it, because auto-disable only fires on a *failed*
+delivery attempt and no test had ever produced one — the old drainer needed a Redis index no
+test could populate. It surfaced within seconds of the first real failed delivery.
+**Fifth time this project has found a control nothing called**, and the first time the reason
+was that the *caller* was untestable rather than unwritten.
+
+**What moved, and what deliberately did not.** `webhook_deliveries` is unchanged — it was
+always durable and forced-RLS, and a queue pointing at a queue is double bookkeeping. Only the
+*index* moved. `WebhookDrainer` lost its five-second loop, its Redis set, its process-local
+fallback and `PENDING_TENANTS_KEY`; it kept the HTTP client, the signature and the arithmetic of
+one attempt. There is now **one background loop in the process**, not two.
+
+**The unrecorded cost of the Redis set, now that it is gone.** P7 recorded that losing the set
+loses the schedule, silently. The second cost was never written down and is worse: the `sadd`
+had to happen *after* the transaction that wrote the deliveries — an index entry for a
+transaction that then rolled back would point the drainer at rows that do not exist — so a
+process that died in between stranded those deliveries **permanently**. `enqueue_drain` takes a
+session and runs inside that transaction, so neither can exist without the other.
+
+**One live drain per tenant, and it re-arms itself rather than queueing a successor.** A burst of
+forty events queues one drain. When a pass ends with the outbox still holding something — a
+delivery inside its backoff — the job puts *itself* back with `run_after` set to when that
+delivery is next due. Two new primitives make that safe: `JobQueue.reschedule` (which resets
+`attempts`, because the counter exists to dead-letter work that keeps *failing* and a completed
+pass is the opposite) and a `running` guard on `complete` (so the runner's own completion
+afterwards is a no-op rather than quietly finishing a job that re-queued itself).
+
+**The race that guard closes, and why PostgreSQL is what closes it.** The outbox read and the
+job's next state happen in **one** transaction. If the handler decided "nothing left" in one
+transaction and the runner closed the job in another, a delivery committed in between would
+attach to a job about to finish and be left with nothing pointing at it. Doing both together
+works because the dedupe index is *partial on live rows*: an `ON CONFLICT` insert that meets
+this row mid-update waits for the transaction, re-checks, finds the row no longer in the index,
+and inserts its own job.
+
+**A failed delivery is not a failed job**, and the handler returning normally is how that is
+said. The outbox already owns retries per delivery, with its own ladder and its own dead letter.
+Raising would stack a coarser retry on top: one unreachable endpoint would drag every other
+delivery for that tenant into the job's backoff, then dead-letter the *job* while the deliveries
+were still alive.
+
+**`POST /v1/stores/{id}/sync` returns 202, never 200**, and that is the design rather than a
+limitation — a request that crawls a merchant's catalogue is a request that times out. It writes
+one durable row and returns a job id; `GET /v1/stores/{id}/sync/{job_id}` reports on it. An
+unknown store is a **404 now** rather than a dead letter an hour later. Pressing it twice while
+a sync is live returns the same job; once that job finishes, the next press queues a fresh one —
+which only works because of defect one being fixed.
+
+**Measured.** 685 unit + **191 integration** + 12 widget green, ruff, mypy strict, 7 import
+contracts kept, platform independence clean, eval-fast 47/47, `alembic check` clean, both
+migrations reversed and re-applied. New: three dedupe-lifetime tests, two rescheduling tests,
+four drain-job tests, two endpoint auto-disable tests, two turn-level drain tests, and six for
+the sync routes including cross-tenant polling and the scope check. The dedupe tests were
+proved to fail under the old permanent constraint.
+
+**Proved against the real shop.** `make job-check` gained a second act: it starts a **real HTTP
+endpoint on this machine**, registers it as a merchant would, queues an event and a drain job in
+one transaction, and watches the same worker deliver a signed POST — verified here with the same
+HMAC a merchant's code would use. That whole path had never run end to end. 46 entities synced
+and one signed webhook delivered, for a tenant the worker was never told about.
+
+**No models were run.** `git status` under `agents/`, `neura-llm/`, `neura-agent-core/` and
+`neura-domain/` is empty.
+
+**What is still not built.** Nothing enqueues a job on a **timer** — a merchant or an operator
+still has to ask. A recurring schedule is a `cron`-shaped table and its own decision. And the
+sync route reports a job's *status*, not its *results*: how many products changed lives in the
+worker's log, not in a row anyone can read.
 
 ### 2026-08-26 — The scheduler, and the one read that crosses tenants (P7, closed)
 

@@ -41,6 +41,7 @@ from neura_agent_core.serving import AgentRunner, ProgressSink, TurnOutcome, Tur
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
 from neura_agent_core.tools import SessionIdentity
 from neura_api.audit import TenantAuditLog
+from neura_api.jobs.webhooks import enqueue_drain
 from neura_api.metering import MeteredLLM
 from neura_api.stores import StoreDirectory
 from neura_core import Database, get_logger, get_settings, new_id
@@ -497,8 +498,22 @@ async def _emit(
             )
         )
 
+    queued = 0
     for event in events:
-        await repository.enqueue(tenant_id, event)
+        queued += len(await repository.enqueue(tenant_id, event))
+
+    # **The drain job is written here, in this transaction, or not at all.**
+    # Until 2026-08-26 this was a Redis `sadd` fired *after* the turn committed,
+    # because an index entry for a transaction that then rolled back would send
+    # the drainer looking for rows that do not exist. A job row has no such
+    # problem and gains the property that mattered: it cannot exist without the
+    # deliveries, and they cannot exist without it (ADR-0022).
+    #
+    # Only when something was actually queued. A tenant with no subscribed
+    # endpoints wrote no deliveries, and a drain job for an empty outbox is a
+    # transaction opened to discover there is nothing to do.
+    if queued:
+        await enqueue_drain(session, tenant_id)
 
 
 async def _close(adapter: object) -> None:

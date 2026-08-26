@@ -43,10 +43,12 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.graph.schema import audit_log
 from neura_agent_core.shadow import ShadowRepository, shadow_turns
+from neura_api.jobs import WEBHOOK_DRAIN
 from neura_commerce import registry
 from neura_core import Database, get_database, get_settings
 from neura_core.errors import ConflictError, IdempotencyConflictError
 from neura_core.idempotency import IdempotencyStore, idempotency_keys, request_fingerprint
+from neura_core.jobs import JobQueue, job_queue
 from neura_core.tenancy import (
     ApiKeyKind,
     ApiKeyRepository,
@@ -58,6 +60,7 @@ from neura_core.tenancy import (
 from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
 from neura_core.webhooks import (
     DeliveryStatus,
+    EndpointStatus,
     PendingEvent,
     WebhookEvent,
     WebhookRepository,
@@ -83,6 +86,7 @@ ALL_TENANT_TABLES = (
     webhook_endpoints,
     webhook_deliveries,
     shadow_turns,
+    job_queue,
 )
 
 
@@ -892,6 +896,95 @@ class TestWebhooks:
             deliveries = await WebhookRepository(session).list_deliveries(TENANT_A)
         assert WebhookEvent.CONVERSATION_RESOLVED.value not in {d.event.value for d in deliveries}
 
+    async def test_a_sustained_failure_disables_the_endpoint(self, db: Database) -> None:
+        """An endpoint that has rejected twenty consecutive events is a URL the
+        merchant changed, and continuing to queue for it fills a table nobody
+        will read.
+
+        **This path had never run.** Auto-disable only fires on a *failed*
+        delivery attempt, and until the webhook drainer moved onto the job queue
+        no test had ever produced one — so a `func.case` that raises `TypeError`
+        on every execution sat here for three weeks. Fourth time this project has
+        found a control nothing called.
+        """
+        from neura_core.webhooks.repository import DISABLE_AFTER_FAILURES
+
+        async with db.tenant_session(TENANT_A) as session:
+            repository = WebhookRepository(session, kek=KEK)
+            endpoint, _ = await repository.register(
+                TENANT_A,
+                url="https://merchant.example/hooks",
+                events=[WebhookEvent.CONVERSATION_RESOLVED],
+            )
+            for _ in range(DISABLE_AFTER_FAILURES - 1):
+                await repository.record_endpoint_result(endpoint.id, ok=False)
+            still_on = await repository.require(endpoint.id)
+            await repository.record_endpoint_result(endpoint.id, ok=False)
+            now_off = await repository.require(endpoint.id)
+
+        assert still_on.status is EndpointStatus.ACTIVE
+        assert now_off.status is EndpointStatus.DISABLED
+        assert now_off.consecutive_failures == DISABLE_AFTER_FAILURES
+
+    async def test_one_success_clears_the_failure_run(self, db: Database) -> None:
+        """*Consecutive* failures. An endpoint behind a flaky hop must not be
+        disabled by twenty failures spread across a month of working delivery."""
+        async with db.tenant_session(TENANT_A) as session:
+            repository = WebhookRepository(session, kek=KEK)
+            endpoint, _ = await repository.register(
+                TENANT_A,
+                url="https://merchant.example/hooks",
+                events=[WebhookEvent.CONVERSATION_RESOLVED],
+            )
+            await repository.record_endpoint_result(endpoint.id, ok=False)
+            await repository.record_endpoint_result(endpoint.id, ok=False)
+            await repository.record_endpoint_result(endpoint.id, ok=True)
+            after = await repository.require(endpoint.id)
+
+        assert after.consecutive_failures == 0
+        assert after.status is EndpointStatus.ACTIVE
+
+    async def test_a_turn_queues_a_drain_job_with_the_deliveries(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """The Redis index, replaced — and in the transaction this time.
+
+        The old ``note()`` ran *after* the turn committed, because an index entry
+        for a transaction that then rolled back would point the drainer at rows
+        that do not exist. A job row is written with the deliveries instead, so
+        neither can exist without the other (ADR-0022).
+        """
+        token = await _provision(db, TENANT_A)
+        client.post(
+            "/v1/webhooks",
+            json={
+                "url": "https://merchant.example/hooks",
+                "events": ["conversation.started", "conversation.resolved"],
+            },
+            headers=_auth(token),
+        )
+
+        client.post("/v1/care/chat", json={"message": "hello"}, headers=_auth(token))
+
+        async with db.tenant_session(TENANT_A) as session:
+            deliveries = await WebhookRepository(session).list_deliveries(TENANT_A)
+            jobs = await JobQueue(session).list_for(TENANT_A)
+
+        assert deliveries, "the turn queued no deliveries; this test proves nothing"
+        assert [j.kind for j in jobs] == [WEBHOOK_DRAIN]
+
+    async def test_a_tenant_with_no_endpoints_queues_no_drain_job(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """A drain job for an empty outbox is a transaction opened to discover
+        there is nothing to do — on every turn, for every merchant who has not
+        registered a webhook. The old Redis set added the tenant regardless."""
+        token = await _provision(db, TENANT_A)
+        client.post("/v1/care/chat", json={"message": "hello"}, headers=_auth(token))
+
+        async with db.tenant_session(TENANT_A) as session:
+            assert await JobQueue(session).list_for(TENANT_A) == []
+
     async def test_a_delivery_dies_after_its_attempts_are_used(self, db: Database) -> None:
         """And is still readable — that is the dead-letter queue api-design.md §9
         promises, and a queue only we can see is a dropped event."""
@@ -1527,3 +1620,139 @@ def _drain(socket: Any, *, limit: int = 200) -> list[dict[str, Any]]:
         if frame["type"] in {"done", "error"}:
             return frames
     raise AssertionError("the socket never finished the turn")
+
+
+class TestStoreSync:
+    """``POST /v1/stores/{id}/sync`` — specified in 1.14, buildable only now.
+
+    It was left out twice over: the results vanished on restart (ADR-0021), and
+    there was nowhere for the work to run (ADR-0022). Both reasons are gone, and
+    it is *still* not a synchronous endpoint — a request that crawls a
+    merchant's catalogue is a request that times out.
+    """
+
+    async def test_requesting_a_sync_queues_a_job_and_returns_202(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """**202, never 200.** A backfill of a real catalogue is minutes of
+        paginated requests against a merchant's own server, so this endpoint
+        writes one durable row and returns."""
+        token = await _provision(db, TENANT_A)
+        store = client.post(
+            "/v1/stores",
+            json={
+                "platform": PLATFORM,
+                "base_url": "https://shop.example/neura/v1",
+                "credentials": {"token": "shop-token"},
+            },
+            headers=_auth(token),
+        ).json()["data"]
+
+        response = client.post(f"/v1/stores/{store['id']}/sync", headers=_auth(token))
+        assert response.status_code == 202
+        queued = response.json()["data"]
+        assert queued["status"] == "pending"
+        assert queued["store_id"] == store["id"]
+        assert queued["incremental"] is True
+
+        async with db.tenant_session(TENANT_A) as session:
+            jobs = await JobQueue(session).list_for(TENANT_A)
+        assert [j.id for j in jobs] == [queued["job_id"]]
+
+    async def test_pressing_it_twice_is_one_sync(self, client: TestClient, db: Database) -> None:
+        """A merchant clicking a button four times must not crawl their own shop
+        four times."""
+        token = await _provision(db, TENANT_A)
+        store = client.post(
+            "/v1/stores",
+            json={
+                "platform": PLATFORM,
+                "base_url": "https://shop.example/neura/v1",
+                "credentials": {"token": "shop-token"},
+            },
+            headers=_auth(token),
+        ).json()["data"]
+
+        first = client.post(f"/v1/stores/{store['id']}/sync", headers=_auth(token)).json()["data"]
+        second = client.post(f"/v1/stores/{store['id']}/sync", headers=_auth(token)).json()["data"]
+
+        assert first["job_id"] == second["job_id"]
+        async with db.tenant_session(TENANT_A) as session:
+            assert len(await JobQueue(session).list_for(TENANT_A)) == 1
+
+    async def test_a_sync_for_an_unknown_store_is_a_404_now_not_an_hour_later(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """Checked before queueing. A job that dead-letters an hour later because
+        the store id was a typo is a 404 delivered by the slowest route."""
+        token = await _provision(db, TENANT_A)
+        response = client.post("/v1/stores/st_nope/sync", headers=_auth(token))
+        assert response.status_code == 404
+
+        async with db.tenant_session(TENANT_A) as session:
+            assert await JobQueue(session).list_for(TENANT_A) == []
+
+    async def test_a_sync_can_be_polled(self, client: TestClient, db: Database) -> None:
+        """The other half of a 202."""
+        token = await _provision(db, TENANT_A)
+        store = client.post(
+            "/v1/stores",
+            json={
+                "platform": PLATFORM,
+                "base_url": "https://shop.example/neura/v1",
+                "credentials": {"token": "shop-token"},
+            },
+            headers=_auth(token),
+        ).json()["data"]
+        queued = client.post(
+            f"/v1/stores/{store['id']}/sync",
+            json={"incremental": False},
+            headers=_auth(token),
+        ).json()["data"]
+        assert queued["incremental"] is False
+
+        polled = client.get(
+            f"/v1/stores/{store['id']}/sync/{queued['job_id']}", headers=_auth(token)
+        )
+        assert polled.status_code == 200
+        assert polled.json()["data"]["job_id"] == queued["job_id"]
+
+        # A job id pasted against the wrong store is a 404, not a confusing
+        # answer about a different shop.
+        assert (
+            client.get(
+                f"/v1/stores/st_other/sync/{queued['job_id']}", headers=_auth(token)
+            ).status_code
+            == 404
+        )
+
+    async def test_another_tenant_cannot_poll_this_sync(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """Row-Level Security is what makes a job addressable by id alone."""
+        token_a = await _provision(db, TENANT_A)
+        token_b = await _provision(db, TENANT_B)
+        store = client.post(
+            "/v1/stores",
+            json={
+                "platform": PLATFORM,
+                "base_url": "https://shop.example/neura/v1",
+                "credentials": {"token": "shop-token"},
+            },
+            headers=_auth(token_a),
+        ).json()["data"]
+        queued = client.post(f"/v1/stores/{store['id']}/sync", headers=_auth(token_a)).json()[
+            "data"
+        ]
+
+        assert (
+            client.get(
+                f"/v1/stores/{store['id']}/sync/{queued['job_id']}", headers=_auth(token_b)
+            ).status_code
+            == 404
+        )
+
+    async def test_a_sync_needs_the_write_scope(self, client: TestClient, db: Database) -> None:
+        """Queueing work against a merchant's own server is not a read."""
+        token = await _provision(db, TENANT_A, scopes=["stores:read"])
+        assert client.post("/v1/stores/st_x/sync", headers=_auth(token)).status_code == 403

@@ -21,7 +21,13 @@ from fastapi import FastAPI
 
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
-from neura_api.jobs import SYNC_STORE, JobRunner, SyncStoreHandler
+from neura_api.jobs import (
+    SYNC_STORE,
+    WEBHOOK_DRAIN,
+    JobRunner,
+    SyncStoreHandler,
+    WebhookDrainHandler,
+)
 from neura_api.middleware.cors import TenantCorsMiddleware
 from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.ratelimit import RateLimiter
@@ -56,9 +62,10 @@ def _redis() -> Any | None:
     """A Redis client, or ``None`` if the package or the server is missing.
 
     ``None`` is a working state, not a failure: rate limiting fails **open** and
-    says so on every request (ADR-0017 §3), and the webhook drainer falls back to
-    a process-local index. Both degradations are loud, and both are bounded by
-    controls that live in PostgreSQL.
+    says so on every request (ADR-0017 §3). That is now the *only* thing Redis
+    backs — the webhook drainer's tenant index moved into PostgreSQL on
+    2026-08-26 (ADR-0022), so a deployment without Redis still delivers every
+    webhook it queued.
     """
     try:
         import redis.asyncio as redis
@@ -87,15 +94,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.limiter = RateLimiter(app.state.redis)
     app.state.idempotency = Idempotency(database)
     app.state.stores = StoreDirectory(database)
-    app.state.drainer = WebhookDrainer(database, app.state.redis)
-    app.state.jobs = _job_runner(database, app.state.stores)
+    app.state.drainer = WebhookDrainer(database)
+    app.state.jobs = _job_runner(database, app.state.stores, app.state.drainer)
     app.state.turns = TurnService(database, _llm(), app.state.stores)
 
     # Agents are mounted here rather than in `create_app`, because discovery is
     # a startup activity and a route table built from an empty registry would
     # silently serve 404s for every agent.
     _mount_agents(app)
-    app.state.drainer.start()
     app.state.jobs.start()
 
     log.info(
@@ -110,7 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await app.state.jobs.stop()
-        await app.state.drainer.stop()
+        await app.state.drainer.aclose()
         if app.state.redis is not None:
             await app.state.redis.aclose()
         # The connection pool is process-wide and lazily created, so it outlives
@@ -123,12 +129,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("api_stopped")
 
 
-def _job_runner(database: Database, stores: StoreDirectory) -> JobRunner:
+def _job_runner(database: Database, stores: StoreDirectory, drainer: WebhookDrainer) -> JobRunner:
     """The worker loop, with its handlers attached.
 
     Handlers are registered here rather than discovered, because the queue must
     not import the things it runs — a queue that knew about syncing would be a
     queue that changes every time a new kind of work appears (ADR-0022).
+
+    **This is now the only background loop in the process.** The webhook drainer
+    had its own five-second poll over a Redis set until 2026-08-26; it is a
+    handler here instead, and there is one clock rather than two.
 
     It runs inside the API process. ADR-0002 says one deployable, and a second
     container to run a five-second poll would be a microservice bought for the
@@ -138,6 +148,7 @@ def _job_runner(database: Database, stores: StoreDirectory) -> JobRunner:
     """
     runner = JobRunner(database)
     runner.register(SYNC_STORE, SyncStoreHandler(stores))
+    runner.register(WEBHOOK_DRAIN, WebhookDrainHandler(drainer))
     return runner
 
 

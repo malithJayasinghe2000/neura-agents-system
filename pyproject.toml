@@ -97,9 +97,11 @@ ignore = [
 # the database from outside it, which is the demonstration rather than an
 # implementation detail: the point is that the worker learns of a tenant it was
 # never handed. It cannot signal an Event across a process boundary, its table
-# names are module constants and never input, and the `assert` is a narrowing
-# for mypy on a pipe that was just opened.
-"scripts/job_check.py" = ["ASYNC110", "S101", "S608"]
+# names are module constants and never input, the `assert` is a narrowing for
+# mypy on a pipe that was just opened, and the stand-in merchant endpoint
+# swallows its own errors because a merchant server misbehaving is the thing
+# being tolerated, not a failure of this check.
+"scripts/job_check.py" = ["ASYNC110", "S101", "S110", "S608"]
 
 [tool.ruff.lint.isort]
 known-first-party = [

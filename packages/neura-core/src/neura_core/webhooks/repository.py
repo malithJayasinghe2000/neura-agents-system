@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -248,6 +248,26 @@ class WebhookRepository:
         ).all()
         return [_delivery_from_row(row) for row in rows]
 
+    async def next_due_at(self, tenant_id: str) -> datetime | None:
+        """When this tenant's outbox next has something to send, or ``None``.
+
+        The scheduler's question, and deliberately not ``due()``'s: a delivery
+        four minutes into a backoff is not due *now* but is absolutely still
+        outstanding, and a drain job that completed because nothing was due this
+        second would leave it with nothing pointing at it.
+
+        ``None`` means the outbox is genuinely empty of pending rows — the only
+        state in which a standing drain job may finish.
+        """
+        earliest = (
+            await self._session.execute(
+                select(func.min(webhook_deliveries.c.next_attempt_at))
+                .where(webhook_deliveries.c.tenant_id == tenant_id)
+                .where(webhook_deliveries.c.status == DeliveryStatus.PENDING.value)
+            )
+        ).scalar()
+        return None if earliest is None else cast("datetime", earliest)
+
     async def list_deliveries(
         self,
         tenant_id: str,
@@ -342,7 +362,13 @@ class WebhookRepository:
                 consecutive_failures=webhook_endpoints.c.consecutive_failures + 1,
                 last_delivery_at=moment,
                 updated_at=func.now(),
-                status=func.case(
+                # `case`, not `func.case`. `func.<anything>` builds a call to a
+                # SQL function of that name and does not take `else_`, so this
+                # raised TypeError on every execution — and nothing executed it
+                # for three weeks, because auto-disable only runs on a *failed*
+                # delivery attempt and no test had ever made one. Found on
+                # 2026-08-26 by the first real failed delivery in the suite.
+                status=case(
                     (
                         webhook_endpoints.c.consecutive_failures + 1 >= DISABLE_AFTER_FAILURES,
                         EndpointStatus.DISABLED.value,
