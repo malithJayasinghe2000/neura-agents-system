@@ -31,7 +31,7 @@ from neura_api.jobs import (
 from neura_api.middleware.cors import TenantCorsMiddleware
 from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.ratelimit import RateLimiter
-from neura_api.registry import discover_agents, discover_runners
+from neura_api.registry import discover_agent_routes, discover_agents, discover_runners
 from neura_api.routes import agent as agent_routes
 from neura_api.routes import health, stores, webhooks, widget
 from neura_api.stores import StoreDirectory
@@ -173,9 +173,19 @@ def _mount_agents(app: FastAPI) -> None:
     which tells an operator "we have it and it is broken" rather than pretending
     the deployment does not have it.
     """
+    own_routes = discover_agent_routes()
+
     for key, discovered in sorted(app.state.agents.items()):
         app.include_router(agent_routes.build_router(key), prefix=discovered.route_prefix)
         log.info("agent_mounted", agent=key, prefix=discovered.route_prefix)
+
+        # An agent's own surface, if it has one, under the same prefix. Mounted
+        # after the generic routes so a path an agent invents can never shadow
+        # `/chat` or `/conversations` — an agent that captured those would be
+        # answering questions the API is responsible for.
+        if build := own_routes.get(key):
+            app.include_router(build(key), prefix=discovered.route_prefix)
+            log.info("agent_routes_mounted", agent=key, prefix=discovered.route_prefix)
 
     # Rebuilt so the agent routes appear in `/openapi.json`, which FastAPI
     # otherwise caches from before the mount.

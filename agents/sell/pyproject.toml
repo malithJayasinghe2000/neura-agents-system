@@ -29,13 +29,13 @@ sell = "neura_agent_sell:MANIFEST"
 # AGENT_NOT_RUNNABLE — "we have it and it is broken" is a different problem from
 # "we do not have it", and only the second one is true today.
 
-#   [project.entry-points."neura.agent_routes"]   ← the fourth group (ADR-0024 §8)
-#
-# Also absent until it has something to mount. Chat routes are generic and come
-# from the manifest's route_prefix; a product feed is not generic, and no other
-# agent has one — so this is how an agent contributes its own surface without
-# the deployable importing it. Registered when `routes.py` exists, not before:
-# an entry point resolving to an empty router is a seam that looks wired.
+# The fourth group (ADR-0024 §8), and SELL is the first agent to need it. Chat,
+# conversations and the shadow queue are the same for any agent and are built
+# generically from route_prefix. A product feed is not generic — no other agent
+# has one, and it answers to crawlers rather than shoppers. Without this group,
+# mounting it would mean `from neura_agent_sell import ...` inside the API.
+[project.entry-points."neura.agent_routes"]
+sell = "neura_agent_sell.routes:build_routes"
 
 [build-system]
 requires = ["hatchling"]

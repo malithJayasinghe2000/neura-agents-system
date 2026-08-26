@@ -32,6 +32,7 @@ from neura_commerce.sync.state import (
 )
 from neura_commerce.sync.store import (
     CrossTenantWriteError,
+    EntityPage,
     EntityStore,
     InMemoryEntityStore,
     StoredEntity,
@@ -59,6 +60,7 @@ __all__ = [
     "CrossTenantWriteError",
     "DatabaseEntityStore",
     "DatabaseSyncStateStore",
+    "EntityPage",
     "EntityStore",
     "InMemoryEntityStore",
     "InMemorySyncStateStore",

@@ -26,6 +26,14 @@ import neura_agent_core.conversations
 import neura_agent_core.graph.schema
 import neura_agent_core.rag.schema
 import neura_agent_core.shadow  # noqa: F401
+
+# The one place an agent's name legitimately appears outside its own package.
+# Alembic diffs against `neura_core.metadata`, and a table whose module was never
+# imported is absent from it — autogenerate then writes a migration that DROPS
+# the table, which is the gotcha AGENTS.md records. An agent that owns a table
+# must be imported here; discovery by entry point would be cleverer and would
+# fail silently in exactly this way.
+import neura_agent_sell.feed.schema  # noqa: F401
 import neura_commerce.sync.schema  # noqa: F401
 import neura_core.idempotency
 import neura_core.jobs.schema

@@ -88,6 +88,31 @@ def fingerprint(entity: CanonicalEntity) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class EntityPage:
+    """A slice of one scope, in ``external_id`` order.
+
+    Added for the product feed, the first caller that needs to read *back* what
+    was synced rather than reconcile it. Everything before it wanted keys, counts
+    or fingerprints; a feed wants the documents themselves.
+
+    **Still within ADR-0021.** The filter is ``(tenant_id, platform,
+    entity_type)`` and the order is ``external_id`` — together a prefix of the
+    natural primary key, so this is a range scan rather than a query over an
+    entity's *contents*. The day something wants "products under 50" that is
+    still a superseding ADR and still not a column.
+
+    Ordered by ``external_id`` rather than ``updated_at`` deliberately: a cursor
+    over a column a sync mutates skips or repeats rows when a write lands
+    mid-page, and a feed that silently omits products is the failure hardest to
+    notice — nothing errors, the catalogue is just smaller than the shop.
+    """
+
+    entities: list[CanonicalEntity] = field(default_factory=list)
+    #: The ``external_id`` to resume after. ``None`` means this was the last page.
+    next_after: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class StoredEntity:
     key: EntityKey
     neura_id: str
@@ -143,6 +168,16 @@ class EntityStore(Protocol):
         self, tenant_id: str, platform: str, entity_type: EntityType
     ) -> dict[str, str]: ...
 
+    async def page(
+        self,
+        tenant_id: str,
+        platform: str,
+        entity_type: EntityType,
+        *,
+        limit: int,
+        after: str | None = None,
+    ) -> EntityPage: ...
+
 
 class InMemoryEntityStore:
     """In-memory implementation. Correct, not durable.
@@ -195,6 +230,33 @@ class InMemoryEntityStore:
     async def get(self, key: EntityKey) -> CanonicalEntity | None:
         row = self._rows.get(key.as_tuple())
         return row.entity if row else None
+
+    async def page(
+        self,
+        tenant_id: str,
+        platform: str,
+        entity_type: EntityType,
+        *,
+        limit: int,
+        after: str | None = None,
+    ) -> EntityPage:
+        rows = sorted(
+            (
+                row
+                for row in self._scoped(tenant_id, platform, entity_type)
+                if after is None or row.key.external_id > after
+            ),
+            key=lambda r: r.key.external_id,
+        )
+        window = rows[:limit]
+        # Reading one row past the window is what says "there is more". A count
+        # query can disagree with the page it describes, because the two run at
+        # different moments.
+        more = len(rows) > limit
+        return EntityPage(
+            entities=[row.entity for row in window],
+            next_after=window[-1].key.external_id if more and window else None,
+        )
 
     async def external_ids(
         self, tenant_id: str, platform: str, entity_type: EntityType

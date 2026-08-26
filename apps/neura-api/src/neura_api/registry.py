@@ -21,6 +21,7 @@ from neura_core import get_logger
 log = get_logger(__name__)
 
 _GROUP = "neura.agents"
+_ROUTES_GROUP = "neura.agent_routes"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +73,35 @@ def discover_runners() -> dict[str, Any]:
             log.error("agent_runner_failed", entry_point=ep.name, error=str(exc))
 
     log.info("agent_runners_discovered", agents=sorted(found))
+    return found
+
+
+def discover_agent_routes() -> dict[str, Any]:
+    """Load every agent-supplied router, keyed by agent key.
+
+    The fourth discovery seam of the same shape (ADR-0024 §8), and the reason it
+    exists is that not every surface is generic. Chat, conversations and the
+    shadow queue are the same for any agent, so `routes/agent.py` builds them
+    once from the manifest's prefix. A product feed is not: no other agent has
+    one, and it answers to crawlers rather than to shoppers.
+
+    Without this group, mounting it would mean `from neura_agent_sell import ...`
+    inside the API — and "one codebase, five products" would stop being
+    structural the moment agent #2 shipped.
+
+    A broken router is logged and skipped rather than fatal, exactly as a broken
+    runner is: one agent's optional surface must not deny service to every other
+    agent in the deployment.
+    """
+    found: dict[str, Any] = {}
+
+    for ep in entry_points(group=_ROUTES_GROUP):
+        try:
+            found[ep.name] = ep.load()
+        except Exception as exc:
+            log.error("agent_routes_failed", entry_point=ep.name, error=str(exc))
+
+    log.info("agent_routes_discovered", agents=sorted(found))
     return found
 
 

@@ -42,6 +42,7 @@ from neura_commerce.sync.schema import sync_checkpoints, synced_entities
 from neura_commerce.sync.state import SyncCheckpoint, SyncKey
 from neura_commerce.sync.store import (
     CrossTenantWriteError,
+    EntityPage,
     StoredEntity,
     StoredEntityInvalidError,
     SyncStoreError,
@@ -160,6 +161,60 @@ class PostgresEntityStore:
         if row is None:
             return None
         return _rehydrate(key.entity_type, row.document, key)
+
+    async def page(
+        self,
+        tenant_id: str,
+        platform: str,
+        entity_type: EntityType,
+        *,
+        limit: int,
+        after: str | None = None,
+    ) -> EntityPage:
+        """A slice of one scope, in ``external_id`` order.
+
+        Keyset pagination, not ``OFFSET``. An offset re-scans everything it
+        skips, so page 400 of a large catalogue costs four hundred pages of work
+        — and worse, it *shifts* when a sync inserts a row behind the cursor,
+        which silently drops a product from the feed. The filter and the order
+        together are a prefix of the primary key, so each page is a range scan
+        that starts exactly where the last one stopped.
+
+        ``limit + 1`` rows are read and the extra one is discarded. It answers
+        "is there another page" from the same statement that produced this one;
+        a separate ``COUNT`` runs at a different moment and can disagree with
+        the page it is describing.
+        """
+        rows = (
+            await self._session.execute(
+                select(_ENTITIES.external_id, _ENTITIES.document)
+                .where(
+                    *_scope(tenant_id, platform, entity_type),
+                    *([_ENTITIES.external_id > after] if after is not None else []),
+                )
+                .order_by(_ENTITIES.external_id)
+                .limit(limit + 1)
+            )
+        ).all()
+
+        window = rows[:limit]
+        entities = [
+            _rehydrate(
+                entity_type,
+                row.document,
+                EntityKey(
+                    tenant_id=tenant_id,
+                    platform=platform,
+                    entity_type=entity_type,
+                    external_id=row.external_id,
+                ),
+            )
+            for row in window
+        ]
+        return EntityPage(
+            entities=entities,
+            next_after=window[-1].external_id if len(rows) > limit and window else None,
+        )
 
     async def external_ids(
         self, tenant_id: str, platform: str, entity_type: EntityType
@@ -367,6 +422,20 @@ class DatabaseEntityStore:
     async def get(self, key: EntityKey) -> CanonicalEntity | None:
         async with self._db.tenant_session(self._tenant_id) as session:
             return await PostgresEntityStore(session).get(key)
+
+    async def page(
+        self,
+        tenant_id: str,
+        platform: str,
+        entity_type: EntityType,
+        *,
+        limit: int,
+        after: str | None = None,
+    ) -> EntityPage:
+        async with self._db.tenant_session(self._tenant_id) as session:
+            return await PostgresEntityStore(session).page(
+                tenant_id, platform, entity_type, limit=limit, after=after
+            )
 
     async def external_ids(
         self, tenant_id: str, platform: str, entity_type: EntityType
