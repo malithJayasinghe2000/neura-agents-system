@@ -4,13 +4,31 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-26 (SELL built — all three surfaces, first eval baseline)
+**Last updated:** 2026-08-26 (later — A14's cause isolated: `verify` is exonerated, `compose` is not)
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **Answer A14, then 1.17 (deploy).** SELL is built and measured; its one unmet
-gate is escalation precision 0.43 against 0.85, and **every miss is the same miss** — `verify`
-refusing a recommendation. **Do not loosen the prompt to make it green**; 2026-07-30 records that
-exact attempt being measured and reverted. Discriminate first: run CARE's suite on the same box
-as a control, then `make verify-probe` with SELL's prompt.
+**Next action:** **E7, then finish A14, then 1.17 (deploy).** The gate is unchanged —
+escalation precision 0.43 against 0.85 — but **the cause is no longer three candidates, it is one.**
+`make verify-probe AGENT=sell` now exists: SELL's own `verify.md`, a shortlist rendered by the real
+`tools/render.py`, five arms, n=10 each. `llama3.1:8b` answered **50/50 correctly** — it passed an
+attributed suitability claim, passed it again with the evidence duplicated, refused an invented
+returns window, refused the **literal failing string** from the eval (*"it's a good match for your
+size and purpose"*), and passed a **comparative** attributed claim. **So `verify.md` is not too
+strict and the GUARD model holds the role. The refusals are correct answers to weak drafts, and
+`compose.md` — or the local reasoner's compliance with it — is what is left.** The CARE control run
+was therefore **not needed and not run**; it was a test for "the model or the box", and the model
+has now been tested directly on SELL's own strings.
+
+**The one thing that is still unexplained, and the reason this is not finished.** A14 records one
+refusal that was a genuine *false* positive — *"a higher 20,000mm hydrostatic head"*, an attribute
+that **is** in the evidence. The obvious theory was that `verify.md` forbids comparisons while
+`compose.md` asks for a difference to be named, so the verifier over-reads the superlative rule.
+**Arm E was added to test exactly that and it passed 10/10**, so the theory is dead and there is no
+second theory — because **nobody has ever seen the draft**. The harness discards it (**E7**). E7 is
+now A14's blocker, costs **zero model calls**, and should be done before any prompt is touched.
+
+**Do not loosen `verify.md`.** 2026-07-30 records that move being measured and reverted, and the
+probe has now independently shown there is nothing there to loosen. Any `compose.md` change is a
+Rule 4 change: n≥3 either side, injection resistance 1.00 including `make eval-guard-off AGENT=sell`.
 
 **The design session completed on 2026-08-26 and produced exactly what
 [`agents/README.md`](agents/README.md) demanded:** all seven things in

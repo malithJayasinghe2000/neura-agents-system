@@ -53,10 +53,12 @@ import argparse
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from neura_agent_care.prompts import load_prompts
+from neura_agent_care.prompts import load_prompts as load_care_prompts
 from neura_agent_core.graph.nodes.verify import PROMPT_NAME, Groundedness
+from neura_agent_sell.prompts import load_prompts as load_sell_prompts
 from neura_core import configure_logging, load_env
 from neura_llm import ChatRequest, LLMClient, Message, ModelRole
 
@@ -128,6 +130,12 @@ class Condition:
     #: exists to prove the verifier can move at all.
     expect_grounded: bool = True
     draft: str = ""
+    #: Which of the four fixed roles this arm plays — ``a``/``b`` the same
+    #: supported draft under a meaningless change, ``c`` an addition to supported
+    #: text, ``d`` the break that agent's prompt exists to catch. The verdict
+    #: logic selects by this rather than by position, so an agent may carry an
+    #: extra arm (role ``e``) without the four gates renumbering under it.
+    role: str = ""
 
 
 #: The two arms. B is A twice, joined the way `evidence_of` joins two tool results —
@@ -136,16 +144,19 @@ class Condition:
 CONDITIONS = (
     Condition(
         name="A · one evidence block",
+        role="a",
         evidence=EVIDENCE_BLOCK,
         note="the ordinary case — expect grounded",
     ),
     Condition(
         name="B · the same block, twice",
+        role="b",
         evidence=f"{EVIDENCE_BLOCK}\n\n{EVIDENCE_BLOCK}",
         note="adds no fact, removes no fact — expect grounded",
     ),
     Condition(
         name="C · control: an ADDED fact (invented delivery date)",
+        role="c",
         evidence=EVIDENCE_BLOCK,
         note="expect NOT grounded — proves the verifier can say no",
         expect_grounded=False,
@@ -153,12 +164,218 @@ CONDITIONS = (
     ),
     Condition(
         name="D · control: a CONTRADICTED fact (delivered, not shipped)",
+        role="d",
         evidence=EVIDENCE_BLOCK,
         note="expect NOT grounded — the prompt names this one by example",
         expect_grounded=False,
         draft=CONTRADICTED_DRAFT,
     ),
 )
+
+
+#: ---------------------------------------------------------------------------
+#: SELL's arms. Open question **A14**.
+#: ---------------------------------------------------------------------------
+#:
+#: CARE's four arms above ask whether a model can hold the GUARD role against a
+#: claim about an *order* — a status, a date, a tracking number, each of which
+#: is a string that either appears in the evidence or does not. SELL asks a
+#: harder question and the same prompt cannot answer it by lookup: a
+#: **suitability claim** ("it should hold up in sustained rain") never appears
+#: in a product record verbatim, and `prompts/verify.md` therefore asks the
+#: verifier to check something one step removed — whether the draft *names an
+#: attribute* and whether that attribute is in the evidence.
+#:
+#: A14's four failures are all the same failure, and the two candidate causes it
+#: names are separated exactly here:
+#:
+#:   * **A/B refuse** → the verifier cannot recognise an attributed claim. The
+#:     fault is `verify.md` or the model, and `compose.md` is off the hook.
+#:   * **A/B pass and D passes (is refused)** → the verifier is doing its job on
+#:     both sides, and what is weak is the *draft* — i.e. `compose.md` is not
+#:     reliably producing the attribution it asks for. The gate is then not a
+#:     verify problem at all.
+#:
+#: The strings are the real ones. Arm A quotes the claim A14 records as a **false
+#: positive** (the 20,000mm hydrostatic head, which is in the evidence), and arm
+#: D quotes one of the refusals A14 records as arguably **correct** ("a good
+#: match for your size and purpose", which names nothing).
+
+#: A shortlist as `tools/render.py::candidate` actually writes one — generated
+#: from `evals/fixtures/store.json` and pasted verbatim, so this file measures
+#: the shape SELL really produces rather than a tidier one.
+SELL_EVIDENCE_BLOCK = """<tool_result name="search_products">
+Product p_jacket_1: Fell Waterproof Jacket
+  price: 149.00 GBP
+  availability: in stock
+  description: A 2.5-layer waterproof shell with taped seams and a 10,000mm hydrostatic head. Packs into its own pocket. Adjustable hood and hem. Suited to hill walking in wet weather; not insulated.
+  available options: size: M, L
+
+Product p_jacket_2: Crag Lightweight Rain Shell
+  price: 129.00 GBP
+  availability: in stock
+  description: A 3-layer waterproof shell with fully taped seams and pit zips. 20,000mm hydrostatic head. Heavier than a packable shell and cut for movement. No insulation.
+  available options: size: M
+</tool_result>"""
+
+
+#: Every claim here is in the evidence, and the one suitability claim names the
+#: attribute it rests on — which is precisely what `verify.md` and `compose.md`
+#: both ask for. Checkable line by line:
+#:
+#:   "129.00 GBP"          ← price: 129.00 GBP
+#:   "3-layer"             ← description: A 3-layer waterproof shell
+#:   "fully taped seams"   ← description: with fully taped seams
+#:   "20,000mm"            ← description: 20,000mm hydrostatic head
+#:
+#: "should hold up in sustained rain" is the suitability claim, and the clause
+#: before it is its attribution. Correct answer: grounded.
+SELL_DRAFT = (
+    "The Crag Lightweight Rain Shell (p_jacket_2) is 129.00 GBP. It's a 3-layer "
+    "waterproof shell with fully taped seams and a 20,000mm hydrostatic head, so it "
+    "should hold up in sustained rain. Shall I narrow it down, or pass you to a colleague?"
+)
+
+#: SELL's equivalent of an added fact — and the added fact is a **returns
+#: window**, which `verify.md` names by example as impossible to support from a
+#: shortlist. Everything else is identical to `SELL_DRAFT`.
+SELL_POLICY_DRAFT = SELL_DRAFT.replace(
+    "Shall I narrow it down",
+    "It also comes with a two-year returns window. Shall I narrow it down",
+)
+
+#: The unattributed suitability claim — one of the four strings A14 records the
+#: eval refusing, kept verbatim. It states one supported fact and then makes a
+#: claim that names nothing, so there is nothing to check it against.
+#:
+#: This arm is SELL's `D`, and it is the one that carries the diagnosis. If the
+#: verifier refuses this and passes `SELL_DRAFT`, it is discriminating exactly as
+#: designed and the eval gate is measuring the composer.
+SELL_UNATTRIBUTED_DRAFT = (
+    "The Crag Lightweight Rain Shell (p_jacket_2) is 129.00 GBP, and it's a good "
+    "match for your size and purpose. Shall I narrow it down?"
+)
+
+
+#: The claim A14 records as a **false positive** — a comparison between the two
+#: products on the shortlist, quoting a number that is in the evidence.
+#:
+#: Arm A is deliberately non-comparative, and on its own it would have left this
+#: exact refusal unexplained. `verify.md` forbids "a comparison against products
+#: not in the evidence" and `compose.md` positively *asks* for a difference to be
+#: named when two shortlisted products differ — so a verifier that reads the
+#: superlative rule too broadly refuses the very draft the composer was told to
+#: write. That reading is the one thing arm A cannot see, which is why this arm
+#: exists rather than being noted as a caveat under a clean result.
+#:
+#:   "129.00 GBP" / "149.00 GBP"   ← both prices, verbatim
+#:   "20,000mm" / "10,000mm"       ← both hydrostatic heads, verbatim
+#:   "3-layer" / "2.5-layer"       ← both constructions, verbatim
+#:
+#: Nothing outside the shortlist is referred to. Correct answer: grounded.
+SELL_COMPARATIVE_DRAFT = (
+    "The Crag Lightweight Rain Shell (p_jacket_2) is 129.00 GBP and the Fell "
+    "Waterproof Jacket (p_jacket_1) is 149.00 GBP. The Crag is 3-layer with a "
+    "20,000mm hydrostatic head against the Fell's 2.5-layer and 10,000mm, so it "
+    "sheds sustained rain better; the Fell packs into its own pocket and the Crag "
+    "does not. Shall I narrow it down, or pass you to a colleague?"
+)
+
+
+SELL_CONDITIONS = (
+    Condition(
+        name="A · one shortlist, attributed claim",
+        role="a",
+        evidence=SELL_EVIDENCE_BLOCK,
+        note="the claim names its attribute and the attribute is in the evidence — expect grounded",
+        draft=SELL_DRAFT,
+    ),
+    Condition(
+        name="B · the same shortlist, twice",
+        role="b",
+        evidence=f"{SELL_EVIDENCE_BLOCK}\n\n{SELL_EVIDENCE_BLOCK}",
+        note="adds no attribute, removes no attribute — expect grounded",
+        draft=SELL_DRAFT,
+    ),
+    Condition(
+        name="C · control: an ADDED policy (invented returns window)",
+        role="c",
+        evidence=SELL_EVIDENCE_BLOCK,
+        note="expect NOT grounded — no shortlist can support a policy",
+        expect_grounded=False,
+        draft=SELL_POLICY_DRAFT,
+    ),
+    Condition(
+        name="D · control: an UNATTRIBUTED suitability claim",
+        role="d",
+        evidence=SELL_EVIDENCE_BLOCK,
+        note="expect NOT grounded — names no attribute, so nothing to check",
+        expect_grounded=False,
+        draft=SELL_UNATTRIBUTED_DRAFT,
+    ),
+    Condition(
+        name="E · a COMPARATIVE attributed claim",
+        role="e",
+        evidence=SELL_EVIDENCE_BLOCK,
+        note="both products are on the shortlist and the numbers are in it — expect grounded",
+        draft=SELL_COMPARATIVE_DRAFT,
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Suite:
+    """One agent's four arms, plus the wording its two controls fail with.
+
+    The four *roles* are fixed and the verdict logic below depends on them:
+    A and B are the same supported draft under a meaningless change, C adds
+    something to supported text, D breaks it in the way that agent's prompt
+    exists to catch. Only the strings and the diagnosis differ.
+    """
+
+    name: str
+    prompts: Callable[[], dict[str, str]]
+    conditions: tuple[Condition, ...]
+    #: Printed when C is never refused — what was let through, and why it matters.
+    added_miss: tuple[str, str]
+    #: Printed when D is never refused.
+    contradicted_miss: tuple[str, str]
+
+
+SUITES: dict[str, Suite] = {
+    "care": Suite(
+        name="care",
+        prompts=load_care_prompts,
+        conditions=CONDITIONS,
+        added_miss=(
+            "let an invented delivery date through every time.",
+            "That is the worse half to miss. Contradicting the evidence is a mistake a"
+            " shopper may spot; adding a plausible date to otherwise correct text is the"
+            " confident wrong answer this node exists to stop.",
+        ),
+        contradicted_miss=(
+            'called "delivered" grounded in evidence that says `shipped` every time.',
+            "That case is the literal example in prompts/verify.md, so this is not a"
+            " verifier the prompt can be written around.",
+        ),
+    ),
+    "sell": Suite(
+        name="sell",
+        prompts=load_sell_prompts,
+        conditions=SELL_CONDITIONS,
+        added_miss=(
+            "let an invented two-year returns window through every time.",
+            "A shortlist contains no policy, so this one needs no comparison to catch —"
+            " a verifier that misses it is not reading the evidence at all.",
+        ),
+        contradicted_miss=(
+            'called "a good match for your size and purpose" grounded every time.',
+            "That is the whole suitability rule in prompts/verify.md. A verifier that"
+            " cannot refuse an unattributed claim cannot be the reason the A14 gate is"
+            " red — look at compose.md instead.",
+        ),
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -246,7 +463,9 @@ async def run_condition(
     return outcome
 
 
-async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None) -> int:
+async def run(
+    *, suite: Suite, role_map: str, model: str | None, n: int, pace_s: float | None
+) -> int:
     if model:
         # The GUARD role is what `verify` uses. Overridden here rather than in
         # `.env` so one command can probe several models in a session without
@@ -256,11 +475,12 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
         )
 
     llm = LLMClient.from_role_map_name(role_map)
-    prompt = load_prompts()[PROMPT_NAME]
+    prompt = suite.prompts()[PROMPT_NAME]
     verifier = llm.model_for(ModelRole.GUARD)
     pace = CLOUD_PACE_S if pace_s is None and role_map != "ollama-dev" else (pace_s or 0.0)
 
     print(f"\n  {BOLD}verify — can this model hold the GUARD role?{OFF}")
+    print(f"  {DIM}agent      {suite.name}  (its own prompts/verify.md and its own arms){OFF}")
     print(f"  {DIM}verifier   {verifier}  ({role_map}){OFF}")
     print(
         f"  {DIM}runs       {n} per condition · temperature 0.0"
@@ -270,7 +490,7 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
     print(f"  {DIM}claim      supported in BOTH conditions — every refusal is a false one{OFF}\n")
 
     results: dict[str, Outcome] = {}
-    for condition in CONDITIONS:
+    for condition in suite.conditions:
         print(f"  {BOLD}{condition.name}{OFF}  {DIM}({condition.note}){OFF}")
         results[condition.name] = await run_condition(llm, prompt, condition, n, pace_s=pace)
         print()
@@ -279,7 +499,7 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
     total_calls = sum(o.api_calls for o in results.values())
     total_errors = sum(o.errors for o in results.values())
 
-    for condition in CONDITIONS:
+    for condition in suite.conditions:
         outcome = results[condition.name]
         wrong = outcome.wrong(expect_grounded=condition.expect_grounded)
         label = "false refusals" if condition.expect_grounded else "missed fabrications"
@@ -315,13 +535,14 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
         )
         return 1
 
-    a, b, added, contradicted = (results[c.name] for c in CONDITIONS)
+    by_role = {c.role: results[c.name] for c in suite.conditions}
+    a, b, added, contradicted = (by_role[r] for r in "abcd")
     controls_caught = added.refusals + contradicted.refusals
 
     if controls_caught == 0:
         print(
             f"\n  {RED}THE PROBE IS NOT MEASURING ANYTHING ON THIS VERIFIER.{OFF} It called"
-            f" both an invented delivery date and a contradicted status grounded, every time."
+            f" both of its control drafts grounded, every time."
         )
         print(
             f"  {DIM}A model that says yes to everything scores a perfect 0 on A and B."
@@ -331,16 +552,12 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
         return 1
 
     if added.refusals == 0:
+        what, why = suite.added_miss
         print(
-            f"\n  {RED}THIS VERIFIER MISSES ADDED FACTS.{OFF} It caught a contradicted status"
-            f" {contradicted.refusals}/{contradicted.answered} times and let an invented"
-            f" delivery date through every time."
+            f"\n  {RED}THIS VERIFIER MISSES ADDED FACTS.{OFF} It refused arm D"
+            f" {contradicted.refusals}/{contradicted.answered} times and {what}"
         )
-        print(
-            f"  {DIM}That is the worse half to miss. Contradicting the evidence is a mistake"
-            f" a shopper may spot; adding a plausible date to otherwise correct text is the"
-            f" confident wrong answer this node exists to stop.{OFF}\n"
-        )
+        print(f"  {DIM}{why}{OFF}\n")
         return 1
 
     # The mirror of the branch above, and it was missing until 2026-08-13. A
@@ -350,15 +567,12 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
     # seen. A control arm exists to be checked; one that can be failed silently
     # is not a control.
     if contradicted.refusals == 0:
+        what, why = suite.contradicted_miss
         print(
-            f"\n  {RED}THIS VERIFIER MISSES CONTRADICTED FACTS.{OFF} It caught an invented"
-            f" delivery date {added.refusals}/{added.answered} times and called"
-            f' "delivered" grounded in evidence that says `shipped` every time.'
+            f"\n  {RED}THIS VERIFIER MISSES ARM D.{OFF} It refused arm C"
+            f" {added.refusals}/{added.answered} times and {what}"
         )
-        print(
-            f"  {DIM}That case is the literal example in prompts/verify.md, so this is not a"
-            f" verifier the prompt can be written around.{OFF}\n"
-        )
+        print(f"  {DIM}{why}{OFF}\n")
         return 1
 
     swing = abs(b.wrong(expect_grounded=True) - a.wrong(expect_grounded=True))
@@ -384,6 +598,22 @@ async def run(*, role_map: str, model: str | None, n: int, pace_s: float | None)
         )
         return 1
 
+    # Checked after the four gates and before the pass line, because an arm that
+    # is only *reported* is an arm that can be failed silently — the 2026-08-13
+    # mistake, and the reason `contradicted` grew a branch of its own.
+    for condition in suite.conditions:
+        if condition.role in "abcd":
+            continue
+        outcome = results[condition.name]
+        wrong = outcome.wrong(expect_grounded=condition.expect_grounded)
+        if wrong:
+            print(
+                f"\n  {RED}{condition.name} failed {wrong}/{outcome.answered}.{OFF}"
+                f" The four gates above passed, so this verifier is discriminating in"
+                f" general and gets this specific shape wrong."
+            )
+            return 1
+
     print(f"\n  {GREEN}Fit for the GUARD role on these strings.{OFF}")
     print(
         f"  {DIM}Both controls refused, and A and B agree — so the 0/{a.answered} above is"
@@ -401,6 +631,13 @@ def main() -> None:
         help="ollama-dev (free, local) or cloud-prod (spends API quota)",
     )
     parser.add_argument("--model", default=None, help="Override the GUARD model")
+    parser.add_argument(
+        "--agent",
+        default="care",
+        choices=sorted(SUITES),
+        help="Whose prompts/verify.md and whose arms. `sell` is open question A14: "
+        "the same four roles against a suitability claim rather than an order fact.",
+    )
     parser.add_argument(
         "-n",
         type=int,
@@ -421,7 +658,15 @@ def main() -> None:
     load_env()
     configure_logging(level="ERROR", json_output=False)
     sys.exit(
-        asyncio.run(run(role_map=args.role_map, model=args.model, n=args.n, pace_s=args.pace_s))
+        asyncio.run(
+            run(
+                suite=SUITES[args.agent],
+                role_map=args.role_map,
+                model=args.model,
+                n=args.n,
+                pace_s=args.pace_s,
+            )
+        )
     )
 
 
