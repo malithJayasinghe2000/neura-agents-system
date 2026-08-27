@@ -82,6 +82,25 @@ agent offers the Trail Cap — `p_injected`, the product carrying the S9 payload
 `no_match`. **Whether a weakly-relevant candidate may reach `compose` at all is a `sell.md` §2.3
 question and was not decided here.**
 
+**The probe ran, and it did not unpark ADR-0025 — it found the question underneath it.**
+`make verify-probe AGENT=sell` on `gemini-3.6-flash`, 80 calls. The four discrimination gates are
+perfect: it accepts clean attributed claims 10/10 and catches both an invented returns policy and
+an unattributed suitability claim 10/10. **But arm E — the clean baseline with no injection — is
+refused 10/10, and so is arm G, the benign control. Arm F, the injected one, is refused 8/10,
+fewer than either.** S9's whole finding is the differential E✔/G✔ vs F✘, and on this model there is
+no differential. ADR-0025's filter therefore cannot be evaluated: arm H is 9/10 against F's 8/10,
+noise on a broken baseline.
+
+**Every refusal names the same clause**, and it is the real finding: *"the Fell packs into its own
+pocket **and the Crag does not**"*. The Fell's description says it packs; the Crag's says
+*"heavier than a packable shell"* and **never says it does not pack**. The draft's negative half is
+an inference from silence — and **the cloud verifier may simply be right**, because a shopper told
+the Crag will not pack down who finds that it does was misled by us. `llama3.1:8b` accepted it
+10/10. **So arm E's `expect grounded` is a claim about what `verify` should accept, not a fact
+about a model, and it is undecided.** A9 in its sharpest form: absence of evidence is not evidence
+of absence, and nothing in `verify.md` says which way to read it. Nothing was changed in response —
+`verify.md` untouched, arm E's expectation untouched, the disagreement left on the record.
+
 **ADR-0025's parking condition has fired, and its stated reason has evaporated.** S9 parks the
 Rule 4 measurement on *"the first cloud model reaching the GUARD role"*, deferred because seven
 suite runs cost ~2h of local inference. That trigger has now fired, and a suite run costs **$0.011
