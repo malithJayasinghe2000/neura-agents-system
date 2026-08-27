@@ -479,6 +479,61 @@ does — and it is the sentence that lets them decide to stretch.
 merchant's engine, not our index. A bad query is now less damaging; it is not less likely. Eight
 tests added, 857 pass.
 
+### ⚠️ Verifying ADR-0027 by hand: three runs, and none of them reached the fix
+
+Run immediately after the fix shipped, and the honest result is that **the live runs proved
+nothing about it** — worth recording, because it is the trap in testing a change through a
+non-deterministic planner.
+
+| question | `plan` chose | did `search_products` run? |
+|:--|:--|:--|
+| *I need trousers under 40* | **nothing** | ❌ |
+| *I need something to wear on my legs under 40* | `get_product_details(1308)` | ❌ |
+| *do you sell fishing rods?* | — routed to `decline` | ❌ |
+
+The price stripper lives inside `search_products`. **No run called it.** The wiring is now pinned
+by two tests that hand the tool a recording adapter and assert the store receives `"trousers"`,
+because a transcript could not show it.
+
+**The second run is a real win by a different route.** *"something to wear on my legs under 40"*
+→ `retrieve` found the **Everyday Jogger, 39.00 USD**, `plan` fetched it directly, `shortlist`
+kept it under the 40 ceiling, and the shopper was recommended the exact product the old behaviour
+had thrown away. That is the sale A15 was costing — arrived at through the semantic index rather
+than the merchant's search, which is **[A16](open-questions.md)** stated as a positive.
+
+### ⚠️ Finding 4: `plan` chose no tool at all, twice out of three
+
+*"I need trousers under 40"* produced `chose nothing` on both runs, escalating with *"the catalogue
+could not be searched"* — **a sentence that reads as an outage and is not one.** The shop was up
+and answering in 100ms all afternoon; nobody asked it.
+
+This is `recommend_002`'s chain from **[A14](open-questions.md)**, reproduced on a real shop
+instead of a fixture, and A14 already names where to look: **`plan` is the one node that calls the
+reasoner with neither `reasoning_effort` nor `max_tokens` set**, and `qwen3:8b` thinks by default.
+A14 also records that it **does not reproduce on `gemini-3.6-flash`** — 3/3 there. So this is very
+likely the local reasoner, and the escalation it produces is safe but expensive.
+
+### 🔴 Finding 5: `route` answers a catalogue question as out of scope — [A18](open-questions.md)
+
+*"do you sell fishing rods?"* → `out_of_scope` at **confidence 1.00**, need statement
+**`'We do not sell fishing rods.'`** — the router wrote the answer itself — then `decline`:
+*"That question is outside what I can help with."*
+
+**Asking whether a shop stocks something is the most ordinary catalogue question there is.** The
+catalogue was never searched.
+
+**And it undercuts the fix that had just shipped.** ADR-0027 rewrote both of `no_match`'s messages
+so a miss speaks about the search rather than the whole store. `route` intercepts the traffic that
+would reach them. The honest-miss path is close to unreachable for the commonest phrasing, so
+**A18 gates the value of ADR-0027** rather than the other way round. Recorded, not fixed — routing
+`do you sell X` to the catalogue by rule is the obvious move and it needs the adversarial cases
+re-run.
+
+### Timing, and it got worse
+
+Run 2 took **63.7 seconds**, of which `plan` was **51.4s**. The shop answered in 119ms. Nothing
+about the product is slow except the local models.
+
 ### ⚠️ Finding 2: each script indexes under its own tenant
 
 `make rag-check` indexed under `tn_ragsmoke`; `sell-ask` runs under `tn_sell_ask` and found

@@ -1060,6 +1060,46 @@ class TestAConstraintMissIsNotAnEmptyStore:
         out = await no_match({"invocations": []}, _config())
         assert out["reply"] == load_prompts()["no_match"]
 
+    async def test_the_stripped_query_is_what_reaches_the_store(self) -> None:
+        """The stripper is unit-tested above; this proves it is **wired**.
+
+        Worth its own test because it could not be verified from a live run:
+        three hand-run turns in the testing log all reached an answer without
+        `search_products` being chosen at all, so no transcript showed what the
+        merchant's search engine actually received.
+        """
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        seen: list[str] = []
+
+        class _RecordingAdapter:
+            async def search_products(self, query: Any) -> Any:
+                seen.append(query.text)
+                return SimpleNamespace(items=[])
+
+        await search_products.fn("trousers under 40", _ctx(adapter=_RecordingAdapter()))
+
+        assert seen == ["trousers"], "the store must not be sent the price phrase"
+
+    async def test_the_store_still_receives_a_query_with_no_price_in_it(self) -> None:
+        """The common case must be untouched — stripping is not rewriting."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        seen: list[str] = []
+
+        class _RecordingAdapter:
+            async def search_products(self, query: Any) -> Any:
+                seen.append(query.text)
+                return SimpleNamespace(items=[])
+
+        await search_products.fn("waterproof hiking jacket", _ctx(adapter=_RecordingAdapter()))
+
+        assert seen == ["waterproof hiking jacket"]
+
     def test_shortlist_reports_the_ceiling_that_excluded_everything(self) -> None:
         from neura_agent_sell.nodes.shortlist import _constraint_miss
 
