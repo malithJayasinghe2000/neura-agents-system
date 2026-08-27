@@ -223,9 +223,11 @@ Contracts: 5 kept, 0 broken                 ← architecture rules
 
 Everything above is the *shopper's* side and the API. The **merchant console** is the screen a shop
 owner logs into ([ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md),
-[console.md](console.md)). Only **screen 1, sign in**, is built so far.
+[console.md](console.md)). **All five v1 screens are built**: sign in, Conversations, Review,
+Shop and Usage.
 
-It is two processes, and both must be running.
+It is two processes, and both must be running. `make console` prints the two commands if you
+would rather not scroll.
 
 ### Terminal 1 — the API
 
@@ -284,9 +286,28 @@ merchants use us). **The API's log is where a delivery failure shows up**, as
 make console-check EMAIL=you@example.com
 ```
 
-Drives **real headless Chrome** through a real emailed link: seven assertions, no models, no cost.
-It checks things a request library cannot — that the session cookie is invisible to JavaScript, that
-no API key ever reaches the browser, and that a used link is refused the second time.
+Drives **real headless Chrome** through a real emailed link and then through all five screens:
+**33 assertions**, no models, no cost.
+
+It checks things a request library cannot, because they are properties of a *rendered page*: that
+the session cookie is invisible to JavaScript, that no API key or stored credential ever reaches
+the browser, that the Review queue shows the evidence rather than only the reply, that a turn the
+agent declined explains itself instead of rendering an empty card, that a `[EMAIL_1]` token is
+explained rather than left looking like lost data, and that no unmeasured figure is printed as
+money. A grade given by clicking a real button is still there after a reload.
+
+It seeds its own conversations, shadow turns, store and usage row — **a check with nothing to look
+at proves nothing** — and removes exactly those rows afterwards, by id.
+
+### Connecting a shop is not done in the console
+
+Screen 4 shows the connection, the catalogue and the last sync, and **has no connect form** —
+that is a decision, not an unfinished screen ([console.md §3.4](console.md)). Use the API or
+the CLI:
+
+```bash
+make sync-check URL=https://your-shop/neura/v1 TOKEN=...   # connects and syncs
+```
 
 ### Useful
 

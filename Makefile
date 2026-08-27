@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        api-check verify-probe router-probe console-check
+        api-check verify-probe router-probe console console-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -42,6 +42,24 @@ api:  ## Run the API only (assumes datastores are up)
 	uv run neura-api
 
 dev: up api  ## Start datastores, then the API with reload
+
+# The console needs the API on 8010, because `next.config.ts` rewrites /api/* to
+# it — and NOT the 8000 in .env, where an unrelated application has been found
+# listening before (open question E6). Two terminals, stated rather than implied:
+# a single target that backgrounded both would hide whichever one failed.
+console:  ## How to run the merchant console (prints the two commands)
+	@echo ""
+	@echo "  Two terminals:"
+	@echo "    1)  NEURA_API_PORT=8010 uv run neura-api"
+	@echo "    2)  cd apps/neura-console && npm run dev"
+	@echo ""
+	@echo "  Then http://localhost:3000 — and to get in:"
+	@echo "    make tenant-new NAME=\"My Shop\" AGENTS=care        (prints tn_...)"
+	@echo "    make user-new EMAIL=you@shop.com TENANT=tn_...     (once)"
+	@echo "    make user-link EMAIL=you@shop.com                  (a sign-in URL)"
+	@echo ""
+	@echo "  To prove it works: make console-check EMAIL=you@shop.com"
+	@echo ""
 
 # ── Quality ──────────────────────────────────────────────────────────────────
 
