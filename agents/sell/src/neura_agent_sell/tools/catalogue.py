@@ -20,6 +20,8 @@ making a claim about *now*, and stock is the field that goes stale fastest.
 
 from __future__ import annotations
 
+import re
+
 from neura_agent_core.tools import ToolContext, tool
 from neura_agent_sell.tools.render import (
     candidate,
@@ -42,6 +44,58 @@ MAX_RESULTS = 5
 #: a way to turn one request into an expensive query against a merchant's store.
 MAX_VARIANTS = 20
 
+#: A price ceiling written into the search text: `under 40`, `below £40`,
+#: `less than $40.00`, `up to 40`, `max 40`, `cheaper than 40`, `no more than 40`.
+#:
+#: **Bound to a number, never to a bare one.** `size 40`, `40 denier` and `SPF 40`
+#: carry no comparison word and are left alone — they are things a shopper
+#: genuinely searches for, and a stripper that ate them would trade one silent
+#: failure for another.
+_PRICE_PHRASE = re.compile(
+    r"""\b(?:
+          under | below | beneath
+        | (?:less|cheaper|lower)\s+than
+        | (?:up\s+to) | (?:no\s+more\s+than) | (?:at\s+most) | max(?:imum)?
+        | within | around | about
+    )\s*
+    [\$£€]?\s*\d+(?:[.,]\d+)?\s*
+    (?:usd|gbp|eur|dollars?|pounds?|euros?|bucks?|quid)?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+#: Left over once the phrase goes: a dangling connective, doubled spaces.
+_DANGLING = re.compile(r"\b(?:for|at|and|or|with|in)\s*$", re.IGNORECASE)
+
+
+def strip_price_constraint(text: str) -> str:
+    """Remove a price ceiling from a search query. See [ADR-0027].
+
+    The merchant's search engine is a keyword search over their own product
+    text, and **no product contains the token `40`**. Measured on the test shop:
+    `trousers` returns 4 and `trousers under 40` returns **0**. One adjective
+    destroys the turn, and every gate downstream reads green.
+
+    `plan.md` already instructs the model not to do this — *"Search for the
+    thing, not the sentence"*, *"Do not try to filter by price yourself"* — and
+    the model does it anyway. That is AGENTS.md rule 3 from the inside: a
+    behaviour defended only by a sentence in a prompt is not defended, so the
+    enforcement is here, at the last point we own the string, and applies
+    whatever produced it.
+
+    **Nothing is lost by removing it.** `route` extracts the ceiling
+    structurally and `shortlist` enforces it exactly, in code, on the results.
+    The phrase in the query was never doing the filtering — it was only
+    preventing the search from matching.
+
+    Returns the original text unchanged if stripping would empty it: a query of
+    *"under 40"* and nothing else is a shopper who named a budget and no
+    product, and an empty search is worse than a bad one.
+    """
+    stripped = _PRICE_PHRASE.sub(" ", text)
+    stripped = _DANGLING.sub("", " ".join(stripped.split())).strip()
+    return stripped or text
+
 
 @tool(
     name="search_products",
@@ -59,6 +113,15 @@ async def search_products(query: str, ctx: ToolContext) -> str:
     text = query.strip()
     if not text:
         return "No search terms were given, so the catalogue was not searched."
+
+    if (searched := strip_price_constraint(text)) != text:
+        log.info(
+            "sell_price_stripped_from_query",
+            tenant_id=ctx.tenant_id,
+            asked=text,
+            searched=searched,
+        )
+    text = searched
 
     page = await ctx.adapter.search_products(ProductQuery(text=text, limit=MAX_RESULTS))
     products = list(page.items)[:MAX_RESULTS]

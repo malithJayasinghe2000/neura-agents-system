@@ -435,9 +435,49 @@ evidence covers the entire store. `shortlist` enforces it — and enforces the w
 zero rows counts as the store having answered.**
 
 So the guarantee holds against an outage, and not against a bad query — which is the far commoner
-case. **Recorded as [A15](open-questions.md), 🔴.** Not fixed: widening the precondition trades the
-honest-miss message, which is a real feature, against a false claim about a merchant's whole
-catalogue. The false claim is worse and it is what currently ships.
+case. **Recorded as [A15](open-questions.md), 🔴.** Not fixed at the time: widening the precondition
+trades the honest-miss message, which is a real feature, against a false claim about a merchant's
+whole catalogue. The false claim is worse and it is what shipped.
+
+### ✅ A15 fixed 2026-08-27 — [ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md)
+
+Decided by the project owner after the numbers were put in front of them. Measured against the
+same endpoint first, because the argument turns on it:
+
+| query | results |
+|:--|--:|
+| `trousers` | **4** |
+| `trousers under 40` | **0** |
+
+And the shop holds an **Everyday Jogger at 39.00 USD** — inside the budget the shopper stated.
+So the sentence was not merely over-broad, it cost a sale that was available.
+
+**The fix is not a better prompt, and that is the finding.** `plan.md` already says *"Search for
+the **thing**, not the sentence"* and *"**Do not try to filter by price yourself** — that is
+handled elsewhere, exactly."* The model was told precisely the right thing and did the other
+thing. **AGENTS.md rule 3, arriving from the inside.**
+
+1. **The price is stripped from the query in code**, at the tool boundary — the last point we own
+   the string, and it applies whatever produced it. `size 40`, `40 denier` and `SPF 40` are
+   untouched: only a comparison word bound to a number matches.
+2. **The constraint miss got its own message.** `shortlist` already knew the difference between
+   *"the catalogue returned nothing"* and *"four came back and your budget excluded them"* — it
+   logged them separately — and said the same sentence for both. It now reports a count and the
+   closest price: *"I found 4 in this store's catalogue, but none under 40.00 USD. The closest is
+   44.00 USD."* No model writes it, `promises` stays empty, and **the product is never named** —
+   a number cannot be added to a basket.
+3. **The whole-store claim is gone** from the zero-results message. It speaks about the search
+   now, with the store's category list still following.
+
+**This narrows a documented prohibition, deliberately and in writing.** `no_match.py` forbade
+describing what was found at all, on the grounds that implying fit is *"the most common failure
+mode of every recommender ever shipped"*. That reasoning is upheld: naming a price the shopper
+themselves set a bound on says the product does **not** fit, which is the opposite of implying it
+does — and it is the sentence that lets them decide to stretch.
+
+**[A16](open-questions.md) is untouched and is the real ceiling.** SELL still searches the
+merchant's engine, not our index. A bad query is now less damaging; it is not less likely. Eight
+tests added, 857 pass.
 
 ### ⚠️ Finding 2: each script indexes under its own tenant
 

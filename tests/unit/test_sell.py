@@ -963,6 +963,122 @@ class TestTheTerminalNodesGenerateNothing:
         assert out["reply"] == load_prompts()["no_match"]
 
 
+class TestAConstraintMissIsNotAnEmptyStore:
+    """[ADR-0027]. A15: one bad query must not speak for a merchant's catalogue."""
+
+    def test_a_price_ceiling_is_stripped_from_the_search_text(self) -> None:
+        """Measured on the test shop: `trousers` returns 4, `trousers under 40`
+        returns 0. The ceiling is enforced by `shortlist`, in code, so the
+        phrase was never filtering — only preventing a match."""
+        from neura_agent_sell.tools.catalogue import strip_price_constraint
+
+        assert strip_price_constraint("trousers under 40") == "trousers"
+        assert strip_price_constraint("waterproof jacket below £150") == "waterproof jacket"
+        assert strip_price_constraint("shoes less than $99.50") == "shoes"
+        assert strip_price_constraint("a coat up to 200 dollars") == "a coat"
+
+    def test_a_bare_number_is_not_a_price(self) -> None:
+        """A stripper that ate these would trade one silent failure for another."""
+        from neura_agent_sell.tools.catalogue import strip_price_constraint
+
+        for query in ("size 40 trousers", "40 denier tights", "SPF 40 sunscreen"):
+            assert strip_price_constraint(query) == query
+
+    def test_a_query_that_is_only_a_budget_survives_intact(self) -> None:
+        """An empty search is worse than a bad one."""
+        from neura_agent_sell.tools.catalogue import strip_price_constraint
+
+        assert strip_price_constraint("under 40") == "under 40"
+
+    async def test_the_budget_case_says_what_was_found_and_what_it_cost(self) -> None:
+        """The commonest real miss, and until ADR-0027 it was computed and
+        thrown away — routed to the same sentence as an empty catalogue."""
+        from neura_agent_sell.nodes import no_match
+
+        out = await no_match(
+            {
+                "invocations": [],
+                "miss": {
+                    "kind": "constraint",
+                    "found": "4",
+                    "ceiling": "40.00",
+                    "cheapest": "44.00",
+                    "currency": "USD",
+                },
+            },
+            _config(),
+        )
+        assert "I found 4" in out["reply"]
+        assert "none under 40.00 USD" in out["reply"]
+        assert "closest is 44.00 USD" in out["reply"]
+        assert out["grounded"] is True
+        assert out["refused"] is True
+
+    async def test_the_budget_message_names_no_product(self) -> None:
+        """ADR-0027 narrowed the prohibition on describing what was found; it
+        did not lift the one on identifying it. A number cannot be added to a
+        basket."""
+        from neura_agent_sell.nodes import no_match
+
+        out = await no_match(
+            {
+                "invocations": [
+                    _invocation(
+                        "search_products",
+                        "Product 1305: Linen Drawstring Trousers\n  price: 44.00 USD",
+                    )
+                ],
+                "miss": {
+                    "kind": "constraint",
+                    "found": "1",
+                    "ceiling": "40.00",
+                    "cheapest": "44.00",
+                    "currency": "USD",
+                },
+            },
+            _config(),
+        )
+        assert "Linen Drawstring" not in out["reply"]
+        assert "1305" not in out["reply"]
+
+    async def test_no_reply_claims_the_shop_does_not_carry_it(self) -> None:
+        """The A15 sentence itself. One query a keyword engine could not match
+        is not evidence that the shelf is bare."""
+        from neura_agent_sell.nodes import no_match
+
+        for miss in ({"kind": "empty"}, {"kind": "constraint", "found": "4", "ceiling": "40.00"}):
+            out = await no_match({"invocations": [], "miss": miss}, _config())
+            assert "doesn't appear to carry" not in out["reply"]
+            assert "does not carry" not in out["reply"]
+
+    async def test_an_unset_miss_falls_back_to_the_fixed_file(self) -> None:
+        """A node that forgets to set `miss` must degrade to the old message,
+        never to half a sentence."""
+        from neura_agent_sell.nodes import no_match
+        from neura_agent_sell.prompts import load_prompts
+
+        out = await no_match({"invocations": []}, _config())
+        assert out["reply"] == load_prompts()["no_match"]
+
+    def test_shortlist_reports_the_ceiling_that_excluded_everything(self) -> None:
+        from neura_agent_sell.nodes.shortlist import _constraint_miss
+
+        miss = _constraint_miss(
+            [
+                ("1305", "Product 1305: Linen Drawstring\n  price: 44.00 USD"),
+                ("1307", "Product 1307: Halden Cargo\n  price: 62.00 USD"),
+            ],
+            {"entities": {"max_price": "40"}},
+        )
+        assert miss == {
+            "kind": "constraint",
+            "found": "2",
+            "ceiling": "40.00",
+            "cheapest": "44.00",
+            "currency": "USD",
+        }
+
+
 class TestPrompts:
     def test_every_prompt_the_graph_asks_for_exists(self) -> None:
         from neura_agent_sell.prompts import REQUIRED, load_prompts

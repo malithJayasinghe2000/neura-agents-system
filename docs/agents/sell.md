@@ -169,6 +169,18 @@ A cold index, a half-finished first sync, an adapter that timed out, a tenant wh
 
 Otherwise the turn escalates with a reason that names which of the two failed. This is `verify`'s failing-closed rule applied one node earlier: **a missing verdict must read as "not established", never as "no objection raised".**
 
+#### What [ADR-0027] changed, 2026-08-27 — and it is the sentence, not the exit
+
+Found by hand against a real shop, recorded as **A15**. The rule above was enforced in one direction only: `shortlist` asked *"did the store reply?"* and never *"did we ask it a question the store could answer?"* **A search returning zero rows counted as the store having answered**, so the guarantee held against an outage and not against a bad query — which is the far commoner case. A shopper who typed *"I need trousers under 40"* was told this shop does not carry it, by a shop stocking four kinds of trousers.
+
+Three things changed, and the exits above are **not** among them:
+
+1. **A price ceiling is stripped from the search text in code** (`tools/catalogue.py`). `trousers under 40` returns 0 from a keyword engine; `trousers` returns 4. The ceiling was never doing the filtering — this node was, on the results — so the phrase only prevented the match. Enforced in code and not in `plan.md`, which already said it and was ignored.
+2. **The constraint miss became its own message.** This node already distinguished "the catalogue returned nothing" from "products came back and the shopper's own limit excluded them" — it logs them separately — and routed both to one sentence. The second now reports a count and the closest price, through `state["miss"]`.
+3. **`no_match` no longer claims anything about the whole store when a search found nothing.** It speaks about the search. The store's category list still follows.
+
+**The three exits, the freshness bound and the fabrication check are unchanged.** What was wrong was never the shape of this node — it was that its most careful sentence was being said on evidence that did not support it.
+
 **Two further checks live here, both deterministic, both cheap:**
 
 - **A recommended product that was not retrieved is a fabrication, and that is detectable without a model.** Every product id the composer may cite must appear in `shortlist`'s output. A citation to anything else fails the turn. This is the *authorisation-is-code* instinct applied to recommendation, and it is the reason `shortlist_groundedness` in §9 can be gated at 1.00 rather than judged.

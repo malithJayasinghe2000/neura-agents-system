@@ -19,12 +19,32 @@ reply is a claim a model composed**, so there is no ungrounded statement for
 ## What it may and may not say
 
 **May:** the fixed sentence; the categories this store publishes; an offer to
-pass the shopper to a person.
+pass the shopper to a person; and — since [ADR-0027] — **a count and a price**
+when the shopper's own stated limit is what excluded everything.
 
-**May not:** name a near-miss product as though it fits, describe what was
-found, or explain *why* the store does not carry something. The first is the
-failure above. The second is a shortlist by another name. The third is a claim
-about a merchant's buying decisions that nothing in this system knows.
+**May not:** name a near-miss product as though it fits, identify one at all, or
+explain *why* the store does not carry something. The first is the failure
+above. The second is a shortlist by another name. The third is a claim about a
+merchant's buying decisions that nothing in this system knows.
+
+### What ADR-0027 narrowed, and what it left alone
+
+This node used to forbid describing what was found *at all*, and it said one
+sentence for two different situations: a search that returned nothing, and a
+search that returned four products the shopper's budget excluded. The second is
+the commonest real miss and the most useful thing SELL can say.
+
+The prohibition's reasoning is upheld — the failure it names is **implying
+fit**. *"None under 40.00 USD; the closest is 44.00"* states that the product
+does **not** fit, in the shopper's own units, which is the opposite, and is what
+lets them decide to stretch. What is still forbidden is naming the product: a
+number cannot be added to a basket.
+
+**The other clause ADR-0027 removed is in the fixed file.** *"This shop doesn't
+appear to carry it"* was a claim about the entire catalogue made on the strength
+of one query, and a merchant's keyword search that cannot match `trousers under
+40` is not evidence that the shelf is bare. The message now speaks about the
+search.
 
 ## The precondition, which is not enforced here
 
@@ -49,6 +69,7 @@ from neura_core import get_logger
 log = get_logger(__name__)
 
 PROMPT_NAME = "no_match"
+CONSTRAINT_PROMPT_NAME = "no_match_constraint"
 
 #: The line `tools/render.py` writes for `list_categories`.
 _CATEGORIES = re.compile(r"^This store's categories: (.+)$", re.MULTILINE)
@@ -58,7 +79,16 @@ async def no_match(state: AgentState, config: RunnableConfig) -> AgentState:
     """Say plainly that this store does not carry it."""
     runtime = runtime_of(config or {})
 
-    reply = runtime.prompt(PROMPT_NAME)
+    miss = state.get("miss") or {}
+
+    if lead := _constraint_lead(miss):
+        # The shopper's own limit is what excluded everything, so say so with
+        # the two numbers that make it actionable ([ADR-0027]). Rendered here,
+        # from values `shortlist` copied out of tool output — the file supplies
+        # the offer that follows, and no model writes either half.
+        reply = f"{lead}\n\n{runtime.prompt(CONSTRAINT_PROMPT_NAME)}"
+    else:
+        reply = runtime.prompt(PROMPT_NAME)
 
     # Appended only when the store actually published a category list this turn.
     # Not fetched here, and not inferred: if `list_categories` did not run or
@@ -72,6 +102,7 @@ async def no_match(state: AgentState, config: RunnableConfig) -> AgentState:
         conversation_id=state.get("conversation_id"),
         tenant_id=state.get("tenant_id"),
         offered_categories=bool(categories),
+        kind=miss.get("kind", "empty"),
     )
 
     return {
@@ -102,4 +133,42 @@ def _categories(state: AgentState) -> str:
     return ""
 
 
-__all__ = ["PROMPT_NAME", "no_match"]
+def _constraint_lead(miss: dict[str, str]) -> str:
+    """One sentence of facts, or nothing at all. See [ADR-0027].
+
+    *"I found 4 in this store's catalogue, but none under 40.00 USD."*
+
+    Returns empty for every situation that is not a constraint miss, which is
+    what makes the caller's ``if`` the whole branch: an unrecognised or absent
+    ``miss`` falls back to the fixed file, so a node that forgets to set it
+    degrades to the old behaviour rather than to a half-written sentence.
+
+    The ceiling is required. Without it there is no constraint to have missed,
+    and *"I found 4 but none of them fit"* is a judgement this node may not make.
+    """
+    if miss.get("kind") != "constraint" or not (ceiling := miss.get("ceiling")):
+        return ""
+
+    try:
+        found = int(miss.get("found", "0"))
+    except ValueError:
+        return ""
+    if found < 1:
+        return ""
+
+    currency = miss.get("currency", "")
+    limit = f"{ceiling} {currency}".strip()
+
+    lead = (
+        f"I found one in this store's catalogue, but it isn't under {limit}."
+        if found == 1
+        else f"I found {found} in this store's catalogue, but none under {limit}."
+    )
+
+    if cheapest := miss.get("cheapest"):
+        lead = f"{lead} The closest is {f'{cheapest} {currency}'.strip()}."
+
+    return lead
+
+
+__all__ = ["CONSTRAINT_PROMPT_NAME", "PROMPT_NAME", "no_match"]

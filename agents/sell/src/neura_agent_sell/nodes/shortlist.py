@@ -118,19 +118,32 @@ async def shortlist(state: AgentState, config: RunnableConfig) -> AgentState:
         }
 
     if not candidates:
-        # The store answered and returned nothing. That is the honest miss.
+        # The store answered and returned nothing. An honest miss — but only
+        # about **this search**. [ADR-0027] removed the clause that made it a
+        # claim about the whole catalogue: one query the merchant's keyword
+        # engine could not match is not evidence that the shelf is bare, and
+        # `no_match` now says so in the shopper's hearing.
         log.info("sell_no_match", conversation_id=state.get("conversation_id"))
-        return {"promises": [], "context": _evidence(successful, [])}
+        return {
+            "promises": [],
+            "context": _evidence(successful, []),
+            "miss": {"kind": "empty"},
+        }
 
     # The store answered, products came back, and the shopper's own constraints
-    # excluded all of them. Also an honest miss — and a more useful one, because
-    # `no_match` can say what was found and why it did not fit.
+    # excluded all of them. The most useful thing SELL can say, and until
+    # [ADR-0027] it was computed here and thrown away — routed to the identical
+    # "we don't carry it" sentence as the case above.
     log.info(
         "sell_all_candidates_excluded",
         conversation_id=state.get("conversation_id"),
         found=len(candidates),
     )
-    return {"promises": [], "context": _evidence(successful, [])}
+    return {
+        "promises": [],
+        "context": _evidence(successful, []),
+        "miss": _constraint_miss(candidates, state),
+    }
 
 
 def reached_the_catalogue(state: AgentState) -> bool:
@@ -240,6 +253,35 @@ def _evidence(invocations: list[ToolInvocation], surviving: list[tuple[str, str]
     return "\n\n".join(
         f'<tool_result name="{i.tool_name}">\n{i.value}\n</tool_result>' for i in invocations
     )
+
+
+def _constraint_miss(candidates: list[tuple[str, str]], state: AgentState) -> dict[str, str]:
+    """The facts behind "we have them, but not at that price". See [ADR-0027].
+
+    Facts only — a count, the shopper's own ceiling, and the lowest price the
+    catalogue actually returned. `no_match` puts them in a fixed sentence.
+
+    **The near-miss product is deliberately not identified.** `no_match.py`
+    forbids naming one as though it fits, and that prohibition stands; what
+    ADR-0027 narrowed is the ban on saying *anything* about what was found.
+    A price the shopper themselves set a bound on states that the product does
+    **not** fit, in their own units — the opposite of implying that it does —
+    and it is the sentence that lets them decide to stretch. Naming the product
+    would put something in reach of a basket; a number cannot be added to one.
+    """
+    ceiling = _ceiling(state)
+    prices: list[tuple[Decimal, str]] = []
+    for _, block in candidates:
+        prices.extend((Decimal(amount), currency) for amount, currency in _PRICE.findall(block))
+
+    miss = {"kind": "constraint", "found": str(len(candidates))}
+    if ceiling is not None:
+        miss["ceiling"] = f"{ceiling:.2f}"
+    if prices:
+        cheapest, currency = min(prices, key=lambda pair: pair[0])
+        miss["cheapest"] = f"{cheapest:.2f}"
+        miss["currency"] = currency
+    return miss
 
 
 __all__ = ["MAX_CANDIDATES", "reached_the_catalogue", "shortlist"]

@@ -4,13 +4,62 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-27 (later still) — **Stage 7 of the testing log: the widget works, and the review queue was recording a zero nobody had measured**
+**Last updated:** 2026-08-27 (evening) — **A15 is closed by [ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md), and the fix could not be a prompt**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Next action:** **Put it in front of a merchant (B2).** Every screen v1 designed is built and
 proved in a real browser — `make console-check EMAIL=…` passes **33/33** — so the console is no
 longer the thing standing between this project and its first design partner. The remaining
 blockers to *deploying* it are **K1** (production email) and **X2** (deploy target), both
 unchanged and both external decisions.
+
+## Session 2026-08-27 (evening) — Stages 5 and 6 by hand, and A15 closed
+
+**CARE was walked end to end for the first time — ten questions, one feature at a time.** Stage 5
+is ✅. The pipeline works. Two findings are worth more than that.
+
+**The order number in the testing log did not exist.** `where is my order 1001?` was the
+documented command; this shop has no order 1001, and a nonexistent order returns the *same*
+message a forbidden one returns — so the run looked like an authorisation refusal and was not one.
+Real orders are `NRA0001`–`NRA0020` across customers 385–392. Run properly, the authorisation
+result is **two mechanisms**: anonymous is refused at the `ownership` gate (0ms, shop never
+contacted), while a signed-in customer asking for someone else's order is **allowed** through the
+gate and the tool filters its own result (A6). The evidence reaching `compose` is byte-identical
+to the evidence for an order that does not exist, which is the guarantee.
+
+**`verify` passed a claim the catalogue does not make — [A9](open-questions.md) on real data for
+the first time.** Asked whether the Ashford Slim Chinos are waterproof, `plan` chose **`no lookup
+needed`** and the draft said they *"are not waterproof"*. The description never uses the word
+water. `verify` said *every claim supported*. **The answer is true and the process is wrong**: it
+came from world knowledge, which is the one thing this product exists not to do. Every previous
+observation of A9 — including the arms E/F/G evidence behind S9 — ran against `store.json`. It
+matches the documented model split exactly: `gemini-3.6-flash` refuses this shape 10/10,
+`llama3.1:8b` accepts it 10/10, and this was `llama3.1:8b`. **Nothing was changed.**
+
+**A15 is closed — [ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md),
+decided by the project owner once the numbers were in front of them.** *"I need trousers under
+40"* was answered *"this shop doesn't appear to carry it"* by a shop stocking four kinds of
+trousers, one of them an Everyday Jogger at **39.00 USD — inside the stated budget**. Measured:
+`trousers` returns 4, `trousers under 40` returns 0.
+
+**The fix could not be a prompt, and that is the finding.** `plan.md` already says *"Search for the
+thing, not the sentence"* and *"Do not try to filter by price yourself"*. The model was told the
+right thing and did the other thing — **rule 3 arriving from the inside**. So: the ceiling is
+stripped from the query **in code** at the tool boundary (bare numbers untouched — `size 40`,
+`SPF 40`); the constraint miss gained its own message, reporting a count and the closest price
+from values copied out of tool output, with **the product never named**; and the whole-store claim
+is gone from the zero-results message.
+
+**It narrows a documented prohibition and says so.** `no_match.py` forbade describing what was
+found; the ADR upholds the reasoning (implying fit) and narrows the scope, because naming a price
+the shopper themselves bounded states the product does **not** fit. The three exits, the freshness
+bound and the fabrication check are unchanged. **857 tests pass, +8.**
+
+**[A16](open-questions.md) is untouched and is now the binding constraint on SELL quality** — it
+still searches the merchant's engine rather than our index, so a bad query is less damaging and
+not less likely.
+
+**Still not run:** `make care-check`, `make sell-check`, and a multi-turn conversation with a
+pronoun. **Next:** Stage 8, the console — the only thing that produces **E1**, a real graded turn.
 
 ## Session 2026-08-27 (later still) — Stage 7: the widget, and what cleanup was eating
 

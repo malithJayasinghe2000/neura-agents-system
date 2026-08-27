@@ -141,6 +141,27 @@ class AgentState(TypedDict, total=False):
     #: the sentence: the handoff already carries the draft in full.
     promises: list[str]
 
+    #: Why a turn ended with nothing to offer, when that is an *answer* rather
+    #: than a failure. Set by the node that decided it; read by the node that
+    #: writes the fixed reply. See [ADR-0027].
+    #:
+    #: ``kind`` is the situation and the rest are its facts, all strings so the
+    #: value checkpoints cleanly:
+    #:
+    #: * ``{"kind": "empty"}`` — the catalogue was searched and returned nothing.
+    #: * ``{"kind": "constraint", "found": "4", "ceiling": "40.00",
+    #:   "cheapest": "44.00", "currency": "USD"}`` — products came back and the
+    #:   shopper's own stated limit excluded every one of them.
+    #:
+    #: **Facts, never a sentence.** The wording lives in a prompt file and the
+    #: numbers are copied from tool output, which is what keeps the reply a
+    #: template rather than a generation — no model writes this, so there is no
+    #: ungrounded claim for `verify` to catch.
+    #:
+    #: Deliberately not named for one agent: "there is nothing to offer, and
+    #: here is precisely why" is a shape any agent can reach.
+    miss: dict[str, str]
+
     # ── route ────────────────────────────────────────────────────────────────
     intent: str
     intent_confidence: float

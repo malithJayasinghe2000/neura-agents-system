@@ -42,7 +42,9 @@ PROMPT_DIR = Path(__file__).resolve().parent
 #: presents as the agent being cautious rather than as anything being broken.
 #: Every case escalated, which is `verify` failing closed exactly as designed —
 #: which is also why nothing looked alarming until the gate was read.
-REQUIRED = frozenset({"route", "plan", "compose", "decline", "no_match", "verify"})
+REQUIRED = frozenset(
+    {"route", "plan", "compose", "decline", "no_match", "no_match_constraint", "verify"}
+)
 
 
 class PromptError(RuntimeError):
