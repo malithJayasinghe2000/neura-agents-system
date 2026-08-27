@@ -546,18 +546,67 @@ async def provision(
 
 
 async def deprovision(tenant_id: str) -> None:
+    """Remove every row this tenant owns — *every* table, not the obvious seven.
+
+    Found on 2026-08-27, in Stage 7 of the testing log. The earlier list deleted
+    the transcript, the usage and the tenant row, and left twelve tenant-scoped
+    tables standing. Three shadow turns, 147 embedded chunks and 46 synced
+    entities had outlived the tenants that owned them — the shadow rows pointing
+    at a conversation, a message and a tenant that no longer existed.
+
+    That is litter in a test harness. What makes it worth a docstring is that
+    this function is the **only** code in the repository that deletes a tenant,
+    so it is also the closest thing here to an answer to "delete my data" — and
+    the rows it was leaving behind are the merchant's catalogue and the drafts
+    of replies. The product-level question is open as **S10**; this only stops
+    the harness from being the thing that proves the gap.
+
+    The session is tenant-scoped and RLS is forced, so an unqualified DELETE
+    removes this tenant's rows and can reach nobody else's. `tenants` goes last
+    so an interrupted run leaves a tenant that can be dropped again rather than
+    orphans with no name to drop them by.
+
+    **`audit_log` is deliberately absent, and finding out why is the useful part.**
+    The first version of this list included it and the delete was refused:
+    `neura_app` is granted only INSERT and SELECT on that table. Append-only is
+    a *privilege*, not a convention someone remembered to honour — so the guard
+    events behind ADR-0012 and S5 cannot be erased by the code path that erases
+    everything else, which is the entire point of keeping them. It also means a
+    tenant's rows do not all go away when the tenant does, and no wording of
+    "we deleted your data" can be true of this table without saying so. That is
+    **S10**, and it is a decision for a person and not for a cleanup helper.
+    """
     from sqlalchemy import delete
 
     from neura_agent_core.conversations import conversation_messages, conversations
+    from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
+    from neura_agent_core.rag.schema import document_chunks
+    from neura_agent_core.shadow import shadow_turns
+    from neura_agent_sell.feed.schema import sell_feeds
+    from neura_commerce.sync.schema import sync_checkpoints, synced_entities
     from neura_core import Database
     from neura_core.idempotency import idempotency_keys
+    from neura_core.identity.schema import memberships
+    from neura_core.jobs.schema import job_queue
     from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
+    from neura_core.webhooks.schema import webhook_deliveries, webhook_endpoints
 
     db = Database.from_settings()
     async with db.tenant_session(tenant_id) as session:
         for table in (
+            shadow_turns,
+            sell_feeds,
             conversation_messages,
             conversations,
+            agent_checkpoint_writes,
+            agent_checkpoints,
+            document_chunks,
+            synced_entities,
+            sync_checkpoints,
+            job_queue,
+            webhook_deliveries,
+            webhook_endpoints,
+            memberships,
             idempotency_keys,
             tenant_usage,
             tenant_stores,

@@ -4,13 +4,64 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-27 (later) — **SELL measured on a cloud model for the first time**, and three of A14's four failures did not survive it
+**Last updated:** 2026-08-27 (later still) — **Stage 7 of the testing log: the widget works, and the review queue was recording a zero nobody had measured**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Next action:** **Put it in front of a merchant (B2).** Every screen v1 designed is built and
 proved in a real browser — `make console-check EMAIL=…` passes **33/33** — so the console is no
 longer the thing standing between this project and its first design partner. The remaining
 blockers to *deploying* it are **K1** (production email) and **X2** (deploy target), both
 unchanged and both external decisions.
+
+## Session 2026-08-27 (later still) — Stage 7: the widget, and what cleanup was eating
+
+**The widget works, in a real browser, end to end.** Four runs green: the free stub (4 scenarios,
+including the socket-to-REST fallback), one real turn — *"can I return these after 20 days?"* →
+*"You can return most items within 30 days of delivery for a full refund"* — the shadow variant,
+and a hand-openable demo URL. Stage 7 is ✅. **No new agent-quality evidence**: these are single
+turns, not an eval, and nothing here moves a gate.
+
+**Two dead fields in the review queue, and the second one is the interesting one.** `_shadow_turn`
+in `neura_api/turns.py` set every field except `latency_ms` and `prompt_revision`, so both took
+their dataclass defaults on every shadow turn ever recorded. `latency_ms` is read by the console
+Review screen and by the scorecard whose own comment says *"the tail is what a shopper waits
+behind"* — **it has always been 0, because the turn is never timed at all.** Fixed by timing the
+graph, wall-clock around `runner.run`, deliberately not a sum of model calls: the tool round-trips
+and the adapter's HTTP are the part a per-call meter cannot see. Verified — `curl` measured 23.8s,
+the row records `latency_ms 23570`. The sixth instance of this project's standing failure shape.
+
+**`prompt_revision` is still empty after the fix, and that is [A17](open-questions.md).** The
+forwarding was one line and is done; the value is absent upstream. `usage["prompt_revision"] =
+REVISION` is set only in `respond`, the last node of the happy path, so **every turn that
+escalates, declines or is blocked carries no revision** — measured on a real escalated turn. The
+shadow queue exists to grade failures, and a failure whose prompt nobody can name is the exact
+precondition for the mistake now recorded twice (2026-07-30's loosened prompt, A14's near-miss).
+**Not fixed:** stamping at graph entry is almost certainly right and it changes both agents and the
+eval harness, so it is not a cleanup helper's call.
+
+**Nothing in this project deletes a merchant — [S10](open-questions.md).** Today's turns had left
+no transcript, which looked like the widget failing to persist and was not: persistence works,
+**cleanup was eating it.** `deprovision()` in `scripts/widget_check.py` — a *test harness helper*,
+and the only tenant-deletion code in the repository — deleted 7 of 19 tenant-scoped tables.
+Counted live: **203 orphaned rows** from tenants that no longer exist, including **147
+`document_chunks` and 46 `synced_entities`**, the merchant's own catalogue outliving the tenant.
+The helper now covers 18 tables and leaves zero residue; the 203 pre-existing orphans are left as
+evidence.
+
+**The fix was refused by Postgres, and the refusal is the best thing the session found.** Deleting
+all 19 tables returned `permission denied for table audit_log`: `neura_app` is granted only INSERT
+and SELECT there. **Append-only is a privilege, not a convention somebody remembered to honour** —
+the ADR-0012/S5 guard events survive the code that erases everything else. A control that had
+never been exercised was exercised and held. What is left is a genuine conflict, not a bug: a
+tamper-evident log that must be kept against a deletion promise that must be kept. S10 belongs
+with **S2** and the missing DPA in one pre-merchant conversation.
+
+**Trap for the next session: `localhost:8000` may not be ours.** It answered 404, not connection
+refused — an unrelated project was on it, and every live widget command defaults to that URL. Our
+API also serves `/v1/health`, not `/health`. Use `NEURA_API_PORT=8010 uv run neura-api`.
+
+`make check` green after both fixes: lint, mypy 212 files, **849 unit tests**.
+
+**Next:** Stage 8, the console — and it is the one that produces **E1**, a real graded turn.
 
 ## Session 2026-08-27 (later) — agent quality: A14, and three metrics that could not fail
 

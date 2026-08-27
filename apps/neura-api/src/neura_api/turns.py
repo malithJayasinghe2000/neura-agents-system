@@ -31,6 +31,7 @@ in ``audit.py``.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -197,6 +198,11 @@ class TurnService:
         # ── The turn ─────────────────────────────────────────────────────────
         metered = MeteredLLM(self._llm)
         store = await self._stores.connect(tenant_id)
+        # Wall-clock, around the graph and nothing else. What a shopper waits
+        # behind is the turn, not the sum of the model calls inside it: the
+        # tool round-trips and the adapter's HTTP are exactly the part a
+        # per-call meter cannot see.
+        turn_started = time.perf_counter()
         try:
             outcome = await runner.run(
                 TurnRequest(
@@ -223,6 +229,7 @@ class TurnService:
             # An adapter holds an HTTP client. One built per turn and abandoned
             # leaks a connection pool per shopper.
             await _close(store.adapter)
+        latency_ms = int((time.perf_counter() - turn_started) * 1000)
 
         # Shadow mode is resolved *after* the turn, because it is per-intent and
         # the intent is something the turn produces (agent-runtime.md §6). That
@@ -260,6 +267,7 @@ class TurnService:
                         message_id=message_id,
                         agent_key=turn.agent_key,
                         mode=mode,
+                        latency_ms=latency_ms,
                     )
                 )
             else:
@@ -377,6 +385,7 @@ def _shadow_turn(
     message_id: str,
     agent_key: str,
     mode: TurnMode,
+    latency_ms: int,
 ) -> ShadowTurn:
     """One withheld turn, as a human will read it weeks later.
 
@@ -409,6 +418,12 @@ def _shadow_turn(
         tool_calls=outcome.tool_calls,
         llm_calls=metered.spend.calls,
         cost_usd=metered.spend.cost_usd,
+        latency_ms=latency_ms,
+        # The same value the transcript records for an answered turn. A graded
+        # turn whose prompt nobody can name is evidence about nothing: the
+        # reason to read the queue six weeks later is to ask whether a prompt
+        # change helped, and that question needs the revision that wrote it.
+        prompt_revision=outcome.prompt_revision,
     )
 
 

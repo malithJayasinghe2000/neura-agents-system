@@ -77,7 +77,7 @@ MySQL is on port 3307 while the shop is configured for 3308.
 | 4 | Index | that data made searchable | local (embeddings) | ✅ 2026-08-27 |
 | 5 | CARE end to end | a real support conversation | local (heat) | ⬜ |
 | 6 | SELL end to end | a real recommendation | local (heat) | ◐ tooling built |
-| 7 | Widget | what a shopper actually sees | local | ⬜ |
+| 7 | Widget | what a shopper actually sees | local | ✅ 2026-08-27 |
 | 8 | Console | what the owner sees, incl. grading a real turn | none | ⬜ |
 | 9 | New e-commerce | a second shop passes conformance | none | ⬜ |
 
@@ -313,14 +313,145 @@ make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1 TENANT=tn_sell_ask
 
 ---
 
-## Stage 7 — the widget ⬜
+## Stage 7 — the widget ✅
 
 What a shopper actually sees. Needs the API running.
 
 ```bash
+make api                                             # or: NEURA_API_PORT=8010 uv run neura-api
 make widget-check                                    # headless Chrome, no models, free
-make widget-demo SHOP=$SHOP TOKEN=$TOKEN             # prints a URL to open by hand
+make widget-check-live URL=... SHOP=$SHOP TOKEN=$TOKEN            # one real turn
+make widget-check-live URL=... SHOP=$SHOP TOKEN=$TOKEN SHADOW=1   # the withheld version
+make widget-demo URL=... SHOP=$SHOP TOKEN=$TOKEN     # prints a URL to open by hand
 ```
+
+**Result:** all four green.
+
+| run | what it proves | models |
+|:--|:--|:--|
+| `widget-check` | 4 scenarios against a **stub**: an answered turn draws the reply, a shadowed turn draws the server's words rather than silence, an empty turn is visibly an error, and a **refused socket falls back to REST and still answers** | none |
+| `widget-check-live` | the real `widget.js`, the real key, the real origin lock, the real graph — *"can I return these after 20 days?"* → **"You can return most items within 30 days of delivery for a full refund"** | local |
+| `…​ SHADOW=1` | what a shopper is shown when the reply is withheld: *"Thanks — your message has been received."* | local |
+| `widget-demo` | a URL to open by hand. `/v1/widget/demo` is `include_in_schema=False` and **404s in production** — deliberate, and correct | none |
+
+**The stub is the valuable one and it is free.** Three of its four scenarios are states that are
+awkward to produce on demand — a withheld reply, an empty answer, a socket that will not open —
+and the socket-to-REST fallback is the one nobody would notice was broken until a shopper behind
+a corporate proxy could not get an answer.
+
+### ✅ Re-verified after the fixes, same afternoon
+
+Stage 7 was re-run from the top once the three defects above were fixed. All four commands green
+again, and the two dead fields now carry values.
+
+**A17 was confirmed exactly, by accident of model variance.** Two real local turns, same code:
+
+| | turn that **escalated** | turn that **resolved** |
+|:--|:--|:--|
+| `latency_ms` | 23570 ✅ | 21613 ✅ (`curl` measured 21.8s) |
+| `prompt_revision` | *empty* ❌ | `662df2be…` ✅ |
+
+So the fix works wherever the value exists, and the value does not exist on a turn that gives up
+before `respond`. That is A17 stated as a measurement rather than as a reading of the code.
+
+**The resolved turn's row, which is the whole system in one line:** `intent policy_qa`,
+`tool_calls 1`, `llm_calls 5`, `grounded t`, `latency_ms 21613`, `cost_usd 0`, `mode shadow` —
+and **`verdict` empty**. That blank is **E1**. Everything else in this project has been measured
+against invented cases; that column is where a real human judgement would go, and Stage 8 is the
+only thing that can fill it.
+
+**Cleanup verified both directions.** One shopper question wrote **7 rows across 7 tables**
+(`shadow_turns`, `conversations`, `conversation_messages`, `tenant_usage`, `api_keys`,
+`tenant_stores`, `tenants`); `make tenant-drop` took all seven to **0**. Orphan count across the
+database is **still exactly 3**, all created *before* the fix — four runs since have added none.
+
+*(`conversation_messages` holds only the shopper's words on a shadow turn. The AI's draft goes to
+the review queue instead of the transcript, deliberately — withheld from the shopper means
+withheld from the shopper's history too.)*
+
+### ⚠️ Trap: port 8000 was somebody else's app
+
+`localhost:8000` answered `404`, not "connection refused" — an unrelated project was on it. Every
+live command here defaults to `URL=http://localhost:8000`, so the check would have driven a real
+browser at a stranger's API and reported a failure about *our* widget. Our API also does not serve
+`/health`; it is **`/v1/health`** and `/v1/health/ready`. Run ours on another port:
+
+```bash
+NEURA_API_PORT=8010 uv run neura-api
+curl -s localhost:8010/v1/health/ready     # postgres ok, redis ok
+```
+
+### ✅ Fixed: the review queue recorded no latency, ever
+
+The shadow turn landed in the queue with `latency_ms = 0`, on a turn that had really run five
+model calls locally. Not a rounding error — **the turn is never timed at all.** `_shadow_turn` in
+`neura_api/turns.py` set every other field and skipped this one, so it fell to its dataclass
+default. The field is read in two places (the console Review screen, and the scorecard's
+`total_latency_ms`, whose own comment says *"the tail is what a shopper waits behind"*), so both
+were rendering a zero nobody had measured.
+
+The same shape as five failures already on this project's record: **a number nobody has read is
+not a number that works.** Fixed by timing the graph — wall-clock around `runner.run` and its
+adapter teardown, deliberately not a sum of model calls, because the tool round-trips and the
+adapter's HTTP are exactly the part a per-call meter cannot see.
+
+Verified on a real turn: `curl` measured **23.8s**, the row now records **`latency_ms 23570`**.
+
+### ⚠️ Finding 4: the turns worth grading cannot say which prompt wrote them
+
+`prompt_revision` was also never written — same omission, same function, and the answered-turn
+transcript **twelve lines above it** was passing the value correctly. Forwarding it was one line.
+
+**It is still empty, and that is the finding.** The re-run turn escalated, and
+`usage["prompt_revision"] = REVISION` is set only in `respond` — the last node of the happy path.
+So **every turn that escalates, declines or is blocked carries no revision**. The shadow queue
+exists to grade failures; a failure whose prompt nobody can name is evidence about nothing. Worse,
+it is the exact precondition for the mistake this project has now recorded twice — the 2026-07-30
+prompt loosened to make a gate go green, and A14's near-miss of tightening one against a fault the
+model no longer had. Recorded as **[A17](open-questions.md)**, not fixed: stamping the revision at
+graph entry is almost certainly right, but it changes both agents and the eval harness, and that
+is not a cleanup helper's decision.
+
+### ⚠️ Finding 5: nothing in this project deletes a merchant
+
+Chasing the missing latency turned up something bigger. Today's live turns had left **no
+transcript at all** — which looked like the widget failing to persist, and was not. Persistence
+works; **cleanup was eating it.** `deprovision()` in `scripts/widget_check.py` deleted 7 of the 19
+tenant-scoped tables and left twelve standing.
+
+Counted on the live database, rows belonging to tenants that no longer exist:
+
+| table | orphaned rows |
+|:--|--:|
+| `document_chunks` | **147** |
+| `synced_entities` | **46** |
+| `audit_log` | 4 |
+| `sync_checkpoints` | 3 |
+| `shadow_turns` | 3 |
+
+The shadow rows are drafts of replies whose conversation, message and tenant had all been deleted
+around them. The first two are **the merchant's own catalogue, embedded and stored, outliving the
+tenant that owned it.**
+
+**And `deprovision` is the only code in the repository that deletes a tenant.** It is a test
+harness helper. So the honest pitch written down in Stage 4 — *"we copy your catalogue and your
+published policies"* — currently has no ending, because there is no route through the product for
+a merchant who asks for it back.
+
+**The fix was refused by the database, and the refusal is the best thing found today.** The first
+version deleted all 19 tables; Postgres answered `permission denied for table audit_log`.
+`neura_app` is granted only `INSERT` and `SELECT` there — **append-only is a privilege, not a
+convention somebody remembered to honour**, so the guard events behind ADR-0012 and S5 survive the
+code that erases everything else. A control that had never been exercised was exercised, and it
+held.
+
+That leaves a genuine conflict rather than a bug: a tamper-evident security log that must be kept,
+against a deletion promise that must be kept. Recorded as **[S10](open-questions.md)**, alongside
+S2 (the KEK in an env var) and the missing DPA — the same pre-merchant conversation.
+
+The helper now covers 18 tables, documents why the nineteenth is absent, and was verified to leave
+**zero residue**. The 203 pre-existing orphans were **left in place as the evidence**; clearing
+them is a one-line drop per tenant when someone wants the database tidy.
 
 ## Stage 8 — the console ⬜
 
