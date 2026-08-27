@@ -69,7 +69,7 @@ MySQL is on port 3307 while the shop is configured for 3308.
 | 1 | Machine works | database, types, 848 tests, Ollama reachable | local | ✅ 2026-08-27 |
 | 2 | Shop conformant | the shop exposes the 9 endpoints correctly | none | ✅ 2026-08-27 |
 | 3 | Sync | shop data copied into our Postgres | none | ✅ 2026-08-27 |
-| 4 | Index | that data made searchable | local (embeddings) | ⬜ |
+| 4 | Index | that data made searchable | local (embeddings) | ✅ 2026-08-27 |
 | 5 | CARE end to end | a real support conversation | local (heat) | ⬜ |
 | 6 | SELL end to end | a real recommendation | local (heat) | ⬜ |
 | 7 | Widget | what a shopper actually sees | local | ⬜ |
@@ -138,7 +138,61 @@ are right whenever somebody remembers to press a button".
 
 ---
 
-## Stage 4 — index ⬜
+## Stage 4 — index ✅
+
+```bash
+make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1
+make rag-ask Q="do you sell my data?" SHOW=1
+```
+
+**Result:** 46 entities → **49 chunks**, all embedded with `nomic-embed-text` (768 dims), under
+namespace `tn_ragsmoke/nomic-embed-text`. Re-running embedded **0** — it knows what it already has.
+Retrieval: **5 of 7** probes hit the right source type; the two misses are the documented ones
+(*"something to wear to the office"* and a pronoun with no referent — a pronoun cannot be embedded
+into a match).
+
+Querying under a *different* embedding model returns empty **and says why**, rather than silently
+returning nothing — the namespace-mismatch trap from llm-abstraction.md §5.2.
+
+**What indexing buys you:** *"keeping my feet warm"* can find *Merino Walking Socks*, even though
+those words appear nowhere in the product. Search by meaning, not by keyword.
+
+---
+
+## What we store about a merchant, and what we never do
+
+Asked during Stage 4, and worth having written down for the first merchant conversation.
+
+| | Copied into our database? | Why |
+|:--|:--|:--|
+| Products, categories | ✅ yes | public — anyone browsing the shop sees them |
+| Policies (returns, shipping, privacy) | ✅ yes | public — published on their site |
+| **Orders** | ❌ **never** | read live per question, through the adapter |
+| **Customer records** | ❌ **never** | read live, and only for a *verified* customer |
+
+Written into `neura_commerce/sync/engine.py` as a design decision, for freshness — *"an order's
+status changes fast, and 'your parcel is out for delivery' being an hour stale is a worse failure
+than the answer taking 400ms"* — but the privacy consequence is real and worth stating: **we hold
+no customer's personal data taken from the shop.**
+
+The one personal thing that *is* stored is the **conversation**, because the console has to show
+it. Personal details are replaced with tokens (`[EMAIL_1]`) **before** anything is written
+(security-model.md §6.2), and transcripts are kept 90 days.
+
+### Two things to fix before a real merchant
+
+1. **The key that encrypts a merchant's store credentials lives in an environment variable**, not
+   a key manager. `.env` says so itself: *"acceptable for a pilot; cloud KMS is required before
+   real merchants"* (security-model.md §12.3).
+2. **There is no data processing agreement.** The facts above are true and precise; nothing states
+   them in a document a merchant's lawyer can read and sign.
+
+The honest pitch: *"We copy your catalogue and your published policies. We never copy your orders
+or your customers. Chat transcripts are kept 90 days with personal details stripped."*
+
+---
+
+## Stage 5 — CARE end to end ⬜
 
 Next up. Turns the synced text into vectors so the agent can search it by meaning rather than
 by keyword.
@@ -152,7 +206,16 @@ make rag-ask Q="do you sell my data?" SHOW=1
 
 ---
 
-## Stages 5–9 ⬜
+Next up. A real support conversation, start to finish.
+
+```bash
+make care-ask Q="where is my order 1001?" URL=$SHOP TOKEN=$TOKEN CUSTOMER=385
+make care-check URL=$SHOP TOKEN=$TOKEN
+```
+
+⚠️ Runs router + reasoner + guard locally. Real laptop heat, ~20-90s per question.
+
+## Stages 6–9 ⬜
 
 Not started. See the stage table above.
 
