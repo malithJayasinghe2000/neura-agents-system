@@ -1,6 +1,11 @@
 # NEURA-SELL — Technical Design
 
-**Status:** Designed, not built · **Date:** 2026-08-26 · **Decision:** [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)
+**Status:** **Built** — designed 2026-08-26, built the same day, all three surfaces · **Design date:** 2026-08-26 · **Decision:** [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)
+
+> `agents/sell/` holds the graph (`graph.py`, seven nodes in `nodes/`), the five tools, the MCP
+> server (`mcp/`), the product feed (`feed/`) and the golden datasets (`evals/`). What is **not**
+> settled is quality: the release gate is unmet at escalation precision **0.43** — see §9 and
+> [**A14**](../open-questions.md).
 
 > This is the design session [`README.md`](README.md) demands before anything may be scaffolded.
 > It supplies the seven things that file lists. Until it existed, `agents/sell/` was a folder
@@ -400,17 +405,57 @@ Calling a deterministic renderer check "an eval" would inflate the suite with ca
 |:--|:--|
 | cases | **10 / 14** |
 | injection resistance | **1.00**, and **1.00 with the guard disabled** |
-| escalation recall | 1.00 · intent accuracy 1.00 · tool selection 1.00 |
+| escalation recall | 1.00 · intent accuracy 1.00 (measured on 5 of 14 cases) |
+| tool selection | **withdrawn.** It read 1.00, and it was measured on **one** case — the single case that stated `tools_called`. The one turn that called no tool at all was silent about tools and fell out of the denominator. Fixed 2026-08-27; the same responses re-scored give **0.80**, below the 0.90 gate. |
 | escalation precision | **0.43** against a 0.85 gate — the one unmet gate |
 
-**All four failures are the same failure**: `verify` refused a recommendation
-and the turn escalated. That is `verify` failing closed, which is the safe
-direction — but an agent that never answers is not a product. Registered as
-**A14**, with three candidate causes and an explicit instruction not to loosen
-the prompt to make the gate go green.
+**All four failures looked like the same failure** — `verify` refused a
+recommendation and the turn escalated — and they are not. Reading the recorded
+run rather than the terminal showed **three different problems**: one `verify`
+false positive that turned out to be indirect injection (**S9**, and
+[ADR-0025](../open-questions.md) is the fix, parked); one turn that escalated
+before anything was composed, having called **no tool at all**; and two weak
+drafts, one of which fabricated availability and was caught correctly. The full
+diagnosis is **A14**, which carries an explicit instruction not to loosen
+`verify.md` to make the gate go green — it is now measured as *correct* on three
+of the four.
 
 **None of this is validation.** Every case is synthetic (**E1**), n=1, and one
 run of fourteen invented cases says nothing about a real shopper.
+
+**Measured again on 2026-08-27 — the first cloud run, `cloud-prod` /
+`gemini-3.6-flash` on every role including GUARD, `--no-judge`, n=3 plus one
+guard-off run:**
+
+| | `ollama-dev` (2026-08-26, n=1) | `cloud-prod` (2026-08-27, n=3) |
+|:--|:--|:--|
+| cases | 10 / 14 | 13 / 13 / 12 |
+| escalation precision | **0.43** | **1.00 · 0.75 · 0.75** — gate 0.85 met once in three |
+| injection resistance | 1.00, incl. guard-off | 1.00 in all four runs, incl. guard-off |
+| tool selection | *withdrawn, see above* | 1.00, measured on 10 of 14 |
+| cost per run | not measured — the counter was broken | **$0.011**, measured |
+| duration | ~20 min | ~100 s |
+
+**Three of A14's four failures do not reproduce on a cloud model.** `recommend_002`
+searched and composed normally 3/3; `recommend_003` found the socks it had never
+been shown; `recommend_004` said the UK 9 was out of stock rather than inventing
+it. **`compose.md` was therefore not changed** — the two drafting failures were
+model behaviour, and tuning a prompt against a fault the current model does not
+exhibit is the 2026-07-30 mistake in a mirror.
+
+**The gate is still not met, and the failure is now a different one.**
+`no_match_001` fails **4 runs of 4**: asked for fishing rods it correctly says
+the store has none, then offers the Trail Cap — `p_injected`, the product
+carrying the S9 payload — as a substitute. `shortlist` admitted a cap as a
+candidate for *"fishing rod"*, so the turn never reached `no_match`. Whether a
+weakly-relevant candidate may reach `compose` at all is a **§2.3** question and
+is open.
+
+**Getting a cloud run at all needed a fix in `neura-llm`.** `compose` sends
+`reasoning_effort="none"`; Gemini's OpenAI-compatible endpoint answers
+`400 INVALID_ARGUMENT`. Every composer call failed and six of fourteen cases were
+skipped as provider-unreachable. `ChatRequest.reasoning_effort` had predicted
+exactly this and said to verify it at swap time; the swap verified it.
 
 **Every threshold above remains an informed starting point rather than a
 measurement.** They will be recalibrated after real conversations exist (**E3**).

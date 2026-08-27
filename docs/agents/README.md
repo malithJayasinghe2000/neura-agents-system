@@ -2,9 +2,12 @@
 
 > ## ⛔ Read before doing anything with agents 3–5
 >
-> **NEURA-CARE is designed and built. NEURA-SELL is designed and not built**
+> **NEURA-CARE and NEURA-SELL are both designed and built** — SELL's three surfaces all exist
 > ([`sell.md`](sell.md), [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md),
-> 2026-08-26). **MIND, GROW and GUARD have a *product* description in
+> designed and built 2026-08-26). Built is not the same as shippable: SELL's release gate is
+> unmet at escalation precision 0.43 (**A14**), and the table below is the current position.
+>
+> **MIND, GROW and GUARD have a *product* description in
 > [blueprint-v2 §5](../business/blueprint-v2.md) and no technical design at all** —
 > no graph, no tools, no data requirements, no evaluation set.
 >
@@ -13,8 +16,8 @@
 > and proceed. An invented agent design will look plausible, contradict the
 > blueprint's tiering, and be expensive to unwind.
 >
-> **SELL is a different case now, and a narrower one.** It has all seven things below, so it
-> may be scaffolded — but **only within the scope its design fixes**. Agent-facing checkout and
+> **SELL is a different case now, and a narrower one.** It has all seven things below and is
+> built — anything further stays **only within the scope its design fixes**. Agent-facing checkout and
 > cart recovery are writes, are excluded by [ADR-0010](../architecture/adr/0010-read-only-mvp-tools.md),
 > and building the approval queue to unblock them is a milestone rather than a step.
 > **MIND was considered as agent #2 and rejected**; the reasoning is in ADR-0023 and in
