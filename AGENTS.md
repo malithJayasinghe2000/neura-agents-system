@@ -92,11 +92,13 @@ make test           # unit + the widget's JS logic
 make test-widget    # `node --test` — Node ships the runner, so no npm and no install
 make widget-check   # drive the REAL widget in REAL headless Chrome. No models, no cost —
                     # the browser half is not reachable from pytest or from node --test
-make console-check EMAIL=…   # the merchant console in REAL headless Chrome: sign in through
-                             # a real link, then read the evidence and grade a withheld turn.
-                             # No models, no cost. __Host-, HttpOnly and "did the screen
-                             # actually render the evidence" are browser facts and nothing
-                             # else can assert them (docs/console.md §6)
+make console-check EMAIL=…   # ALL FIVE console screens in REAL headless Chrome: sign in
+                             # through a real link, read the evidence, grade a withheld turn,
+                             # open a transcript, and check no credential or invented number
+                             # reaches a page. 33 checks. No models, no cost — __Host-,
+                             # HttpOnly and "did the screen actually render it" are browser
+                             # facts and nothing else can assert them (docs/console.md §6).
+                             # It seeds its own rows and removes exactly those
 make widget-check-live SHOP=… TOKEN=… [SHADOW=1]   # the same file against a running API
                                                    # and a real shop. One turn, not an eval
 make lint           # ruff + mypy

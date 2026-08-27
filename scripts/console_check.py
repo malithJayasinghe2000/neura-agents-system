@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -57,8 +58,12 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.rag.schema import document_chunks
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn, shadow_turns
+from neura_commerce.pagination import Cursor
+from neura_commerce.sync.schema import sync_checkpoints
 from neura_core import Database, get_settings, ids, load_env
 from neura_core.identity import COOKIE_NAME, memberships_for, request_sign_in_link
+from neura_core.tenancy.schema import tenant_stores, tenant_usage
+from neura_core.tenancy.usage import UsageDelta, UsageMeter, today
 
 GREEN = "\033[32m"
 RED = "\033[31m"
@@ -177,6 +182,9 @@ async def main() -> int:
                 print(f"\n  {BOLD}conversations — what it actually said{OFF}")
                 await _check_conversations(browser, console, seeded, failures)
 
+                print(f"\n  {BOLD}shop and usage — connection, and honest numbers{OFF}")
+                await _check_shop_and_usage(browser, console, seeded, failures)
+
             # 6. The link is single use. Reloading it must not sign anyone in again.
             await browser.goto(minted.url)
             await asyncio.sleep(3)
@@ -218,6 +226,33 @@ SEEDED_REPLY = "Unworn boots can be returned within 30 days of delivery."
 #: A message carrying the guard's placeholders. On the screen these must be
 #: **explained** — `[EMAIL_1]` left bare reads to a merchant as lost data.
 SEEDED_TOKENISED = "my email is [EMAIL_1] and my address is [ADDRESS_1] — where is my order?"
+
+#: Written into the seeded store's `credentials` and `wrapped_dek`.
+#:
+#: The point of a recognisable placeholder: "no credential reached the screen"
+#: has to be an assertion about a string that is **really in the row**. Without a
+#: seeded store the check passes against an empty screen, which proves nothing —
+#: the same class of false pass as an API check that succeeded against the wrong
+#: server (open question E6).
+# S105 reads this as a hardcoded password, the same way it reads the `lgt_` id
+# prefix in `neura_core.ids`. It is neither: it is a marker written into a
+# throwaway row so that the assertion *"this never reaches the page"* is about a
+# string that is really in the database. A real secret here would defeat the
+# check — the whole point is that it is worthless and recognisable.
+SEEDED_SECRET = "CONSOLE-CHECK-SECRET-MUST-NEVER-BE-RETURNED"  # noqa: S105
+
+#: The platform the seeded store claims. Not a real one: `AGENTS.md` rule 1 keeps
+#: platform names out of every file outside `neura-adapters`, and a fixture is a
+#: file.
+SEEDED_PLATFORM = "console-check"
+
+#: The agent this check bills its seeded usage to.
+#:
+#: **Not `care`.** This writes into a developer's own database, where the tenant
+#: may be a real shop with real metered usage in it, and `tenant_usage` is keyed
+#: by (tenant, day, agent) — so a teardown that removed today's `care` row would
+#: delete a real one. A key nothing else uses makes the cleanup exact.
+SEEDED_AGENT = "console-check"
 
 
 async def _check_review(
@@ -360,6 +395,83 @@ async def _check_conversations(
     )
 
 
+async def _check_shop_and_usage(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """Screens 4 and 5, against rendered pages.
+
+    Two claims, and both are about what must **not** be on the screen. A
+    credential that is never displayed and a figure that never pretends to be a
+    measurement are properties of the rendered page, and neither survives being
+    asserted only against JSON: a screen can perfectly well fetch a safe payload
+    and then print `$0.00` under the word "cost".
+    """
+    await browser.goto(f"{console}/console/{seeded['tenant']}/shops")
+    await asyncio.sleep(3)
+    shop = await browser.evaluate("document.body.innerText")
+
+    # The connection has to be *on* the screen, or every assertion below passes
+    # against an empty page and proves nothing (open question E6, again).
+    _check(
+        "the connected shop is on the screen",
+        "console-check.invalid" in shop,
+        failures,
+    )
+    _check("what was synced is reported", "118 read" in shop, failures)
+
+    # `console.md §3.4`: never a stored credential, not even masked, because a
+    # field that can be revealed is a field that gets revealed in a screen-share.
+    # This is only a real check because the row above genuinely contains it.
+    _check(
+        "no stored credential reaches the shop screen",
+        SEEDED_SECRET not in shop and "wrapped_dek" not in shop and "fn_sk_" not in shop,
+        failures,
+    )
+
+    # A cursor is opaque by design (api-design.md §5) and a merchant can do
+    # nothing with it but paste it somewhere it will go stale.
+    _check(
+        "the opaque sync cursor is not rendered",
+        Cursor(state={"page": 2}).encode() not in shop,
+        failures,
+    )
+
+    # The write this screen deliberately does not have. A connect form is
+    # designed (§3.4) and not built, so there must be no field asking for one.
+    token_fields = await browser.evaluate(
+        "document.querySelectorAll('input[type=password], form input').length"
+    )
+    _check("no credential form exists on the shop screen", token_fields == 0, failures)
+
+    await browser.goto(f"{console}/console/{seeded['tenant']}/usage?period=all")
+    await asyncio.sleep(3)
+    usage = await browser.evaluate("document.body.innerText")
+
+    _check("the usage screen renders", "Usage" in usage, failures)
+
+    # Rule 4, the one `console.md §5` says a dashboard usually breaks. Zero is
+    # what a free local model records *and* what an unpriced hosted model
+    # records, so it must never be printed as an amount of money.
+    _check("no unmeasured cost is printed as a figure", "$0" not in usage, failures)
+
+    # And no derived ratio anywhere. "2 of 41" is checkable; "95% deflected" is
+    # a claim nobody has measured (CLAUDE.md §4).
+    _check(
+        "no deflection or resolution rate is claimed",
+        "% deflect" not in usage.lower()
+        and "deflection rate" not in usage.lower().replace("not a deflection rate", ""),
+        failures,
+    )
+
+    # A total with no period is not a total. A screen that silently changed
+    # window between two visits would look like traffic changing.
+    _check(
+        "every total names the period it covers",
+        "Everything recorded for this shop" in usage,
+        failures,
+    )
+
+
 async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
     """Two shadowed turns, one real conversation, and one policy to cite.
 
@@ -374,6 +486,7 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
         "conversation": ids.new_id(ids.CONVERSATION),
         "answered_conversation": ids.new_id(ids.CONVERSATION),
         "chunk": ids.new_id(ids.CHUNK),
+        "store": ids.new_id(ids.STORE),
     }
 
     async with db.tenant_session(tenant_id) as session:
@@ -415,6 +528,52 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
                 source_id="console-check-returns",
                 chunk_index=0,
             )
+        )
+
+        # Screen 4 needs a connection to *fail* to leak. Placeholders rather
+        # than a real envelope: nothing here decrypts, and the assertion is that
+        # these strings never reach the page.
+        await session.execute(
+            tenant_stores.insert().values(
+                id=made["store"],
+                tenant_id=tenant_id,
+                platform=SEEDED_PLATFORM,
+                base_url="https://console-check.invalid/neura/v1",
+                credentials=SEEDED_SECRET,
+                wrapped_dek=SEEDED_SECRET,
+                status="active",
+            )
+        )
+        await session.execute(
+            sync_checkpoints.insert().values(
+                tenant_id=tenant_id,
+                platform=SEEDED_PLATFORM,
+                entity_type="product",
+                cursor=Cursor(state={"page": 2}).encode(),
+                updated_through=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+                last_run_count=118,
+            )
+        )
+
+        # Screen 5 needs something to count. A usage screen with nothing in it
+        # renders its empty state, and a check that only ever sees the empty
+        # state has told us nothing about the figures.
+        await UsageMeter(session).record(
+            tenant_id,
+            SEEDED_AGENT,
+            UsageDelta(
+                conversations=2,
+                turns=3,
+                llm_calls=6,
+                tool_calls=1,
+                escalations=1,
+                prompt_tokens=3100,
+                completion_tokens=640,
+                # Zero, deliberately: this is the ambiguous value the screen has
+                # to refuse to print as money.
+                cost_usd=Decimal("0"),
+            ),
         )
 
         shadow = ShadowRepository(session)
@@ -474,6 +633,23 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
             )
         )
         await session.execute(delete(conversations).where(conversations.c.id.in_(threads)))
+        await session.execute(delete(tenant_stores).where(tenant_stores.c.id == seeded["store"]))
+        # By platform, which is this check's own string and nothing else's — not
+        # "this tenant's checkpoints", which would take a real sync's position
+        # with it and silently restart a merchant's next crawl from the top.
+        await session.execute(
+            delete(sync_checkpoints)
+            .where(sync_checkpoints.c.tenant_id == seeded["tenant"])
+            .where(sync_checkpoints.c.platform == SEEDED_PLATFORM)
+        )
+        # Exactly this run's usage row, by its three-part key. Never "today's
+        # usage for this tenant" — that would take a real agent's row with it.
+        await session.execute(
+            delete(tenant_usage)
+            .where(tenant_usage.c.tenant_id == seeded["tenant"])
+            .where(tenant_usage.c.usage_date == today())
+            .where(tenant_usage.c.agent_key == SEEDED_AGENT)
+        )
 
 
 def _check(what: str, passed: bool, failures: list[str]) -> None:

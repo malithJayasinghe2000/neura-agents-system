@@ -4,20 +4,27 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-27 — console screens 2 (Conversations) and 3 (Review) built
-**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, and **NEURA-SELL**
-**Next action:** **Console screens 4 (Shop, read-only) and 5 (Usage)** — the last two of v1.
-Screens **1, 2 and 3** are built and working in a real browser; `make console-check EMAIL=…`
-drives headless Chrome through a real link, an evidence panel, a verdict and a transcript, and
-passes **24/24**.
+**Last updated:** 2026-08-27 — **the merchant console v1 is complete**: all five screens built
+**Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
+**Next action:** **Put it in front of a merchant (B2).** Every screen v1 designed is built and
+proved in a real browser — `make console-check EMAIL=…` passes **33/33** — so the console is no
+longer the thing standing between this project and its first design partner. The remaining
+blockers to *deploying* it are **K1** (production email) and **X2** (deploy target), both
+unchanged and both external decisions.
 
 **What exists now.** `apps/neura-console` — Next.js 16, Tailwind 4, shadcn/ui, self-hosted Geist,
-and now a shared shell: `console/layout.tsx` for the frame and `[tenantId]/layout.tsx` + `ShopNav`
-for one shop's tabs. Screens: sign in, shop list, **Conversations** (list + transcript) and
-**Review**. Backend: three identity tables, four `/v1/console` auth endpoints, **three review
-endpoints and two conversation endpoints**, all behind `acting_for()`. Prettier now formats the
-JS half at the same 100 columns the code was already written to, with shadcn's vendored `ui/`
-excluded so a re-pull stays diffable.
+prettier at 100 columns, a shared shell (`console/layout.tsx`, `[tenantId]/layout.tsx`, `ShopNav`).
+Five screens: **sign in · Conversations · Review · Shop · Usage**. Backend: three identity tables,
+four `/v1/console` auth endpoints and **eight console-authenticated screen endpoints**, every one
+behind `acting_for()` — session cookie → person → membership → tenant → RLS. **64 unit + 83
+integration tests** on the console, and 33 browser checks.
+
+**One decision was yours and is recorded as taken: Shop is read-only.** `console.md §3.4` designs
+a connect form that submits a store credential; it is not built. The console's whole write surface
+is one grading verdict, and a credential form would be the highest-value target in the
+application, added before anybody has connected a shop through anything but the CLI — the same
+reasoning ADR-0026 §6 used to defer the approval queue. The empty state tells a merchant where it
+*can* be done. The cost is stated: **no self-serve onboarding**.
 
 **The night's most valuable output was not a screen.**
 
@@ -45,6 +52,28 @@ filter hides none of them (a list opening on *Answered* reports a healthier prod
 merchant has); `blocked` is deliberately not painted as an error, because ADR-0012 says a
 recognised attack ended cheaply is the defence working; and an unknown `?state=` is a **400**, not
 a silently ignored parameter — a dropped filter returns everything while looking filtered.
+
+**Screen 5 is where this project's honesty rule meets a real widget, and it is entirely
+subtractive.** There is **no rate on it, of any kind** — not deflection, not resolution, no trend,
+no target. Escalations over conversations is arithmetic the data supports; *deflection* is a claim
+it does not, and CLAUDE.md §4 lists it under unknown. So the screen says *"1 of 2 conversations
+were handed to a person"* and, in the same sentence, *"that is a count, not a deflection rate"* —
+both halves, because a merchant given the count alone does the division themselves. An integration
+test walks every field name in the payload and fails on anything ending in `_rate`. Cost is
+**"not priced"**, never `$0.00`. And **shadow mode is stated before any figure**: without it, "41
+conversations, 2 escalated" reads as a working assistant when no shopper saw a single reply — the
+most misleading page this console could produce, built entirely from true numbers.
+
+**Screen 4 never shows a credential, and that is structural rather than careful.** The read goes
+through `StoreConnectionRepository.list_for`, which selects four columns and cannot return
+`credentials` or `wrapped_dek` because it never asks for them. The suite writes a recognisable
+placeholder into both and asserts it never appears — and the browser check does the same **after
+seeding a real store**, because the first version of that check passed against an empty screen.
+A check that can pass with nothing to look at is not a check (E6, a third time).
+
+**The live reachability probe is a click, not a page load**, and returns **200 describing a
+failure** rather than 503: "your shop did not answer" is the result, and a 503 would be
+indistinguishable from our own outage in the exact moment somebody is trying to tell them apart.
 
 **Screen 3 is the one the console was built for**, and the reason has not changed: it is the only
 screen that produces something this project does not have — **real graded turns**, the sole route

@@ -34,6 +34,7 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.rag.schema import document_chunks
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn, shadow_turns
+from neura_commerce.pagination import Cursor
 from neura_commerce.sync.schema import sync_checkpoints
 from neura_core import Database, ids
 from neura_core.identity.schema import login_tokens, memberships, users
@@ -309,7 +310,11 @@ async def _store(session, shop: Shop) -> None:
             tenant_id=shop.tenant,
             platform=PLATFORM,
             entity_type="product",
-            cursor="fixture-cursor",
+            # A real `Cursor`, not a plain string: the value is opaque *and*
+            # structured, and `PostgresSyncStateStore` decodes it on read. A
+            # hand-written string blows up the load path, which is a fixture
+            # bug that reads exactly like a product bug.
+            cursor=Cursor(state={"page": 3}).encode(),
             updated_through=datetime.now(UTC),
             completed_at=datetime.now(UTC),
             last_run_count=42,

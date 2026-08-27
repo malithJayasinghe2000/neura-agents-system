@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **Screens 1 (sign in), 2 (Conversations) and 3 (Review) built 2026-08-27** — `make console-check`. Screens 4 and 5 not written. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27** — `make console-check` — 33 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -25,8 +25,8 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 1 | **Sign in** | `users`, `login_tokens` | ✅ **built 2026-08-27** |
 | 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ **built 2026-08-27** |
 | 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
-| 4 | **Shops** | `tenant_stores`, `sync_checkpoints` | ✅ |
-| 5 | **Usage** | `tenant_usage` | ✅ |
+| 4 | **Shop** | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4** |
+| 5 | **Usage** | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
 | 6 | Security | `audit_log` | v1.1 — closes **S5** |
 | 7 | Settings & keys | `api_keys` | v1.1 |
 | 8 | Approvals | — | **blocked** by [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) |
@@ -140,11 +140,83 @@ Connect a shop (URL + token), run the conformance suite against it, and watch th
 
 Credentials are written through the existing envelope encryption path. **The console never displays a stored credential**, not even masked to its owner: a field that can be revealed is a field that gets revealed in a screen-share.
 
+#### Built 2026-08-27, **read-only** — and that is a decision
+
+The screen shows the connection, what is in the catalogue, when each kind last
+synced, and an **opt-in** live reachability check. **The connect form is not
+built**, and the reason is the shape of the console's authority rather than the
+size of the form:
+
+> The console's entire write surface is one grading verdict. A browser form that
+> submits a store credential would be the highest-value target in the
+> application, added on the screen a merchant opens least often, before anybody
+> has connected a shop through anything but the CLI.
+
+That is the same reasoning [ADR-0026 §6](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md)
+used to defer the approval queue. Connecting stays on `POST /v1/stores` and
+`make tenant-new`; whoever adds the form does it deliberately. **The empty state
+says so in the merchant's words**, because "you cannot do this here" is only
+useful if it also says where it *can* be done.
+
+**Never showing a credential is structural, not careful.** The read goes through
+`StoreConnectionRepository.list_for`, which selects four columns and *cannot*
+return `credentials` or `wrapped_dek` because it never asks for them. The
+integration suite writes a recognisable placeholder into both columns and asserts
+it never appears — an assertion about a string that is really in the row, not a
+hopeful check against a column that happened to be empty.
+
+**The live probe is a click, not a page load.** Everything on first render comes
+from the database; *"is it reachable right now?"* makes an outbound request to
+the merchant's own server and therefore happens only when asked. A page that
+probed on every glance would be a monitoring agent nobody asked for. The probe
+returns **200 describing a failure** rather than 503: from the console's point of
+view "your shop did not answer" is the result, and a 503 would be
+indistinguishable from our own outage in the exact moment somebody is trying to
+tell the two apart.
+
+**The opaque sync cursor is never rendered.** Whether a crawl is part-way through
+is the fact a merchant needs; the value is a string they can only paste somewhere
+it will go stale (api-design.md §5).
+
 ### 3.5 Usage
 
 Conversations, turns, escalations, blocked attacks, tokens, cost — from `tenant_usage`, which has been written since 1.14.
 
 **Every number carries its own honesty.** A figure derived from synthetic data says so *on the screen*. A deflection rate from eleven conversations shows the eleven. `docs/` has been disciplined about this from the beginning ([CLAUDE.md §4](../CLAUDE.md)) and a dashboard is exactly where that discipline usually dies.
+
+#### Built 2026-08-27, and it is entirely subtractive
+
+**There is no rate on this screen, of any kind.** Not deflection, not resolution,
+no trend, no target. Escalations over conversations is arithmetic the data
+supports; *deflection* is a business claim it does not — it counts a shopper who
+gave up, or who accepted a wrong answer, as deflected, and [CLAUDE.md §4](../CLAUDE.md)
+lists deflection rate under **unknown**. So the screen shows *"1 of 2
+conversations were handed to a person"*, which a merchant can check, and the same
+sentence refuses the word: *"that is a count, not a deflection rate."* Both halves
+matter — state the count alone and the reader does the division themselves.
+An integration test walks every field name in the payload and fails on anything
+ending in `_rate`.
+
+**Zero is never printed as money.** `PriceTable.cost` returns `0` for a local
+model *and* for a hosted model whose price is not configured, and nothing below
+the screen can tell them apart. The screen writes **"not priced"** and explains
+both possibilities. `make console-check` fails if a `$0` ever renders.
+
+**Shadow mode is stated before any figure.** The usage row cannot say the work
+was withheld; `TenantConfig.mode` can. Without it, a merchant reads "41
+conversations, 2 escalated" as a working assistant when no shopper was shown a
+single reply — **the most misleading page this console could produce, built
+entirely from true numbers.**
+
+**Every total names its period**, and an unknown `?period=` is a 400 rather than
+a silent correction: a quietly adjusted window is a wrong number, not a wrong
+parameter. The per-agent split is labelled *today* because that is the grain the
+meter records; summing it across a 30-day selector would report something nobody
+measured.
+
+**The caveats come from the server**, not from the JavaScript bundle — ADR-0020's
+rule for merchant-facing sentences — and each appears only when it is true, so
+the list never becomes boilerplate a reader learns to skip.
 
 ---
 
@@ -211,14 +283,25 @@ The last two steps are the ones that already exist and are already trusted. **Th
 5. Sign-in **cannot be used to enumerate** which emails have accounts.
 6. No credential and no API key appears in any response body, ever.
 
-**All six are asserted, and two of them twice.** `tests/integration/test_console_review.py`
-covers 1, 2, 4 and 6 against real PostgreSQL with **two populated tenants**;
-`tests/integration/test_console_auth.py` covers 3 and 5. `make console-check`
-then re-asserts 6 and the three rules of §3.2 **in real headless Chrome**,
-because *"show the evidence"*, *"a withheld turn says so"* and *"no invented
-numbers"* are claims about what a rendered page contains — a server that offered
-the material and a screen that displayed it are not the same thing, and only one
-of them is the product.
+**All six are asserted, on every screen, and the repetition is the point.** The bar is *per
+screen*, not per project: a membership check that holds on one route and was forgotten on
+another is exactly the shape of bug §6 exists to catch, and "the other file tests it" has never
+once been true of the route somebody added last. So clauses 1, 2, 4 and 6 are re-asserted in
+`test_console_review.py`, `test_console_conversations.py` and `test_console_shop_and_usage.py`
+— each against real PostgreSQL with **two populated tenants** — and `test_console_auth.py` owns
+3 and 5.
+
+`make console-check` then re-asserts them **in real headless Chrome**, 33 times, because every
+rule this console has is a claim about what a *rendered page* contains. A server that offered
+safe material and a screen that displayed it are not the same thing, and only one of them is the
+product: a page can fetch a payload with no credential in it and still print `$0.00` under the
+word "cost".
+
+**Twice now, a browser check passed against nothing and had to be made real.** The first Shop
+check asserted "no credential reached the screen" against a shop with no store connected, and
+the first Usage check asked for a period label on a screen showing its empty state. Both now
+seed real rows first and remove exactly those rows afterwards. *A check that can pass with
+nothing to look at is not a check* — the same lesson as **E6**, in a third place.
 
 ---
 
@@ -230,6 +313,7 @@ of them is the product.
 | **Node and npm enter a pure-Python repo** | Second toolchain in `make check`; two ways to have a stale dependency. |
 | **One role, `owner`** | A merchant who wants to give a support agent read-only access cannot, until somebody asks and it is designed. |
 | **No approval queue** | Every write feature stays blocked. This is by design and is the next thing the console unlocks. |
+| **No connect form (v1)** | A merchant cannot connect their own shop; somebody with API access has to. Deliberate — see §3.4. It blocks self-serve onboarding and nothing else. |
 | **Shadow mode must be on to have anything to review** | A merchant who goes live immediately sees an empty Review screen forever. **Done 2026-08-27** — the empty state says exactly that, and distinguishes it from a filter that matched nothing. |
 
 ---

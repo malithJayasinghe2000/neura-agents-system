@@ -22,7 +22,11 @@ from neura_api.routes.console_conversations import (
     _message_payload,
     _state,
 )
+from neura_api.routes.console_shop import COUNTED, _checkpoint_payload
+from neura_api.routes.console_usage import PERIODS, _caveats, _totals_payload
+from neura_commerce.identity import EntityType
 from neura_core import ValidationError
+from neura_core.tenancy.usage import UsageTotals
 
 
 class TestTheStateFilter:
@@ -129,3 +133,113 @@ class TestTheMessage:
         when = datetime.now(UTC)
         assert _message_payload(message(created_at=when))["created_at"] == when.isoformat()
         assert _message_payload(message())["created_at"] is None
+
+
+class TestTheShopScreenSaysWhatItKnows:
+    def test_a_sync_that_never_finished_is_null_and_not_a_date(self) -> None:
+        """ "Never finished" and "finished at the epoch" are different facts and
+        only one should make a merchant worry. Nothing defaults this."""
+        payload = _checkpoint_payload(
+            _checkpoint(entity_type=EntityType.PRODUCT, completed_at=None)
+        )
+        assert payload["completed_at"] is None
+
+    def test_the_opaque_cursor_is_never_in_the_payload(self) -> None:
+        """A cursor is opaque by design (api-design.md §5). Whether a crawl is
+        part-way through is the fact a merchant needs; the value is not, and it
+        is the sort of field that gets pasted into a support ticket and goes
+        stale."""
+        payload = _checkpoint_payload(_checkpoint(cursor="an-encoded-cursor"))
+        assert "cursor" not in payload
+        assert payload["in_progress"] is True
+
+    def test_nothing_in_progress_when_there_is_no_cursor(self) -> None:
+        assert _checkpoint_payload(_checkpoint(cursor=None))["in_progress"] is False
+
+    def test_orders_and_customers_are_deliberately_not_counted(self) -> None:
+        """They are looked up live through the shop and never synced
+        (commerce-integration.md), so counting them would report zero and read
+        as a broken sync rather than as a design decision."""
+        assert EntityType.ORDER not in COUNTED
+        assert EntityType.CUSTOMER not in COUNTED
+        assert EntityType.PRODUCT in COUNTED
+
+
+class TestTheUsageScreenInventsNothing:
+    """`console.md §5` and `CLAUDE.md §4`, at the layer that builds the payload."""
+
+    def test_the_payload_carries_counts_and_not_one_ratio(self) -> None:
+        payload = _totals_payload(UsageTotals(tenant_id="tn_1", conversations=41, escalations=2))
+        assert payload["conversations"] == 41
+        assert payload["escalations"] == 2
+        assert not any(key.endswith("_rate") for key in payload)
+
+    def test_a_zero_cost_is_never_a_measurement(self) -> None:
+        """Zero is what a local model records *and* what a hosted model with no
+        configured price records (`neura_llm.pricing`). Nothing below this layer
+        can tell them apart."""
+        assert _totals_payload(UsageTotals(tenant_id="tn_1"))["cost"]["measured"] is False
+
+    def test_a_real_cost_is_reported_as_one(self) -> None:
+        from decimal import Decimal
+
+        payload = _totals_payload(UsageTotals(tenant_id="tn_1", cost_usd=Decimal("1.42")))
+        assert payload["cost"] == {"usd": "1.42", "measured": True}
+
+    def test_shadow_mode_is_the_first_thing_said(self) -> None:
+        """True numbers describing work no shopper ever saw is the most
+        misleading page this console could produce. It leads."""
+        caveats = _caveats(UsageTotals(tenant_id="tn_1", conversations=41), "shadow")
+        assert "shadow mode" in caveats[0]
+
+    def test_a_live_shop_claims_nothing_about_withholding(self) -> None:
+        caveats = _caveats(UsageTotals(tenant_id="tn_1", conversations=41), "live")
+        assert not any("shadow mode" in caveat for caveat in caveats)
+
+    def test_the_escalation_count_is_stated_with_its_denominator_and_disclaimed(
+        self,
+    ) -> None:
+        """Both halves matter. A merchant reading "2 of 41" will otherwise do the
+        division and call the answer a deflection rate — which `CLAUDE.md §4`
+        lists as unknown."""
+        [caveat] = [
+            c
+            for c in _caveats(
+                UsageTotals(tenant_id="tn_1", conversations=41, escalations=2), "live"
+            )
+            if "conversations" in c
+        ]
+        assert "2 of 41 conversations" in caveat
+        assert "not a deflection rate" in caveat
+
+    def test_a_shop_with_no_conversations_makes_no_claim_about_them(self) -> None:
+        """Nothing recorded means nothing to disclaim. A caveat that is always
+        present is a caveat the reader learns to skip."""
+        caveats = _caveats(UsageTotals(tenant_id="tn_1"), "live")
+        assert not any("conversations were handed" in caveat for caveat in caveats)
+
+    def test_everything_ever_recorded_is_not_a_number_of_days(self) -> None:
+        assert PERIODS["all"] is None
+
+    def test_the_periods_offered_are_the_periods_accepted(self) -> None:
+        """The screen's tabs and the endpoint's whitelist are the same dict, so a
+        tab cannot come to offer a window the API refuses."""
+        assert set(PERIODS) == {"today", "7d", "30d", "all"}
+
+
+def _checkpoint(**overrides: object):
+    """A `SyncCheckpoint` with only what a test cares about set."""
+    from neura_commerce.sync.state import SyncCheckpoint, SyncKey
+
+    key = SyncKey(
+        tenant_id="tn_1",
+        platform="fixture",
+        entity_type=overrides.pop("entity_type", EntityType.PRODUCT),  # type: ignore[arg-type]
+    )
+    fields: dict[str, object] = {"key": key, "last_run_count": 7}
+    fields.update(overrides)
+    if isinstance(fields.get("cursor"), str):
+        from neura_commerce.pagination import Cursor
+
+        fields["cursor"] = Cursor(state={"page": 1})
+    return SyncCheckpoint(**fields)  # type: ignore[arg-type]
