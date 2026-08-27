@@ -250,10 +250,51 @@ product data. `sell.md` §5.2 says quality is bounded above by the merchant's ca
 stronger and was not written down. It never showed up in the evals because the fixture store's
 search is ours.
 
-**Not decided here.** The options each cost something: search our own semantic index instead
+**Recorded as [A16](open-questions.md).** The options each cost something: search our own semantic index instead
 (better matching, but a stale index now decides what is recommended), send simpler queries
 (loses the shopper's constraints), or fall back from the shop's search to ours when it returns
 nothing (two behaviours, one of which is invisible).
+
+### ✅ Fixed: a chunk address was readable as a product id
+
+The first real question — *"show me a jacket"* — returned **"this shop doesn't appear to carry
+it"**, from a shop with four jackets.
+
+```
+RETRIEVE  found  ['product:1311#0', ...]                    ← the search WORKED
+PLAN      chose  get_product_details(product_ref='product:1311#0')
+ACT       store said: no product with id 'product:1311#0'
+SHORTLIST nothing survived
+NO_MATCH  "this shop doesn't appear to carry it"
+```
+
+Product **1311 is the Waxed Cotton Field Jacket**. Semantic search found exactly the right
+product; the id it was handed was a *chunk address*, not a product id.
+
+**The prompt was obeyed, and that is the point.** `plan.md` says *"Do not guess ids. Every id you
+pass must have appeared in a result you were shown."* The model followed it exactly. The id it was
+shown was the wrong one, so the rule **produced** the error rather than preventing it — the shape
+of every rule 3 argument in this project, arriving in a prompt instead of an authorisation check.
+
+Fixed by naming the attributes: `ref="1311" chunk="0"` instead of `id="product:1311#0"`. Re-run
+gives `get_product_details(product_ref="1311")` → *Waxed Cotton Field Jacket, 165.00 USD, in
+stock*, shortlisted. Pinned by a test.
+
+### ⚠️ Finding 3 — the worst one: `no_match` overclaims, and it is shipping
+
+*"I need trousers under 40"* → the planner searched `"trousers under 40"` → the shop's literal
+search returned zero → the shopper was told **"this shop doesn't appear to carry it"**, about a
+shop holding five kinds of trousers.
+
+`sell.md` §2.3 says that sentence is a claim about the **entire store** and is only safe when the
+evidence covers the entire store. `shortlist` enforces it — and enforces the wrong half. It asks
+*"did the store reply?"*, never *"did we ask it a question it could answer?"* **A search returning
+zero rows counts as the store having answered.**
+
+So the guarantee holds against an outage, and not against a bad query — which is the far commoner
+case. **Recorded as [A15](open-questions.md), 🔴.** Not fixed: widening the precondition trades the
+honest-miss message, which is a real feature, against a false claim about a merchant's whole
+catalogue. The false claim is worse and it is what currently ships.
 
 ### ⚠️ Finding 2: each script indexes under its own tenant
 
