@@ -71,7 +71,7 @@ MySQL is on port 3307 while the shop is configured for 3308.
 | 3 | Sync | shop data copied into our Postgres | none | ✅ 2026-08-27 |
 | 4 | Index | that data made searchable | local (embeddings) | ✅ 2026-08-27 |
 | 5 | CARE end to end | a real support conversation | local (heat) | ⬜ |
-| 6 | SELL end to end | a real recommendation | local (heat) | ⬜ |
+| 6 | SELL end to end | a real recommendation | local (heat) | ◐ tooling built |
 | 7 | Widget | what a shopper actually sees | local | ⬜ |
 | 8 | Console | what the owner sees, incl. grading a real turn | none | ⬜ |
 | 9 | New e-commerce | a second shop passes conformance | none | ⬜ |
@@ -215,7 +215,59 @@ make care-check URL=$SHOP TOKEN=$TOKEN
 
 ⚠️ Runs router + reasoner + guard locally. Real laptop heat, ~20-90s per question.
 
-## Stages 6–9 ⬜
+## Stage 6 — SELL end to end ⬜ (tooling built 2026-08-27)
+
+`make sell-ask` did not exist. Written this session, because **until it did, SELL had never once
+been pointed at a real catalogue** — the 0.43 escalation precision, the four A14 failures, the
+whole of `evals/` all ran against `store.json`, four invented products. A recommender graded only
+on fixtures is graded on somebody's imagination.
+
+```bash
+make sell-ask Q="I need something warm for winter" URL=$SHOP TOKEN=$TOKEN
+```
+
+It prints the two places SELL *chooses*, which is what makes it different from `care-ask`:
+`plan` picks the search **and its query string**, and `shortlist` decides in code what may be
+recommended at all. It also prints `promises` on every run — the list `respond` will refuse to
+let the draft stray outside of.
+
+### ⚠️ Finding 1: product search goes to the SHOP, not to our index
+
+`search_products` calls the merchant's own `/products?q=` endpoint. Our semantic index is used by
+`retrieve` for policy and context — **not for finding products**. Measured against the test shop:
+
+| query | results |
+|:--|:--|
+| `jacket` | 4 |
+| `waterproof` | 2 |
+| **`warm jacket`** | **0** |
+
+The shop stocks a *Waxed Cotton Field Jacket*, a *Quilted Liner Vest* and a *Lightweight Rain
+Shell*. Adding one adjective returns nothing.
+
+**So SELL's recommendation quality is capped by the merchant's search engine**, not only by their
+product data. `sell.md` §5.2 says quality is bounded above by the merchant's catalogue; this is
+stronger and was not written down. It never showed up in the evals because the fixture store's
+search is ours.
+
+**Not decided here.** The options each cost something: search our own semantic index instead
+(better matching, but a stale index now decides what is recommended), send simpler queries
+(loses the shopper's constraints), or fall back from the shop's search to ours when it returns
+nothing (two behaviours, one of which is invisible).
+
+### ⚠️ Finding 2: each script indexes under its own tenant
+
+`make rag-check` indexed under `tn_ragsmoke`; `sell-ask` runs under `tn_sell_ask` and found
+nothing. Not a bug — tenant isolation working — but it means `retrieve` is empty unless you index
+that tenant too:
+
+```bash
+make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1 TENANT=tn_sell_ask
+```
+
+---
+
+## Stages 7–9 ⬜
 
 Not started. See the stage table above.
 

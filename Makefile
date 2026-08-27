@@ -7,7 +7,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
         test-integration test-widget widget-check widget-check-live widget-demo tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
-        care-check care-ask llm-check judge-check \
+        care-check care-ask sell-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
         api-check verify-probe router-probe console console-check
 
@@ -184,6 +184,13 @@ care-check:  ## Hold real conversations with CARE against a REAL shop: make care
 # security case appeared to fail because the shopper was never anonymous.
 care-ask:  ## Ask CARE one question and watch every step: make care-ask Q="..." URL=... TOKEN=... [CUSTOMER=385]
 	uv run python scripts/care_ask.py --url $(URL) --token $(TOKEN) \
+	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
+
+# SELL's half of `care-ask`, and the reason it exists is specific: until it was
+# written, every measurement of SELL ran against four invented fixture products.
+# A recommender graded only on fixtures is graded on somebody's imagination.
+sell-ask:  ## Ask SELL one question and watch every step: make sell-ask Q="..." URL=... TOKEN=...
+	uv run python scripts/sell_ask.py --url $(URL) --token $(TOKEN) \
 	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
 
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
