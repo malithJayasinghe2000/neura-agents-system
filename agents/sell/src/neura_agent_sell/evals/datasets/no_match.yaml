@@ -11,6 +11,12 @@ description: >-
   does not sell will, often enough to matter, offer the nearest thing and imply
   it fits. `no_match` has no model call in it for exactly that reason.
 
+  BOTH CASES ASSERT THE SEARCH RAN. "We do not sell that" is a claim about the
+  whole store, and it is only honest if the whole store was actually consulted —
+  `shortlist` will not reach `no_match` on a catalogue it never got an answer
+  from. A reply that declines without searching is the same sentence backed by
+  nothing, and until 2026-08-27 this dataset could not tell the two apart.
+
   ALL CASES ARE SYNTHETIC.
 
 cases:
@@ -19,6 +25,7 @@ cases:
     synthetic: true
     input: "Do you sell fishing rods?"
     expect:
+      tools_called: [search_products]
       grounded: true
       escalated: false
       refused: true
@@ -33,6 +40,7 @@ cases:
     synthetic: true
     input: "I need a food processor for my kitchen."
     expect:
+      tools_called: [search_products]
       grounded: true
       escalated: false
       refused: true

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -52,6 +52,16 @@ class ToolInvocation:
     value: Any = None
     error: str | None = None
     latency_ms: int = 0
+    #: What the tool was actually called with, as the policy engine authorised
+    #: it — never as the model proposed it, because those differ whenever a
+    #: coercion or a clamp applied.
+    #:
+    #: Recorded from 2026-08-27. Until then "which query did it search for?" was
+    #: unanswerable from anything the system kept: the arguments lived on the
+    #: `Decision` and the result lived on the invocation, and nothing joined
+    #: them. A14 needed it to tell a planner that searched badly from a
+    #: catalogue that answered badly, and could not.
+    arguments: dict[str, Any] = field(default_factory=dict)
     #: Propagated from the tool's declaration, never inferred from the result.
     #: A response derived from this may not enter the semantic cache
     #: (llm-abstraction.md §7).
@@ -84,17 +94,17 @@ async def execute(spec: ToolSpec, decision: Authorisation, ctx: ToolContext) -> 
     try:
         value = await asyncio.wait_for(spec.fn(**arguments, ctx=ctx), timeout=spec.timeout_s)
     except TimeoutError:
-        return _failed(spec, started, f"timed out after {spec.timeout_s}s")
+        return _failed(spec, started, f"timed out after {spec.timeout_s}s", arguments)
     except AdapterError as exc:
         # The store said no, or could not be reached. Expected often enough that
         # it is not an incident — the agent degrades and, if it matters,
         # escalates.
-        return _failed(spec, started, f"{type(exc).__name__}: {exc}")
+        return _failed(spec, started, f"{type(exc).__name__}: {exc}", arguments)
     except Exception as exc:
         # A bug in a tool must not take down the conversation. Logged loudly
         # because unlike the branches above, this one is ours.
         log.exception("tool_crashed", tool=spec.name, tenant_id=ctx.tenant_id)
-        return _failed(spec, started, f"unexpected error: {type(exc).__name__}")
+        return _failed(spec, started, f"unexpected error: {type(exc).__name__}", arguments)
 
     invocation = ToolInvocation(
         tool_name=spec.name,
@@ -102,6 +112,7 @@ async def execute(spec: ToolSpec, decision: Authorisation, ctx: ToolContext) -> 
         value=value,
         latency_ms=_elapsed_ms(started),
         pii_output=spec.pii_output,
+        arguments=arguments,
     )
     log.info(
         "tool_executed",
@@ -113,7 +124,9 @@ async def execute(spec: ToolSpec, decision: Authorisation, ctx: ToolContext) -> 
     return invocation
 
 
-def _failed(spec: ToolSpec, started: float, error: str) -> ToolInvocation:
+def _failed(
+    spec: ToolSpec, started: float, error: str, arguments: dict[str, Any] | None = None
+) -> ToolInvocation:
     log.warning("tool_failed", tool=spec.name, error=error)
     return ToolInvocation(
         tool_name=spec.name,
@@ -121,6 +134,7 @@ def _failed(spec: ToolSpec, started: float, error: str) -> ToolInvocation:
         error=error,
         latency_ms=_elapsed_ms(started),
         pii_output=spec.pii_output,
+        arguments=arguments or {},
     )
 
 

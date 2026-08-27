@@ -54,6 +54,15 @@ class AgentResponse(BaseModel):
     latency_ms: int = 0
     cost_usd: Decimal = Decimal("0")
     tokens_used: int = 0
+    llm_calls: int = Field(
+        default=0,
+        description=(
+            "Model calls this turn made, in every role. The honest denominator for "
+            "`structured_repair_rate`, which until 2026-08-27 divided by the number "
+            "of TOOL calls — a different quantity that happens to be the same order "
+            "of magnitude. A target that does not report it falls back to that proxy."
+        ),
+    )
     structured_repairs: int = Field(
         default=0, description="JSON repair retries — the early warning that a model is unsuitable"
     )
@@ -67,6 +76,17 @@ class AgentResponse(BaseModel):
     #: server that had already crashed three times.
     draft: str = ""
     verify_reason: str = ""
+    #: **Why the turn ended at a person**, in the node's own words — and the
+    #: third field E7 turns out to be about.
+    #:
+    #: `verify_reason` answers it only for the turns `verify` refused. A turn
+    #: that escalates from `route`, `plan` or `shortlist` never reaches the
+    #: verifier, so both fields above are empty and the record says only *that*
+    #: it escalated. That is exactly what `recommend_002` looked like on
+    #: 2026-08-26: empty draft, empty verify_reason, empty evidence, no tools —
+    #: and the sentence naming which half failed had been written by `shortlist`,
+    #: logged, and dropped on the floor (open question A14).
+    escalation_reason: str = ""
 
     #: The model provider could not be reached at all. **Not a result.** The
     #: case is skipped rather than scored, for the same reason an unreachable

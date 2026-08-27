@@ -392,6 +392,23 @@ class TestExecution:
         assert invocation.ok
         assert "1001" in str(invocation.value)
 
+    async def test_what_the_call_was_made_with_is_recorded(self) -> None:
+        """As authorised, not as proposed — and joined to its own result.
+
+        Until 2026-08-27 the arguments lived on the `Decision` and the result
+        lived on the invocation, with nothing joining them, so *"which query did
+        it search for?"* could not be answered from anything the system kept.
+        A14 needed exactly that to tell a planner that searched badly from a
+        catalogue that answered badly.
+        """
+        ctx = context(identity=SessionIdentity(customer_external_id="cust_1"))
+        decision = PolicyEngine(registry()).authorise(
+            "get_order_status", {"order_ref": "1001"}, ctx
+        )
+        invocation = await execute(get_order_status, decision, ctx)
+
+        assert invocation.arguments == {"order_ref": "1001"}
+
     async def test_pii_is_propagated_from_the_declaration(self) -> None:
         """Marked at the tool, never guessed from the text of a result — that
         flag is what keeps customer data out of the semantic cache."""

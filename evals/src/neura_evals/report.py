@@ -40,6 +40,11 @@ def print_report(report: RunReport) -> None:
         table.add_column("value", justify="right")
         table.add_column("gate", justify="right")
         table.add_column("", width=3)
+        # How much of the run each rate was asked about. A gate met on one case
+        # of fourteen prints identically to one met on all fourteen unless the
+        # column is here — which is what SELL's 2026-08-26 tool selection figure
+        # did, and it was the run's only unmeasured case that had failed.
+        table.add_column("cases", justify="right")
 
         for name, value in sorted(summary.metrics.items()):
             threshold = THRESHOLDS.get(name)
@@ -49,9 +54,17 @@ def print_report(report: RunReport) -> None:
                 breached = value > threshold if name in LOWER_IS_BETTER else value < threshold
                 mark = "[red]✘[/]" if breached else "[green]✔[/]"
                 gate = f"{threshold:.2f}"
-            table.add_row(name.replace("_", " "), f"{value:.2f}", gate, mark)
+            measured, scoreable = summary.coverage.get(name, (0, 0))
+            covered = f"{measured}/{scoreable}"
+            if scoreable and measured < scoreable:
+                covered = f"[yellow]{covered}[/]"
+            table.add_row(name.replace("_", " "), f"{value:.2f}", gate, mark, covered)
 
         console.print(table)
+        console.print(
+            "  [dim]cases = how many of the cases that ran actually scored that metric. "
+            "A rate over part of a suite is real, and narrower than it looks.[/]"
+        )
 
     console.print(
         f"\n  latency     p50 {summary.p50_latency_ms}ms · p95 {summary.p95_latency_ms}ms"
@@ -78,6 +91,10 @@ def print_report(report: RunReport) -> None:
                 console.print(f"      [dim]draft:  {draft[:220]}[/]")
             if reason := result.response.verify_reason.strip():
                 console.print(f"      [dim]verify: {reason[:160]}[/]")
+            # For the turns that never reached `verify` — the ones where every
+            # other diagnostic field is empty and only this one says anything.
+            if reason := result.response.escalation_reason.strip():
+                console.print(f"      [dim]escalated: {reason[:160]}[/]")
         if len(failures) > 20:
             console.print(f"\n  ... and {len(failures) - 20} more")
         console.print()

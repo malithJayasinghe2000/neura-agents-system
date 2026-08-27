@@ -94,7 +94,11 @@ class TestScoring:
     async def test_unasserted_checks_are_skipped_not_passed(self) -> None:
         """A case that asserts nothing must not silently score as a pass."""
         result = await score_case(
-            _case("c1", Expectation()), AgentResponse(reply="anything"), judge=None
+            # One tool call, so the zero-tool rule below is not what is under
+            # test here — this is about the checks a silent case does not emit.
+            _case("c1", Expectation()),
+            AgentResponse(reply="anything", tools_called=[ToolInvocation(name="get_order")]),
+            judge=None,
         )
         assert all(c.status is not CheckStatus.FAIL for c in result.checks)
         assert not any(c.name == "intent" for c in result.checks)
@@ -116,6 +120,51 @@ class TestScoring:
             ),
             judge=None,
         )
+        assert result.passed
+
+    async def test_a_case_that_called_nothing_is_scored_not_skipped(self) -> None:
+        """The A14 hole: the one turn that used no tool fell out of a gated metric.
+
+        `recommend_002` called no tool, composed nothing and escalated — and
+        because it never wrote `tools_called`, `tool_selection_accuracy` reported
+        1.00 over the three cases that had. A metric whose denominator each case
+        may opt out of cannot fail, and it opted out exactly where the surprise
+        was.
+        """
+        result = await score_case(
+            _case("c1", Expectation(intent=Intent.PRODUCT_QA)),
+            AgentResponse(reply="I'll pass you to a colleague.", intent=Intent.PRODUCT_QA),
+            judge=None,
+        )
+        selection = [c for c in result.checks if c.name == "tool_selection"]
+        assert selection, "a turn that called no tools must be scored, not skipped"
+        assert selection[0].status is CheckStatus.FAIL
+        assert "tools_called" in selection[0].detail, "the failure must name its own fix"
+
+    async def test_calling_nothing_passes_when_the_case_says_so(self) -> None:
+        """`[]` is an expectation, not an absence of one."""
+        result = await score_case(
+            _case("c1", Expectation(tools_called=[])), AgentResponse(reply="ok"), judge=None
+        )
+        assert result.passed
+
+    async def test_a_silent_case_that_did_call_tools_is_still_skipped(self) -> None:
+        """Not asserting an exact tool set stays legitimate — over-specifying is brittle."""
+        result = await score_case(
+            _case("c1", Expectation()),
+            AgentResponse(reply="ok", tools_called=[ToolInvocation(name="search_products")]),
+            judge=None,
+        )
+        assert not any(c.name == "tool_selection" for c in result.checks)
+
+    async def test_adversarial_cases_are_exempt_from_the_zero_tool_rule(self) -> None:
+        """They assert authorisation, which is mandatory, and not selection."""
+        result = await score_case(
+            _case("c1", Expectation(unauthorised_tool_calls=0), intent=Intent.ADVERSARIAL),
+            AgentResponse(reply="no"),
+            judge=None,
+        )
+        assert not any(c.name == "tool_selection" for c in result.checks)
         assert result.passed
 
     async def test_forbidden_tool_fails(self) -> None:
@@ -180,7 +229,9 @@ class TestScoring:
 
         result = await score_case(
             _case("c1", Expectation(grounded=True)),
-            AgentResponse(reply="Your order shipped."),
+            AgentResponse(
+                reply="Your order shipped.", tools_called=[ToolInvocation(name="get_order")]
+            ),
             judge=DownJudge(),  # type: ignore[arg-type]
         )
         check = next(c for c in result.checks if c.name == "groundedness")
@@ -191,13 +242,35 @@ class TestScoring:
     async def test_must_contain_is_case_insensitive(self) -> None:
         result = await score_case(
             _case("c1", Expectation(must_contain=["SHIPPED"])),
-            AgentResponse(reply="Your order has shipped."),
+            AgentResponse(
+                reply="Your order has shipped.", tools_called=[ToolInvocation(name="get_order")]
+            ),
             judge=None,
         )
         assert result.passed
 
 
 class TestSummary:
+    async def test_a_rate_is_reported_with_how_much_of_the_run_it_covers(self) -> None:
+        """1.00 from one case must not print like 1.00 from fourteen."""
+        results = [
+            await score_case(
+                _case("asserts", Expectation(intent=Intent.ORDER_STATUS)),
+                AgentResponse(
+                    reply="ok", intent="order_status", tools_called=[ToolInvocation(name="t")]
+                ),
+                judge=None,
+            ),
+            await score_case(
+                _case("silent", Expectation()),
+                AgentResponse(reply="ok", tools_called=[ToolInvocation(name="t")]),
+                judge=None,
+            ),
+        ]
+        summary = summarise(results)
+        assert summary.metrics["intent_accuracy"] == 1.0
+        assert summary.coverage["intent_accuracy"] == (1, 2), "one case of two produced that 1.00"
+
     async def test_metrics_reflect_only_asserted_checks(self) -> None:
         results = [
             await score_case(
@@ -477,12 +550,42 @@ class TestPersistence:
         """A file of failures alone cannot answer "did this regress"."""
         dataset = Dataset(name="d", cases=[_case("c1", Expectation()), _case("c2", Expectation())])
         report = await run_eval(
-            target=FakeTarget({"c1": AgentResponse(reply="a"), "c2": AgentResponse(reply="b")}),
+            target=FakeTarget(
+                {
+                    "c1": AgentResponse(reply="a", tools_called=[ToolInvocation(name="t")]),
+                    "c2": AgentResponse(reply="b", tools_called=[ToolInvocation(name="t")]),
+                }
+            ),
             datasets=[dataset],
         )
         cases = json.loads(write_report(report, tmp_path / "r.json").read_text())["cases"]
         assert {c["case_id"] for c in cases} == {"c1", "c2"}
         assert all(c["passed"] for c in cases)
+
+    async def test_why_a_turn_escalated_is_kept(self, tmp_path: Path) -> None:
+        """The field A14 needed and the file did not have.
+
+        A turn that escalates before `verify` has an empty draft, an empty
+        verify_reason and no evidence — the record says only that it happened.
+        The node that decided wrote a sentence saying which half failed, and it
+        went to the terminal.
+        """
+        dataset = Dataset(name="d", cases=[_case("c1", Expectation(escalated=False))])
+        report = await run_eval(
+            target=FakeTarget(
+                {
+                    "c1": AgentResponse(
+                        reply="I'll pass you to a colleague.",
+                        escalated=True,
+                        escalation_reason="the catalogue could not be searched",
+                        tools_called=[ToolInvocation(name="t")],
+                    )
+                }
+            ),
+            datasets=[dataset],
+        )
+        case = json.loads(write_report(report, tmp_path / "r.json").read_text())["cases"][0]
+        assert case["escalation_reason"] == "the catalogue could not be searched"
 
     async def test_a_synthetic_run_says_so_in_the_file(self, tmp_path: Path) -> None:
         """Read six weeks later, a number without this is a number somebody quotes."""

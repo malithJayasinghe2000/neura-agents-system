@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
-from neura_evals.dataset import EvalCase
+from neura_evals.dataset import ADVERSARIAL, EvalCase
 from neura_evals.judge import Judge
 from neura_evals.target import AgentResponse
 
@@ -120,16 +120,7 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
             )
         )
 
-    if expect.tools_called is not None:
-        actual_tools = set(response.tool_names)
-        expected_tools = set(expect.tools_called)
-        checks.append(
-            Check(
-                "tool_selection",
-                CheckStatus.PASS if actual_tools == expected_tools else CheckStatus.FAIL,
-                f"got {sorted(actual_tools)}, expected {sorted(expected_tools)}",
-            )
-        )
+    _score_tool_selection(case, response, checks)
 
     if expect.tools_not_called:
         forbidden = set(expect.tools_not_called) & set(response.tool_names)
@@ -232,6 +223,68 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
     return CaseResult(case.id, case.intent, case.synthetic, checks, response, groundedness)
 
 
+def _score_tool_selection(case: EvalCase, response: AgentResponse, checks: list[Check]) -> None:
+    """Score which tools ran — **including the turn that ran none**.
+
+    `tool_selection_accuracy` is a release gate, and until 2026-08-27 its
+    denominator was opt-in: the check existed only when a case wrote
+    ``expect.tools_called``. That is the general shape of a metric that cannot
+    fail, and SELL's first run showed it fully formed — **the suite reported
+    1.00 from one case out of fourteen**, because one case out of fourteen had
+    bothered to say what it expected.
+
+    The case that stayed silent was ``recommend_002``, which called **no tools
+    at all**, composed nothing and escalated (open question A14). The single
+    turn in the run whose tool behaviour nobody had predicted was the exact turn
+    the gate could not see, and that is not a coincidence: a case is silent about
+    tools precisely when its author had no strong expectation, which is where
+    surprises live.
+
+    So silence is no longer free in the one place it hides a result:
+
+    * The case states ``tools_called`` → scored against it, as before. ``[]`` is
+      a real expectation meaning *call nothing*, not an absence of one.
+    * The case is silent and tools ran → still skipped. Not asserting on an
+      exact tool set is legitimate; over-specifying makes a case brittle against
+      a planner choosing a different-but-valid lookup.
+    * The case is silent and **nothing** ran → **FAIL**. Calling no tool is a
+      tool-selection decision like any other, and an unscoreable one is a defect
+      in the case. The fix is to write the expectation, not to loosen this.
+
+    **Adversarial cases are exempt, deliberately.** They already carry a
+    mandatory safety assertion (``unauthorised_tool_calls``, enforced at load
+    time) and what they measure is authorisation, not selection. Demanding an
+    exact tool set from them would over-specify the one dataset whose cases must
+    survive the agent legitimately answering an attack's benign half.
+    """
+    expect = case.expect
+
+    if expect.tools_called is not None:
+        actual_tools = set(response.tool_names)
+        expected_tools = set(expect.tools_called)
+        checks.append(
+            Check(
+                "tool_selection",
+                CheckStatus.PASS if actual_tools == expected_tools else CheckStatus.FAIL,
+                f"got {sorted(actual_tools)}, expected {sorted(expected_tools)}",
+            )
+        )
+        return
+
+    if case.intent == ADVERSARIAL or response.tool_names:
+        return
+
+    checks.append(
+        Check(
+            "tool_selection",
+            CheckStatus.FAIL,
+            "the agent called no tools, and this case does not say whether it should have. "
+            "Add `expect.tools_called` — `[]` if calling nothing is correct here. A turn "
+            "that used none of the store's data cannot be left unscored.",
+        )
+    )
+
+
 @dataclass(slots=True)
 class RunSummary:
     """Aggregate metrics for one eval run."""
@@ -248,6 +301,15 @@ class RunSummary:
     #: measured them (open question E6).
     unavailable: int = 0
     metrics: dict[str, float] = field(default_factory=dict)
+    #: ``metric name -> (cases that scored it, cases that ran)``.
+    #:
+    #: A rate says how often the agent was right; this says how much of the run
+    #: it was asked about. The two look identical in a report and are not: SELL's
+    #: 2026-08-26 run reported ``tool_selection_accuracy 1.00`` measured on
+    #: **one case of fourteen**, and nothing on the screen said so. The same
+    #: reasoning already forced `unjudged` onto this summary — this generalises
+    #: it to every metric instead of the one where it had already gone wrong.
+    coverage: dict[str, tuple[int, int]] = field(default_factory=dict)
     p50_latency_ms: int = 0
     p95_latency_ms: int = 0
     total_cost_usd: Decimal = Decimal("0")
@@ -280,6 +342,16 @@ def _rate(results: list[CaseResult], check_name: str) -> float | None:
     if not relevant:
         return None
     return sum(1 for c in relevant if c.status is CheckStatus.PASS) / len(relevant)
+
+
+def _measured(results: list[CaseResult], check_name: str) -> int:
+    """How many cases actually scored one named check."""
+    return sum(
+        1
+        for r in results
+        for c in r.checks
+        if c.name == check_name and c.status is not CheckStatus.SKIP
+    )
 
 
 def _escalation_check(result: CaseResult) -> Check | None:
@@ -376,6 +448,14 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         ),
     )
 
+    # The denominator every coverage figure is stated against: cases that ran.
+    # Not `len(results)` — a case skipped for a dead provider was never offered
+    # to any metric, and counting it as uncovered would blame the datasets for an
+    # outage (E6).
+    scoreable = sum(
+        1 for r in results if not r.response.not_run and not r.response.infrastructure_error
+    )
+
     for metric_name, check_name in (
         ("intent_accuracy", "intent"),
         ("tool_selection_accuracy", "tool_selection"),
@@ -393,18 +473,31 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         value = _rate(results, check_name)
         if value is not None:
             summary.metrics[metric_name] = value
+            summary.coverage[metric_name] = (_measured(results, check_name), scoreable)
 
     _score_escalation(results, summary)
+    # Both escalation figures are derived from the one escalation check, so they
+    # share its coverage.
+    if escalation_cases := _measured(results, "escalation"):
+        for metric_name in ("escalation_precision", "escalation_recall"):
+            if metric_name in summary.metrics:
+                summary.coverage[metric_name] = (escalation_cases, scoreable)
 
     # Only cases that actually ran. Counting an unrun case as "one call, zero
     # repairs" reported a perfect 0.00 repair rate — a green gate derived from no
     # measurement at all, which is the one number shape this harness exists to
     # refuse. Caught by a test, not by reading the code.
     ran = [r for r in results if not r.response.not_run]
-    total_llm_calls = sum(max(1, len(r.response.tools_called)) for r in ran)
+    # The real count where the target reports one. The old expression —
+    # `max(1, len(tools_called))` — was a stand-in for "how many model calls",
+    # and it is not that: a turn that escalates out of `route` makes one model
+    # call and zero tool calls, and a turn that calls three tools still made only
+    # two. It is now a fallback for targets that do not meter themselves.
+    total_llm_calls = sum(r.response.llm_calls or max(1, len(r.response.tools_called)) for r in ran)
     total_repairs = sum(r.response.structured_repairs for r in ran)
     if total_llm_calls:
         summary.metrics["structured_repair_rate"] = total_repairs / total_llm_calls
+        summary.coverage["structured_repair_rate"] = (len(ran), scoreable)
 
     latencies = [r.response.latency_ms for r in results]
     summary.p50_latency_ms = _percentile(latencies, 0.50)

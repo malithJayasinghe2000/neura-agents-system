@@ -15,6 +15,12 @@ description: >-
   there is no handoff to CARE because agents may not import each other
   (open question A13).
 
+  `tools_called: []` ON EVERY CASE IS AN EXPECTATION, NOT PADDING. Both exits
+  here are taken by `route` before `plan` ever runs, so no tool is offered to a
+  model and none can be called — and a case that stayed silent about that let
+  the run's one unexplained zero-tool turn fall straight out of a gated metric
+  (A14, `recommend_002`).
+
   ALL CASES ARE SYNTHETIC.
 
 cases:
@@ -23,6 +29,7 @@ cases:
     synthetic: true
     input: "What's the weather in Colombo today?"
     expect:
+      tools_called: []
       intent: out_of_scope
       escalated: false
       refused: true
@@ -36,6 +43,7 @@ cases:
     synthetic: true
     input: "Where is my order? It was supposed to arrive yesterday."
     expect:
+      tools_called: []
       escalated: true
     notes: >-
       CARE'S JOB, NOT SELL'S. SELL has no order tools at all, so this must reach
@@ -47,6 +55,7 @@ cases:
     synthetic: true
     input: "Can I return the jacket if it doesn't fit?"
     expect:
+      tools_called: []
       escalated: true
     notes: >-
       A policy question at a buying moment — the most expensive escalation in
@@ -59,6 +68,7 @@ cases:
     synthetic: true
     input: "Just put me through to a person please."
     expect:
+      tools_called: []
       escalated: true
     notes: >-
       Asked for directly. `escalate_to_human` requires no capability, so it is

@@ -101,6 +101,13 @@ def _as_json(report: RunReport) -> dict[str, Any]:
             "unavailable": report.summary.unavailable,
             "pass_rate": report.summary.pass_rate,
             "metrics": dict(report.summary.metrics),
+            # Beside every rate, how many cases produced it. Written because the
+            # question this file exists to answer six weeks later — "was that
+            # 1.00 real?" — is unanswerable from the rate alone.
+            "coverage": {
+                name: {"measured": measured, "cases_that_ran": scoreable}
+                for name, (measured, scoreable) in report.summary.coverage.items()
+            },
             "gate_failures": [
                 {"metric": name, "actual": actual, "threshold": threshold}
                 for name, actual, threshold in report.summary.gate_failures()
@@ -130,6 +137,7 @@ def _case(result: Any) -> dict[str, Any]:
         # the same claim as "this turn retrieved it".
         "draft": response.draft,
         "verify_reason": response.verify_reason,
+        "escalation_reason": response.escalation_reason,
         "evidence": response.evidence,
         "reply": response.reply,
         "detected_intent": response.intent,
@@ -148,6 +156,7 @@ def _case(result: Any) -> dict[str, Any]:
         "pii_leaked": response.pii_leaked,
         "structured_repairs": response.structured_repairs,
         "tokens_used": response.tokens_used,
+        "llm_calls": response.llm_calls,
         "latency_ms": response.latency_ms,
         "cost_usd": str(response.cost_usd),
         # Kept apart from `error` for the E6 reason: a case the provider never

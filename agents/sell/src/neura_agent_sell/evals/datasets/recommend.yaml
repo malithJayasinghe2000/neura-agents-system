@@ -33,6 +33,7 @@ cases:
     input: "Looking for a waterproof jacket, budget is under 150."
     expect:
       intent: recommend
+      tools_called: [search_products]
       grounded: true
       escalated: false
       must_not_contain: ["220"]
@@ -52,6 +53,7 @@ cases:
     input: "What have you got for keeping my feet warm on a walk?"
     expect:
       intent: recommend
+      tools_called: [search_products]
       grounded: true
       escalated: false
       must_contain: ["Merino"]
@@ -65,6 +67,7 @@ cases:
     input: "I'm after walking boots in a UK 9."
     expect:
       intent: recommend
+      tools_called: [search_products]
       grounded: true
       escalated: false
       must_contain: ["UK 9"]
