@@ -36,6 +36,24 @@ class TestLoading:
         load_env()
         assert os.environ["EVAL_JUDGE_MODEL"] == "gemini-2.5-flash"
 
+    def test_the_first_occurrence_of_a_duplicate_key_wins(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Surprising, and it decided which LLM provider was live for a week.
+
+        Most people read a .env like a shell script, where a later line
+        overrides an earlier one. Here the opposite holds — a consequence of
+        real environment variables winning — so a block appended to the bottom
+        of the file is inert while looking authoritative.
+        """
+        _write_env(
+            tmp_path, "CLOUD_LLM_BASE_URL=https://first\nCLOUD_LLM_BASE_URL=https://second\n"
+        )
+        monkeypatch.delenv("CLOUD_LLM_BASE_URL", raising=False)
+
+        load_env()
+        assert os.environ["CLOUD_LLM_BASE_URL"] == "https://first"
+
     def test_real_environment_wins_over_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

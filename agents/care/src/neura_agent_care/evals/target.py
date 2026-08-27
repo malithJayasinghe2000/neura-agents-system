@@ -35,7 +35,7 @@ from neura_agent_care.graph import compile_graph
 from neura_agent_care.runtime import build_runtime
 from neura_agent_care.tools import TOOL_SCOPES
 from neura_agent_core.audit import AuditEvent, InMemoryAuditLog
-from neura_agent_core.graph import CONFIG_KEY, initial_state
+from neura_agent_core.graph import CONFIG_KEY, initial_state, total_cost, total_tokens
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity
 from neura_core import get_logger
@@ -144,6 +144,7 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
     tools_called = [
         ToolInvocation(
             name=invocation.tool_name,
+            arguments=invocation.arguments,
             authorised=invocation.tool_name not in refused or invocation.ok,
             error=invocation.error,
         )
@@ -166,6 +167,7 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
         escalated=escalated,
         draft=final.get("draft", ""),
         verify_reason=final.get("verify_reason", ""),
+        escalation_reason=final.get("escalation_reason", ""),
         infrastructure_error=final.get("infrastructure_error"),
         blocked=blocked,
         pii_leaked=bool(final.get("pii_leaks")),
@@ -179,8 +181,29 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
         # third is a policy refusal that ended in a handover. All three are
         # refusals; only the last costs a human.
         refused=bool(final.get("refused")) or (escalated and _was_refused(decisions)),
-        tokens_used=int(final.get("usage", {}).get("tokens", 0)),
+        **_spend(final),
     )
+
+
+def _spend(final: dict[str, Any]) -> dict[str, Any]:
+    """What the turn cost, as the harness reports it.
+
+    Read from the shared accumulator. Until 2026-08-27 this mapped ``tokens``
+    alone, and ``tokens`` was only ``compose``'s share — the router, the planner
+    and the verifier were all metered as free, so no report could answer *"what
+    would this suite cost on a cloud provider?"*.
+
+    `cost_usd` is ``0`` for a local model **and** for a cloud model with no
+    configured price. Set ``LLM_PRICING_JSON`` before reading anything into a
+    zero here (CLAUDE.md §4).
+    """
+    usage = final.get("usage", {})
+    return {
+        "tokens_used": total_tokens(usage),
+        "cost_usd": total_cost(usage),
+        "llm_calls": int(usage.get("calls", 0)),
+        "structured_repairs": int(usage.get("structured_repairs", 0)),
+    }
 
 
 def _evidence(final: dict[str, Any]) -> list[str]:

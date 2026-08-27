@@ -32,9 +32,9 @@ from typing import Literal, cast
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
-from neura_agent_core.graph import AgentState, Runtime, infra_error, runtime_of
+from neura_agent_core.graph import AgentState, Runtime, accrue, infra_error, runtime_of
 from neura_core import get_logger
-from neura_llm import ChatRequest, Message, ModelRole
+from neura_llm import ChatRequest, ChatResponse, Message, ModelRole
 
 log = get_logger(__name__)
 
@@ -124,7 +124,7 @@ async def route(state: AgentState, config: RunnableConfig) -> AgentState:
         return _escalate("the shopper's message was empty")
 
     try:
-        result = await _classify(runtime, message, state.get("history", []))
+        result, response = await _classify(runtime, message, state.get("history", []))
     except Exception as exc:
         # A wrong guess here misroutes the whole turn, and every step after it
         # inherits the mistake while appearing to work.
@@ -135,6 +135,11 @@ async def route(state: AgentState, config: RunnableConfig) -> AgentState:
         }
 
     update: AgentState = {
+        # Counted here, in the update every path below merges, so that a turn
+        # ending at `needs_person` is charged for the router call it made. Eleven
+        # of fourteen cases in SELL's first run reported zero tokens for exactly
+        # this reason.
+        "usage": accrue(state, ModelRole.ROUTER, response),
         "intent": result.intent,
         "intent_confidence": result.confidence,
         "entities": _entities(result),
@@ -180,8 +185,14 @@ async def route(state: AgentState, config: RunnableConfig) -> AgentState:
     return update
 
 
-async def _classify(runtime: Runtime, message: str, history: list[dict[str, str]]) -> Route:
-    """One structured call on the ROUTER role."""
+async def _classify(
+    runtime: Runtime, message: str, history: list[dict[str, str]]
+) -> tuple[Route, ChatResponse]:
+    """One structured call on the ROUTER role, with what it cost.
+
+    The response is returned alongside the value rather than discarded: this is
+    the highest-volume call in the system and it was being metered as free.
+    """
     request = ChatRequest(
         messages=[
             Message.system(runtime.prompt(PROMPT_NAME)),
@@ -190,7 +201,7 @@ async def _classify(runtime: Runtime, message: str, history: list[dict[str, str]
         temperature=0.0,
     )
     result = await runtime.llm.chat_structured(ModelRole.ROUTER, request, Route)
-    return cast(Route, result.value)
+    return cast(Route, result.value), result.response
 
 
 def _render(message: str, history: list[dict[str, str]]) -> str:

@@ -27,6 +27,28 @@ class LLMCapability(StrEnum):
     JSON_MODE = "json.object"
     """Valid JSON guaranteed, but the shape is not enforced."""
 
+    REASONING_EFFORT_NONE = "reasoning.none"
+    """``reasoning_effort="none"`` is accepted — the caller can switch thinking off.
+
+    Declared rather than assumed, because the two paths this project ships
+    disagree about it and the disagreement is a hard 400 rather than a
+    degradation. Ollama understands ``"none"``. **Gemini's OpenAI-compatible
+    endpoint rejects it with `400 INVALID_ARGUMENT`** — measured 2026-08-27,
+    with ``"low"`` and omission both accepted on the same model in the same
+    minute.
+
+    `ChatRequest.reasoning_effort` predicted this in as many words and said to
+    verify it at model-swap time. It was verified by the swap: every `compose`
+    call in SELL's first cloud run 400'd, six of fourteen cases were skipped as
+    unreachable, and the agent could not be measured on a cloud model at all.
+
+    **Dropping the parameter is not the fallback.** A reasoning model left to
+    think spends `max_tokens` on thinking first and returns `finish_reason=length`
+    with empty content — the exact failure ``"none"`` exists to prevent, and it
+    arrives looking like a model that had nothing to say. The fallback is the
+    lowest value the provider *does* accept.
+    """
+
     STREAMING = "streaming"
     VISION = "vision"
     LOGPROBS = "logprobs"
@@ -37,7 +59,12 @@ class LLMCapability(StrEnum):
 # strongest structured-output tier. Tool-calling support varies by model, so it
 # is decided per model below rather than assumed for the provider.
 _OLLAMA_BASE = frozenset(
-    {LLMCapability.JSON_SCHEMA_MODE, LLMCapability.JSON_MODE, LLMCapability.STREAMING}
+    {
+        LLMCapability.JSON_SCHEMA_MODE,
+        LLMCapability.JSON_MODE,
+        LLMCapability.STREAMING,
+        LLMCapability.REASONING_EFFORT_NONE,
+    }
 )
 
 # Local models with reliable native tool calling. Conservative on purpose: a
@@ -45,6 +72,10 @@ _OLLAMA_BASE = frozenset(
 # wrongly omitted just takes the slower fallback path.
 _OLLAMA_TOOL_CALLING_FAMILIES = ("llama3.1", "llama3.2", "llama3.3", "qwen2.5", "qwen3", "mistral")
 
+#: Note what is **absent**: ``REASONING_EFFORT_NONE``. The conservative default
+#: is that a cloud endpoint does not accept ``"none"``, because being wrong in
+#: that direction costs one notch of extra thinking and being wrong in the other
+#: costs every affected call.
 _CLOUD_DEFAULT = frozenset(
     {
         LLMCapability.NATIVE_TOOL_CALLING,
@@ -54,6 +85,10 @@ _CLOUD_DEFAULT = frozenset(
         LLMCapability.STREAMING,
     }
 )
+
+#: What ``"none"`` becomes on a provider that will not take it: the least
+#: thinking the provider offers, never nothing at all.
+LOWEST_REASONING_EFFORT = "low"
 
 
 def capabilities_for(*, provider_name: str, model: str) -> frozenset[LLMCapability]:

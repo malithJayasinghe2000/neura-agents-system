@@ -182,6 +182,18 @@ class TestCapabilities:
         assert LLMCapability.NATIVE_TOOL_CALLING in caps
 
 
+class TestReasoningEffortIsDeclared:
+    def test_ollama_accepts_none(self) -> None:
+        caps = capabilities_for(provider_name="ollama", model="qwen3:8b")
+        assert LLMCapability.REASONING_EFFORT_NONE in caps
+
+    def test_a_cloud_endpoint_is_assumed_not_to(self) -> None:
+        """Conservative on purpose. Wrong this way costs one notch of extra
+        thinking; wrong the other way 400s every affected call."""
+        caps = capabilities_for(provider_name="cloud", model="gemini-3.6-flash")
+        assert LLMCapability.REASONING_EFFORT_NONE not in caps
+
+
 class TestPricing:
     def test_local_inference_is_free(self) -> None:
         table = PriceTable({"m": {"input": Decimal("1"), "output": Decimal("2")}})
@@ -332,6 +344,81 @@ class TestLLMClient:
             ModelRole.REASONER, ChatRequest(messages=[Message.user("x")], temperature=0.1)
         )
         assert provider.calls[0]["request"].temperature == 0.1
+
+    async def test_reasoning_effort_none_is_downgraded_where_it_is_not_accepted(self) -> None:
+        """Gemini's OpenAI-compatible endpoint 400s on `"none"`. Measured 2026-08-27.
+
+        It took out every `compose` call in SELL's first cloud run — six of
+        fourteen cases skipped as provider-unreachable, and no cloud measurement
+        of the agent possible at all.
+        """
+        role_map = RoleMap(
+            name="fake-cloud",
+            providers={
+                "fake": ProviderConfig(
+                    name="fake",
+                    base_url="http://x/v1",
+                    is_local=False,
+                    capabilities=frozenset({LLMCapability.JSON_MODE}),
+                )
+            },
+            roles={ModelRole.REASONER: RoleConfig(provider="fake", model="m")},
+        )
+        client = LLMClient(role_map)
+        provider = FakeProvider()
+        client._providers["fake"] = provider  # type: ignore[assignment]
+
+        await client.chat(
+            ModelRole.REASONER,
+            ChatRequest(messages=[Message.user("x")], reasoning_effort="none"),
+        )
+        assert provider.calls[0]["request"].reasoning_effort == "low"
+
+    async def test_it_is_downgraded_and_never_dropped(self) -> None:
+        """Dropping it lets the model think until `max_tokens` runs out and
+        return empty content — the exact failure `"none"` exists to prevent."""
+        role_map = RoleMap(
+            name="fake-cloud",
+            providers={
+                "fake": ProviderConfig(
+                    name="fake", base_url="http://x/v1", is_local=False, capabilities=frozenset()
+                )
+            },
+            roles={ModelRole.REASONER: RoleConfig(provider="fake", model="m")},
+        )
+        client = LLMClient(role_map)
+        provider = FakeProvider()
+        client._providers["fake"] = provider  # type: ignore[assignment]
+
+        await client.chat(
+            ModelRole.REASONER,
+            ChatRequest(messages=[Message.user("x")], reasoning_effort="none"),
+        )
+        assert provider.calls[0]["request"].reasoning_effort is not None
+
+    async def test_a_provider_that_accepts_none_is_left_alone(self) -> None:
+        """Ollama understands it, and that is the whole local path."""
+        role_map = RoleMap(
+            name="fake-local",
+            providers={
+                "fake": ProviderConfig(
+                    name="fake",
+                    base_url="http://x/v1",
+                    is_local=True,
+                    capabilities=frozenset({LLMCapability.REASONING_EFFORT_NONE}),
+                )
+            },
+            roles={ModelRole.REASONER: RoleConfig(provider="fake", model="m")},
+        )
+        client = LLMClient(role_map)
+        provider = FakeProvider()
+        client._providers["fake"] = provider  # type: ignore[assignment]
+
+        await client.chat(
+            ModelRole.REASONER,
+            ChatRequest(messages=[Message.user("x")], reasoning_effort="none"),
+        )
+        assert provider.calls[0]["request"].reasoning_effort == "none"
 
     async def test_embedding_namespace_is_the_model_name(self) -> None:
         """Vector rows are scoped by this, since models are not interchangeable."""

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from langchain_core.runnables import RunnableConfig
 
-from neura_agent_core.graph import AgentState, infra_error, propose, runtime_of
+from neura_agent_core.graph import AgentState, accrue, infra_error, propose, runtime_of
 from neura_core import get_logger
 from neura_llm import ChatRequest, Message, ModelRole
 from neura_llm import ToolSpec as LLMToolSpec
@@ -87,7 +87,9 @@ async def plan(state: AgentState, config: RunnableConfig) -> AgentState:
         proposed=[call.name for call in response.tool_calls],
         offered=[spec.name for spec in available],
     )
-    return propose(proposals)
+    # The planner's call is charged whether or not it proposed anything — and a
+    # plan with no tools is precisely the turn this used to record as free.
+    return {**propose(proposals), "usage": accrue(state, ModelRole.REASONER, response)}
 
 
 def _render(state: AgentState) -> str:

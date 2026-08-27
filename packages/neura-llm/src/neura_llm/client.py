@@ -13,7 +13,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from neura_core import get_logger
-from neura_llm.capabilities import LLMCapability
+from neura_llm.capabilities import LOWEST_REASONING_EFFORT, LLMCapability
 from neura_llm.errors import EmbeddingDimensionMismatchError
 from neura_llm.pricing import PriceTable
 from neura_llm.provider import OpenAICompatibleProvider
@@ -33,6 +33,9 @@ class LLMClient:
         self._role_map = role_map
         self._prices = prices or PriceTable.from_env()
         self._providers: dict[str, OpenAICompatibleProvider] = {}
+        #: Roles already reported as downgraded, so the log line is said once
+        #: rather than on every call.
+        self._effort_downgraded: set[ModelRole] = set()
 
     @classmethod
     def from_role_map_name(cls, name: str) -> LLMClient:
@@ -89,9 +92,47 @@ class LLMClient:
             updates["reasoning_effort"] = defaults.reasoning_effort
         return request.model_copy(update=updates) if updates else request
 
+    def _apply_capabilities(self, request: ChatRequest, role: ModelRole) -> ChatRequest:
+        """Rewrite anything the provider serving this role cannot accept.
+
+        Today that is one parameter, and it is a hard failure rather than a
+        degradation: ``reasoning_effort="none"`` is understood by Ollama and
+        **rejected with 400 by Gemini's OpenAI-compatible endpoint**. Measured
+        2026-08-27, when it took out every `compose` call in SELL's first cloud
+        run and six of fourteen cases were skipped as provider-unreachable.
+
+        It is downgraded to the lowest value the provider does take, never
+        dropped. A caller asking for ``"none"`` is asking not to pay for
+        deliberation — and a reasoning model with no ceiling on its thinking
+        spends `max_tokens` before writing a character, which returns empty
+        content and `finish_reason=length` and reads as a model with nothing to
+        say (`ChatRequest.reasoning_effort`).
+
+        Same shape as the `json_schema` → `json_object` fallback in
+        `structured.py`: the runtime adapts to what a provider declares instead
+        of assuming the strongest behaviour and failing at request time
+        (llm-abstraction.md §1.3).
+        """
+        if request.reasoning_effort != "none":
+            return request
+        if LLMCapability.REASONING_EFFORT_NONE in self._role_map.capabilities(role):
+            return request
+
+        if role not in self._effort_downgraded:
+            self._effort_downgraded.add(role)
+            log.info(
+                "reasoning_effort_downgraded",
+                role=role.value,
+                requested="none",
+                using=LOWEST_REASONING_EFFORT,
+                detail="the provider for this role does not accept 'none'",
+            )
+        return request.model_copy(update={"reasoning_effort": LOWEST_REASONING_EFFORT})
+
     async def chat(self, role: ModelRole, request: ChatRequest) -> ChatResponse:
         provider, model, defaults = self._provider_for(role)
-        response = await provider.chat(self._apply_defaults(request, defaults), model=model)
+        prepared = self._apply_capabilities(self._apply_defaults(request, defaults), role)
+        response = await provider.chat(prepared, model=model)
         log.info(
             "llm_call",
             role=role.value,
@@ -107,7 +148,7 @@ class LLMClient:
     async def chat_stream(self, role: ModelRole, request: ChatRequest) -> AsyncIterator[ChatChunk]:
         provider, model, defaults = self._provider_for(role)
         async for chunk in provider.chat_stream(
-            self._apply_defaults(request, defaults), model=model
+            self._apply_capabilities(self._apply_defaults(request, defaults), role), model=model
         ):
             yield chunk
 
@@ -117,7 +158,7 @@ class LLMClient:
         provider, model, defaults = self._provider_for(role)
         result = await generate_structured(
             provider,
-            self._apply_defaults(request, defaults),
+            self._apply_capabilities(self._apply_defaults(request, defaults), role),
             schema_type,
             model=model,
             capabilities=self._role_map.capabilities(role),

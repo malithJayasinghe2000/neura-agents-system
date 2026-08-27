@@ -43,6 +43,7 @@ from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity, ToolContext
 from neura_commerce import CommerceAdapter
 from neura_domain import Policy, PolicyKind, SideEffect
+from neura_llm import ChatResponse, FinishReason, Usage
 
 TENANT = "tn_care_test"
 
@@ -85,30 +86,30 @@ class StubLLM:
             result.value = self.routed  # type: ignore[attr-defined]
         else:
             result.value = schema(grounded=self.grounded, unsupported_claim="")  # type: ignore[attr-defined]
+        # A real `ChatResponse`, not a duck-typed stand-in: `route` and `verify`
+        # now meter what they spend, and a fake that omits the cost is a fake
+        # that cannot notice a node forgetting to count it.
+        result.response = ChatResponse(  # type: ignore[attr-defined]
+            usage=Usage(prompt_tokens=10, completion_tokens=5), model="stub"
+        )
         return result
 
     async def chat(self, role: Any, request: Any) -> Any:
+        """A real `ChatResponse`, not an object shaped like one.
+
+        It was hand-rolled attribute by attribute, and every attribute a node
+        started reading had to be remembered here — `structured_repairs` was the
+        one that caught it out. A stub that cannot go out of date with the type
+        it stands in for is worth more than one that is quick to write.
+        """
         self.requests.append(request)
-
-        class Usage:
-            prompt_tokens = 10
-            completion_tokens = 5
-            total_tokens = 15
-
-        class Response:
-            pass
-
-        from decimal import Decimal
-
-        from neura_llm import FinishReason
-
-        response = Response()
-        response.content = self.draft  # type: ignore[attr-defined]
-        response.tool_calls = self.tool_calls  # type: ignore[attr-defined]
-        response.usage = Usage()  # type: ignore[attr-defined]
-        response.cost_usd = Decimal("0")  # type: ignore[attr-defined]
-        response.finish_reason = FinishReason.STOP  # type: ignore[attr-defined]
-        return response
+        return ChatResponse(
+            content=self.draft,
+            tool_calls=self.tool_calls,
+            usage=Usage(prompt_tokens=10, completion_tokens=5),
+            finish_reason=FinishReason.STOP,
+            model="stub",
+        )
 
 
 def _ctx(store: Any, *, customer: str | None = None) -> ToolContext:

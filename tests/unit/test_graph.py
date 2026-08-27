@@ -14,6 +14,8 @@ order.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, InMemoryAuditLog
@@ -22,6 +24,7 @@ from neura_agent_core.graph import (
     AgentGraph,
     GraphContractError,
     Runtime,
+    accrue,
     initial_state,
     propose,
 )
@@ -29,6 +32,7 @@ from neura_agent_core.graph.nodes.verify import Groundedness, verify
 from neura_agent_core.policy import ConversationBudget, PolicyEngine
 from neura_agent_core.tools import SessionIdentity, ToolContext, ToolRegistry, tool
 from neura_domain import Capability
+from neura_llm import ChatResponse, ModelRole, Usage
 
 TENANT = "tn_graph"
 CONVERSATION = "cnv_graph"
@@ -71,6 +75,11 @@ class StubLLM:
             value = Groundedness(
                 grounded=self.grounded,
                 unsupported_claim="" if self.grounded else "the refund window",
+            )
+            # `verify` meters the GUARD call it makes. A fake without a real
+            # response cannot catch that going missing again.
+            response = ChatResponse(
+                usage=Usage(prompt_tokens=10, completion_tokens=5), model="stub-guard"
             )
 
         return Result()
@@ -440,3 +449,79 @@ def _entry(outcome: str) -> AuditEntry:
 
 async def _noop(state, cfg=None):  # type: ignore[no-untyped-def]
     return {}
+
+
+class TestWhatATurnSpent:
+    """Every model call is counted, not just `compose`'s.
+
+    The bug this pins produced a report where eleven of fourteen eval cases
+    showed **zero tokens** — every case that escalated, declined or was blocked
+    before the composer ran. Each had already paid for a router call, and some
+    for a planner and a verifier too. A suite that cannot say what it spent
+    cannot answer what it would cost on a cloud provider, which is the whole
+    reason local usage is recorded at all (llm-abstraction.md §3).
+    """
+
+    def test_a_second_call_adds_to_the_first(self) -> None:
+        state: Any = {"usage": {}}
+        response = ChatResponse(usage=Usage(prompt_tokens=100, completion_tokens=20), model="m")
+
+        state["usage"] = accrue(state, ModelRole.ROUTER, response)
+        state["usage"] = accrue(state, ModelRole.GUARD, response)
+
+        assert state["usage"]["tokens"] == 240
+        assert state["usage"]["calls"] == 2
+        assert state["usage"]["prompt_tokens"] == 200
+        assert state["usage"]["completion_tokens"] == 40
+
+    def test_the_roles_are_kept_apart(self) -> None:
+        """Per-role, because the swap the role map exists for is per-role.
+
+        "What would a cloud model in the GUARD role cost?" is a question about
+        `verify`'s share alone — ADR-0025 is parked on exactly that.
+        """
+        state: Any = {"usage": {}}
+        state["usage"] = accrue(
+            state,
+            ModelRole.ROUTER,
+            ChatResponse(usage=Usage(prompt_tokens=10, completion_tokens=1), model="small"),
+        )
+        state["usage"] = accrue(
+            state,
+            ModelRole.GUARD,
+            ChatResponse(usage=Usage(prompt_tokens=900, completion_tokens=30), model="big"),
+        )
+
+        by_role = state["usage"]["by_role"]
+        assert by_role["guard"]["prompt_tokens"] == 900
+        assert by_role["router"]["prompt_tokens"] == 10
+        assert by_role["guard"]["model"] == "big", "a count cannot be repriced without the model"
+
+    def test_a_field_this_does_not_own_survives(self) -> None:
+        """`respond` writes `prompt_revision` into the same dict, and it answers
+        "which prompt wrote this?" six weeks later."""
+        state: Any = {"usage": {"prompt_revision": "compose@3"}}
+        usage = accrue(state, ModelRole.REASONER, ChatResponse(model="m"))
+        assert usage["prompt_revision"] == "compose@3"
+
+    async def test_a_verified_turn_is_charged_for_the_guard_call(self) -> None:
+        """`verify` runs on GUARD and was metered as free on both verdicts."""
+        state = initial_state(tenant_id=TENANT, conversation_id="c", message="hello")
+        state["draft"] = "Your refund window is 30 days."
+        state["context"] = "Refunds are accepted within 30 days."
+
+        update = await verify(state, config(runtime(llm=StubLLM(grounded=True))))
+
+        assert update["usage"]["by_role"]["guard"]["calls"] == 1
+        assert update["usage"]["tokens"] == 15
+
+    async def test_a_refusal_is_charged_too(self) -> None:
+        """The expensive verdict, and the one that was invisible in the bill."""
+        state = initial_state(tenant_id=TENANT, conversation_id="c", message="hello")
+        state["draft"] = "Your refund window is 90 days."
+        state["context"] = "Refunds are accepted within 30 days."
+
+        update = await verify(state, config(runtime(llm=StubLLM(grounded=False))))
+
+        assert update["grounded"] is False
+        assert update["usage"]["tokens"] == 15

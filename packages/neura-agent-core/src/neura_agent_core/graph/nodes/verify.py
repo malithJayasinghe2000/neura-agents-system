@@ -49,8 +49,10 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 from neura_agent_core.graph.state import AgentState, runtime_of
+from neura_agent_core.graph.usage import accrue
 from neura_agent_core.guard import find_leaks
 from neura_core import get_logger
+from neura_llm import ChatRequest, ChatResponse, Message, ModelRole
 
 log = get_logger(__name__)
 
@@ -144,24 +146,30 @@ async def verify(state: AgentState, config: RunnableConfig) -> AgentState:
         checkable = runtime.evidence_filter(draft, evidence)
 
     try:
-        result = await _ask(runtime, draft, checkable)
+        result, response = await _ask(runtime, draft, checkable)
     except Exception as exc:
         # Fails closed. A verifier that lets answers through when it breaks is
         # worse than no verifier, because it looks like protection.
         log.warning("verify_failed", conversation_id=state.get("conversation_id"), error=str(exc))
         return _ungrounded(f"verification could not be completed: {type(exc).__name__}")
 
+    # Charged on both branches. `verify` runs on GUARD, and what a cloud model
+    # in that role would cost is the measurement ADR-0025 is parked on — a
+    # refusal is the *expensive* verdict and was being booked as free.
+    usage = accrue(state, ModelRole.GUARD, response)
+
     if result.grounded:
         log.info("verify_passed", conversation_id=state.get("conversation_id"))
-        return {"grounded": True, "verify_reason": "every claim supported"}
+        return {"grounded": True, "verify_reason": "every claim supported", "usage": usage}
 
-    return _ungrounded(f"unsupported claim: {result.unsupported_claim or 'unspecified'}")
+    return {
+        **_ungrounded(f"unsupported claim: {result.unsupported_claim or 'unspecified'}"),
+        "usage": usage,
+    }
 
 
-async def _ask(runtime: Any, draft: str, evidence: str) -> Groundedness:
-    """One structured call on the GUARD role."""
-    from neura_llm import ChatRequest, Message, ModelRole
-
+async def _ask(runtime: Any, draft: str, evidence: str) -> tuple[Groundedness, ChatResponse]:
+    """One structured call on the GUARD role, with what it cost."""
     request = ChatRequest(
         messages=[
             Message.system(runtime.prompt(PROMPT_NAME)),
@@ -170,7 +178,7 @@ async def _ask(runtime: Any, draft: str, evidence: str) -> Groundedness:
         temperature=0.0,
     )
     result = await runtime.llm.chat_structured(ModelRole.GUARD, request, Groundedness)
-    return cast(Groundedness, result.value)
+    return cast(Groundedness, result.value), result.response
 
 
 def evidence_of(state: AgentState) -> str:

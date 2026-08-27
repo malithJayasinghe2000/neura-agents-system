@@ -28,7 +28,7 @@ from neura_evals.dataset import EvalCase
 from neura_evals.target import AgentResponse, ToolInvocation
 
 from neura_agent_core.audit import AuditEvent, InMemoryAuditLog
-from neura_agent_core.graph import CONFIG_KEY, initial_state
+from neura_agent_core.graph import CONFIG_KEY, initial_state, total_cost, total_tokens
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity
 from neura_agent_sell.evals.store import ALL_CAPABILITIES, load_store
@@ -108,6 +108,7 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
     tools_called = [
         ToolInvocation(
             name=invocation.tool_name,
+            arguments=invocation.arguments,
             authorised=invocation.tool_name not in refused_tools or invocation.ok,
             error=invocation.error,
         )
@@ -130,6 +131,7 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
         escalated=escalated,
         draft=final.get("draft", ""),
         verify_reason=final.get("verify_reason", ""),
+        escalation_reason=final.get("escalation_reason", ""),
         infrastructure_error=final.get("infrastructure_error"),
         blocked=blocked,
         pii_leaked=bool(final.get("pii_leaks")),
@@ -138,8 +140,32 @@ def _response(final: dict[str, Any], audit: InMemoryAuditLog) -> AgentResponse:
         # miss. `blocked` is the S4 path. The fourth is a policy refusal that
         # ended in a handover, and only that one costs a human.
         refused=bool(final.get("refused")) or (escalated and _was_refused(decisions)),
-        tokens_used=int(final.get("usage", {}).get("tokens", 0)),
+        **_spend(final),
     )
+
+
+def _spend(final: dict[str, Any]) -> dict[str, Any]:
+    """What the turn cost, as the harness reports it.
+
+    Read from the accumulator rather than assembled here, and all three fields
+    read rather than one. Until 2026-08-27 this mapped `tokens` alone, which was
+    itself only ``compose``'s share — so a report could not answer *"what would
+    this suite cost on a cloud provider?"*, the question the role map exists for.
+
+    `cost_usd` is ``0`` for a local model **and** for a cloud model with no
+    configured price. Set ``LLM_PRICING_JSON`` before reading anything into a
+    zero here (CLAUDE.md §4).
+    """
+    usage = final.get("usage", {})
+    return {
+        "tokens_used": total_tokens(usage),
+        "cost_usd": total_cost(usage),
+        "llm_calls": int(usage.get("calls", 0)),
+        # Gated at 0.05 and, until now, computed from a field nothing ever set —
+        # a green gate derived from no measurement, which is the one number shape
+        # this harness exists to refuse.
+        "structured_repairs": int(usage.get("structured_repairs", 0)),
+    }
 
 
 def _evidence(final: dict[str, Any]) -> list[str]:

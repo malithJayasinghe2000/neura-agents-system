@@ -29,14 +29,11 @@ by the shopper.
 
 from __future__ import annotations
 
-from decimal import Decimal
-from typing import Any
-
 from langchain_core.runnables import RunnableConfig
 
-from neura_agent_core.graph import AgentState, infra_error, runtime_of
+from neura_agent_core.graph import AgentState, accrue, infra_error, runtime_of
 from neura_core import get_logger
-from neura_llm import ChatRequest, ChatResponse, FinishReason, Message, ModelRole
+from neura_llm import ChatRequest, FinishReason, Message, ModelRole
 
 log = get_logger(__name__)
 
@@ -101,7 +98,14 @@ async def compose(state: AgentState, config: RunnableConfig) -> AgentState:
             conversation_id=state.get("conversation_id"),
             finish_reason=response.finish_reason.value,
         )
-        return {"escalated": True, "escalation_reason": reason}
+        # Charged. A model that spent its whole ceiling thinking and emitted
+        # nothing spent it; booking that as free hides the most expensive
+        # failure this node has.
+        return {
+            "escalated": True,
+            "escalation_reason": reason,
+            "usage": accrue(state, ModelRole.REASONER, response),
+        }
 
     log.info(
         "sell_composed",
@@ -109,7 +113,7 @@ async def compose(state: AgentState, config: RunnableConfig) -> AgentState:
         chars=len(draft),
         candidates=len(state.get("promises", [])),
     )
-    return {"draft": draft, "usage": _usage(state, response)}
+    return {"draft": draft, "usage": accrue(state, ModelRole.REASONER, response)}
 
 
 def _render(state: AgentState) -> str:
@@ -145,19 +149,6 @@ def _render(state: AgentState) -> str:
         f"<untrusted_customer_message>\n{state.get('message', '')}\n</untrusted_customer_message>"
     )
     return "\n\n".join(parts)
-
-
-def _usage(state: AgentState, response: ChatResponse) -> dict[str, Any]:
-    """Accumulate cost and tokens.
-
-    Cost carried as a ``Decimal`` rendered to a string, not a float: the amounts
-    are tiny, a float would round them plausibly rather than visibly, and the
-    state is checkpointed to Postgres and read back.
-    """
-    usage = dict(state.get("usage", {}))
-    usage["tokens"] = int(usage.get("tokens", 0)) + response.usage.total_tokens
-    usage["cost_usd"] = str(Decimal(str(usage.get("cost_usd", "0"))) + response.cost_usd)
-    return usage
 
 
 __all__ = ["MAX_TOKENS", "PROMPT_NAME", "compose"]

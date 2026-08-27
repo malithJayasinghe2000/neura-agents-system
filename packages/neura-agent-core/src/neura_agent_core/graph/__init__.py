@@ -33,6 +33,7 @@ from neura_agent_core.graph.state import (
     runtime_of,
     unreachable_provider,
 )
+from neura_agent_core.graph.usage import accrue, total_cost, total_tokens
 
 __all__ = [
     "CONFIG_KEY",
@@ -43,6 +44,7 @@ __all__ = [
     "GraphContractError",
     "Groundedness",
     "Runtime",
+    "accrue",
     "act",
     "blocked",
     "escalate",
@@ -54,6 +56,8 @@ __all__ = [
     "propose",
     "retrieve",
     "runtime_of",
+    "total_cost",
+    "total_tokens",
     "unreachable_provider",
     "verify",
 ]
