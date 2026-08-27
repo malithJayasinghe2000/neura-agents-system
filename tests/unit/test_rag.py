@@ -606,6 +606,34 @@ class TestRetrieval:
         assert "</untrusted>" in context
         assert "Trail Runner GTX" in context
 
+    async def test_the_context_carries_an_id_the_tools_would_accept(self) -> None:
+        """A chunk address must not be readable as a product id.
+
+        Measured against a real shop on 2026-08-27. This rendered one glued
+        attribute — `id="product:1311#0"` — beside a product description, SELL's
+        planner passed it to `get_product_details`, the store correctly said no
+        such product exists, and a shopper asking for a jacket was told the shop
+        does not carry jackets. Product `1311` was a Waxed Cotton Field Jacket
+        that the search had just found.
+
+        `plan.md` says *"every id you pass must have appeared in a result you
+        were shown"*. The model obeyed it. The id it was shown was the wrong one.
+        """
+        store = InMemoryVectorStore()
+        embedder = FakeEmbedder(dimensions=64)
+        await Indexer(store, embedder, tenant_id=TENANT).index([product()])
+
+        context = (
+            await Retriever(store, embedder, tenant_id=TENANT).search("shoe", min_score=0.0)
+        ).as_context()
+
+        assert 'ref="' in context, "the source entity's own id must be present and labelled"
+        assert 'chunk="' in context, "and the chunk offset must be plainly a chunk offset"
+        assert "#" not in context.split(">")[0], (
+            "a chunk address glued into one attribute reads as an entity id"
+        )
+        assert 'id="product:' not in context, "this exact shape cost a merchant a sale"
+
     async def test_an_empty_query_is_rejected_rather_than_embedded(self) -> None:
         embedder = FakeEmbedder()
         result = await Retriever(InMemoryVectorStore(), embedder, tenant_id=TENANT).search("  ")

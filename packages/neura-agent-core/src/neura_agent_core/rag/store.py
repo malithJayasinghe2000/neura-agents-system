@@ -107,10 +107,32 @@ class RetrievedChunk:
         (docs/architecture/security-model.md §2.3). The delimiter is not a
         security boundary on its own; it is what makes the guard node's job and
         a human reviewer's job possible.
+
+        **The attributes are named separately, and that is not cosmetic.** Until
+        2026-08-27 this rendered one glued attribute, ``id="product:1311#0"`` —
+        a chunk address, in a shape indistinguishable from a product id, sitting
+        beside a product description. Measured against a real shop that day:
+        SELL's planner read it, called ``get_product_details(product_ref=
+        "product:1311#0")``, the store correctly answered that no such product
+        exists, and a shopper asking for a jacket was told **the shop does not
+        carry jackets** — while product ``1311``, a Waxed Cotton Field Jacket,
+        sat in the catalogue the search had just found.
+
+        The prompt is not what failed. `plan.md` says *"Do not guess ids. Every
+        id you pass must have appeared in a result you were shown"*, and the
+        model obeyed it exactly. **The id it was shown was the wrong one**, so
+        the rule produced the error rather than preventing it — the shape of
+        every rule 3 argument in this project, arriving in a prompt rather than
+        in an authorisation check.
+
+        ``ref`` is now the source entity's own id, which is the id the tools
+        accept, and ``chunk`` is plainly an offset within it. Nothing parses
+        this string; it is written for a model and for a human reading a trace,
+        and both are better served by attributes that say what they are.
         """
         return (
-            f'<untrusted source="retrieved_document" '
-            f'id="{self.source_type.value}:{self.source_id}#{self.chunk_index}">\n'
+            f'<untrusted source="retrieved_document" type="{self.source_type.value}" '
+            f'ref="{self.source_id}" chunk="{self.chunk_index}">\n'
             f"{self.content}\n"
             f"</untrusted>"
         )
