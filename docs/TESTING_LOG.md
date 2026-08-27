@@ -3,8 +3,13 @@
 > **Purpose.** One person, testing every part of NEURA by hand, in order, to build a working
 > mental model of the system. Started 2026-08-27.
 >
-> **This is a log, not a spec.** Update it as you go. If you are a fresh session picking this up:
-> read the stage table, find the first ⬜, and continue from there.
+> **This is a log, not a spec.** Update it as you go.
+>
+> **If you are a fresh session picking this up:** read `CLAUDE.md` and `docs/PROJECT_STATE.md`
+> first, then this file. Find the first ⬜ in the stage table and continue from there — small
+> steps, one command at a time, in plain language. Log what each stage proved, and log anything it
+> found. **The findings are the point.** Three real defects surfaced in one afternoon of Stages
+> 1-6, none of which fourteen eval runs had ever seen.
 
 ---
 
@@ -308,7 +313,40 @@ make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1 TENANT=tn_sell_ask
 
 ---
 
-## Stages 7–9 ⬜
+## Stage 7 — the widget ⬜
+
+What a shopper actually sees. Needs the API running.
+
+```bash
+make widget-check                                    # headless Chrome, no models, free
+make widget-demo SHOP=$SHOP TOKEN=$TOKEN             # prints a URL to open by hand
+```
+
+## Stage 8 — the console ⬜
+
+What the shop owner sees, and the only screen that produces something this project does not
+have: **a real graded turn** (**E1**).
+
+```bash
+make console                                         # prints the two commands to run
+make tenant-new NAME="My Shop" AGENTS=care
+make user-new EMAIL=you@shop.com TENANT=tn_...
+make user-link EMAIL=you@shop.com                    # a sign-in URL
+make console-check EMAIL=you@shop.com                # 33 browser checks
+```
+
+## Stage 9 — the new e-commerce ⬜
+
+The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the
+endpoint that is wrong.
+
+```bash
+make conformance URL=https://newshop/neura/v1 TOKEN=xxx
+```
+
+⚠️ **Know this before starting:** the new shop must expose the **nine read-only endpoints** itself.
+That is real work — `docs/INTEGRATION_GUIDE.md` is the spec — not a settings screen. Bagisto does
+it through a bridge package.
 
 Not started. See the stage table above.
 
