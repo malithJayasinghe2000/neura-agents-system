@@ -33,7 +33,7 @@ from neura_agent_core.rag import (
 )
 from neura_commerce import EntityType
 from neura_commerce.sync import InMemoryEntityStore, InMemorySyncStateStore, RateLimiter, SyncEngine
-from neura_core import Database, configure_logging
+from neura_core import Database, configure_logging, load_env
 from neura_domain import CanonicalEntity
 from neura_llm import LLMClient
 
@@ -65,6 +65,26 @@ PROBES: list[tuple[str, EntityType]] = [
 ]
 
 
+def _role_map_name() -> str:
+    """Which role map these hand-runs use — the configured one, by default.
+
+    **Was hardcoded to `ollama-dev`, and that is a usability bug rather than a
+    safety one.** Found 2026-08-28: the operator set `NEURA_ROLE_MAP=cloud-prod`
+    in `.env` precisely so their laptop would stop running inference, and these
+    scripts kept every model local anyway — silently, because nothing printed
+    which map was in force.
+
+    Deliberately *unlike* `neura-eval`, which pins `ollama-dev` on purpose so a
+    suite can never cost money by accident. This is a single interactive
+    question typed by a person who chose the setting, the models in use are
+    printed on every run, and honouring `.env` is the least surprising thing it
+    can do. `NEURA_ROLE_MAP=ollama-dev make ...` overrides it either way.
+    """
+    from neura_core import get_settings
+
+    return get_settings().role_map
+
+
 def tick(ok: bool) -> str:
     return f"{GREEN}✔{OFF}" if ok else f"{RED}✘{OFF}"
 
@@ -89,7 +109,7 @@ async def collect(engine: SyncEngine, entities: InMemoryEntityStore, tenant: str
 
 
 async def run(url: str, token: str, tenant: str, keep: bool) -> int:
-    llm = LLMClient.from_role_map_name("ollama-dev")
+    llm = LLMClient.from_role_map_name(_role_map_name())
     database = Database.from_settings()
     adapter = GenericAdapter(base_url=url, tenant_id=tenant, token=token)
     entities = InMemoryEntityStore()
@@ -237,6 +257,11 @@ def _with_embedding_model(llm: LLMClient, model: str) -> LLMClient:
 
 
 def main() -> None:
+    # **Before anything reads a setting.** `roles.py` resolves cloud models
+    # through raw `os.getenv`, so a `.env` that has not been loaded leaves the
+    # whole cloud map "not configured" — which is what these three scripts did,
+    # invisibly, for as long as they hardcoded `ollama-dev` and never needed it.
+    load_env()
     parser = argparse.ArgumentParser(description="Run RAG against a real shop.")
     parser.add_argument("--url", required=True)
     parser.add_argument("--token", required=True)

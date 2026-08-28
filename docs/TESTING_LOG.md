@@ -654,6 +654,40 @@ make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1 TENANT=tn_sell_ask
 
 ---
 
+### ⚠️ Finding 8: the hand-test scripts ignored `.env` and never loaded it
+
+Found while pointing the hand-runs at a cloud model, 2026-08-28. Two defects, one hiding the
+other.
+
+**`care_ask.py`, `sell_ask.py` and `rag_smoke_test.py` hardcoded `LLMClient.from_role_map_name("ollama-dev")`.**
+The operator set `NEURA_ROLE_MAP=cloud-prod` in `.env` precisely so their laptop would stop running
+inference, and every hand-run kept all five roles local anyway — **silently**, because nothing
+printed which map was in force. Now they honour the configured map;
+`NEURA_ROLE_MAP=ollama-dev make care-ask …` still pins it local.
+
+Deliberately *unlike* `neura-eval`, which keeps its own `--role-map` defaulting to `ollama-dev` so
+a suite can never cost money by accident. **That difference is worth knowing on its own** — the
+`.env` setting does *not* reach the eval, and a cloud suite is `--role-map cloud-prod` or nothing.
+
+**And underneath it: those same three scripts never called `load_env()`** — every other script in
+`scripts/` does. `roles.py` resolves cloud models through raw `os.getenv`, while `get_settings()`
+reads `.env` through pydantic, so the role *name* resolved to `cloud-prod` and every model under it
+came back empty: *"Role map 'cloud-prod' needs configuration for role 'embedder'"* for values
+sitting in the file. The hardcoding had hidden this for as long as it existed, because `ollama-dev`
+works entirely on defaults.
+
+### Embeddings on a cloud model, and one number that moved
+
+`gemini-embedding-001`, 3072 dimensions, `tn_sell_ask` re-indexed: 46 entities → 49 chunks. The
+`embedding` column is an unconstrained `vector`, so no migration was needed, and the old
+`nomic-embed-text` vectors are untouched under their own namespace — the namespace guard reports
+the switch rather than silently returning nothing.
+
+**Retrieval scored 6/7 against `nomic-embed-text`'s 5/7** on the same probes: *"what colours does it
+come in?"* now reaches a product rather than the Payment Policy. **One run, seven probes, one
+shop** — the script's own words apply: a measurement, not a benchmark. It is not evidence that
+either embedder is better.
+
 ## Stage 7 — the widget ✅
 
 What a shopper actually sees. Needs the API running.
