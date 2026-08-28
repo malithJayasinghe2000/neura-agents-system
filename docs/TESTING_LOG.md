@@ -581,7 +581,22 @@ catalogue *was* read — with a tool that returns categories rather than product
 
 Escalating is right — you cannot recommend from a category list. **The reason is wrong**, and a
 human reading that handover concludes the shop was down. It was up and answering all afternoon.
-Not fixed; recorded.
+
+**✅ Fixed 2026-08-28 — the reason, not the escalation.** Two different failures had one sentence,
+and the sentence described the rarer one. A handover is read by a person deciding what to do next,
+and *"the store did not answer"* and *"the store was never asked for products"* call for opposite
+actions — check the merchant's site, or look at why the planner chose what it chose.
+
+| what happened | what the handover now says |
+|:--|:--|
+| no tool ran at all | *"no catalogue lookup ran at all…"* |
+| a tool ran, none of them a product lookup | *"the store answered (list_categories) but was never asked for products…"* |
+
+**The escalation itself was not relaxed and must not be.** A category list cannot establish that a
+store does not stock something — categories are coarse, and no *"Fishing"* category is not the same
+as no fishing rod. Reading it as one would be the invention
+[ADR-0028](architecture/adr/0028-only-the-catalogue-may-say-what-a-store-sells.md) removed from
+`route`, arriving one node later.
 
 ### ⚠️ Not yet verified
 

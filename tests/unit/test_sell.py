@@ -995,6 +995,48 @@ class TestTheTerminalNodesGenerateNothing:
         assert out["reply"] == load_prompts()["no_match"]
 
 
+class TestTheHandoverSaysWhichFailureHappened:
+    """Finding 7 in the testing log. `plan` chose `list_categories`, the store
+    answered it in 202ms with six categories, and the handover said *"the
+    catalogue could not be searched"* — so a support person reads an outage
+    where there was none."""
+
+    def test_no_lookup_at_all_says_so(self) -> None:
+        from neura_agent_sell.nodes.shortlist import _no_evidence_reason
+
+        assert "no catalogue lookup ran at all" in _no_evidence_reason([])
+
+    def test_a_lookup_that_returns_no_products_does_not_read_as_an_outage(self) -> None:
+        from neura_agent_sell.nodes.shortlist import _no_evidence_reason
+
+        reason = _no_evidence_reason(["list_categories"])
+        assert "the store answered" in reason
+        assert "list_categories" in reason
+        assert "could not be searched" not in reason
+
+    async def test_a_category_list_still_escalates(self) -> None:
+        """The escalation is not the bug and is not being relaxed. Categories
+        are coarse: no "Fishing" category is not the same as no fishing rod,
+        and reading it as one is the invention [ADR-0028] removed from `route`,
+        one node later.
+        """
+        from neura_agent_sell.nodes.shortlist import shortlist
+
+        out = await shortlist(
+            {
+                "invocations": [
+                    _invocation(
+                        "list_categories",
+                        "This store's categories: Mens, shoes, trousers",
+                    )
+                ]
+            },
+            _config(),
+        )
+        assert out["escalated"] is True
+        assert "never asked for products" in out["escalation_reason"]
+
+
 class TestOnlyTheCatalogueMaySayWhatAStoreSells:
     """[ADR-0028], closes A18. Measured: *"do you sell fishing rods?"* declined
     at confidence 1.00 with the need statement written as "We do not sell

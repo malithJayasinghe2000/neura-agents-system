@@ -102,19 +102,31 @@ async def shortlist(state: AgentState, config: RunnableConfig) -> AgentState:
         }
 
     if not catalogue_answered:
-        # The store was never successfully asked. Saying "we do not carry that"
-        # here would be a claim about a catalogue nobody read.
+        # The store was never successfully asked for *products*. Saying "we do
+        # not carry that" here would be a claim about a catalogue nobody read,
+        # so this still escalates — but it says which of the two happened.
+        #
+        # Found by hand 2026-08-28: `plan` chose `list_categories`, the store
+        # answered it in 202ms with six categories, and this branch reported
+        # "the catalogue could not be searched". A support person reading that
+        # concludes the merchant's store was down. It was up all afternoon;
+        # nobody asked it for a product.
+        #
+        # **The escalation is not the bug and is not being relaxed.** A category
+        # list cannot establish that a store does not stock something — the
+        # categories are coarse, and absence of a "Fishing" category is not
+        # absence of a fishing rod. Reading it as one would be the same
+        # invention [ADR-0028] removed from `route`, one node later.
+        ran = [i.tool_name for i in successful]
         log.info(
             "sell_no_catalogue_evidence",
             conversation_id=state.get("conversation_id"),
             tools=[i.tool_name for i in state.get("invocations", [])],
+            succeeded=ran,
         )
         return {
             "escalated": True,
-            "escalation_reason": (
-                "the catalogue could not be searched, so whether this store carries "
-                "it is unknown — not answered"
-            ),
+            "escalation_reason": _no_evidence_reason(ran),
         }
 
     if not candidates:
@@ -252,6 +264,27 @@ def _evidence(invocations: list[ToolInvocation], surviving: list[tuple[str, str]
 
     return "\n\n".join(
         f'<tool_result name="{i.tool_name}">\n{i.value}\n</tool_result>' for i in invocations
+    )
+
+
+def _no_evidence_reason(succeeded: list[str]) -> str:
+    """Why no product evidence exists — an outage, or nobody asking.
+
+    Two failures that produced one sentence, and the sentence described the
+    rarer one. A handover reason is read by a person deciding what to do next,
+    and "the store did not answer" and "the store was never asked for products"
+    call for opposite actions: check the merchant's site, or look at why the
+    planner chose what it chose.
+    """
+    if not succeeded:
+        return (
+            "no catalogue lookup ran at all, so whether this store carries it is "
+            "unknown — not answered"
+        )
+    ran = ", ".join(sorted(set(succeeded)))
+    return (
+        f"the store answered ({ran}) but was never asked for products, so whether it "
+        f"carries this is unknown — not answered"
     )
 
 
