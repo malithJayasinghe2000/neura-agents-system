@@ -525,9 +525,70 @@ catalogue was never searched.
 **And it undercuts the fix that had just shipped.** ADR-0027 rewrote both of `no_match`'s messages
 so a miss speaks about the search rather than the whole store. `route` intercepts the traffic that
 would reach them. The honest-miss path is close to unreachable for the commonest phrasing, so
-**A18 gates the value of ADR-0027** rather than the other way round. Recorded, not fixed — routing
-`do you sell X` to the catalogue by rule is the obvious move and it needs the adversarial cases
-re-run.
+**A18 gates the value of ADR-0027** rather than the other way round.
+
+### ✅ A18 fixed 2026-08-28 — [ADR-0028](architecture/adr/0028-only-the-catalogue-may-say-what-a-store-sells.md)
+
+**The decisive test was one command, and it overturned the diagnosis.** *"Do you sell jackets?"*
+was predicted to decline as well — proving the bug was the *phrasing*. It did not:
+
+| shopper asked | `route` decided |
+|:--|:--|
+| do you sell **jackets**? | `recommend` 0.80 — searched ✅ |
+| do you sell **fishing rods**? | **`out_of_scope`, confidence 1.00** ❌ |
+
+**So it is not the phrasing. The router is judging the product** — and `route.md` contains no
+reference to the catalogue, and `route` runs before `retrieve`, so it is judging a shop it has
+never seen. For a clothing shop the guess is good. **For a fishing tackle shop it declines the
+merchant's best-selling product**, silently, because `out_of_scope` is the only category that ends
+a turn with neither an answer nor a person.
+
+**The principle:** *only the catalogue may say what a store sells.* A deterministic rule over the
+question's **shape** — never the product — overrides `out_of_scope` to `recommend`, and the turn
+goes and looks. `no_match` still says no, having asked. A pattern that tried to recognise plausible
+merchandise would be the same mistake written as a regex, and would fail on exactly the shops this
+exists to serve.
+
+### ⚠️ Finding 6, found by the same run: the router invented the product
+
+*"do you sell jackets?"* produced the need statement **`'waterproof hiking jacket'`** — two
+attributes nobody mentioned. That sentence is what searches the catalogue, so **a store hanging
+four plain jackets looks empty to a shopper asking for exactly what it stocks.**
+
+The cause is in the prompt, and it is unambiguous. `route.md`'s illustration of how to write the
+field read:
+
+> *"…so 'what about in blue?' must become **'waterproof hiking jacket in blue'**."*
+
+**The model copied the example instead of the shopper.** The example is rewritten — and
+`_grounded_need()` now discards any rewrite containing content words that appear neither in the
+message nor in the history, because **a rule that lives only in a prompt is not a rule**. That is
+AGENTS.md rule 3 for the third time in two days: `plan.md`'s ignored price instruction
+([ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md)), `route.md`'s
+ignored *"be especially careful with out_of_scope"*, and now its copied example.
+
+Words resolved from a previous turn pass — *"those in grey"* → *"wool socks in grey"* — because
+every word came from the conversation. Benign rephrasing is caught too (*"something warm"* →
+*"warm jacket"* falls back); the trade is deliberate and the fallback is the raw message, so the
+floor is the behaviour that existed before the field did.
+
+### ⚠️ Finding 7: `list_categories` does not count as reading the catalogue
+
+The jacket run escalated with *"the catalogue could not be searched"* after `plan` chose
+`list_categories`, which **succeeded** and returned the store's six categories in 202ms. The
+catalogue *was* read — with a tool that returns categories rather than products, so `shortlist`'s
+`catalogue_answered` (which counts only `search_products` and `get_product_details`) was false.
+
+Escalating is right — you cannot recommend from a category list. **The reason is wrong**, and a
+human reading that handover concludes the shop was down. It was up and answering all afternoon.
+Not fixed; recorded.
+
+### ⚠️ Not yet verified
+
+**The adversarial eval has not been re-run since the routing change.** ADR-0028 changes which
+messages can reach `decline`, and `decline` is the one path `route.py` names as the one an attacker
+gains from. Injection resistance must still be 1.00, and that is a suite run — cheap on a cloud
+model (~$0.011), ~2h locally.
 
 ### Timing, and it got worse
 

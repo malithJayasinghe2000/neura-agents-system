@@ -27,6 +27,7 @@ CARE unchanged rather than re-derived — including the higher bar on declining
 
 from __future__ import annotations
 
+import re
 from typing import Literal, cast
 
 from langchain_core.runnables import RunnableConfig
@@ -67,6 +68,171 @@ HISTORY_TURNS = 4
 #: A cap on extracted attributes. The list comes from a model, and an unbounded
 #: one is a way to make `shortlist` filter a catalogue against forty predicates.
 MAX_ATTRIBUTES = 6
+
+#: Words a rewrite may introduce without it counting as invention: grammar, not
+#: content. A need statement is a search query, so what matters is the nouns and
+#: adjectives that reach the merchant's search engine.
+_FUNCTION_WORDS = frozenset(
+    {
+        # determiners and pronouns
+        "a",
+        "an",
+        "the",
+        "this",
+        "that",
+        "these",
+        "those",
+        "my",
+        "your",
+        "our",
+        "their",
+        "its",
+        "his",
+        "her",
+        "i",
+        "me",
+        "we",
+        "us",
+        "you",
+        "they",
+        "them",
+        "he",
+        "she",
+        "it",
+        # auxiliaries and modals
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "am",
+        "do",
+        "does",
+        "did",
+        "done",
+        "have",
+        "has",
+        "had",
+        "having",
+        "can",
+        "could",
+        "will",
+        "would",
+        "shall",
+        "should",
+        "may",
+        "might",
+        "must",
+        # prepositions and conjunctions
+        "for",
+        "of",
+        "in",
+        "on",
+        "at",
+        "to",
+        "from",
+        "with",
+        "without",
+        "by",
+        "about",
+        "into",
+        "over",
+        "under",
+        "and",
+        "or",
+        "but",
+        "not",
+        "no",
+        "nor",
+        "so",
+        "if",
+        "then",
+        "than",
+        "as",
+        # the vocabulary of asking for something, which describes no product
+        "some",
+        "any",
+        "something",
+        "anything",
+        "nothing",
+        "one",
+        "ones",
+        "thing",
+        "things",
+        "need",
+        "needs",
+        "want",
+        "wants",
+        "looking",
+        "look",
+        "like",
+        "sell",
+        "sells",
+        "selling",
+        "stock",
+        "stocks",
+        "stocked",
+        "carry",
+        "carries",
+        "got",
+        "please",
+        "thanks",
+        "hi",
+        "hello",
+    }
+)
+
+#: Content words, for comparing a rewrite against what was actually said.
+_WORD = re.compile(r"[a-z0-9]+")
+
+#: A shopper asking whether this store has something. See [ADR-0028].
+#:
+#: Deliberately about the *question's shape* and never about the product: the
+#: whole failure this catches is a model judging what a merchant stocks, and a
+#: pattern that tried to recognise sellable things would be the same mistake in
+#: a regular expression.
+_ASKS_AVAILABILITY = re.compile(
+    r"""
+      \b(?:do|does|did|d)\s+
+        (?:you|ya|u|they|yall|y'all|your\s+(?:shop|store|site|website|company))\b
+        [^?.!]*?\b(?:sell|sells|stock|stocks|carry|carries|have|has|offer|offers|
+                     supply|supplies|deal\s+in)\b
+    | \bhave\s+(?:you|they)\s+(?:got|any)\b
+    | \bare\s+there\s+any\b
+    | \bcan\s+(?:i|we|you)\s+(?:buy|get|order|find|purchase)\b
+    | \b(?:any|got\s+any)\s+\w+\s+(?:in\s+stock|available)\b
+    | \bis\s+there\s+(?:a|an|any)\b [^?.!]*? \b(?:available|in\s+stock)\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def asks_what_the_store_sells(message: str) -> bool:
+    """Is this a shopper asking whether the store has something? [ADR-0028]
+
+    Exported because it is a rule, not a heuristic buried in a branch: the
+    property it defends — *a model may not decide what a merchant sells* — is
+    the one that makes this agent work for a shop selling anything other than
+    what the model happens to expect.
+    """
+    return bool(_ASKS_AVAILABILITY.search(message))
+
+
+def _stem(word: str) -> str:
+    """Crude singular/plural folding, and nothing more.
+
+    `jackets` and `jacket` are the same word for this purpose, and a check that
+    called the second an invention of the first would fire on almost every
+    turn — a false alarm that falls back to the raw message is a quiet
+    downgrade, so the cheap fold is worth it. Deliberately not a stemmer: the
+    comparison only has to be good enough to avoid punishing a plural.
+    """
+    for suffix in ("ies", "es", "s"):
+        if len(word) > len(suffix) + 2 and word.endswith(suffix):
+            return word[: -len(suffix)]
+    return word
 
 
 class Route(BaseModel):
@@ -144,8 +310,9 @@ async def route(state: AgentState, config: RunnableConfig) -> AgentState:
         "intent_confidence": result.confidence,
         "entities": _entities(result),
         # Falls back to the message: a router returning an empty rewrite must not
-        # silently disable retrieval for the turn.
-        "search_query": result.need.strip() or message,
+        # silently disable retrieval for the turn — nor invent what it searches
+        # for. See :func:`_grounded_need`.
+        "search_query": _grounded_need(result.need, message, state.get("history", [])),
     }
 
     log.info(
@@ -163,6 +330,30 @@ async def route(state: AgentState, config: RunnableConfig) -> AgentState:
         # handoff to CARE, because agents may not import each other and the
         # event bus is Phase 3 (open question A13).
         return {**update, **_escalate("the question needs a person, or another agent")}
+
+    if result.intent == OUT_OF_SCOPE and asks_what_the_store_sells(message):
+        # [ADR-0028]. The router is shown nothing about this store, so
+        # "we do not sell that" from here is a guess about a shop it has never
+        # seen. Measured: *"do you sell fishing rods?"* declined at confidence
+        # **1.00**, with the need statement written as "We do not sell fishing
+        # rods." — the classifier answering rather than classifying.
+        #
+        # Only the catalogue may answer availability, so this turn goes and
+        # looks. `no_match` still says no; it says it having asked.
+        log.info(
+            "sell_availability_question_not_declined",
+            conversation_id=state.get("conversation_id"),
+            confidence=round(result.confidence, 2),
+        )
+        update = {
+            **update,
+            "intent": RECOMMEND,
+            # **Not the rewrite.** On this path it is the router's own answer —
+            # "We do not sell fishing rods." — which searches for nothing. The
+            # shopper's words are the only honest input left.
+            "search_query": message,
+        }
+        result = result.model_copy(update={"intent": RECOMMEND})
 
     if result.intent == OUT_OF_SCOPE:
         if result.confidence < DECLINE_MIN_CONFIDENCE:
@@ -245,6 +436,63 @@ def _entities(result: Route) -> dict[str, str]:
     return entities
 
 
+def _grounded_need(need: str, message: str, history: list[dict[str, str]]) -> str:
+    """The rewrite, or the shopper's own words if the rewrite invented something.
+
+    **Measured, 2026-08-27.** A shopper asked *"do you sell jackets?"* and the
+    router produced the need statement **"waterproof hiking jacket"** — two
+    attributes nobody had mentioned. That sentence is what searches the
+    catalogue, so a store hanging four plain jackets looks empty to a shopper who
+    asked for exactly what it stocks.
+
+    The cause was in the prompt: its illustration of how to write the field read
+    *"must become 'waterproof hiking jacket in blue'"*, and the model copied the
+    example instead of the shopper. The example is fixed. **This exists because
+    fixing the example is not enough** — `plan.md` already forbade filtering by
+    price and the model did it anyway ([ADR-0027]), which is AGENTS.md rule 3:
+    a behaviour defended only by a sentence in a prompt is not defended.
+
+    So the rewrite is checked against its sources. Every content word in it must
+    appear in the shopper's message or in a turn the router was shown —
+    resolving *"those in grey"* to *"wool socks in grey"* passes, because every
+    word came from the conversation. A word from neither is an invention, and
+    the whole rewrite is discarded in favour of the raw message.
+
+    **The trade-off is deliberate and it is not free.** Benign rephrasing is
+    caught too: *"something warm"* rewritten as *"warm jacket"* falls back. What
+    is lost in that case is a slightly better query; what is kept is that no
+    search is ever run for a product the shopper did not describe. The fallback
+    is the message itself, which is what `retrieve` used before this field
+    existed, so the floor is the old behaviour rather than nothing.
+
+    Every fallback is logged with the offending words, because the rate at which
+    this fires is the measurement of whether the prompt fix worked.
+    """
+    rewritten = need.strip()
+    if not rewritten:
+        return message
+
+    said = {_stem(w) for w in _WORD.findall(message.lower())}
+    for turn in history:
+        said |= {_stem(w) for w in _WORD.findall(str(turn.get("content", "")).lower())}
+
+    invented = [
+        word
+        for word in _WORD.findall(rewritten.lower())
+        if _stem(word) not in said and word not in _FUNCTION_WORDS and len(word) > 2
+    ]
+    if not invented:
+        return rewritten
+
+    log.warning(
+        "sell_need_statement_invented_words",
+        invented=sorted(set(invented)),
+        need=rewritten,
+        used=message,
+    )
+    return message
+
+
 def _escalate(reason: str) -> AgentState:
     return {"escalated": True, "escalation_reason": reason}
 
@@ -258,5 +506,6 @@ __all__ = [
     "OUT_OF_SCOPE",
     "RECOMMEND",
     "Route",
+    "asks_what_the_store_sells",
     "route",
 ]

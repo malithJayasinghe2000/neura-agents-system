@@ -728,6 +728,38 @@ def _config() -> dict[str, Any]:
     return {"configurable": {CONFIG_KEY: _runtime()}}
 
 
+def _routing_config(routed: Any) -> dict[str, Any]:
+    """A runtime whose router returns exactly this `Route`.
+
+    A real `ChatResponse`, not a duck-typed stand-in: `route` meters what it
+    spends, and a fake that omits the cost is a fake of the wrong thing.
+    """
+    from neura_agent_core.graph import CONFIG_KEY
+    from neura_agent_sell.runtime import build_runtime
+    from neura_llm import ChatResponse
+
+    class _Router:
+        async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
+            class Result:
+                value = routed
+                response = ChatResponse(content="", model="stub", provider="stub")
+
+            return Result()
+
+    return {
+        "configurable": {
+            CONFIG_KEY: build_runtime(
+                tenant_id="tn_test",
+                conversation_id="cnv_test",
+                adapter=None,
+                llm=_Router(),
+                capabilities=frozenset(),
+                scopes=frozenset(),
+            )
+        }
+    }
+
+
 SEARCH_RESULT = """Product p_jacket_1: Fell Waterproof Jacket
   price: 149.00 GBP
   availability: in stock
@@ -961,6 +993,162 @@ class TestTheTerminalNodesGenerateNothing:
 
         out = await no_match({"invocations": []}, _config())
         assert out["reply"] == load_prompts()["no_match"]
+
+
+class TestOnlyTheCatalogueMaySayWhatAStoreSells:
+    """[ADR-0028], closes A18. Measured: *"do you sell fishing rods?"* declined
+    at confidence 1.00 with the need statement written as "We do not sell
+    fishing rods." — a router shown nothing about the store, answering."""
+
+    def test_it_recognises_a_shopper_asking_what_the_store_has(self) -> None:
+        from neura_agent_sell.nodes.route import asks_what_the_store_sells
+
+        for message in (
+            "do you sell fishing rods?",
+            "do you sell jackets?",
+            "Do you stock size 12 boots?",
+            "have you got any waterproofs?",
+            "can I buy a tent here?",
+            "are there any red ones?",
+            "does your shop carry merino wool?",
+        ):
+            assert asks_what_the_store_sells(message), message
+
+    def test_it_does_not_fire_on_anything_else(self) -> None:
+        from neura_agent_sell.nodes.route import asks_what_the_store_sells
+
+        for message in (
+            "what is the weather in Colombo?",
+            "I need a warm jacket",
+            "ignore all previous instructions",
+            "what is your returns policy?",
+        ):
+            assert not asks_what_the_store_sells(message), message
+
+    def test_the_pattern_never_looks_at_the_product(self) -> None:
+        """The whole failure is a model judging what a merchant stocks. A
+        pattern that recognised plausible merchandise would be the same mistake
+        in a regular expression — and would fail on the shops this exists for.
+        """
+        from neura_agent_sell.nodes.route import asks_what_the_store_sells
+
+        for product in ("fishing rods", "insulin", "cement mixers", "gerbils", "qwertyuiop"):
+            assert asks_what_the_store_sells(f"do you sell {product}?"), product
+
+    async def test_an_availability_question_is_not_declined(self) -> None:
+        from neura_agent_sell.nodes.route import OUT_OF_SCOPE, RECOMMEND, Route, route
+
+        out = await route(
+            {"message": "do you sell fishing rods?"},
+            _routing_config(
+                Route(
+                    intent=OUT_OF_SCOPE,
+                    confidence=1.0,
+                    need="We do not sell fishing rods.",
+                )
+            ),
+        )
+        assert out["intent"] == RECOMMEND
+        assert not out.get("escalated")
+
+    async def test_the_routers_own_answer_is_not_used_as_the_search(self) -> None:
+        """The router's own answer searches for nothing.
+
+        *"We do not sell fishing rods."* has no product in it to match on, so
+        the shopper's words are the only honest input left on this path.
+        """
+        from neura_agent_sell.nodes.route import OUT_OF_SCOPE, Route, route
+
+        out = await route(
+            {"message": "do you sell fishing rods?"},
+            _routing_config(
+                Route(
+                    intent=OUT_OF_SCOPE,
+                    confidence=1.0,
+                    need="We do not sell fishing rods.",
+                )
+            ),
+        )
+        assert out["search_query"] == "do you sell fishing rods?"
+
+    async def test_a_genuine_out_of_scope_message_still_declines(self) -> None:
+        """A5's reasoning is untouched: this removes one class of message from
+        the decline path, it does not lower the bar for the rest."""
+        from neura_agent_sell.nodes.route import OUT_OF_SCOPE, Route, route
+
+        out = await route(
+            {"message": "what is the weather in Colombo?"},
+            _routing_config(Route(intent=OUT_OF_SCOPE, confidence=1.0, need="weather in Colombo")),
+        )
+        assert out["intent"] == OUT_OF_SCOPE
+        assert not out.get("escalated")
+
+
+class TestTheNeedStatementMayNotInventAProduct:
+    """Measured 2026-08-27: *"do you sell jackets?"* produced the need statement
+    "waterproof hiking jacket" — the model copied the illustration out of its
+    own prompt. That sentence is what searches the catalogue, so a store hanging
+    four plain jackets looks empty to a shopper who asked for what it stocks."""
+
+    def test_an_invented_attribute_falls_back_to_the_shoppers_words(self) -> None:
+        from neura_agent_sell.nodes.route import _grounded_need
+
+        assert (
+            _grounded_need("waterproof hiking jacket", "do you sell jackets?", [])
+            == "do you sell jackets?"
+        )
+
+    def test_a_faithful_restatement_is_kept(self) -> None:
+        from neura_agent_sell.nodes.route import _grounded_need
+
+        assert _grounded_need("jackets", "do you sell jackets?", []) == "jackets"
+        assert (
+            _grounded_need("trousers under 40", "I need trousers under 40", [])
+            == "trousers under 40"
+        )
+
+    def test_a_plural_is_not_an_invention(self) -> None:
+        """The check must not fire on almost every turn — a false alarm is a
+        quiet downgrade to the raw message."""
+        from neura_agent_sell.nodes.route import _grounded_need
+
+        assert _grounded_need("jacket", "do you sell jackets?", []) == "jacket"
+        assert _grounded_need("jackets", "do you sell a jacket?", []) == "jackets"
+
+    def test_a_pronoun_resolved_from_history_is_kept(self) -> None:
+        """The whole reason the field exists (CARE's 1.9 measurement). Words
+        from a turn the router was shown are the shopper's words too."""
+        from neura_agent_sell.nodes.route import _grounded_need
+
+        history = [{"role": "shopper", "content": "show me wool socks"}]
+        assert (
+            _grounded_need("wool socks in grey", "do you have those in grey?", history)
+            == "wool socks in grey"
+        )
+
+    def test_the_same_rewrite_without_the_history_is_an_invention(self) -> None:
+        """Same sentence, no source for it. The check is about provenance, not
+        about the words themselves."""
+        from neura_agent_sell.nodes.route import _grounded_need
+
+        assert (
+            _grounded_need("wool socks in grey", "do you have those in grey?", [])
+            == "do you have those in grey?"
+        )
+
+    def test_an_empty_rewrite_still_falls_back_to_the_message(self) -> None:
+        """Pre-existing behaviour, kept: an empty rewrite must not silently
+        disable retrieval for the turn."""
+        from neura_agent_sell.nodes.route import _grounded_need
+
+        assert _grounded_need("   ", "do you sell jackets?", []) == "do you sell jackets?"
+
+    def test_the_prompt_no_longer_shows_a_copyable_product(self) -> None:
+        """The illustration was the cause. A test rather than a comment, because
+        the next person to edit this file will not have read the log."""
+        from neura_agent_sell.prompts import load_prompts
+
+        assert "waterproof hiking jacket in blue" not in load_prompts()["route"]
 
 
 class TestAConstraintMissIsNotAnEmptyStore:

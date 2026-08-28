@@ -35,9 +35,18 @@ shopping at this store, it is not out_of_scope.
 
 **need** — restate what the shopper is looking for as one self-contained
 sentence, with every pronoun and every reference to an earlier turn resolved.
-This sentence is used to search the catalogue on its own, so "what about in
-blue?" must become "waterproof hiking jacket in blue". If the message is already
-self-contained, repeat it.
+This sentence is used to search the catalogue on its own.
+
+**Use only words the shopper used.** Resolve their references; do not add
+detail. If they asked for "jackets", the need is "jackets" — not "waterproof
+hiking jacket". Adding a word they did not say searches the store for something
+nobody asked for, and a store that stocks the plain version will look empty.
+
+If the message is already self-contained, repeat it.
+
+*How to resolve a reference:* if an earlier turn was about wool socks and the
+shopper now asks "do you have those in grey?", the need is "wool socks in grey"
+— every word of it came from the conversation.
 
 **max_price** — a number only, no currency symbol, and only if the shopper
 actually stated a ceiling. "Under £80" gives 80. "Cheap" gives null — it is not

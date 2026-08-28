@@ -4,13 +4,60 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-27 (evening) — **A15 is closed by [ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md), and the fix could not be a prompt**
+**Last updated:** 2026-08-28 — **A18 closed by [ADR-0028](architecture/adr/0028-only-the-catalogue-may-say-what-a-store-sells.md): only the catalogue may say what a store sells**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Next action:** **Put it in front of a merchant (B2).** Every screen v1 designed is built and
 proved in a real browser — `make console-check EMAIL=…` passes **33/33** — so the console is no
 longer the thing standing between this project and its first design partner. The remaining
 blockers to *deploying* it are **K1** (production email) and **X2** (deploy target), both
 unchanged and both external decisions.
+
+## Session 2026-08-28 — the router was deciding what merchants sell
+
+**One command overturned the diagnosis, and it is the best test of the week.** A18 had been
+recorded as *"`route` answers a catalogue question as out of scope"*, assumed to be about the
+phrase *"do you sell…"*. Asking about a product the shop **does** stock disproved it:
+
+| shopper asked | `route` decided |
+|:--|:--|
+| do you sell **jackets**? | `recommend` 0.80 — searched ✅ |
+| do you sell **fishing rods**? | **`out_of_scope`, confidence 1.00** ❌ |
+
+**The router is judging the product, not the question** — and `route.md` contains no reference to
+the catalogue, while `route` runs before `retrieve`. It is guessing about a shop it has never seen.
+Good guess for a clothing shop. **For a fishing tackle shop it declines the merchant's best-selling
+product**, silently, because `out_of_scope` is the only category ending a turn with neither an
+answer nor a person. That is the difference between a demo on one clothing shop and a product for
+any store, which is what ADR-0009 exists for.
+
+**[ADR-0028](architecture/adr/0028-only-the-catalogue-may-say-what-a-store-sells.md): only the
+catalogue may say what a store sells.** A deterministic rule over the question's *shape* —
+`do you sell/stock/carry/have …` — overrides `out_of_scope` to `recommend`, and the turn goes and
+looks. **The pattern never looks at the product**: one that recognised plausible merchandise would
+be the same mistake rewritten as a regex and would fail on exactly the shops this serves.
+`needs_person` untouched, `DECLINE_MIN_CONFIDENCE` untouched, and `no_match` still says no — having
+asked, in ADR-0027's wording. **ADR-0027 rewrote what that node says; this is what lets a shopper
+hear it.**
+
+**The same run found the router inventing the product.** *"do you sell jackets?"* produced the need
+statement **`'waterproof hiking jacket'`**. `route.md`'s own illustration read *"must become
+'waterproof hiking jacket in blue'"* — **the model copied the example instead of the shopper**. That
+sentence searches the catalogue, so a store hanging four plain jackets looks empty to someone asking
+for what it stocks. Example rewritten, and `_grounded_need()` discards any rewrite with content
+words absent from the message and history. **Rule 3 for the third time in two days**: `plan.md`'s
+ignored price instruction, `route.md`'s ignored out-of-scope warning, and now its copied example.
+
+**Recorded, not fixed — Finding 7:** `list_categories` succeeded and returned six categories, and
+`shortlist` still escalated with *"the catalogue could not be searched"*, because
+`catalogue_answered` counts only `search_products` and `get_product_details`. Escalating is right;
+the sentence is false, and a human reading that handover concludes the shop was down.
+
+**⚠️ Not verified: the adversarial eval has not been re-run since the routing change.** ADR-0028
+changes which messages can reach `decline` — the one path `route.py` names as the one an attacker
+gains from. **Injection resistance must still be 1.00 and nobody has checked.** A suite run is
+~$0.011 on `gemini-3.6-flash`, ~2h locally. **This is the first thing the next session should do.**
+
+`make check` green: **872 tests**, +13.
 
 ## Session 2026-08-27 (evening) — Stages 5 and 6 by hand, and A15 closed
 

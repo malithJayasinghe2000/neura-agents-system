@@ -169,6 +169,16 @@ A cold index, a half-finished first sync, an adapter that timed out, a tenant wh
 
 Otherwise the turn escalates with a reason that names which of the two failed. This is `verify`'s failing-closed rule applied one node earlier: **a missing verdict must read as "not established", never as "no objection raised".**
 
+#### What [ADR-0028] changed, 2026-08-28 — and it gates the entry
+
+The exits above are only worth anything if turns reach them. **They were not.**
+
+*"Do you sell fishing rods?"* was classified `out_of_scope` at **confidence 1.00** and never reached this node at all — `route.md` describes no catalogue and `route` runs before `retrieve`, so the router was guessing about a shop it has never seen. Good guess for a clothing shop; for a tackle shop it declines the merchant's best-selling product, and `out_of_scope` is the only category that ends a turn with neither an answer nor a person.
+
+**Only the catalogue may say what a store sells.** A deterministic rule over the question's shape now overrides `out_of_scope` to `recommend` for any *"do you sell / stock / carry / have …"*, and the turn goes and looks. `no_match` still says no — having asked.
+
+ADR-0027 rewrote what this node *says*; ADR-0028 is what lets a shopper hear it.
+
 #### What [ADR-0027] changed, 2026-08-27 — and it is the sentence, not the exit
 
 Found by hand against a real shop, recorded as **A15**. The rule above was enforced in one direction only: `shortlist` asked *"did the store reply?"* and never *"did we ask it a question the store could answer?"* **A search returning zero rows counted as the store having answered**, so the guarantee held against an outage and not against a bad query — which is the far commoner case. A shopper who typed *"I need trousers under 40"* was told this shop does not carry it, by a shop stocking four kinds of trousers.
