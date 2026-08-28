@@ -81,6 +81,11 @@ def build_runtime(
         identity=identity or SessionIdentity(),
         adapter=adapter,
         allowed_tools=allowed_tools,
+        # The same retriever the graph uses, handed to the tools as well —
+        # `search_products` falls back to it when the merchant's own search
+        # returns nothing ([ADR-0029]). A tenant with no index passes None here
+        # and the fallback simply never runs.
+        retriever=retriever,
     )
 
     registry = build_registry()

@@ -4,13 +4,55 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-28 (later) — **ADR-0028 verified on a cloud model: injection resistance 1.00 in all four runs, and `no_match_001`'s failure moved from `route` to `shortlist`**
+**Last updated:** 2026-08-29 — **A16 closed by [ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md), and the §2.3 weak-relevance question is now the only thing between SELL and a good answer**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Next action:** **Put it in front of a merchant (B2).** Every screen v1 designed is built and
 proved in a real browser — `make console-check EMAIL=…` passes **33/33** — so the console is no
 longer the thing standing between this project and its first design partner. The remaining
 blockers to *deploying* it are **K1** (production email) and **X2** (deploy target), both
 unchanged and both external decisions.
+
+## Session 2026-08-29 — A16 closed, and the last SELL question is §2.3
+
+**"Do you sell jackets?" was answered "I can't find anything matching that" by a shop with four
+jackets** — and the same turn's `retrieve` had already found one. The merchant's search is a
+literal text match with no stemming: `trousers` → 4, `jackets` → **0**, `shoes` → **0**, `shoe` → 1,
+because the titles read *"Waxed Cotton Field **Jacket**"*. **One letter decided the turn**, and
+every gate downstream read green.
+
+**ADR-0027 and ADR-0028 are what made this binding rather than background.** Both made the query
+*more faithful to the shopper*, and a faithful query is worth nothing to an engine that cannot
+match a plural.
+
+**[ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md): the index
+may name a candidate, never describe one.** When — and only when — the store's own search returns
+nothing, `search_products` asks our index **which products to look at**, then **fetches each one
+live** and keeps those the store still returns as `ACTIVE`. The index answers *"which might be
+worth looking at?"*; the store answers every fact a shopper acts on. A product gone since the sync
+fails confirmation and disappears, so `catalogue.py`'s *"read live, deliberately"* guarantee is kept
+rather than traded: **a stale index costs a wasted lookup, never a wrong claim.** Announced in three
+places — a log line, a header on the tool result so it reaches the evidence and the eval record, and
+a line in `sell-ask` — because *"two paths reach `compose`, one invisible"* was the cost it was
+weighed against. It does **not** fire when the store's search succeeds, and does **not** reach the
+MCP surface.
+
+**Verified live:** the jackets question now returns the Waxed Cotton Field Jacket and the
+Lightweight Rain Shell, both confirmed live.
+
+**And it paid the predicted cost within minutes, which is the useful part.** The index proposed four
+candidates for *"jackets"*: a jacket, a **Quilted Liner Vest**, a jacket, and a **Linen Pinafore
+Frock**. `compose` wrote about neither of the two wrong ones — but `promises` permitted both.
+**Weak relevance now reaches `shortlist` from a second direction.**
+
+**That is the next SELL decision and it is `sell.md` §2.3, undecided.** It is the same question as
+`no_match_001`, which fails 4 of 4 by offering a cap for *"fishing rod"*. Semantic search returns
+the nearest things it holds, and **"nearest" is not "suitable"** — while `shortlist` deliberately
+filters on price and never on kind, because matching "jacket" against a description is a language
+judgement and a substring would drop *"keeps the rain out"*. **Whoever answers this answers both.**
+
+**SELL's open list is now short:** §2.3 weak relevance (above), A9 (`verify` accepting inference
+from silence, seen on CARE), and A17 (an escalated turn records no prompt revision). `make check`
+green: **881 tests**, +6.
 
 ## Session 2026-08-28 — the router was deciding what merchants sell
 

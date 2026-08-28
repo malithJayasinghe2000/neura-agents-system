@@ -700,6 +700,44 @@ Note the shape of it: **our own index found the jacket and we did not use it.** 
 our copy for context; `search_products` goes to the merchant. A16's named options — fall back to our
 index when the shop returns nothing, or search ours instead — are unchanged and undecided.
 
+### ✅ A16 fixed 2026-08-29 — [ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md)
+
+**The index may name a candidate, never describe one.** When the merchant's search returns nothing,
+`search_products` now asks our synced index **which products to look at**, then **fetches every one
+of them live** from the store and keeps those still returned as `ACTIVE`.
+
+The split is the decision. The index answers *"which might be worth looking at?"* — a question about
+meaning, and one that cannot mislead when it is stale. The store answers *"what is it, what does it
+cost, can it be bought?"* — every fact a shopper acts on. So a product deleted or sold out since the
+sync fails confirmation and vanishes: **a stale index costs a wasted lookup, never a wrong claim.**
+
+**Verified live the same day:**
+
+> *"Yes, we have a couple of jacket options available. Product 1311 is the **Waxed Cotton Field
+> Jacket** ($165.00 USD)… Product 1315 is the **Lightweight Rain Shell** ($110.00 USD)…"*
+
+The shopper who was told the shop had no jackets now gets the jackets.
+
+### ⚠️ And it paid the predicted cost within minutes
+
+```
+may recommend 4: 1311, 1313, 1315, 1323
+  · Waxed Cotton Field Jacket   ← a jacket
+  · Quilted Liner Vest          ← a vest
+  · Lightweight Rain Shell      ← a jacket
+  · Linen Pinafore Frock        ← a dress
+```
+
+**A pinafore frock was admitted as a candidate for "jackets".** `compose` wrote about neither it nor
+the vest — but `promises` permitted both, so it was allowed to.
+
+ADR-0029's own consequences section names this: *"a weak-relevance candidate can now reach
+`shortlist` from a second direction"*. It is the **`sell.md` §2.3** question — the same one behind
+`no_match_001`, where a cap is admitted for *"fishing rod"* — and it is **not decided**. Semantic
+search returns the nearest things it has, and "nearest" is not "suitable"; nothing in `shortlist`
+filters on the *kind* of product, deliberately, because matching "jacket" against a description is a
+language judgement and doing it with a substring would drop *"keeps the rain out"*.
+
 **Speed, measured on the same three questions:**
 
 | question | `ollama-dev` | `gemini-3.6-flash` |

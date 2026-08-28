@@ -29,7 +29,7 @@ from neura_agent_sell.tools.render import (
     inventory_evidence,
     product_evidence,
 )
-from neura_commerce import ProductQuery
+from neura_commerce import EntityType, ProductQuery
 from neura_core import get_logger
 from neura_domain import Capability, ProductStatus
 
@@ -136,6 +136,11 @@ async def search_products(query: str, ctx: ToolContext) -> str:
     sellable = [p for p in products if p.status is ProductStatus.ACTIVE]
 
     if not sellable:
+        # The merchant's engine found nothing. Before saying so, ask our own
+        # index which products it would have looked at ([ADR-0029]).
+        if recovered := await _from_the_index(text, ctx):
+            return recovered
+
         # Said precisely. "No candidates" is not "this store sells nothing like
         # that" — one is about this query, the other is a claim about the whole
         # catalogue, and only `shortlist` may make the second one (sell.md §2.3).
@@ -151,6 +156,70 @@ async def search_products(query: str, ctx: ToolContext) -> str:
         withheld=len(products) - len(sellable),
     )
     return "\n\n".join(candidate(product) for product in sellable)
+
+
+async def _from_the_index(text: str, ctx: ToolContext) -> str:
+    """Candidates the synced index would have found, confirmed live. [ADR-0029]
+
+    **The index names them; the store describes them.** Measured on the test
+    shop: `trousers` returns 4 products and `jackets` returns **0**, because the
+    titles read *"Waxed Cotton Field Jacket"* and the merchant's search is a
+    literal text match with no stemming. One letter, and a shopper is told a
+    shop with four jackets is empty — while `retrieve` had already found one in
+    the same turn.
+
+    So the ids come from our copy and **every fact comes from the adapter**. A
+    product deleted, withdrawn or sold out since the last sync fails the
+    confirmation below and disappears, which is what keeps this module's
+    "read live, deliberately" guarantee intact: a stale index costs a wasted
+    lookup, never a wrong claim in front of a shopper.
+
+    Returns an empty string when there is no index, when it knows nothing, or
+    when nothing survives confirmation — the caller then says what it always
+    said, and a tenant with no index behaves exactly as before.
+    """
+    if ctx.retriever is None:
+        return ""
+
+    found = await ctx.retriever.search(
+        text, limit=MAX_RESULTS * 2, source_types=[EntityType.PRODUCT]
+    )
+    # De-duplicated in retrieval order: one product is several chunks, and the
+    # best-scoring chunk is the one that should decide its place in the list.
+    proposed: list[str] = []
+    for chunk in found.chunks:
+        if chunk.source_id not in proposed:
+            proposed.append(chunk.source_id)
+    if not proposed:
+        return ""
+
+    confirmed = []
+    for product_id in proposed[:MAX_RESULTS]:
+        product = await ctx.adapter.get_product(product_id)
+        if product is not None and product.status is ProductStatus.ACTIVE:
+            confirmed.append(product)
+
+    log.info(
+        "sell_search_fell_back_to_index",
+        tenant_id=ctx.tenant_id,
+        query=text,
+        proposed=proposed[:MAX_RESULTS],
+        confirmed=len(confirmed),
+    )
+
+    if not confirmed:
+        return ""
+
+    # Stated, not silent. This line is in the evidence a reviewer reads and in
+    # the tool output an eval records, because "two paths reach `compose`" is
+    # the cost this decision was weighed against and an unattributable
+    # recommendation months from now is how that cost gets paid.
+    header = (
+        f"The store's own search returned nothing for {text!r}, so these candidates come "
+        "from the synced catalogue. Their prices and availability below were confirmed "
+        "live with the store just now."
+    )
+    return header + "\n\n" + "\n\n".join(candidate(product) for product in confirmed)
 
 
 @tool(

@@ -995,6 +995,135 @@ class TestTheTerminalNodesGenerateNothing:
         assert out["reply"] == load_prompts()["no_match"]
 
 
+class TestTheIndexMayNameACandidateNeverDescribeOne:
+    """[ADR-0029], closes A16. Measured on the real shop: `trousers` returns 4
+    and `jackets` returns 0, because the titles read "Waxed Cotton Field Jacket"
+    and the merchant's search is a literal text match. One letter, and a shopper
+    is told a shop with four jackets is empty — while `retrieve` had already
+    found one in the same turn."""
+
+    @staticmethod
+    def _ctx_with(index_hits: list[str], store: dict[str, Any]) -> Any:
+        from types import SimpleNamespace
+
+        from neura_commerce import EntityType
+
+        class _Retriever:
+            async def search(self, query: str, **kw: Any) -> Any:
+                chunks = [
+                    SimpleNamespace(source_id=i, source_type=EntityType.PRODUCT, chunk_index=0)
+                    for i in index_hits
+                ]
+                return SimpleNamespace(chunks=chunks)
+
+        class _Adapter:
+            def __init__(self) -> None:
+                self.asked: list[str] = []
+
+            async def search_products(self, query: Any) -> Any:
+                return SimpleNamespace(items=[])
+
+            async def get_product(self, ref: str) -> Any:
+                self.asked.append(ref)
+                return store.get(ref)
+
+        adapter = _Adapter()
+        return _ctx(adapter=adapter, retriever=_Retriever()), adapter
+
+    async def test_the_index_rescues_a_search_the_store_could_not_match(self) -> None:
+        from neura_agent_sell.tools.catalogue import search_products
+
+        ctx, adapter = self._ctx_with(
+            ["1311"], {"1311": _product(external_id="1311", title="Waxed Cotton Field Jacket")}
+        )
+        out = await search_products.fn("jackets", ctx)
+
+        assert "Waxed Cotton Field Jacket" in out
+        assert adapter.asked == ["1311"], "every fact must come from the live store"
+
+    async def test_the_fallback_says_it_happened(self) -> None:
+        """Stated, not silent — the cost this decision was weighed against is an
+        unattributable recommendation months from now."""
+        from neura_agent_sell.tools.catalogue import search_products
+
+        ctx, _ = self._ctx_with(
+            ["1311"], {"1311": _product(external_id="1311", title="Field Jacket")}
+        )
+        out = await search_products.fn("jackets", ctx)
+
+        assert "store's own search returned nothing" in out
+        assert "confirmed live" in out
+
+    async def test_a_product_gone_since_the_sync_does_not_survive(self) -> None:
+        """The freshness guarantee, kept. A stale index costs a wasted lookup,
+        never a wrong claim in front of a shopper."""
+        from neura_agent_sell.tools.catalogue import search_products
+
+        ctx, adapter = self._ctx_with(["1311"], {})  # the store no longer has it
+        out = await search_products.fn("jackets", ctx)
+
+        assert adapter.asked == ["1311"]
+        assert "no available products matching" in out
+        assert "1311" not in out
+
+    async def test_a_withdrawn_product_does_not_survive_either(self) -> None:
+        from neura_agent_sell.tools.catalogue import search_products
+        from neura_domain import ProductStatus
+
+        ctx, _ = self._ctx_with(
+            ["1311"],
+            {
+                "1311": _product(
+                    external_id="1311", title="Field Jacket", status=ProductStatus.ARCHIVED
+                )
+            },
+        )
+        out = await search_products.fn("jackets", ctx)
+
+        assert "no available products matching" in out
+
+    async def test_no_index_behaves_exactly_as_before(self) -> None:
+        """A tenant with no index, or one under a different embedding model,
+        must be unchanged."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                return SimpleNamespace(items=[])
+
+        out = await search_products.fn("jackets", _ctx(adapter=_Adapter()))
+        assert "no available products matching" in out
+
+    async def test_a_successful_store_search_never_reaches_the_index(self) -> None:
+        """The fallback is for *nothing*, not for *not enough*. Merging the two
+        would be a relevance judgement made in code with no data behind it."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        called = []
+
+        class _Retriever:
+            async def search(self, query: str, **kw: Any) -> Any:
+                called.append(query)
+                return SimpleNamespace(chunks=[])
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                return SimpleNamespace(
+                    items=[_product(external_id="1305", title="Linen Drawstring Trousers")]
+                )
+
+            async def get_product(self, ref: str) -> Any:
+                raise AssertionError("must not be called on a successful search")
+
+        out = await search_products.fn("trousers", _ctx(adapter=_Adapter(), retriever=_Retriever()))
+        assert "Linen Drawstring Trousers" in out
+        assert called == [], "the index must not be consulted when the store answered"
+
+
 class TestTheHandoverSaysWhichFailureHappened:
     """Finding 7 in the testing log. `plan` chose `list_categories`, the store
     answered it in 202ms with six categories, and the handover said *"the

@@ -135,6 +135,17 @@ class ToolContext:
     #: The tenant's commerce adapter. Typed loosely on purpose — a tool that
     #: needs one narrows it itself, and most tools do not need one at all.
     adapter: Any = None
+    #: The tenant's synced catalogue index, when one exists. See [ADR-0029].
+    #:
+    #: **A tool may use this to decide what to look up, never to describe it.**
+    #: The index is as fresh as the last sync; the adapter above is live, and a
+    #: shopper acts on prices and availability. Anything read from here must be
+    #: confirmed through the adapter before it reaches a reply — which also
+    #: makes a stale entry cost a wasted lookup rather than a wrong claim.
+    #:
+    #: `None` on every surface that has no index, including the MCP server,
+    #: which builds its own context and passes none.
+    retriever: Any = None
     #: Set by tenant configuration; the policy engine reads it for check 4.
     allowed_tools: frozenset[str] | None = None
 
