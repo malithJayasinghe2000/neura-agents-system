@@ -654,6 +654,63 @@ make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1 TENANT=tn_sell_ask
 
 ---
 
+### ✅ SELL on a cloud model, by hand — two fixes confirmed, and A16 exposed
+
+`gemini-3.6-flash` on every role, `gemini-embedding-001` for retrieval, against the real shop.
+
+| question | result |
+|:--|:--|
+| *do you sell fishing rods?* | ✅ `recommend` 0.95 → searched → honest miss, **no whole-store claim** |
+| *do you sell jackets?* | ❌ searched `jackets`, store returned **0**, shopper told nothing was found |
+| *I need trousers under 40* | ✅ **"I found 4 in this store's catalogue, but none under 40.00 USD. The closest is 44.00 USD."** |
+
+**[ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md) fired for the first
+time on real data**, and `plan` chose `search_products({'query': 'trousers'})` — **the model
+dropped "under 40" by itself**, obeying the instruction the local reasoner ignored on three
+consecutive runs. The stripper was not needed here; it remains the floor for when a model does not.
+
+**[ADR-0028](architecture/adr/0028-only-the-catalogue-may-say-what-a-store-sells.md) confirmed:**
+*"do you sell fishing rods?"* classified `recommend` and reached the catalogue. **No Trail Cap** —
+`no_match_001`'s substitute failure comes from the fixture store's planted `p_injected`, not from
+real merchant data.
+
+### 🔴 Finding 9: the jackets run is [A16](open-questions.md), and it is now the binding constraint
+
+```
+RETRIEVE  found  product:1311#0            ← our index HAS the Waxed Cotton Field Jacket
+PLAN      chose  search_products('jackets')
+ACT       store said: no available products matching 'jackets'
+NO_MATCH  "I can't find anything matching that"
+```
+
+**The store stocks four jackets.** Measured directly against the same endpoint:
+
+| query | results | why |
+|:--|--:|:--|
+| `trousers` | **4** | titles read *"Halden Cargo **Trousers**"* |
+| `jackets` | **0** | titles read *"Waxed Cotton Field **Jacket**"* |
+| `shoes` | **0** | same, singular in the title |
+
+**The merchant's search is a literal text match with no stemming.** One letter decides the turn.
+
+This is the cleanest evidence A16 has: **same shop, same code, same model, one word different.**
+And it is now the *binding* constraint — every fix of the last two days made the query more
+faithful, and a more faithful query is worth nothing to an engine that cannot match a plural.
+Note the shape of it: **our own index found the jacket and we did not use it.** `retrieve` searches
+our copy for context; `search_products` goes to the merchant. A16's named options — fall back to our
+index when the shop returns nothing, or search ours instead — are unchanged and undecided.
+
+**Speed, measured on the same three questions:**
+
+| question | `ollama-dev` | `gemini-3.6-flash` |
+|:--|--:|--:|
+| fishing rods | ~15s | **5.5s** |
+| jackets | 31.4s | **5.2s** |
+| trousers under 40 | 24.5s | **9.9s** |
+
+`plan` alone fell from **12–51s** to **2–5s**, and it never once chose no tool at all — the failure
+that struck twice in three local runs of the same question.
+
 ### ⚠️ Finding 8: the hand-test scripts ignored `.env` and never loaded it
 
 Found while pointing the hand-runs at a cloud model, 2026-08-28. Two defects, one hiding the

@@ -81,7 +81,7 @@ WHAT_IT_DOES = {
     "act": "authorise each lookup in code, then run the allowed ones",
     "shortlist": "decide IN CODE what may be recommended — price ceiling, cap, honest miss",
     "decline": "out of scope, and nobody needed — a fixed message, no model",
-    "no_match": "this store genuinely does not carry it — a fixed message, no model",
+    "no_match": "nothing to recommend, and why — a fixed message, no model",
     "compose": "draft a shortlist from the evidence, attributing every claim",
     "verify": "a second model checks every claim against that evidence",
     "respond": "send it — after checking the draft names no product the shortlist withheld",
@@ -218,9 +218,19 @@ def _show(node: str, update: dict[str, Any], elapsed_ms: int, runtime: Any) -> N
             # is the product's central claim: "we do not carry that" is a
             # statement about the whole store, and may only be made when the
             # whole store was actually consulted (sell.md §2.3).
-            print(
-                f"      {YELLOW}nothing survived — the store was asked and does not carry it{OFF}"
-            )
+            #
+            # Which of the two misses it is comes from `shortlist` ([ADR-0027]),
+            # because "the search found nothing" and "your budget excluded four
+            # products" are different answers and printing one label for both is
+            # what this script exists to stop.
+            miss = update.get("miss") or {}
+            if miss.get("kind") == "constraint":
+                print(
+                    f"      {YELLOW}the store was asked and answered — "
+                    f"{miss.get('found', '?')} found, all outside the stated constraint{OFF}"
+                )
+            else:
+                print(f"      {YELLOW}the store was asked and this search found nothing{OFF}")
 
     elif node in ("compose", "no_match", "decline"):
         if draft := update.get("draft", ""):
