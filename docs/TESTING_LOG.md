@@ -184,6 +184,19 @@ The one personal thing that *is* stored is the **conversation**, because the con
 it. Personal details are replaced with tokens (`[EMAIL_1]`) **before** anything is written
 (security-model.md §6.2), and transcripts are kept 90 days.
 
+**And that sentence needs a correction, made 2026-08-30 after the project owner pushed on it.**
+*"Personal details"* is generous: `guard/pii.py` tokenises **four patterns — EMAIL, PHONE, CARD,
+ADDRESS — and nothing else.** Everything else a shopper types is stored verbatim:
+
+> *"I'm pregnant and need looser trousers"* · *"it's for my wife's birthday"* ·
+> *"I've gained weight, I'm a 42 now"*
+
+**That is personal data**, kept 90 days and shown in the merchant's console. The honest claim is
+narrower than the one written above and than the pitch below: **we do not copy the shop's customer
+database** — no names, addresses or order histories in our tables — **but what a person types to
+us, we keep.** Any pitch that implies otherwise is wrong, and this matters most exactly where it
+would be quoted: to a merchant, in the sentence that ends *"…with personal details stripped."*
+
 ### Two things to fix before a real merchant
 
 1. **The key that encrypts a merchant's store credentials lives in an environment variable**, not
@@ -192,8 +205,13 @@ it. Personal details are replaced with tokens (`[EMAIL_1]`) **before** anything 
 2. **There is no data processing agreement.** The facts above are true and precise; nothing states
    them in a document a merchant's lawyer can read and sign.
 
-The honest pitch: *"We copy your catalogue and your published policies. We never copy your orders
-or your customers. Chat transcripts are kept 90 days with personal details stripped."*
+The honest pitch, **corrected 2026-08-30**: *"We copy your catalogue and your published policies.
+We never copy your orders or your customers. Chat transcripts are kept 90 days — with emails, phone
+numbers, card numbers and postal addresses replaced by tokens before anything is stored. **The rest
+of what a shopper types is kept as written.**"*
+
+The earlier version of this line ended *"with personal details stripped"*, which is not true of the
+four-pattern tokeniser and would have been said to a merchant.
 
 ---
 
