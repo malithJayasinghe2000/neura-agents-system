@@ -106,6 +106,55 @@
     return [{ role: "error", text: EMPTY_TURN_MESSAGE, disclosure: "" }];
   }
 
+  /**
+   * Schemes a browser may be handed. [ADR-0030]
+   *
+   * `javascript:` executes and `data:` can carry a whole document, and both
+   * arrive here inside a merchant's own product URL — a field they typed, that
+   * nothing upstream renders and therefore nothing upstream had to make safe.
+   * The server drops them too; this is the second of the two, because the one
+   * that matters is the one closest to the browser.
+   */
+  var SAFE_URL = /^https?:\/\/[^\s]+$/i;
+
+  /**
+   * The products a turn may display, cleaned. [ADR-0030]
+   *
+   * Pure, and beside `messagesForTurn` for the same reason: it is a decision
+   * about what a shopper is shown, so it is testable without a DOM.
+   *
+   * **Every field is treated as text except the two that are not.** `title`,
+   * `price` and the rest are placed with `textContent` later and cannot become
+   * markup; `url` and `image` become attributes a browser resolves, so anything
+   * that is not plain http(s) is dropped and the card renders without it.
+   *
+   * A card with no title is discarded outright — a shopper reads an unnamed
+   * grey box as a broken site, not as a missing field.
+   */
+  function productsForTurn(payload) {
+    var items = (payload && payload.products) || [];
+    var out = [];
+    if (!items.length) {
+      return out;
+    }
+    for (var i = 0; i < items.length; i += 1) {
+      var item = items[i] || {};
+      if (!item.title) {
+        continue;
+      }
+      out.push({
+        id: String(item.id || ""),
+        title: String(item.title),
+        price: item.price ? String(item.price) : "",
+        currency: item.currency ? String(item.currency) : "",
+        in_stock: item.in_stock === true || item.in_stock === "true",
+        url: SAFE_URL.test(String(item.url || "")) ? String(item.url) : "",
+        image: SAFE_URL.test(String(item.image || "")) ? String(item.image) : ""
+      });
+    }
+    return out;
+  }
+
   /** Read the embed configuration off the <script> tag that loaded us. */
   function configFrom(script, location) {
     var data = (script && script.dataset) || {};
@@ -292,6 +341,19 @@
     "[data-role='system'] .bubble{background:#fff8e6;border:1px solid #f0dfae;color:#6b5726;}",
     "[data-role='error'] .bubble{background:#fdecec;border:1px solid #f2c3c3;color:#8c2b2b;}",
     ".note{font-size:10.5px;color:#79839a;}",
+    // Product cards ([ADR-0030]). A horizontal strip that scrolls rather than
+    // wrapping: a chat panel is ~340px wide, and four wrapped cards push the
+    // reply that named them off the top of the log.
+    ".cards{display:flex;gap:8px;overflow-x:auto;padding:2px 1px 6px;scrollbar-width:thin;}",
+    ".card{flex:0 0 148px;border:1px solid #e6e9f0;border-radius:10px;overflow:hidden;",
+    "background:#fff;text-decoration:none;color:inherit;display:flex;flex-direction:column;}",
+    "a.card:hover{border-color:#b9c4dc;}",
+    "a.card:focus-visible{outline:2px solid #7aa2ff;outline-offset:1px;}",
+    ".card-image{width:100%;height:104px;object-fit:cover;background:#f1f3f8;display:block;}",
+    ".card-body{padding:8px 9px;display:flex;flex-direction:column;gap:3px;}",
+    ".card-title{font-size:12.5px;line-height:1.3;font-weight:600;}",
+    ".card-price{font-size:12.5px;color:#1b2333;}",
+    ".card-stock{font-size:10.5px;color:#5c8a5c;}",
     ".status{font-size:12px;color:#79839a;font-style:italic;min-height:16px;padding:0 14px 4px;}",
     ".compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #e6e9f0;}",
     ".compose input{flex:1;padding:9px 11px;border:1px solid #d3d8e3;border-radius:9px;font-size:14px;",
@@ -602,7 +664,68 @@
       for (var i = 0; i < rows.length; i += 1) {
         this.render(rows[i]);
       }
+      this.renderProducts(productsForTurn(payload));
       this.setBusy(false);
+    };
+
+    /**
+     * The cards, under the reply that named them. [ADR-0030]
+     *
+     * **The widget owns every tag and every attribute here.** Nothing from the
+     * network is ever written as markup: text goes in through `element()`,
+     * which uses `textContent`, and the only two values that reach an attribute
+     * were checked against `SAFE_URL` first.
+     *
+     * A card links out to the merchant's own product page, in a new tab, with
+     * `rel="noopener noreferrer"` so the page it opens cannot reach back into
+     * the tab it was opened from.
+     */
+    NeuraChat.prototype.renderProducts = function (items) {
+      if (!items.length) {
+        return;
+      }
+      var strip = element("div", "cards");
+      for (var i = 0; i < items.length; i += 1) {
+        strip.appendChild(this.card(items[i]));
+      }
+      this.log.appendChild(strip);
+      this.log.scrollTop = this.log.scrollHeight;
+    };
+
+    NeuraChat.prototype.card = function (item) {
+      // An anchor when there is somewhere to go, a plain box when there is not.
+      // A card that looks clickable and is not is worse than one that does not.
+      var node = document.createElement(item.url ? "a" : "div");
+      node.className = "card";
+      if (item.url) {
+        node.href = item.url;
+        node.target = "_blank";
+        node.rel = "noopener noreferrer";
+      }
+
+      if (item.image) {
+        var image = document.createElement("img");
+        image.className = "card-image";
+        image.src = item.image;
+        // The title, not "product image" — a shopper using a screen reader gets
+        // the same information a sighted one does.
+        image.alt = item.title;
+        image.loading = "lazy";
+        node.appendChild(image);
+      }
+
+      var body = element("div", "card-body");
+      body.appendChild(element("div", "card-title", item.title));
+      if (item.price) {
+        body.appendChild(
+          element("div", "card-price", (item.price + " " + item.currency).trim())
+        );
+      }
+      body.appendChild(
+        element("div", "card-stock", item.in_stock ? "In stock" : "Out of stock")
+      );
+      node.appendChild(body);
+      return node;
     };
 
     NeuraChat.prototype.remember = function (conversationId) {
@@ -667,6 +790,7 @@
       endpointFor: endpointFor,
       labelForStep: labelForStep,
       messagesForTurn: messagesForTurn,
+      productsForTurn: productsForTurn,
     };
   }
 })();

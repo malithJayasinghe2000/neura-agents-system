@@ -84,6 +84,7 @@ async def respond(state: AgentState, config: RunnableConfig) -> AgentState:
         }
 
     reply = runtime.vault.rehydrate(draft)
+    cards = _cards_for(draft, state, runtime)
 
     log.info(
         "sell_responded",
@@ -92,13 +93,47 @@ async def respond(state: AgentState, config: RunnableConfig) -> AgentState:
         intent=state.get("intent"),
         prompt_revision=REVISION,
         recommended=state.get("promises", []),
+        cards=[card["id"] for card in cards],
         rehydrated=len(state.get("redactions", [])),
     )
 
     usage = dict(state.get("usage", {}))
     usage["prompt_revision"] = REVISION
 
-    return {"reply": reply, "usage": usage}
+    return {"reply": reply, "cards": cards, "usage": usage}
+
+
+def _cards_for(draft: str, state: AgentState, runtime: object) -> list[dict[str, str]]:
+    """The products this reply may *show*, in the order it names them. [ADR-0030]
+
+    **Built after the fabrication check and from the same set**, which is what
+    makes cards need no safety argument of their own: an id that is not in
+    `promises` has already escalated the turn by the time this runs, so a card
+    for a rejected candidate — the out-of-stock recommendation, the one over the
+    price ceiling — cannot be constructed here.
+
+    Narrower than `promises` on purpose. A shortlist of four the composer wrote
+    about twice produces **two** cards: showing the other two would be
+    recommending products the reply did not choose, with pictures, which is the
+    "here is the nearest thing, it probably fits" failure `no_match` exists to
+    refuse.
+
+    Order follows the draft rather than the shortlist, so the first card is the
+    one the sentence led with.
+    """
+    promised = set(state.get("promises", []))
+    if not promised:
+        return []
+
+    available: dict[str, dict[str, str]] = getattr(runtime, "cards", {}) or {}
+
+    cards: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for token in _CITED.findall(draft):
+        if token in promised and token not in seen and (card := available.get(token)):
+            seen.add(token)
+            cards.append(card)
+    return cards
 
 
 def _invented_ids(draft: str, state: AgentState) -> set[str]:

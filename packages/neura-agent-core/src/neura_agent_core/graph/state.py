@@ -162,6 +162,14 @@ class AgentState(TypedDict, total=False):
     #: here is precisely why" is a shape any agent can reach.
     miss: dict[str, str]
 
+    #: Structured items the reply may *display*, in the order it names them.
+    #: See [ADR-0030]. Fields only — a title, a price, a link — never markup.
+    #:
+    #: Declared here because **an undeclared key is dropped silently by
+    #: LangGraph**, and a card list that vanishes between `respond` and the API
+    #: would look exactly like a turn that recommended nothing.
+    cards: list[dict[str, str]]
+
     # ── route ────────────────────────────────────────────────────────────────
     intent: str
     intent_confidence: float
@@ -265,6 +273,18 @@ class Runtime:
     #: meant to last for (security-model.md §6.2). `guard` fills it, `respond`
     #: and `escalate` read it, and it dies with the turn.
     vault: PiiVault = field(default_factory=PiiVault)
+
+    #: Structured facts a tool saw this turn, keyed by id, for a reply that has
+    #: to *show* something rather than only describe it. See [ADR-0030].
+    #:
+    #: Here for the same reason `vault` is: it is per-turn, it is never
+    #: checkpointed, and the objects a tool fetched have no business in a
+    #: database row. The same dict is handed to :class:`ToolContext`, so a tool
+    #: writes and a terminal node reads without either learning about the other.
+    #:
+    #: Agent-neutral by construction — the engine never learns what an entry
+    #: means, only that a node asked for one by id.
+    cards: dict[str, dict[str, str]] = field(default_factory=dict)
 
     #: Whether `guard`'s rules run at all. Off is a *measurement* mode, not a
     #: deployment mode — `make eval-guard-off` uses it to prove that injection

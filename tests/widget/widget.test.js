@@ -144,3 +144,74 @@ test("an unknown graph node still produces a status line", () => {
   assert.strictEqual(widget.labelForStep("some_future_node"), widget.STEP_FALLBACK);
   assert.strictEqual(widget.labelForStep(undefined), widget.STEP_FALLBACK);
 });
+
+// ── Product cards ([ADR-0030]) ───────────────────────────────────────────────
+//
+// `productsForTurn` is tested for the same reason `messagesForTurn` is: it
+// decides what a shopper is shown. The difference is that two of its fields
+// become attributes a browser resolves, so being wrong here is not a blank
+// bubble — it is a merchant's product URL executing on their own storefront.
+
+test("a turn with products returns them as clean fields", () => {
+  const items = widget.productsForTurn({
+    reply: "The Waxed Cotton Field Jacket (1311) is 165.00 USD.",
+    products: [
+      {
+        id: "1311",
+        title: "Waxed Cotton Field Jacket",
+        price: "165.00",
+        currency: "USD",
+        in_stock: true,
+        url: "https://shop.example/waxed-cotton-field-jacket",
+        image: "https://shop.example/img/1311.jpg",
+      },
+    ],
+  });
+  assert.strictEqual(items.length, 1);
+  assert.strictEqual(items[0].title, "Waxed Cotton Field Jacket");
+  assert.strictEqual(items[0].price, "165.00");
+  assert.strictEqual(items[0].in_stock, true);
+  assert.strictEqual(items[0].url, "https://shop.example/waxed-cotton-field-jacket");
+});
+
+test("a javascript: url never reaches an attribute", () => {
+  // The merchant typed this field and nothing upstream renders it, so nothing
+  // upstream had to make it safe. The server drops it too; this is the second
+  // of the two, and it is the one closest to the browser.
+  const items = widget.productsForTurn({
+    products: [{ id: "x", title: "Trap", url: "javascript:alert(1)" }],
+  });
+  assert.strictEqual(items[0].url, "", "the card must render without a link");
+});
+
+test("a data: image never reaches an attribute", () => {
+  const items = widget.productsForTurn({
+    products: [
+      { id: "x", title: "Trap", image: "data:text/html,<script>alert(1)</script>" },
+    ],
+  });
+  assert.strictEqual(items[0].image, "");
+});
+
+test("a product with no title is discarded", () => {
+  // A shopper reads an unnamed grey box as a broken site, not a missing field.
+  const items = widget.productsForTurn({
+    products: [{ id: "x", price: "10.00" }, { id: "y", title: "Real" }],
+  });
+  assert.deepStrictEqual(items.map((i) => i.title), ["Real"]);
+});
+
+test("a turn with no products renders none", () => {
+  // CARE, a withheld turn, an escalation, and any reply that recommended
+  // nothing all land here — so a client may call this unconditionally.
+  assert.deepStrictEqual(widget.productsForTurn({ reply: "hello" }), []);
+  assert.deepStrictEqual(widget.productsForTurn({}), []);
+  assert.deepStrictEqual(widget.productsForTurn(null), []);
+});
+
+test("out of stock is carried, not hidden", () => {
+  const items = widget.productsForTurn({
+    products: [{ id: "x", title: "Gone", in_stock: false }],
+  });
+  assert.strictEqual(items[0].in_stock, false);
+});

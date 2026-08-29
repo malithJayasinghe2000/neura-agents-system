@@ -146,6 +146,14 @@ class ToolContext:
     #: `None` on every surface that has no index, including the MCP server,
     #: which builds its own context and passes none.
     retriever: Any = None
+    #: The turn's card cache — the *same dict* :class:`Runtime` holds, so a tool
+    #: that fetched a product can leave its structured facts where a terminal
+    #: node will find them. See [ADR-0030].
+    #:
+    #: Mutable inside a frozen context on purpose: what may be written here is
+    #: decided by the tool, and *whether it reaches a shopper* is decided later,
+    #: by the fabrication check that already gates every product id in a reply.
+    cards: dict[str, dict[str, str]] = field(default_factory=dict)
     #: Set by tenant configuration; the policy engine reads it for check 4.
     allowed_tools: frozenset[str] | None = None
 

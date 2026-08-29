@@ -490,7 +490,7 @@ async def run_stub(chrome_binary: str) -> list[Result]:
 
 
 async def provision(
-    base: str, shop_url: str, shop_token: str, *, shadow: bool = False
+    base: str, shop_url: str, shop_token: str, *, shadow: bool = False, agent: str = "care"
 ) -> tuple[str, str]:
     """A tenant, a store, and a **public** key origin-locked to ``base``.
 
@@ -517,7 +517,7 @@ async def provision(
         await TenantRepository(session).create(
             tenant_id=tenant_id,
             name="widget check",
-            enabled_agents=["care"],
+            enabled_agents=[agent],
             # `--shadow` runs the real thing: a full turn whose reply is
             # withheld, so what the browser renders is `fallback_message` and
             # nothing else. It is the one case that cannot be produced by
@@ -526,14 +526,7 @@ async def provision(
         )
         _, issued = await ApiKeyRepository(session).issue(
             tenant_id,
-            scopes=[
-                "care:chat:write",
-                "care:conversations:read",
-                "care:order:read",
-                "care:catalogue:read",
-                "care:policies:read",
-                "care:escalate",
-            ],
+            scopes=_scopes_for(agent),
             name="widget-check",
             kind=ApiKeyKind.PUBLIC,
             allowed_origins=[base.rstrip("/")],
@@ -543,6 +536,33 @@ async def provision(
         )
     await db.dispose()
     return tenant_id, issued.token
+
+
+#: What a public widget key may do, per agent. Kept here rather than derived
+#: from the manifest because a demo that silently grants whatever an agent
+#: declares would stop being a check on what a *public* key is allowed to hold.
+_SCOPES = {
+    "care": (
+        "care:chat:write",
+        "care:conversations:read",
+        "care:order:read",
+        "care:catalogue:read",
+        "care:policies:read",
+        "care:escalate",
+    ),
+    "sell": (
+        "sell:chat:write",
+        "sell:conversations:read",
+        "sell:catalogue:read",
+        "sell:escalate",
+    ),
+}
+
+
+def _scopes_for(agent: str) -> list[str]:
+    if agent not in _SCOPES:
+        raise SystemExit(f"unknown agent {agent!r} — expected one of {', '.join(_SCOPES)}")
+    return list(_SCOPES[agent])
 
 
 async def deprovision(tenant_id: str) -> None:
@@ -690,6 +710,11 @@ async def main() -> int:
         help="provision and print a URL to open by hand, instead of driving Chrome",
     )
     parser.add_argument("--message", default="what is your returns policy?")
+    parser.add_argument(
+        "--agent",
+        default="care",
+        help="which agent the provisioned tenant runs — care (default) or sell",
+    )
     args = parser.parse_args()
 
     chrome_binary = find_chrome()
@@ -700,7 +725,7 @@ async def main() -> int:
             if not (args.shop_url and args.shop_token):
                 raise SystemExit("--live needs either --key, or --shop-url and --shop-token")
             tenant_id, key = await provision(
-                args.url, args.shop_url, args.shop_token, shadow=args.shadow
+                args.url, args.shop_url, args.shop_token, shadow=args.shadow, agent=args.agent
             )
             print(f"  provisioned {tenant_id} with a public key locked to {args.url}")
         if args.setup_only:
@@ -710,7 +735,7 @@ async def main() -> int:
             print()
             print("  Open this in your own browser:")
             print()
-            print(f"    {args.url.rstrip('/')}/v1/widget/demo?key={key}")
+            print(f"    {args.url.rstrip('/')}/v1/widget/demo?key={key}&agent={args.agent}")
             print()
             print(f"  Mode: {'SHADOW — the reply is withheld' if args.shadow else 'LIVE'}")
             print(f"  When you are done:  make tenant-drop TENANT={tenant_id}")

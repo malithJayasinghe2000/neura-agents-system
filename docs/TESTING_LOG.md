@@ -1056,6 +1056,63 @@ The helper now covers 18 tables, documents why the nineteenth is absent, and was
 **zero residue**. The 203 pre-existing orphans were **left in place as the evidence**; clearing
 them is a one-line drop per tenant when someone wants the database tidy.
 
+## Product cards — [ADR-0030], built 2026-08-30
+
+The widget rendered text only. A shopping assistant that cannot show the jacket is doing half the
+job, so SELL replies now carry the products they name, as **fields a client draws a card from**.
+
+**Verified end to end through the real API, against the real shop:**
+
+```json
+{ "id": "1311", "title": "Waxed Cotton Field Jacket",
+  "price": "165.00", "currency": "USD", "in_stock": "true",
+  "url": "http://bagisto.test/waxed-cotton-field-jacket" }
+```
+
+No `image` — the test shop publishes `image_urls: []` for every product, which is exactly why the
+card is built to render without one.
+
+**The rule: the model names the products, the server states the facts, the widget draws the card.**
+No layer does another's job, and **no markup crosses the wire in either direction**. Cards are
+built in `respond` *after* the fabrication check and from the same `promises` set, so a card for a
+rejected candidate cannot be constructed — the out-of-stock recommendation and the price-ceiling
+violation were already impossible, and cards inherit that rather than needing their own version.
+
+Narrower than the shortlist on purpose: a shortlist of four the composer wrote about twice produces
+**two** cards.
+
+**Two things needed fixing to test it at all.** The demo tool provisioned `care` only, so a SELL
+widget could not be opened in a browser — it now takes `--agent`, with a per-agent scope table, and
+the demo page reads the agent from the URL.
+
+### 🔴 Finding 10: `verify` passed a fabrication on the cloud model that the local one caught
+
+The turn that produced the card above also produced this:
+
+> *"The Waxed Cotton Field Jacket (1311) is 165.00 USD and in stock. It's **waterproof with taped
+> seams**, so it should…"*
+
+Product 1311's description, in full: *"Traditional 8oz waxed cotton that **sheds rain** and gains
+character rather than wearing out. Four bellows pockets, a corduroy collar, and a two-way brass zip
+under a storm flap."*
+
+**"Waterproof" and "taped seams" are not in it.** They belong to the *Lightweight Rain Shell*, a
+different product. `state: resolved` — `verify` passed it.
+
+**And the same sentence was caught two days earlier.** On `ollama-dev`, `llama3.1:8b` rejected it:
+*NOT grounded — unsupported claim: "The Waxed Cotton Field Jacket is waterproof with taped seams"*,
+and the turn escalated with the draft attached.
+
+So the model comparison is **not one-directional**. Every other measurement this week favoured
+`gemini-3.6-flash` — better tool choice, no invented attributes in `route`, 5s against 45s. Here the
+local verifier is the one that held. **A single reply is not a measurement**, and this is recorded
+as a finding rather than a result — but it is the sharpest reason yet that the verifier's model is
+its own choice and not a by-product of the role map, and it belongs with **A9** and **S9**, which
+are already about what `verify` should and should not accept.
+
+**Cards make it worse, and that is the argument for caring.** A sentence saying *"waterproof"* is a
+claim a shopper might skim. **A card beside it, with a price and a link, is a claim they act on.**
+
 ## Stage 8 — the console ⬜
 
 What the shop owner sees, and the only screen that produces something this project does not

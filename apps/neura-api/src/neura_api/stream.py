@@ -194,6 +194,13 @@ async def run_streamed_turn(
                     # carries the same value the REST payload does, from the
                     # same property — two transports, one sentence.
                     "fallback_message": result.fallback_message,
+                    # Products the reply names, as display fields ([ADR-0030]).
+                    # On `done` rather than as a frame of their own: they arrive
+                    # with the turn that earned them, so a client cannot render
+                    # a card for a turn that then escalated. Same list, same
+                    # field name, as the REST payload — two transports, one
+                    # contract.
+                    "products": outcome.cards,
                 },
             )
 

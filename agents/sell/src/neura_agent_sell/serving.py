@@ -146,6 +146,11 @@ def _outcome(final: dict[str, Any]) -> TurnOutcome:
         prompt_revision=usage.get("prompt_revision"),
         handoff=str(final.get("handoff", "")),
         escalation_reason=str(final.get("escalation_reason", "")),
+        # Built by `respond` from the ids the draft actually cited, after the
+        # fabrication check has already run against `promises` ([ADR-0030]).
+        # Empty on every turn that did not reach `respond`, which is what makes
+        # an escalated or blocked turn carry no products by construction.
+        cards=list(final.get("cards", [])),
     )
 
 

@@ -73,6 +73,11 @@ def build_runtime(
     and the tests that prove the guard is not what makes injection resistance
     1.00 (ADR-0011). It is not a deployment switch.
     """
+    # One dict, two holders: the tools write into it through `ToolContext` and
+    # `respond` reads it off the `Runtime` ([ADR-0030]). Created here so that
+    # both sides are the same object rather than two that happen to agree.
+    cards: dict[str, dict[str, str]] = {}
+
     ctx = ToolContext(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -86,6 +91,7 @@ def build_runtime(
         # returns nothing ([ADR-0029]). A tenant with no index passes None here
         # and the fallback simply never runs.
         retriever=retriever,
+        cards=cards,
     )
 
     registry = build_registry()
@@ -96,6 +102,7 @@ def build_runtime(
         policy=PolicyEngine(registry),
         budget=ConversationBudget(max_tool_calls=max_tool_calls),
         retriever=retriever,
+        cards=cards,
         audit=audit,
         llm=llm,
         prompts=load_prompts(),

@@ -84,7 +84,10 @@ async def snippet(
     response_class=Response,
     include_in_schema=False,
 )
-async def demo(key: Annotated[str, Query(max_length=128)] = "") -> Response:
+async def demo(
+    key: Annotated[str, Query(max_length=128)] = "",
+    agent: Annotated[str, Query(max_length=32)] = "care",
+) -> Response:
     """The widget on a page, under the CSP a merchant would be asked to run.
 
     **404 in production.** It is a development tool, and an HTML page on the API
@@ -97,8 +100,11 @@ async def demo(key: Annotated[str, Query(max_length=128)] = "") -> Response:
     # attribute is stripped rather than escaped — the alternative is trusting an
     # escaping function on the one page whose whole job is to load a script.
     safe_key = "".join(c for c in key if c.isalnum() or c in "_-")
+    # Same treatment, same reason: it lands in an attribute value, and an agent
+    # key is `[a-z]` in every manifest this will ever load.
+    safe_agent = "".join(c for c in agent if c.isalnum() or c in "_-") or "care"
     return Response(
-        content=DEMO_HTML.replace("__KEY__", safe_key),
+        content=DEMO_HTML.replace("__KEY__", safe_key).replace("__AGENT__", safe_agent),
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )

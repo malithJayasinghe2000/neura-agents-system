@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from neura_agent_core.tools import ToolContext, tool
+from neura_agent_sell.tools.card import product_card
 from neura_agent_sell.tools.render import (
     candidate,
     category_evidence,
@@ -156,6 +157,7 @@ async def search_products(query: str, ctx: ToolContext) -> str:
         results=len(sellable),
         withheld=len(products) - len(sellable),
     )
+    _remember(ctx, sellable)
     return "\n\n".join(candidate(product) for product in sellable)
 
 
@@ -245,7 +247,28 @@ async def _from_the_index(text: str, ctx: ToolContext) -> str:
         "from the synced catalogue. Their prices and availability below were confirmed "
         "live with the store just now."
     )
+    _remember(ctx, confirmed)
     return header + "\n\n" + "\n\n".join(candidate(product) for product in confirmed)
+
+
+def _remember(ctx: ToolContext, products: list[Any]) -> None:
+    """Keep the structured facts this lookup already fetched. [ADR-0030]
+
+    A tool result is prose, for a model to reason over. `candidate()` renders no
+    image and no URL, because a model has no use for either — so a reply that
+    has to *show* a product cannot be built from what a reply that only
+    *describes* one was given.
+
+    The alternative is fetching every recommended product a second time in
+    `respond`, which is up to four extra round-trips to re-read what this turn
+    already read. This dies with the turn, so it cannot go stale.
+
+    **Writing here grants nothing.** Whether an entry ever reaches a shopper is
+    decided later by the fabrication check, against `promises`.
+    """
+    for product in products:
+        if card := product_card(product):
+            ctx.cards[card["id"]] = card
 
 
 def _shares_a_word(query: str, products: list[Any]) -> bool:
@@ -311,6 +334,8 @@ async def get_product_details(product_ref: str, ctx: ToolContext) -> str:
             f"The store has no product with id {ref!r}. Do not describe a product "
             "from memory — search the catalogue instead."
         )
+
+    _remember(ctx, [product])
 
     if product.status is not ProductStatus.ACTIVE:
         return (

@@ -1124,6 +1124,146 @@ class TestTheIndexMayNameACandidateNeverDescribeOne:
         assert called == [], "the index must not be consulted when the store answered"
 
 
+class TestAProductCardIsDataTheWidgetDraws:
+    """[ADR-0030]. The model names the products, the server states the facts,
+    the widget draws the card — and no layer does another's job."""
+
+    def test_a_card_carries_the_fields_a_shopper_needs(self) -> None:
+        from neura_agent_sell.tools.card import product_card
+
+        card = product_card(
+            _product(
+                external_id="1311",
+                title="Waxed Cotton Field Jacket",
+                url="https://shop.example/waxed-cotton-field-jacket",
+                image_urls=["https://shop.example/img/1311.jpg"],
+                variants=[_variant(external_id="1311", in_stock=True)],
+            )
+        )
+        assert card is not None
+        assert card["id"] == "1311"
+        assert card["title"] == "Waxed Cotton Field Jacket"
+        assert card["url"] == "https://shop.example/waxed-cotton-field-jacket"
+        assert card["image"] == "https://shop.example/img/1311.jpg"
+        assert card["in_stock"] == "true"
+
+    def test_an_executable_url_is_dropped_not_rendered(self) -> None:
+        """The only place merchant data becomes something a browser resolves."""
+        from neura_agent_sell.tools.card import product_card
+
+        card = product_card(
+            _product(
+                external_id="x",
+                title="Trap",
+                url="javascript:alert(1)",
+                image_urls=["data:text/html,<script>alert(1)</script>"],
+            )
+        )
+        assert card is not None
+        assert "url" not in card, "a card renders without a link rather than with a trap"
+        assert "image" not in card
+
+    def test_a_relative_url_is_dropped(self) -> None:
+        """No host, so nothing to trust. A card without an image is fine."""
+        from neura_agent_sell.tools.card import product_card
+
+        card = product_card(_product(external_id="x", title="T", url="/products/x"))
+        assert card is not None
+        assert "url" not in card
+
+    def test_a_product_with_no_title_gets_no_card(self) -> None:
+        from neura_agent_sell.tools.card import product_card
+
+        assert product_card(_product(external_id="x", title="")) is None
+
+    def test_a_withdrawn_product_is_marked_out_of_stock(self) -> None:
+        """The same call `render.py` makes for the model. A card saying "In
+        stock" beside prose saying otherwise is worse than either alone."""
+        from neura_agent_sell.tools.card import product_card
+        from neura_domain import ProductStatus
+
+        card = product_card(_product(external_id="x", title="Gone", status=ProductStatus.ARCHIVED))
+        assert card is not None
+        assert card["in_stock"] == "false"
+
+
+class TestCardsObeyTheFabricationCheck:
+    """Cards need no safety argument of their own: they are built after the
+    check that already gates every product id in a reply, and from the same
+    set."""
+
+    @staticmethod
+    def _runtime_with(cards: dict[str, dict[str, str]]) -> Any:
+        from neura_agent_core.graph import CONFIG_KEY
+        from neura_agent_sell.runtime import build_runtime
+
+        runtime = build_runtime(
+            tenant_id="tn_test",
+            conversation_id="cnv_test",
+            adapter=None,
+            llm=None,
+            capabilities=frozenset(),
+            scopes=frozenset(),
+        )
+        runtime.cards.update(cards)
+        return {"configurable": {CONFIG_KEY: runtime}}
+
+    async def test_only_products_the_reply_names_get_a_card(self) -> None:
+        """A shortlist of four the composer wrote about twice produces two
+        cards. Showing the others would be recommending products the reply did
+        not choose, with pictures."""
+        from neura_agent_sell.nodes import respond
+
+        out = await respond(
+            {
+                "draft": "The 1311 and the 1315 are both good.",
+                "grounded": True,
+                "promises": ["1311", "1313", "1315", "1323"],
+                "invocations": [
+                    _invocation("search_products", "Product 1311: A\n\nProduct 1315: B")
+                ],
+            },
+            self._runtime_with(
+                {
+                    "1311": {"id": "1311", "title": "A"},
+                    "1313": {"id": "1313", "title": "B"},
+                    "1315": {"id": "1315", "title": "C"},
+                }
+            ),
+        )
+        assert [c["id"] for c in out["cards"]] == ["1311", "1315"]
+
+    async def test_cards_follow_the_order_the_reply_names_them(self) -> None:
+        from neura_agent_sell.nodes import respond
+
+        out = await respond(
+            {
+                "draft": "Start with 1315, or consider 1311.",
+                "grounded": True,
+                "promises": ["1311", "1315"],
+                "invocations": [
+                    _invocation("search_products", "Product 1311: A\n\nProduct 1315: B")
+                ],
+            },
+            self._runtime_with(
+                {"1311": {"id": "1311", "title": "A"}, "1315": {"id": "1315", "title": "B"}}
+            ),
+        )
+        assert [c["id"] for c in out["cards"]] == ["1315", "1311"]
+
+    async def test_an_escalated_turn_carries_no_cards(self) -> None:
+        """`respond` never runs, so there is nothing to show — which is how a
+        withheld or blocked turn ends up with no products, by construction."""
+        from neura_agent_sell.nodes import respond
+
+        out = await respond(
+            {"draft": "", "grounded": False, "promises": ["1311"]},
+            self._runtime_with({"1311": {"id": "1311", "title": "A"}}),
+        )
+        assert out.get("escalated") is True
+        assert "cards" not in out
+
+
 class TestTheFallbackNeedsAWordInCommon:
     """[ADR-0029] amended. The index always returns its nearest neighbours, and
     "nearest" in a 29-product catalogue is not "relevant": measured on the real

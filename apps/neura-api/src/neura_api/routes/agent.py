@@ -125,6 +125,14 @@ class ChatData(BaseModel):
     #: ``reply or fallback_message`` is correct in both cases. Fixed text, never
     #: the withheld draft, and it never claims a person was told.
     fallback_message: str = ""
+    #: Products the reply names, as display fields a client can draw a card
+    #: from — id, title, price, currency, in_stock, url, image ([ADR-0030]).
+    #:
+    #: **Fields, never markup.** The client owns every tag; this owns no HTML at
+    #: all. Empty for CARE, for a withheld or escalated turn, and for any reply
+    #: that recommended nothing — so a client may render it unconditionally, and
+    #: one that ignores the field entirely still shows the text it always did.
+    products: list[dict[str, str]] = Field(default_factory=list)
 
 
 def build_router(agent_key: str) -> APIRouter:
@@ -472,6 +480,10 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
             blocked=outcome.blocked,
             citations=[Citation(type=c.type, id=c.id) for c in outcome.citations],
             fallback_message=result.fallback_message,
+            # Read off the outcome, not the result: a **shadowed** turn has no
+            # `reply` and must have no products either, and `outcome.cards` is
+            # empty for it because `respond` never ran ([ADR-0030], ADR-0020).
+            products=outcome.cards,
         ).model_dump(mode="json"),
         request_id=str(getattr(getattr(request, "state", None), "request_id", "") or ""),
     )

@@ -179,6 +179,11 @@ class TurnOutcome:
     #: reason is not recorded is a refusal somebody has to reproduce to argue
     #: with.
     verify_reason: str = ""
+    #: Products this reply may *display*, in the order it names them, as flat
+    #: display fields. See [ADR-0030]. Empty for every agent that has no cards
+    #: and for every turn that recommended nothing, so a transport can render it
+    #: unconditionally.
+    cards: list[dict[str, str]] = field(default_factory=list)
     intent: str | None = None
     citations: list[Citation] = field(default_factory=list)
     tool_calls: int = 0
