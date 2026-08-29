@@ -56,6 +56,20 @@ Recommending a product that sold out this morning is its own failure, and worse 
 
 Put another way: **a stale index can now cost us a wasted lookup. It cannot put a wrong fact in front of a shopper.**
 
+### The fallback fires only when the merchant's own words justify it
+
+**Amended 2026-08-29, before this shipped anywhere, because the first version regressed the case it was not thinking about.**
+
+The index always returns its nearest neighbours, and *"nearest"* in a 29-product catalogue is not *"relevant"*. Measured: **`fishing rods` returns a jacket at 0.528 against a best of 0.545** — noise indistinguishable from signal, and `DEFAULT_MIN_SCORE` is **0.3**, so every one of them would have passed. The first version of this decision would have answered *"do you sell fishing rods?"* with five things that are not fishing rods, which is **worse than the behaviour it replaced**.
+
+So the fallback additionally requires that **at least one confirmed product uses one of the shopper's own words**, in its title or description, singular and plural folded together.
+
+**Not a score threshold, and that is the point.** A threshold needs a number, and the scales are not comparable across embedding models: measured on the same shop, `nomic-embed-text` runs **0.50 to 0.75** where `gemini-embedding-001` runs **0.53 to 0.66**. Any constant would be right for one model and wrong for the next, and it would be a number invented from one shop wearing a measurement's clothes — the thing CLAUDE.md §4 exists to prevent.
+
+The word test asks the question this fallback actually rests on: **did the merchant's search miss this for a *word* reason?** `jackets` against *"Waxed Cotton Field **Jacket**"* is exactly that — a plural their engine could not stem. `fishing rods` against a catalogue of clothing is not.
+
+It is deliberately **not** deciding whether a product *fits*; that is the `sell.md` §2.3 question and a language judgement this node may not make. And it fails to the pre-ADR behaviour: a shopper asking for *"a waterproof coat"* in a shop that calls it a shell shares no word, gets no fallback, and is told exactly what they were told before this decision existed.
+
 ### It is announced, not silent
 
 The cost this decision was weighed against is *"two behaviours, one of which is invisible"* — a wrong recommendation six months from now being impossible to attribute. So the fallback is loud in three places:

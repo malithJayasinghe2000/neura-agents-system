@@ -21,6 +21,7 @@ making a claim about *now*, and stock is the field that goes stale fastest.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from neura_agent_core.tools import ToolContext, tool
 from neura_agent_sell.tools.render import (
@@ -207,7 +208,32 @@ async def _from_the_index(text: str, ctx: ToolContext) -> str:
         confirmed=len(confirmed),
     )
 
-    if not confirmed:
+    if not confirmed or not _shares_a_word(text, confirmed):
+        # The index always returns its nearest neighbours, and "nearest" in a
+        # 29-product catalogue is not "relevant" — measured: `fishing rods`
+        # returns a jacket at 0.528 against a best of 0.545, noise that looks
+        # exactly like signal. Proposing those would answer "do you sell fishing
+        # rods?" with five things that are not fishing rods.
+        #
+        # **The gate is the merchant's own words, not a score.** This fallback
+        # exists for searches their engine missed for a *word* reason — a plural
+        # it could not stem, a synonym in the title — so requiring one shared
+        # word is requiring evidence that such a reason exists. A score
+        # threshold would need a number, and the scales are not comparable
+        # across embedding models (measured: `nomic-embed-text` runs 0.50 to 0.75
+        # on the same shop where `gemini-embedding-001` runs 0.53 to 0.66), so any
+        # constant would be right for one model and wrong for the next.
+        #
+        # It fails to the behaviour that existed before [ADR-0029]: a shopper
+        # asking for "a waterproof coat" in a shop that calls it a shell shares
+        # no word, gets no fallback, and is told what they were told yesterday.
+        log.info(
+            "sell_index_fallback_rejected",
+            tenant_id=ctx.tenant_id,
+            query=text,
+            confirmed=len(confirmed),
+            reason="nothing confirmed" if not confirmed else "no word in common",
+        )
         return ""
 
     # Stated, not silent. This line is in the evidence a reviewer reads and in
@@ -220,6 +246,49 @@ async def _from_the_index(text: str, ctx: ToolContext) -> str:
         "live with the store just now."
     )
     return header + "\n\n" + "\n\n".join(candidate(product) for product in confirmed)
+
+
+def _shares_a_word(query: str, products: list[Any]) -> bool:
+    """Does any confirmed product actually use one of the shopper's words?
+
+    Crude, and deliberately so. It is not deciding whether a product *fits* —
+    that is the `sell.md` §2.3 question and a language judgement this node may
+    not make. It decides only whether the merchant's own text contains the thing
+    the shopper typed, which is the premise this fallback rests on: their search
+    missed a word it should have matched.
+
+    Singular and plural fold together, because `jackets` failing to match
+    *"Waxed Cotton Field **Jacket**"* is the entire reason this code exists.
+    """
+    wanted = {
+        _fold(word)
+        for word in _WORDS.findall(query.lower())
+        if len(word) > 2 and word not in _NOT_A_PRODUCT
+    }
+    if not wanted:
+        return False
+
+    for product in products:
+        text = f"{product.title or ''} {product.description or ''}".lower()
+        if wanted & {_fold(word) for word in _WORDS.findall(text)}:
+            return True
+    return False
+
+
+def _fold(word: str) -> str:
+    """`jackets` and `jacket` are one word here. Not a stemmer — a plural fold."""
+    for suffix in ("ies", "es", "s"):
+        if len(word) > len(suffix) + 2 and word.endswith(suffix):
+            return word[: -len(suffix)]
+    return word
+
+
+#: Words that describe the asking rather than the product.
+_NOT_A_PRODUCT = frozenset(
+    {"any", "for", "have", "looking", "need", "sell", "show", "some", "something", "want", "you"}
+)
+
+_WORDS = re.compile(r"[a-z0-9]+")
 
 
 @tool(

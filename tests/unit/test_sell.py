@@ -1124,6 +1124,87 @@ class TestTheIndexMayNameACandidateNeverDescribeOne:
         assert called == [], "the index must not be consulted when the store answered"
 
 
+class TestTheFallbackNeedsAWordInCommon:
+    """[ADR-0029] amended. The index always returns its nearest neighbours, and
+    "nearest" in a 29-product catalogue is not "relevant": measured on the real
+    shop, `fishing rods` returns a **jacket** at 0.528 against a best of 0.545 —
+    noise that looks exactly like signal."""
+
+    async def test_noise_does_not_become_a_recommendation(self) -> None:
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+        from neura_commerce import EntityType
+
+        class _Retriever:
+            async def search(self, query: str, **kw: Any) -> Any:
+                return SimpleNamespace(
+                    chunks=[
+                        SimpleNamespace(
+                            source_id="1304", source_type=EntityType.PRODUCT, chunk_index=0
+                        )
+                    ]
+                )
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                return SimpleNamespace(items=[])
+
+            async def get_product(self, ref: str) -> Any:
+                return _product(external_id="1304", title="Halden Cargo Trousers")
+
+        out = await search_products.fn(
+            "fishing rods", _ctx(adapter=_Adapter(), retriever=_Retriever())
+        )
+        assert "no available products matching" in out
+        assert "Halden" not in out, "trousers must not be offered for a fishing rod"
+
+    def test_the_gate_is_the_merchants_words_not_a_score(self) -> None:
+        """A threshold would need a number, and the scales are not comparable
+        across embedding models — measured, `nomic-embed-text` runs 0.50 to 0.75
+        on the same shop where `gemini-embedding-001` runs 0.53 to 0.66. Any
+        constant would be right for one and wrong for the next."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import _shares_a_word
+
+        jackets = [
+            SimpleNamespace(title="Waxed Cotton Field Jacket", description="sheds rain"),
+            SimpleNamespace(title="Lightweight Rain Shell", description="2.5-layer waterproof"),
+        ]
+        assert _shares_a_word("jackets", jackets) is True
+        assert _shares_a_word("do you sell jackets?", jackets) is True
+        assert _shares_a_word("fishing rods", jackets) is False
+
+    def test_a_plural_is_what_this_exists_for(self) -> None:
+        """`jackets` failing to match "Waxed Cotton Field Jacket" is the entire
+        reason ADR-0029 exists; the gate must not undo it."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import _shares_a_word
+
+        one = [SimpleNamespace(title="Waxed Cotton Field Jacket", description="")]
+        assert _shares_a_word("jackets", one) is True
+        assert _shares_a_word("jacket", one) is True
+
+    def test_a_word_only_in_the_description_counts(self) -> None:
+        """The Rain Shell is a jacket and never says so in its title."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import _shares_a_word
+
+        shell = [SimpleNamespace(title="Lightweight Rain Shell", description="a packable jacket")]
+        assert _shares_a_word("jackets", shell) is True
+
+    def test_a_query_of_only_filler_words_never_opens_the_gate(self) -> None:
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import _shares_a_word
+
+        anything = [SimpleNamespace(title="Waxed Cotton Field Jacket", description="rain")]
+        assert _shares_a_word("do you have something", anything) is False
+
+
 class TestTheHandoverSaysWhichFailureHappened:
     """Finding 7 in the testing log. `plan` chose `list_categories`, the store
     answered it in 202ms with six categories, and the handover said *"the

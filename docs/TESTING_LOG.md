@@ -738,6 +738,32 @@ search returns the nearest things it has, and "nearest" is not "suitable"; nothi
 filters on the *kind* of product, deliberately, because matching "jacket" against a description is a
 language judgement and doing it with a substring would drop *"keeps the rain out"*.
 
+### ⚠️ ADR-0029 regressed the fishing rod, and was amended before anyone saw it
+
+Spotted by the project owner immediately after the fix shipped: *"this kind of problem can only
+happen if the search API is not working on that shop side — then we search from our side"*. Exactly
+right, and it has a consequence the ADR had not thought through.
+
+`fishing rods` makes the shop's search return nothing → **the fallback fires** → the index returns
+its nearest neighbours, which for a clothing catalogue is **noise**: best score **0.545**, with a
+**jacket at 0.528**. And `DEFAULT_MIN_SCORE` is **0.3**, so every one of them would have passed.
+The first version would have answered *"do you sell fishing rods?"* with five things that are not
+fishing rods — **worse than the behaviour it replaced.**
+
+**Fixed with the merchant's own words, not a score.** The fallback now additionally requires that
+at least one confirmed product uses one of the shopper's words, in its title or description, with
+singular and plural folded together.
+
+**A threshold was the obvious fix and the measurement rules it out:** the score scales are not
+comparable across embedding models — on the same shop, `nomic-embed-text` runs **0.50 to 0.75**
+where `gemini-embedding-001` runs **0.53 to 0.66**. One constant would be right for one model and
+wrong for the next, and it would be a number invented from a single shop.
+
+The word test asks what the fallback actually rests on: **did their search miss this for a *word*
+reason?** `jackets` against *"Waxed Cotton Field **Jacket**"* is exactly that. `fishing rods`
+against a wardrobe is not. It fails to the pre-ADR-0029 behaviour, so it can never be worse than
+where we started.
+
 ### 📏 The first measurement §2.3 has ever had
 
 Taken 2026-08-29 to test a proposal — *"show the jackets first, then the nearest ones"* — against
