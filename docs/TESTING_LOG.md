@@ -764,6 +764,41 @@ reason?** `jackets` against *"Waxed Cotton Field **Jacket**"* is exactly that. `
 against a wardrobe is not. It fails to the pre-ADR-0029 behaviour, so it can never be worse than
 where we started.
 
+### ✅ The word gate verified, on both models — 2026-08-29
+
+**The fishing-rod case had never actually been tested.** Two local runs failed before reaching it:
+`plan` chose `list_categories` instead of searching, so `search_products` never ran and neither did
+the gate. Tested properly on `gemini-3.6-flash`:
+
+| question | search | fallback | result |
+|:--|:--|:--|:--|
+| *do you sell fishing rods?* | 0 results | ran, **rejected — no shared word** | honest miss, **5.7s** |
+| *do you sell jackets?* | 0 results | ran, **accepted** | 2 real jackets, `verify` **passed**, 14.3s |
+
+No trousers, no socks and no cap were offered for a fishing rod. The regression ADR-0029 had
+introduced is closed, and the case it was built for still works.
+
+### ⚠️ The same two questions on `ollama-dev`, and the model is the difference
+
+Run immediately before, same code, same shop:
+
+**`jackets`** — the fallback worked and the local reasoner then wrote *"The Waxed Cotton Field
+Jacket **is waterproof with taped seams**, so it should handle winter hiking."* The description says
+*"8oz waxed cotton that **sheds rain**"* — **"waterproof" and "taped seams" belong to a different
+product**, the Lightweight Rain Shell. It also called the Quilted Liner **Vest** a jacket.
+
+**`verify` caught it**: *NOT grounded — unsupported claim*. The turn escalated with the full draft
+attached and marked *"NOT SENT — you decide"*, so **nothing false reached the shopper**. This is the
+second AI earning its place, on real merchant data.
+
+**`fishing rods`** — `plan` chose `list_categories`, so the gate never ran. It escalated with the
+message [Finding 7](#) fixed: *"the store answered (list_categories) but was never asked for
+products"* — accurate, where it used to claim the shop was down.
+
+**45.2s and 14.3s local against 14.3s and 5.7s on cloud**, and on cloud `plan` picked
+`search_products` both times. The local reasoner remains the weak link, exactly as
+[A14](open-questions.md) records.
+
 ### 📏 The first measurement §2.3 has ever had
 
 Taken 2026-08-29 to test a proposal — *"show the jackets first, then the nearest ones"* — against
