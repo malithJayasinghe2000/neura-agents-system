@@ -738,6 +738,60 @@ search returns the nearest things it has, and "nearest" is not "suitable"; nothi
 filters on the *kind* of product, deliberately, because matching "jacket" against a description is a
 language judgement and doing it with a substring would drop *"keeps the rain out"*.
 
+### 📏 The first measurement §2.3 has ever had
+
+Taken 2026-08-29 to test a proposal — *"show the jackets first, then the nearest ones"* — against
+the real index. `gemini-embedding-001`, `tn_sell_ask`, 29 products. **The proposal does not survive
+it, and something else does.**
+
+**Query `"jackets"`** — the candidates in the order the index returns them:
+
+| score | product | actually a jacket? |
+|--:|:--|:--|
+| 0.615 | Waxed Cotton Field Jacket | ✅ |
+| **0.607** | **Quilted Liner Vest** | ❌ |
+| 0.598 | Lightweight Rain Shell | ✅ |
+| **0.596** | **Linen Pinafore Frock** | ❌ |
+
+**They are already in relevance order, and a vest outranks a real rain jacket.** The best jacket and
+a *dress* are **0.019** apart. No cut-off keeps both jackets and drops both non-jackets: any line
+that admits the Rain Shell at 0.598 admits the frock at 0.596. **Ranking cannot separate kind from
+nearness here.**
+
+**And ordering is the wrong lever anyway** — it changes what is *shown*, not what is *permitted*.
+The frock stays in `promises`, so `compose` may still recommend it. Fixing this means **excluding**,
+not reordering.
+
+**What the same numbers do separate is whether the store has anything at all:**
+
+| query | best score | does the shop stock it? |
+|:--|--:|:--|
+| `trousers` | 0.663 | ✅ |
+| `jackets` | 0.615 | ✅ |
+| **`fishing rods`** | **0.545** | ❌ |
+
+For *"fishing rods"* **nothing clears 0.545**, and a jacket sits in that list at 0.528 — the whole
+result set is noise and it *looks* like noise. That is `no_match_001`'s failure, where a **cap** is
+offered for a fishing rod.
+
+**So §2.3 is two questions, not one:**
+
+| question | can a score answer it? |
+|:--|:--|
+| *does this shop stock anything like this?* | **plausibly** — 0.545 against 0.615 is a real gap |
+| *is this item the right kind of thing?* | **no** — a dress and a jacket are 0.002 apart |
+
+**Also worth recording: `compose` got it right.** Handed all four candidates, it wrote about the two
+jackets and silently ignored the vest and the dress. The model is good at *"is this a jacket?"* —
+that is a language judgement and language is what it is for. **The shown answer was correct; the
+permission was too wide.** The demonstrated harm is the fishing-rod case, where the model did *not*
+exercise that judgement.
+
+**⚠️ These numbers are one shop, one embedding model, 29 products.** They are the first evidence
+§2.3 has, and they are **not a calibration**. A threshold drawn from them would be a guess wearing a
+number's clothes, which is the thing CLAUDE.md §4 exists to prevent. **Nothing was changed in
+response.**
+
 **Speed, measured on the same three questions:**
 
 | question | `ollama-dev` | `gemini-3.6-flash` |
