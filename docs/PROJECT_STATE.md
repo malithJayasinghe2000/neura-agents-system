@@ -4,13 +4,63 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-29 — **A16 closed by [ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md), and the §2.3 weak-relevance question is now the only thing between SELL and a good answer**
+**Last updated:** 2026-08-30 — **product cards ship ([ADR-0030]), and `verify` passed a fabrication the local model had caught**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Next action:** **Put it in front of a merchant (B2).** Every screen v1 designed is built and
 proved in a real browser — `make console-check EMAIL=…` passes **33/33** — so the console is no
 longer the thing standing between this project and its first design partner. The remaining
 blockers to *deploying* it are **K1** (production email) and **X2** (deploy target), both
 unchanged and both external decisions.
+
+## Session 2026-08-30 — product cards, and a claim a shopper would act on
+
+**SELL replies now carry the products they name, as fields a client draws a card from —
+[ADR-0030](architecture/adr/0030-a-product-card-is-data-the-widget-draws.md).** The widget rendered
+text only, and a shopping assistant that cannot show the jacket is doing half the job.
+
+**The rule: the model names the products, the server states the facts, the widget draws the card.**
+The widget's *"textContent, never innerHTML"* rule is **not** relaxed — a merchant's description is
+arbitrary text they typed, and S6 records that hostile text as live in the wild. Facts ride a
+per-turn cache on `Runtime`, beside the PII vault and for the same reason. Cards are built in
+`respond` **after** the fabrication check and from the same `promises` set, so a card for a rejected
+candidate cannot be constructed; narrower than the shortlist, because four shortlisted and two
+written about is **two** cards. `url` and `image` are checked twice — server and widget — and an
+image-host allow-list is deliberately **not** decided.
+
+Verified end to end against the real shop: `1311 · Waxed Cotton Field Jacket · 165.00 USD · in
+stock · url`. No image, because the test shop publishes `image_urls: []` for every product — which
+is why the card is built to look right without one.
+
+**🔴 Finding 10, and it matters more than the cards.** The same turn said the jacket is *"waterproof
+with taped seams"*. Product 1311's description says *"8oz waxed cotton that **sheds rain**"*, and the
+merchant's own storefront says *"Water-resistant"*. **`verify` passed it.** The identical sentence
+was **caught two days earlier** by `llama3.1:8b`, which escalated it as an unsupported claim.
+
+So the model comparison is **not one-directional**. Every other measurement this week favoured
+`gemini-3.6-flash`; here the local verifier held and the cloud one did not. One reply is not a
+measurement — but it is the sharpest argument yet that **the verifier's model is its own choice**,
+not a by-product of the role map. It belongs with **A9** and **S9**. *And cards raise the stakes: a
+sentence saying "waterproof" is skimmed; a card beside it with a price and a link is acted on.*
+
+**Three defects a screenshot found that no test had:** the card's last line was clipped (`.log` is a
+flex column and `.cards` was shrinkable), a tile built around a picture looks broken when there is
+not one (rebuilt as a wide row with a 46px thumbnail), and raw `**markdown**` was reaching the
+screen (stripped, not rendered — turning `**` into `<strong>` means parsing model output into
+markup, which is the one thing that file exists never to do).
+
+**⚠️ Finding 11, worth knowing before touching the widget:** `widget.js` is read **once at import**
+and uvicorn's reloader watches only `*.py`, so **editing it does nothing until the API restarts**.
+It cost a round of *"still not good"* on a screenshot of already-corrected code. Fixed with
+`reload_includes`; the check is
+`curl -s localhost:8010/v1/widget/widget.js | grep -c card-thumb`.
+
+**Also:** the demo tool provisioned `care` only, so a SELL widget could not be opened in a browser
+at all. It now takes `--agent` with a per-agent scope table, and the demo page reads the agent from
+the URL.
+
+**894 Python tests, 21 widget tests.** The `.env` is on **Gemini** and `tn_sell_ask` is indexed with
+`gemini-embedding-001` — revert both together, and re-run `make rag-check … TENANT=tn_sell_ask`
+afterwards.
 
 ## Session 2026-08-29 — A16 closed, and the last SELL question is §2.3
 
