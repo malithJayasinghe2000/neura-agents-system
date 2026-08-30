@@ -12,7 +12,7 @@ rather than by watching a shopper get handed to a human.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from neura_domain import Capability
 
@@ -30,6 +30,24 @@ class AgentManifest(BaseModel):
     optional_capabilities: frozenset[Capability] = frozenset()
     scopes: frozenset[str] = frozenset()
     route_prefix: str
+
+    #: What this agent answers, for [ADR-0031]'s dispatcher — one plain
+    #: sentence, addressed to whoever is choosing between agents rather than to
+    #: a merchant deciding what to buy. That is why it is not ``description``:
+    #: every agent's description reduces to "helps shoppers", and CARE and SELL
+    #: are exactly the pair that has to be told apart.
+    #:
+    #: **These two fields are the dispatcher's prompt.** Shared code never names
+    #: an agent (``routes/agent.py`` does not know the word "care"), so the only
+    #: thing that makes an agent reachable is what it says here — which means a
+    #: wrong dispatch is diagnosed by reading a manifest, and a new agent is
+    #: made reachable by writing five sentences rather than by editing the
+    #: dispatcher.
+    handles: str
+    #: Three to five real shopper questions this agent answers. Required, and
+    #: bounded, because an agent that declares nothing is an agent nobody can
+    #: reach — and failing loudly at import beats being silently unroutable.
+    handles_examples: tuple[str, ...] = Field(min_length=3, max_length=5)
 
 
 MANIFEST = AgentManifest(
@@ -91,6 +109,21 @@ MANIFEST = AgentManifest(
         }
     ),
     route_prefix="/v1/sell",
+    # Written from `prompts/route.md`'s two intents — `recommend` and `compare`
+    # — and deliberately narrow. SELL's `needs_person` covers orders, delivery,
+    # returns, refunds and store policy, so claiming any of those here would
+    # dispatch a shopper to an agent that answers by fetching a human.
+    handles=(
+        "Helping a shopper find or choose a product they have not bought yet: "
+        "describing what they need and being shown options, or comparing "
+        "products they have named."
+    ),
+    handles_examples=(
+        "I need a warm jacket for winter, under 150",
+        "Which of these two is warmer?",
+        "Do you have anything like this in navy?",
+        "What would you recommend for hiking in the rain?",
+    ),
 )
 
 __all__ = ["MANIFEST", "AgentManifest"]

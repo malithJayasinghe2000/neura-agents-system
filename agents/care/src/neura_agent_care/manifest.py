@@ -12,7 +12,7 @@ work for it, rather than the merchant discovering it through a failed conversati
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from neura_domain import Capability
 
@@ -30,6 +30,24 @@ class AgentManifest(BaseModel):
     optional_capabilities: frozenset[Capability] = frozenset()
     scopes: frozenset[str] = frozenset()
     route_prefix: str
+
+    #: What this agent answers, for [ADR-0031]'s dispatcher — one plain
+    #: sentence, addressed to whoever is choosing between agents rather than to
+    #: a merchant deciding what to buy. That is why it is not ``description``:
+    #: every agent's description reduces to "helps shoppers", and CARE and SELL
+    #: are exactly the pair that has to be told apart.
+    #:
+    #: **These two fields are the dispatcher's prompt.** Shared code never names
+    #: an agent (``routes/agent.py`` does not know the word "care"), so the only
+    #: thing that makes an agent reachable is what it says here — which means a
+    #: wrong dispatch is diagnosed by reading a manifest, and a new agent is
+    #: made reachable by writing five sentences rather than by editing the
+    #: dispatcher.
+    handles: str
+    #: Three to five real shopper questions this agent answers. Required, and
+    #: bounded, because an agent that declares nothing is an agent nobody can
+    #: reach — and failing loudly at import beats being silently unroutable.
+    handles_examples: tuple[str, ...] = Field(min_length=3, max_length=5)
 
 
 MANIFEST = AgentManifest(
@@ -81,4 +99,20 @@ MANIFEST = AgentManifest(
         }
     ),
     route_prefix="/v1/care",
+    # Written from `prompts/route.md`'s own intents and worked examples, not
+    # from the pitch. The dispatcher's job is to tell CARE from SELL, and the
+    # separating words are the ones SELL cannot claim: *placed*, *returns*,
+    # *delivery*, *refunds*.
+    handles=(
+        "Questions about an order the shopper has already placed, and about how "
+        "the store operates — returns, refunds, delivery, payment. Also general "
+        "questions about what the store sells."
+    ),
+    handles_examples=(
+        "Where is my order NRA0001?",
+        "How long do I have to return something?",
+        "How much is delivery to Ireland?",
+        "Has my refund come through yet?",
+        "Do you sell waterproof boots?",
+    ),
 )
