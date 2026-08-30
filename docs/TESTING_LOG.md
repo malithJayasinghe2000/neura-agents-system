@@ -1085,6 +1085,24 @@ Narrower than the shortlist on purpose: a shortlist of four the composer wrote a
 widget could not be opened in a browser — it now takes `--agent`, with a per-agent scope table, and
 the demo page reads the agent from the URL.
 
+### ⚠️ Finding 11: editing `widget.js` does nothing until the API restarts
+
+Cost a full round of *"still not good"* on a screenshot of code that had already been fixed.
+
+`widget/__init__.py` reads the file **once at import** — deliberately, and the docstring says why:
+*"a disk read per shopper would be pure latency"*. **Uvicorn's reloader watches only `*.py`.** So the
+process kept serving the bytes it loaded at startup, the browser kept showing the old widget, and
+nothing about the file on disk was wrong.
+
+The check that settles it in one line:
+
+```bash
+curl -s localhost:8010/v1/widget/widget.js | grep -c card-thumb   # 0 = stale process
+```
+
+**Fixed:** `reload_includes=["*.py", "*.js", "*.html"]`, development only. Production still reads
+once.
+
 ### 🔴 Finding 10: `verify` passed a fabrication on the cloud model that the local one caught
 
 The turn that produced the card above also produced this:
