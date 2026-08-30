@@ -215,3 +215,29 @@ test("out of stock is carried, not hidden", () => {
   });
   assert.strictEqual(items[0].in_stock, false);
 });
+
+test("markdown emphasis is stripped, not shown", () => {
+  // Caught in a screenshot: `compose` writes `**like this**` whether or not
+  // anyone asked, and the widget renders with textContent — so the asterisks
+  // arrived on screen literally and the panel looked broken.
+  const rows = widget.messagesForTurn({
+    reply: "The **Waxed Cotton Field Jacket (1311)** is 165.00 USD.",
+    ai_disclosure: "You are chatting with an AI assistant.",
+  });
+  assert.strictEqual(
+    rows[0].text,
+    "The Waxed Cotton Field Jacket (1311) is 165.00 USD."
+  );
+});
+
+test("stripping emphasis is not a markdown renderer", () => {
+  // It must not grow into one. A link in a reply is a claim about a
+  // destination, and destinations belong in a card, where they are checked.
+  const kept = "See [our returns page](https://evil.example) and `code`.";
+  assert.strictEqual(widget.withoutEmphasis(kept), kept);
+});
+
+test("an unpaired asterisk is left alone", () => {
+  assert.strictEqual(widget.withoutEmphasis("2 * 3 = 6"), "2 * 3 = 6");
+  assert.strictEqual(widget.withoutEmphasis("**"), "**");
+});

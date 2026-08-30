@@ -93,7 +93,7 @@
     var disclosure = data.ai_disclosure || "";
 
     if (reply) {
-      return [{ role: "assistant", text: reply, disclosure: disclosure }];
+      return [{ role: "assistant", text: withoutEmphasis(reply), disclosure: disclosure }];
     }
     if (fallback) {
       // The agent did not say this — the merchant's configured wording did, so
@@ -104,6 +104,30 @@
     }
     // No disclosure on this row: the widget is speaking, not the agent.
     return [{ role: "error", text: EMPTY_TURN_MESSAGE, disclosure: "" }];
+  }
+
+  /**
+   * Markdown emphasis, as a model writes it and a shopper should not read it.
+   *
+   * `compose` produces prose for a person, and models write `**like this**`
+   * whether or not anyone asked. The widget renders with `textContent`, so the
+   * asterisks arrive on screen literally — *"The **Waxed Cotton Field Jacket
+   * (1311)** is 165.00 USD"* — which looks like a broken page.
+   *
+   * **Stripped rather than rendered.** Turning `**` into a `<strong>` means
+   * parsing model output into markup, and the one rule this file exists to keep
+   * is that nothing off the network becomes markup. Removing the markers is a
+   * display fix with no such cost: what is left is the same sentence.
+   *
+   * Deliberately only the emphasis markers. This is not a markdown renderer and
+   * must not grow into one — a link or an image in a reply is a claim about a
+   * destination, and destinations belong in a product card, where they are
+   * checked.
+   */
+  function withoutEmphasis(text) {
+    return String(text || "")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/__(.+?)__/g, "$1");
   }
 
   /**
@@ -341,19 +365,27 @@
     "[data-role='system'] .bubble{background:#fff8e6;border:1px solid #f0dfae;color:#6b5726;}",
     "[data-role='error'] .bubble{background:#fdecec;border:1px solid #f2c3c3;color:#8c2b2b;}",
     ".note{font-size:10.5px;color:#79839a;}",
-    // Product cards ([ADR-0030]). A horizontal strip that scrolls rather than
-    // wrapping: a chat panel is ~340px wide, and four wrapped cards push the
-    // reply that named them off the top of the log.
-    ".cards{display:flex;gap:8px;overflow-x:auto;padding:2px 1px 6px;scrollbar-width:thin;}",
-    ".card{flex:0 0 148px;border:1px solid #e6e9f0;border-radius:10px;overflow:hidden;",
-    "background:#fff;text-decoration:none;color:inherit;display:flex;flex-direction:column;}",
-    "a.card:hover{border-color:#b9c4dc;}",
+    // Product cards ([ADR-0030]). A stacked list of wide rows rather than a
+    // strip of tall tiles: a chat panel is ~340px, most merchants publish no
+    // image at all (the test shop publishes none for any product), and a tile
+    // built around a picture looks broken exactly when there is not one. A row
+    // reads the same with or without.
+    //
+    // `flex:0 0 auto` because `.log` is a flex column — without it the strip is
+    // a shrinkable item and the last line of the last card is clipped, which is
+    // what shipped first and what a screenshot caught.
+    ".cards{display:flex;flex-direction:column;gap:6px;flex:0 0 auto;}",
+    ".card{display:flex;align-items:center;gap:9px;padding:8px;border:1px solid #e6e9f0;",
+    "border-radius:10px;background:#fff;text-decoration:none;color:inherit;}",
+    "a.card:hover{border-color:#b9c4dc;background:#fafbfd;}",
     "a.card:focus-visible{outline:2px solid #7aa2ff;outline-offset:1px;}",
-    ".card-image{width:100%;height:104px;object-fit:cover;background:#f1f3f8;display:block;}",
-    ".card-body{padding:8px 9px;display:flex;flex-direction:column;gap:3px;}",
-    ".card-title{font-size:12.5px;line-height:1.3;font-weight:600;}",
-    ".card-price{font-size:12.5px;color:#1b2333;}",
-    ".card-stock{font-size:10.5px;color:#5c8a5c;}",
+    ".card-thumb{flex:0 0 46px;width:46px;height:46px;border-radius:7px;background:#eef1f6;",
+    "object-fit:cover;display:block;}",
+    ".card-body{display:flex;flex-direction:column;gap:2px;min-width:0;}",
+    ".card-title{font-size:13px;line-height:1.3;font-weight:600;}",
+    ".card-meta{font-size:11.5px;color:#5b6478;}",
+    ".card-stock{color:#3f7a4a;}",
+    ".card-stock[data-stock='false']{color:#8c2b2b;}",
     ".status{font-size:12px;color:#79839a;font-style:italic;min-height:16px;padding:0 14px 4px;}",
     ".compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #e6e9f0;}",
     ".compose input{flex:1;padding:9px 11px;border:1px solid #d3d8e3;border-radius:9px;font-size:14px;",
@@ -703,27 +735,39 @@
         node.rel = "noopener noreferrer";
       }
 
+      // A thumbnail when the merchant published one, an empty tile of the same
+      // size when they did not — so a card with no image is a card, not a
+      // shorter card with a gap where a picture should be.
       if (item.image) {
         var image = document.createElement("img");
-        image.className = "card-image";
+        image.className = "card-thumb";
         image.src = item.image;
         // The title, not "product image" — a shopper using a screen reader gets
         // the same information a sighted one does.
         image.alt = item.title;
         image.loading = "lazy";
         node.appendChild(image);
+      } else {
+        node.appendChild(element("div", "card-thumb"));
       }
 
       var body = element("div", "card-body");
       body.appendChild(element("div", "card-title", item.title));
-      if (item.price) {
-        body.appendChild(
-          element("div", "card-price", (item.price + " " + item.currency).trim())
-        );
+
+      // Price and availability on one line. Two stacked lines of small grey
+      // text beside a 46px thumbnail is taller than the thumbnail and reads as
+      // a list of fields rather than as a product.
+      var meta = element("div", "card-meta");
+      var price = (item.price + " " + item.currency).trim();
+      if (price) {
+        meta.appendChild(element("span", "", price));
+        meta.appendChild(element("span", "", " · "));
       }
-      body.appendChild(
-        element("div", "card-stock", item.in_stock ? "In stock" : "Out of stock")
-      );
+      var stock = element("span", "card-stock", item.in_stock ? "In stock" : "Out of stock");
+      stock.dataset.stock = item.in_stock ? "true" : "false";
+      meta.appendChild(stock);
+      body.appendChild(meta);
+
       node.appendChild(body);
       return node;
     };
@@ -791,6 +835,7 @@
       labelForStep: labelForStep,
       messagesForTurn: messagesForTurn,
       productsForTurn: productsForTurn,
+      withoutEmphasis: withoutEmphasis,
     };
   }
 })();
