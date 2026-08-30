@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from neura_evals.metrics import LOWER_IS_BETTER, THRESHOLDS
+from neura_evals.metrics import LOWER_IS_BETTER, THRESHOLDS, RunSummary
 from neura_evals.runner import RunReport, compare
 
 console = Console()
@@ -66,6 +66,8 @@ def print_report(report: RunReport) -> None:
             "A rate over part of a suite is real, and narrower than it looks.[/]"
         )
 
+    _print_dispatch_matrix(summary)
+
     console.print(
         f"\n  latency     p50 {summary.p50_latency_ms}ms · p95 {summary.p95_latency_ms}ms"
     )
@@ -110,19 +112,60 @@ def print_report(report: RunReport) -> None:
         )
 
 
+def _print_dispatch_matrix(summary: RunSummary) -> None:
+    """Which agent each message was meant for, and which one got it — [ADR-0031].
+
+    Printed beside `dispatch_accuracy` because the rate alone cannot say which
+    way the run was wrong, and the two directions do not cost the same. Silent
+    when nothing dispatched, so an ordinary agent suite is unchanged.
+    """
+    if not summary.dispatch_matrix:
+        return
+
+    console.print("\n  [bold]dispatch[/]  [dim]expected → chosen[/]")
+    for expected in sorted(summary.dispatch_matrix):
+        chosen = summary.dispatch_matrix[expected]
+        for got in sorted(chosen, key=lambda k: (k != expected, k)):
+            count = chosen[got]
+            if got == expected:
+                console.print(f"    [green]✔[/] {expected} → {got}  [dim]x{count}[/]")
+            else:
+                console.print(f"    [red]✘[/] {expected} → [red]{got}[/]  [dim]x{count}[/]")
+    console.print(
+        "  [dim]a misroute is not symmetric: one direction loses a feature, the other "
+        "hands the shopper to a person. The rate above cannot tell you which.[/]"
+    )
+
+
 def _print_caveats(report: RunReport) -> None:
     """Say plainly what these numbers are not."""
     warnings: list[str] = []
 
-    if report.target_name == "no-agent":
-        # Said first and said loudly. With every case skipped there are no failed
-        # checks, so the summary line reads "35 passed" — which is true of the
-        # checks and false of everything a reader would infer from it.
+    # Said first and said loudly. With every case skipped there are no failed
+    # checks, so the summary line reads "35 passed" — which is true of the
+    # checks and false of everything a reader would infer from it.
+    #
+    # Keyed on the measurement, not on the target's *name*. It used to test
+    # `target_name == "no-agent"`, which silently covered exactly one target:
+    # the first target that was neither an agent nor `--no-agent` printed
+    # "16 passed, 0 failed" with no caveat (found 2026-08-30, ADR-0031 §6).
+    # A name is not a measurement — the same lesson `coverage` already carries.
+    if report.summary.unmeasured and report.summary.unmeasured == report.summary.total:
+        reason = next(
+            (r.response.error for r in report.results if r.response.error),
+            "no target was run",
+        )
         warnings.append(
-            "[bold]NO AGENT WAS RUN. Nothing here measures the agent.[/]\n"
+            "[bold]NOTHING WAS RUN. Nothing here measures anything.[/]\n"
+            f"{reason}\n"
             "Every case was skipped. This run proves the datasets parse and the scoring\n"
             "logic works — it says nothing about whether any reply was correct, grounded\n"
-            "or safe. `make eval` runs the real agent; this is `--no-agent`."
+            "or safe."
+        )
+    elif report.summary.unmeasured:
+        warnings.append(
+            f"[bold]{report.summary.unmeasured} of {report.summary.total} cases did not run.[/]\n"
+            "They are skipped, not failed — but every rate below covers only the rest."
         )
 
     if not report.judge_enabled:

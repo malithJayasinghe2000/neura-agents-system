@@ -108,6 +108,14 @@ def _as_json(report: RunReport) -> dict[str, Any]:
                 name: {"measured": measured, "cases_that_ran": scoreable}
                 for name, (measured, scoreable) in report.summary.coverage.items()
             },
+            # `expected -> chosen -> count` ([ADR-0031]). Kept rather than only
+            # printed, for E7's reason: `dispatch_accuracy 0.85` six weeks later
+            # cannot say whether the 15% went to an agent that answered or to one
+            # that fetched a human, and that is the whole question.
+            "dispatch_matrix": {
+                expected: dict(chosen)
+                for expected, chosen in report.summary.dispatch_matrix.items()
+            },
             "gate_failures": [
                 {"metric": name, "actual": actual, "threshold": threshold}
                 for name, actual, threshold in report.summary.gate_failures()
@@ -141,6 +149,12 @@ def _case(result: Any) -> dict[str, Any]:
         "evidence": response.evidence,
         "reply": response.reply,
         "detected_intent": response.intent,
+        # Which agent the dispatcher chose ([ADR-0031]), per case rather than
+        # only in the aggregate matrix. E7 again: the matrix says *how many*
+        # `care` messages went to `sell`, and reading a failure means knowing
+        # **which** message did — a run file that recorded only the total would
+        # answer the summary question and not the diagnostic one.
+        "dispatched_to": response.dispatched_to,
         "tools_called": [
             {
                 "name": t.name,

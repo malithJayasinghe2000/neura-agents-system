@@ -66,6 +66,19 @@ class Expectation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intent: str | None = None
+    agent: str | None = Field(
+        default=None,
+        description=(
+            "Which agent should have answered this message — [ADR-0031] §6.\n\n"
+            "Only a dispatch case sets it. It is a plain `str` for the same reason "
+            "`intent` is: the harness must not hold a list of agent keys, or it "
+            "learns which agents exist and the third one becomes a refactor.\n\n"
+            "**A single accuracy number over these hides the thing worth knowing.** "
+            "The misroute is asymmetric — one direction is answered by the wrong "
+            "agent, the other fetches a human — so `summarise` also reports the "
+            "expected-to-chosen matrix, and that is where the cost is legible."
+        ),
+    )
     tools_called: list[str] | None = Field(
         default=None, description="Exact set of tools expected, order-insensitive"
     )

@@ -11,6 +11,7 @@ members = [
     "neura-api",
     "neura-commerce",
     "neura-core",
+    "neura-dispatch",
     "neura-domain",
     "neura-evals",
     "neura-llm",
@@ -937,6 +938,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "neura-dispatch"
+version = "0.1.0"
+source = { editable = "packages/neura-dispatch" }
+dependencies = [
+    { name = "neura-core" },
+    { name = "neura-evals" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "neura-core", editable = "packages/neura-core" },
+    { name = "neura-evals", editable = "evals" },
+]
+
+[[package]]
 name = "neura-domain"
 version = "0.1.0"
 source = { editable = "packages/neura-domain" }
@@ -999,6 +1015,7 @@ dependencies = [
     { name = "neura-api" },
     { name = "neura-commerce" },
     { name = "neura-core" },
+    { name = "neura-dispatch" },
     { name = "neura-domain" },
     { name = "neura-evals" },
     { name = "neura-llm" },
@@ -1026,6 +1043,7 @@ requires-dist = [
     { name = "neura-api", editable = "apps/neura-api" },
     { name = "neura-commerce", editable = "packages/neura-commerce" },
     { name = "neura-core", editable = "packages/neura-core" },
+    { name = "neura-dispatch", editable = "packages/neura-dispatch" },
     { name = "neura-domain", editable = "packages/neura-domain" },
     { name = "neura-evals", editable = "evals" },
     { name = "neura-llm", editable = "packages/neura-llm" },

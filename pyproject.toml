@@ -10,6 +10,7 @@ dependencies = [
     "neura-commerce",
     "neura-adapters",
     "neura-agent-core",
+    "neura-dispatch",
     "neura-agent-care",
     "neura-agent-sell",
     "neura-api",
@@ -31,6 +32,7 @@ neura-llm = { workspace = true }
 neura-commerce = { workspace = true }
 neura-adapters = { workspace = true }
 neura-agent-core = { workspace = true }
+neura-dispatch = { workspace = true }
 neura-agent-care = { workspace = true }
 neura-agent-sell = { workspace = true }
 neura-api = { workspace = true }

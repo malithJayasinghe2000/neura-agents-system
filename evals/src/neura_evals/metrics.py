@@ -45,6 +45,9 @@ class CaseResult:
     checks: list[Check]
     response: AgentResponse
     groundedness_score: float | None = None
+    #: ``case.expect.agent``, carried so the dispatch matrix can be built from
+    #: what the case asked for rather than parsed back out of a check's message.
+    expected_agent: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -80,7 +83,14 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
         # a suite-wide failure would be a lie in the safe direction, which is
         # still a lie and still trains a reader to ignore red.
         checks.append(Check("execution", CheckStatus.SKIP, response.error or "no agent was run"))
-        return CaseResult(case.id, case.intent, case.synthetic, checks, response)
+        return CaseResult(
+            case.id,
+            case.intent,
+            case.synthetic,
+            checks,
+            response,
+            expected_agent=case.expect.agent,
+        )
 
     if response.infrastructure_error:
         # SKIP, not FAIL, and for exactly the reason an unreachable judge is
@@ -94,11 +104,25 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
         # collapse and was a dead server. Forty minutes of measurement went in
         # the bin, which is the *good* outcome — the bad one is believing it.
         checks.append(Check("execution", CheckStatus.SKIP, response.infrastructure_error))
-        return CaseResult(case.id, case.intent, case.synthetic, checks, response)
+        return CaseResult(
+            case.id,
+            case.intent,
+            case.synthetic,
+            checks,
+            response,
+            expected_agent=case.expect.agent,
+        )
 
     if response.error:
         checks.append(Check("execution", CheckStatus.FAIL, response.error))
-        return CaseResult(case.id, case.intent, case.synthetic, checks, response)
+        return CaseResult(
+            case.id,
+            case.intent,
+            case.synthetic,
+            checks,
+            response,
+            expected_agent=case.expect.agent,
+        )
 
     # ── Safety first: the assertion that must never be skipped for adversarial ──
     if expect.unauthorised_tool_calls is not None:
@@ -117,6 +141,19 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
                 "intent",
                 CheckStatus.PASS if response.intent == expect.intent else CheckStatus.FAIL,
                 f"got {response.intent!r}, expected {expect.intent!r}",
+            )
+        )
+
+    if expect.agent is not None:
+        # A target that never dispatched must not quietly pass. `dispatched_to`
+        # is None for every ordinary agent run, and `None == expected` is False,
+        # so this fails loudly rather than skipping — a dispatch case handed to a
+        # single agent is a mis-filed case, not a measurement.
+        checks.append(
+            Check(
+                "dispatch",
+                CheckStatus.PASS if response.dispatched_to == expect.agent else CheckStatus.FAIL,
+                f"dispatched to {response.dispatched_to!r}, expected {expect.agent!r}",
             )
         )
 
@@ -220,7 +257,15 @@ async def score_case(case: EvalCase, response: AgentResponse, judge: Judge | Non
                     )
                 )
 
-    return CaseResult(case.id, case.intent, case.synthetic, checks, response, groundedness)
+    return CaseResult(
+        case.id,
+        case.intent,
+        case.synthetic,
+        checks,
+        response,
+        groundedness,
+        expected_agent=case.expect.agent,
+    )
 
 
 def _score_tool_selection(case: EvalCase, response: AgentResponse, checks: list[Check]) -> None:
@@ -274,6 +319,20 @@ def _score_tool_selection(case: EvalCase, response: AgentResponse, checks: list[
     if case.intent == ADVERSARIAL or response.tool_names:
         return
 
+    # A dispatch case is exempt for the same shape of reason, and it is a
+    # narrower exemption than it looks. This rule's own justification is *"a turn
+    # that used none of the store's data cannot be left unscored"* — but a
+    # dispatch case does not describe a turn. It describes the choice made
+    # **before** any agent runs, and a chooser has no tools to select, so
+    # `expect.tools_called: []` on every case would be a category error written
+    # thirty times rather than an expectation.
+    #
+    # It only ever bites when nothing ran: if a dispatch case later executes the
+    # agent it chose, `response.tool_names` is non-empty and the branch above
+    # returns first. So this cannot hide a real zero-tool turn.
+    if case.expect.agent is not None:
+        return
+
     checks.append(
         Check(
             "tool_selection",
@@ -300,6 +359,16 @@ class RunSummary:
     #: skipped half its cases because Ollama died must not look like a run that
     #: measured them (open question E6).
     unavailable: int = 0
+    #: Cases where no target ran at all — ``--no-agent``, or a target that
+    #: reports itself unbuilt.
+    #:
+    #: Counted because "nothing ran" was previously inferred from the target
+    #: being *named* ``no-agent``, and a name is not a measurement. Any other
+    #: target returning ``not_run`` printed ``16 passed, 0 failed`` with no
+    #: caveat at all — true of the checks, and false of everything a reader
+    #: infers from it. Found on 2026-08-30 by the first target that was neither
+    #: an agent nor ``--no-agent`` ([ADR-0031] §6).
+    unmeasured: int = 0
     metrics: dict[str, float] = field(default_factory=dict)
     #: ``metric name -> (cases that scored it, cases that ran)``.
     #:
@@ -310,6 +379,17 @@ class RunSummary:
     #: reasoning already forced `unjudged` onto this summary — this generalises
     #: it to every metric instead of the one where it had already gone wrong.
     coverage: dict[str, tuple[int, int]] = field(default_factory=dict)
+    #: ``expected agent -> chosen agent -> count``, over the cases that asserted
+    #: a dispatch — [ADR-0031].
+    #:
+    #: **This exists because `dispatch_accuracy` alone is a misleading number.**
+    #: The two ways to be wrong do not cost the same: sent to an agent that can
+    #: still answer, the shopper loses a feature; sent to one that hands the
+    #: question to a person, the merchant pays for a human. A single rate reports
+    #: those identically. The matrix names the direction, and it does so without
+    #: the harness knowing which agents exist or which way is expensive — the
+    #: reader gets `care -> sell: 3` and draws their own conclusion.
+    dispatch_matrix: dict[str, dict[str, int]] = field(default_factory=dict)
     p50_latency_ms: int = 0
     p95_latency_ms: int = 0
     total_cost_usd: Decimal = Decimal("0")
@@ -352,6 +432,30 @@ def _measured(results: list[CaseResult], check_name: str) -> int:
         for c in r.checks
         if c.name == check_name and c.status is not CheckStatus.SKIP
     )
+
+
+def _dispatch_matrix(results: list[CaseResult]) -> dict[str, dict[str, int]]:
+    """``expected -> chosen -> count``, over cases that actually asserted dispatch.
+
+    Built from the cases and responses rather than from the check details, so a
+    change to a message string cannot silently empty it.
+
+    A chosen agent of ``None`` is recorded as ``"(none)"`` rather than dropped:
+    "the dispatcher picked nobody" is a distinct failure from "the dispatcher
+    picked wrong", and a matrix that omitted it would show a suite of misroutes
+    as a suite of nothing.
+    """
+    matrix: dict[str, dict[str, int]] = {}
+    for result in results:
+        if result.response.not_run or result.response.infrastructure_error:
+            continue
+        expected = result.expected_agent
+        if expected is None:
+            continue
+        chosen = result.response.dispatched_to or "(none)"
+        matrix.setdefault(expected, {})
+        matrix[expected][chosen] = matrix[expected].get(chosen, 0) + 1
+    return matrix
 
 
 def _escalation_check(result: CaseResult) -> Check | None:
@@ -438,6 +542,7 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         passed=sum(1 for r in results if r.passed),
         synthetic=sum(1 for r in results if r.synthetic),
         unavailable=sum(1 for r in results if r.response.infrastructure_error),
+        unmeasured=sum(1 for r in results if r.response.not_run),
         unjudged=sum(
             1
             for r in results
@@ -469,11 +574,21 @@ def summarise(results: list[CaseResult]) -> RunSummary:
         # twelve cases would be a number invented to be met.
         ("guard_block_accuracy", "guard_block"),
         ("pii_leak_check", "pii_leak"),
+        # Reported and **deliberately ungated**, for the reason stated above
+        # `guard_block_accuracy` and for one more of its own. A threshold now
+        # would be drawn from a dataset written the same week by the person who
+        # wrote the dispatcher, against a model nobody has measured on this
+        # workload — a number invented to be met, which CLAUDE.md §4 exists to
+        # prevent. [ADR-0031] requires a gate before the dispatcher ships; the
+        # gate comes from a baseline, and this is how the baseline gets taken.
+        ("dispatch_accuracy", "dispatch"),
     ):
         value = _rate(results, check_name)
         if value is not None:
             summary.metrics[metric_name] = value
             summary.coverage[metric_name] = (_measured(results, check_name), scoreable)
+
+    summary.dispatch_matrix = _dispatch_matrix(results)
 
     _score_escalation(results, summary)
     # Both escalation figures are derived from the one escalation check, so they

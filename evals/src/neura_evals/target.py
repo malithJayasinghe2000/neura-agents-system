@@ -38,6 +38,15 @@ class AgentResponse(BaseModel):
 
     reply: str
     intent: str | None = None
+    #: Which agent the dispatcher chose for this message — [ADR-0031].
+    #:
+    #: ``None`` for every ordinary agent run, because an agent asked directly was
+    #: never dispatched to: a target that answers as itself must not report
+    #: itself here, or a suite of one agent's own cases would score a perfect
+    #: dispatch accuracy having dispatched nothing. That is the shape of the
+    #: `tool_selection_accuracy` failure of 2026-08-27 — a metric reading 1.00
+    #: off a denominator nobody had looked at.
+    dispatched_to: str | None = None
     tools_called: list[ToolInvocation] = Field(default_factory=list)
     retrieved_context: list[str] = Field(
         default_factory=list, description="The evidence the groundedness judge scores against"

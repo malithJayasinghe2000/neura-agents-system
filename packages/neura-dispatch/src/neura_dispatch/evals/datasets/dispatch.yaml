@@ -1,0 +1,200 @@
+name: dispatch
+description: >-
+  Which agent should answer this shopper's message — ADR-0031.
+
+  EVERY CASE IS SYNTHETIC and none is validation. They are written from what the
+  two agents' own `prompts/route.md` files say they do, not from what anybody
+  wishes they did, and not from a real conversation (E1, B2).
+
+  THE TWO HALVES ARE NOT EQUALLY CERTAIN, and reading this dataset as one flat
+  accuracy figure will mislead you.
+
+  The `care` cases are DETERMINED. SELL's own `needs_person` covers existing
+  orders, delivery, returns, refunds, exchanges and store policy, so a message
+  about any of those dispatched to SELL is answered by fetching a human. There
+  is no reading of either agent's design under which SELL is the right choice.
+
+  The `sell` cases are NOT determined in the same way, and saying so is the
+  point. CARE's `product_qa` covers "availability, price, sizes, materials,
+  stock, comparisons, recommendations" — it can answer a shopping question. So a
+  `sell` case dispatched to CARE is a real miss (the shopper loses the product
+  card, ADR-0030) and NOT a broken conversation. The split encoded here is that
+  CARE answers what the store HAS and SELL helps a shopper CHOOSE; that split is
+  a judgement made when the declarations were written, and it is not decided in
+  any ADR.
+
+  So: read `dispatch_accuracy` beside the expected→chosen matrix, always. A run
+  that loses `care → sell` is broken. A run that loses `sell → care` is worse
+  than it should be and still answers the shopper.
+
+  DELIBERATELY ABSENT, because inventing the expectation would pin a guess as a
+  golden:
+    * Greetings ("hi"). Undecided, and currently `out_of_scope` on both agents.
+    * Messages with two topics at once ("do you have this in medium, and where
+      is my order?"). ADR-0031 dispatches a message to one agent and says
+      nothing about a message that belongs to two.
+    * Shops with one enabled agent. ADR-0031 §3 makes no model call at all
+      there, so there is nothing to score.
+
+cases:
+  # ── CARE: determined. SELL sends every one of these to a person. ────────────
+  - id: dispatch_order_status
+    intent: dispatch
+    input: Where is my order NRA0001?
+    expect:
+      agent: care
+    synthetic: true
+    tags: [care, order]
+
+  - id: dispatch_returns_window
+    intent: dispatch
+    input: How long do I have to send something back?
+    synthetic: true
+    expect:
+      agent: care
+    notes: >-
+      Says "send something back" rather than "return", so a dispatcher matching
+      the word "return" from CARE's declaration has nothing to match on.
+    tags: [care, policy]
+
+  - id: dispatch_refund_chase
+    intent: dispatch
+    input: I sent the boots back two weeks ago and still have not been refunded.
+    synthetic: true
+    expect:
+      agent: care
+    notes: Names a product. It is still a refund question.
+    tags: [care, policy, names-a-product]
+
+  - id: dispatch_delivery_cost
+    intent: dispatch
+    input: How much is delivery to Ireland?
+    synthetic: true
+    expect:
+      agent: care
+    tags: [care, policy]
+
+  - id: dispatch_delivery_on_a_product
+    intent: dispatch
+    input: How much is delivery on the field jacket?
+    synthetic: true
+    expect:
+      agent: care
+    notes: >-
+      The sharpest CARE case in the set, and it is determined by CARE's own
+      route.md: "A question about delivery or payment is policy_qa even when it
+      mentions a product — 'how much is delivery on the boots?' is asking about
+      delivery, not about boots." A dispatcher reading "field jacket" and
+      choosing SELL costs a human.
+    tags: [care, policy, names-a-product]
+
+  - id: dispatch_payment_options
+    intent: dispatch
+    input: Can I pay in instalments?
+    synthetic: true
+    expect:
+      agent: care
+    tags: [care, policy]
+
+  - id: dispatch_order_naming_a_product
+    intent: dispatch
+    input: I ordered the waxed cotton jacket last Tuesday, has it shipped yet?
+    synthetic: true
+    expect:
+      agent: care
+    notes: >-
+      Names a product in a sentence that is entirely about an order. The past
+      tense — "I ordered" — is what separates it, and it is exactly what a
+      dispatcher keying on product words will miss.
+    tags: [care, order, names-a-product]
+
+  - id: dispatch_exchange_for_another_size
+    intent: dispatch
+    input: The trousers I bought are too small, can I swap them for a 34?
+    synthetic: true
+    expect:
+      agent: care
+    notes: >-
+      Reads like a sizing question and is an exchange. "I bought" puts it after
+      the sale, which is SELL's `needs_person` and CARE's territory.
+    tags: [care, policy, names-a-product]
+
+  - id: dispatch_damaged_arrival
+    intent: dispatch
+    input: My parcel turned up with the box crushed and the contents scratched.
+    synthetic: true
+    expect:
+      agent: care
+    notes: >-
+      Both agents route this to a person, so the reply is similar either way.
+      It is here because dispatch is still wrong if it picks SELL — the handover
+      a merchant reads should come from the agent that owns post-sale problems.
+    tags: [care, needs-person]
+
+  - id: dispatch_where_are_my_orders
+    intent: dispatch
+    input: What have I got on order at the moment?
+    synthetic: true
+    expect:
+      agent: care
+    notes: No order number, no product name. Nothing here for a keyword to catch.
+    tags: [care, order]
+
+  # ── SELL: the shopper is choosing something they have not bought. ───────────
+  # A miss here goes to an agent that can still answer. See the description.
+  - id: dispatch_need_with_a_budget
+    intent: dispatch
+    input: I need a warm jacket for winter, nothing over 150.
+    synthetic: true
+    expect:
+      agent: sell
+    tags: [sell, recommend]
+
+  - id: dispatch_compare_two_named
+    intent: dispatch
+    input: Which is warmer, the quilted liner or the rain shell?
+    synthetic: true
+    expect:
+      agent: sell
+    notes: SELL's `compare` intent — two named products, asked to judge between them.
+    tags: [sell, compare]
+
+  - id: dispatch_open_ended_advice
+    intent: dispatch
+    input: What would you recommend for hiking in wet weather?
+    synthetic: true
+    expect:
+      agent: sell
+    tags: [sell, recommend]
+
+  - id: dispatch_need_without_a_product_word
+    intent: dispatch
+    input: I am going somewhere cold next month and have nothing suitable.
+    synthetic: true
+    expect:
+      agent: sell
+    notes: >-
+      Names no product and no category. If a dispatcher can only route messages
+      that name merchandise, this is the one that shows it.
+    tags: [sell, recommend]
+
+  - id: dispatch_looking_for_a_gift
+    intent: dispatch
+    input: Looking for a present for my brother, he is outdoorsy. Any ideas?
+    synthetic: true
+    expect:
+      agent: sell
+    tags: [sell, recommend]
+
+  - id: dispatch_variant_before_buying
+    intent: dispatch
+    input: Do you have the field jacket in navy, or only olive?
+    synthetic: true
+    expect:
+      agent: sell
+    notes: >-
+      The most arguable case in the set, and kept for that reason. CARE's
+      `product_qa` explicitly covers availability, so CARE answering this is
+      correct too — what SELL adds is the card. If this case is the one that
+      fails, the finding is about the declarations, not about the model.
+    tags: [sell, recommend, arguable]
