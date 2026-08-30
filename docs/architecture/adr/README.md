@@ -31,3 +31,10 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0022](0022-scheduling-under-rls.md) | A durable job queue, and the one read that crosses tenants | Accepted |
 | [0023](0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) | Agent #2 is SELL, read-only, and every protocol is an output format | Accepted |
 | [0024](0024-the-feed-is-opt-in-and-addressed-by-a-rotatable-secret.md) | The product feed is opt-in, and addressed by a rotatable secret | Accepted |
+| [0025](0025-verify-sees-only-what-the-draft-cites.md) | `verify` Reads Only What The Draft Cites | Accepted |
+| [0026](0026-the-merchant-console-and-the-first-human-in-the-system.md) | The Merchant Console, And The First Human In The System | Accepted |
+| [0027](0027-a-constraint-miss-is-not-an-empty-store.md) | A Constraint Miss Is Not An Empty Store | Accepted |
+| [0028](0028-only-the-catalogue-may-say-what-a-store-sells.md) | Only The Catalogue May Say What A Store Sells | Accepted |
+| [0029](0029-the-index-may-name-a-candidate-never-describe-one.md) | The Index May Name A Candidate, Never Describe One | Accepted |
+| [0030](0030-a-product-card-is-data-the-widget-draws.md) | A Product Card Is Data The Widget Draws | Accepted |
+| [0031](0031-the-shopper-never-chooses-the-agent.md) | The Shopper Never Chooses The Agent | Accepted — **design only, nothing is built** |

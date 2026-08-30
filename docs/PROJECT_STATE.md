@@ -4,13 +4,93 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-30 — **product cards ship ([ADR-0030]), and `verify` passed a fabrication the local model had caught**
+**Last updated:** 2026-08-30 (later) — **a shop can buy two agents and be delivered one ([ADR-0031], design only)**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
-**Next action:** **Put it in front of a merchant (B2).** Every screen v1 designed is built and
-proved in a real browser — `make console-check EMAIL=…` passes **33/33** — so the console is no
-longer the thing standing between this project and its first design partner. The remaining
-blockers to *deploying* it are **K1** (production email) and **X2** (deploy target), both
-unchanged and both external decisions.
+**Next action:** **Build [ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md), then get one real graded turn (E1).**
+Stage 8 is proved — `make console-check EMAIL=…` passes **33/33** in a real browser — but the
+console is a *reader* and has produced **no graded turn**, so E1 is blocked on one thing: a real
+shopper turn. Ahead of it sits a defect found this session and decided the same day: **a merchant
+who buys two agents can only be delivered one**, because the widget fixes the agent in their HTML
+and refuses to mount a second box. **B2 (a merchant) is still the top risk**, and the deployment
+blockers **K1** (production email) and **X2** (deploy target) are unchanged and both external.
+
+## Session 2026-08-30 (later) — a shop can buy two agents and be delivered one
+
+**Stage 8 was walked by hand and `make console-check` passes 33/33 in a real browser.** No models,
+no cost. The console is a **reader**: it cannot cause a conversation, only show one and let the
+owner grade it. `tn_01M0ZP…` stands at **0 turns**, so every screen renders its empty state — and
+**E1 is now blocked on exactly one thing, a real shopper turn.**
+
+**🔴 The session's finding is a product defect, not a bug, and it was found by typing *"hi"* into
+the SELL demo widget.** Written up as **[A13](open-questions.md)** and decided the same day as
+**[ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md)**.
+
+**A merchant cannot put both agents on the page at all.** `data-neura-agent` fixes the agent in the
+merchant's HTML, and `mount()` in `widget.js` returns early when a `neura-chat` element already
+exists — so **pasting the snippet twice makes the second widget silently do nothing.** A13 and
+[sell.md §10.4](agents/sell.md) both said shoppers are *"escalated at the boundary between agents"*;
+that quietly assumed a shopper can reach both. **They can reach one, ever.**
+
+**And CARE is the wider agent, so buying SELL as well currently buys a *narrowing*.** CARE's
+`product_qa` covers *"availability, price, sizes, materials, stock, comparisons, recommendations"*;
+SELL's `needs_person` covers orders, delivery, returns, refunds, exchanges and **store policy** —
+all to a person. **A merchant owning both is better off pointing the box at CARE and never using
+SELL**, losing only the product cards. That inverts the commercial premise: a second service must
+add reach, and this one removes it.
+
+**[ADR-0031], decided by the project owner, design only and nothing built.** `POST /v1/chat` with no
+agent in the path; agents **declare** what they handle in their manifest, so shared code still never
+names one — `routes/agent.py` does not know the word "care" and must not learn it; **one small model
+call** chooses, and **only when two or more agents are enabled**, so a single-agent shop is
+unchanged; a question for an agent the shop has **not bought** goes to a **person**, never to an
+unbought service; one conversation in the console with **each message marked by the agent that wrote
+it**. **The hard rule is not the obstacle it looks like:** a layer *above* the agents is not one
+agent importing another, and this was checked before the option was offered.
+
+**Rule 4 applies and there is nothing to apply it with.** Dispatch accuracy needs its own dataset,
+metric and gate; none exists. **A misroute is asymmetric** — a shopping question sent to CARE is
+answered, an order question sent to SELL reaches a person — so one accuracy number will hide the
+expensive direction.
+
+**Scope was reviewed against `docs/archive/FiveNeurals_AI_Agents_Blueprint_v1.md` at the owner's
+request and deliberately not re-opened.** v1's larger SELL features stay closed for now, each
+needing its own ADR: **dynamic pricing is a write** and needs a superseding ADR for
+[ADR-0010](architecture/adr/0010-read-only-mvp-tools.md), and **cart recovery** is recorded in
+`CLAUDE.md` §2 as excluded and *not re-openable*, so re-opening it would be an explicit reversal.
+The owner's framing is worth keeping: **the five agents are services we run, not staff we place
+inside the merchant's team** — a shop keeps its own marketing people and GROW works beside them.
+
+### Three smaller findings, none fixed
+
+**⚠️ Finding 12: a product card is never stored.** Cards are built in `respond`, ride out on
+`AgentResponse.cards`, and stop there — no column on `shadow_turns` or `conversation_messages`.
+That lands on **Finding 10**: its argument is that *"a card beside it, with a price and a link, is a
+claim they act on"*, **and the merchant grading that turn sees the draft text only.** The half that
+raises the stakes is invisible to the person judging it. `make widget-check`'s stub also has **no
+card scenario**, so the card has no browser regression test.
+
+**⚠️ *"hi"* is answered by a file.** `route` classifies a greeting `out_of_scope` and `decline`
+prints `decline.md` verbatim — correct by design ([decline.py](../agents/sell/src/neura_agent_sell/nodes/decline.py)
+argues it well: a model asked to decline invents a reason). **The defect is upstream**: a greeting is
+not a question, and it is the first thing every shopper types. Its own question, not ADR-0031's.
+
+**⚠️ Three setup facts that cost time.** The `.env` was on **`ollama-dev`**, not `cloud-prod` —
+"Gemini" survives only in two comment lines and the cloud block is **OpenRouter free**; check the
+file rather than remember it. `CLOUD_MODEL_EMBEDDER` is still unset, so `cloud-prod` cannot serve a
+widget turn at all. And **`tn_sell_ask` is indexed under *both* namespaces** —
+`gemini-embedding-001` (3072d, 49 chunks) **and** `nomic-embed-text` (768d, 49 chunks) — so
+switching the embedder back needs **no re-index**, contrary to what was assumed. Read
+`document_chunks` with `set app.tenant_id='…'` first: it is RLS-forced and returns zero rows
+without it, which looks exactly like an empty index.
+
+**Docs only this session — no code, no schema, no models beyond one accidental local turn.**
+`git status` under `packages/`, `agents/` and `apps/` is empty. ADR index README had never listed
+0025–0030; all six plus 0031 are now in it.
+
+**Next, in order:** build ADR-0031 (and the dataset rule 4 needs), then **E1 — one real graded
+turn**, then the remaining three agents. Not before: three more agents on a delivery layer that can
+only deliver one service builds the same defect three more times.
+
 
 ## Session 2026-08-30 — product cards, and a claim a shopper would act on
 

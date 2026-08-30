@@ -78,7 +78,7 @@ MySQL is on port 3307 while the shop is configured for 3308.
 | 5 | CARE end to end | a real support conversation | local (heat) | ✅ 2026-08-27 |
 | 6 | SELL end to end | a real recommendation | local (heat) | ◐ tooling built |
 | 7 | Widget | what a shopper actually sees | local | ✅ 2026-08-27 |
-| 8 | Console | what the owner sees, incl. grading a real turn | none | ⬜ |
+| 8 | Console | what the owner sees, incl. grading a real turn | none | ◐ 33/33 green 2026-08-30; **no graded turn — E1 open** |
 | 9 | New e-commerce | a second shop passes conformance | none | ⬜ |
 
 ---
@@ -1131,7 +1131,7 @@ are already about what `verify` should and should not accept.
 **Cards make it worse, and that is the argument for caring.** A sentence saying *"waterproof"* is a
 claim a shopper might skim. **A card beside it, with a price and a link, is a claim they act on.**
 
-## Stage 8 — the console ⬜
+## Stage 8 — the console ◐ (proved green 2026-08-30; no graded turn yet)
 
 What the shop owner sees, and the only screen that produces something this project does not
 have: **a real graded turn** (**E1**).
@@ -1143,6 +1143,90 @@ make user-new EMAIL=you@shop.com TENANT=tn_...
 make user-link EMAIL=you@shop.com                    # a sign-in URL
 make console-check EMAIL=you@shop.com                # 33 browser checks
 ```
+
+**Result 2026-08-30: `make console-check` passes 33/33 in real headless Chrome, no models.**
+Worth reading the check names rather than the count — a majority of them assert an *absence*: no
+password field, no API key handed to the browser, no credential on the shop screen, no unmeasured
+cost printed as a figure, no deflection or resolution rate claimed.
+
+**The console is a reader.** It cannot cause a conversation; it shows conversations that already
+happened and lets the owner grade them. `tn_01M0ZP…` ("Malith's Test Shop") stands at **0 turns**,
+so every screen renders its empty state — which is correct, not broken. `console-check` builds and
+destroys its own throwaway tenant and left the real one untouched.
+
+**So E1 is still open, and it is now blocked on exactly one thing: a real shopper turn.** That
+needs a model run in a tenant we own.
+
+### Setup notes found the hard way
+
+- **The `.env` was on `ollama-dev`, not `cloud-prod`.** The session began on the belief that it was
+  on Gemini; it was not, and the `CLOUD_*` block points at **OpenRouter free**, not Gemini, which
+  survives only in two comment lines. Any hand-run would have been local. **Check the file, do not
+  remember it.**
+- **`CLOUD_MODEL_EMBEDDER` is unset**, so `cloud-prod` cannot serve a widget turn at all —
+  `retrieve` needs that role. This is [Finding 8](#) still biting.
+- **`tn_sell_ask` is indexed under *both* namespaces** — `gemini-embedding-001` (3072d, 49 chunks)
+  **and** `nomic-embed-text` (768d, 49 chunks). Switching the embedder back therefore needs **no
+  re-index**, contrary to what was assumed. Read it with
+  `set app.tenant_id='tn_sell_ask'` first: `document_chunks` is RLS-forced and returns zero rows
+  without it, which looks exactly like an empty index.
+
+### ⚠️ Finding 12: a product card is never stored
+
+Cards are built in `respond` ([ADR-0030]), ride out on `AgentResponse.cards`, and **stop there.**
+Neither `shadow_turns` nor `conversation_messages` has a column for them.
+
+That lands directly on [Finding 10](#). Finding 10's argument for why the fabrication matters is
+that *"a sentence saying waterproof is skimmed; a card beside it with a price and a link is acted
+on"*. **But the merchant grading that turn in Review sees the draft text only.** The half that
+raises the stakes is invisible to the person judging it.
+
+Also: `make widget-check`'s stub has **no card scenario**, so the card has no browser regression
+test — its four scenarios are unchanged from before cards existed.
+
+Neither was fixed. Storing cards is a schema decision.
+
+### 🔴 Finding 13: a shop that buys both agents cannot use both — and CARE is the wider agent
+
+Found by opening the SELL demo widget by hand and typing *"hi"*. Three separate discoveries, and
+the third inverts the commercial case for the second agent. Full write-up in **[A13](open-questions.md)**.
+
+**1. "hi" is answered by a file, not a model.** `route` classified it `out_of_scope`, and `decline`
+printed `prompts/decline.md` **verbatim** — the two-paragraph reply that reads oddly because it is
+static text, always printed whole. That is deliberate and [decline.py](../agents/sell/src/neura_agent_sell/nodes/decline.py)
+argues it well: a model asked to *"politely decline"* invents a reason, and *"we don't stock that"*
+about a store nobody read is the exact failure this system exists to prevent. **What is wrong is
+upstream** — `route` treats a greeting as a question. *"hi"* is the commonest opening message in any
+chat box, and the shopper is told their question is outside what the assistant can help with.
+
+**2. One page can hold one chat box, and one box holds one agent.** `data-neura-agent` fixes it in
+the merchant's HTML. `mount()` in `widget.js` returns early when a `neura-chat` element already
+exists, so **pasting the snippet twice makes the second widget silently do nothing.** A demo key is
+also scoped and origin-locked to one agent, which is why flipping `&agent=care` on a sell key gives
+`403 PERMISSION_DENIED` — the control working, and refused before any model runs.
+
+**3. CARE is wider than SELL, so buying SELL as well currently *narrows* what a shopper may ask.**
+Read off the two routers:
+
+| shopper asks | CARE | SELL |
+|:--|:--|:--|
+| *where is my order?* | ✅ answers | 🧑 **a person** |
+| *what's your returns policy?* | ✅ answers | 🧑 **a person** |
+| *do you sell jackets?* | ✅ answers | ✅ answers |
+| *which jacket is warmer?* | ✅ answers | ✅ answers **+ a product card** |
+
+CARE's `product_qa` covers *"availability, price, sizes, materials, stock, comparisons,
+**recommendations**"*. SELL's `needs_person` covers *"existing orders, delivery status, returns,
+refunds, exchanges… store policy"*.
+
+**So a merchant who has bought both is usually better off pointing the box at CARE and never using
+SELL** — losing the product cards and keeping everything else. Pointing it at SELL pays a **person**
+for questions CARE answers in seconds, while CARE sits enabled and unreachable.
+
+**Nothing was changed.** The fix is a dispatcher above both agents, which is an ADR and a design
+session. Worth recording that the hard rule is **not** the obstacle it appears to be: a layer above
+the agents does not make one agent import another, so `AGENTS.md` does not block it.
+
 
 ## Stage 9 — the new e-commerce ⬜
 
