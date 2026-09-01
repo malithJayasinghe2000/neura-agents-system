@@ -11,6 +11,7 @@ requires-python = ">=3.12,<3.13"
 # may this.
 dependencies = [
     "neura-core",
+    "neura-llm",
     "neura-evals",
 ]
 

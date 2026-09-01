@@ -39,6 +39,7 @@ from neura_api.routes import (
     console_review,
     console_shop,
     console_usage,
+    dispatch,
     health,
     stores,
     webhooks,
@@ -106,7 +107,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.stores = StoreDirectory(database)
     app.state.drainer = WebhookDrainer(database)
     app.state.jobs = _job_runner(database, app.state.stores, app.state.drainer)
-    app.state.turns = TurnService(database, _llm(), app.state.stores)
+    # One client, shared. The dispatcher ([ADR-0031]) calls a model *before* any
+    # turn exists, so it cannot borrow the per-turn `MeteredLLM` the turn
+    # service wraps around this — and building a second client would open a
+    # second HTTP connection pool per process for one extra call per message.
+    app.state.llm = _llm()
+    app.state.turns = TurnService(database, app.state.llm, app.state.stores)
 
     # Agents are mounted here rather than in `create_app`, because discovery is
     # a startup activity and a route table built from an empty registry would
@@ -247,6 +253,10 @@ def create_app() -> FastAPI:
     app.include_router(console_conversations.router, prefix="/v1")
     app.include_router(console_shop.router, prefix="/v1")
     app.include_router(console_usage.router, prefix="/v1")
+    # Mounted once, and it names no agent — that is the whole point
+    # ([ADR-0031]). It sits beside the per-agent routes rather than
+    # replacing them: `/v1/care/chat` is still CARE's own declared prefix.
+    app.include_router(dispatch.router, prefix="/v1")
     app.include_router(health.router, prefix="/v1")
     app.include_router(widget.router, prefix="/v1")
     app.include_router(stores.router, prefix="/v1")

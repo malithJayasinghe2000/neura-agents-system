@@ -10,6 +10,7 @@ dependencies = [
     "neura-commerce",
     "neura-adapters",
     "neura-agent-core",
+    "neura-dispatch",
     "fastapi>=0.115",
     # Console sign-in validates the address before it reaches a query (ADR-0026).
     # A typo would otherwise be a lookup that matches nothing, shown to the

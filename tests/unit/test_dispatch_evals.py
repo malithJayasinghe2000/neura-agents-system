@@ -47,15 +47,26 @@ class TestTheTargetIsDiscoverable:
         assert DATASETS.is_dir()
         assert list(DATASETS.glob("*.yaml"))
 
-    def test_it_reports_itself_unbuilt_rather_than_guessing(self) -> None:
-        """A stub that picked an agent would produce a quotable accuracy figure.
+    def test_an_unreachable_model_is_unmeasured_not_a_misroute(self) -> None:
+        """The step-2 version of this test asserted the target was a stub.
 
-        Derived from nothing, and somebody would quote it.
+        It is not one any more, and what replaces it is the assertion that
+        matters: with no usable client the case is `infrastructure_error` —
+        **skipped, not scored** — because a dead provider recorded as a wrong
+        answer is the 2026-07-31 mistake, where Ollama died and the suite
+        reported a total agent collapse (E6).
         """
         response = asyncio.run(build_target(None).run(_case("x", "care")))
-        assert response.not_run
+        assert response.infrastructure_error
         assert response.dispatched_to is None
-        assert "no dispatcher exists" in (response.error or "").lower()
+        assert not response.not_run
+
+    def test_that_case_is_skipped_rather_than_failed(self) -> None:
+        """The half above is only true if the scorer agrees with it."""
+        response = asyncio.run(build_target(None).run(_case("x", "care")))
+        result = _score(_case("x", "care"), response)
+        assert result.passed  # type: ignore[attr-defined]
+        assert all(c.status.value == "skip" for c in result.checks)  # type: ignore[attr-defined]
 
     def test_the_target_satisfies_the_harness_protocol(self) -> None:
         assert isinstance(build_target(None), DispatchTarget)

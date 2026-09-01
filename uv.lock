@@ -861,6 +861,7 @@ dependencies = [
     { name = "neura-agent-core" },
     { name = "neura-commerce" },
     { name = "neura-core" },
+    { name = "neura-dispatch" },
     { name = "neura-domain" },
     { name = "neura-llm" },
     { name = "opentelemetry-instrumentation-fastapi" },
@@ -879,6 +880,7 @@ requires-dist = [
     { name = "neura-agent-core", editable = "packages/neura-agent-core" },
     { name = "neura-commerce", editable = "packages/neura-commerce" },
     { name = "neura-core", editable = "packages/neura-core" },
+    { name = "neura-dispatch", editable = "packages/neura-dispatch" },
     { name = "neura-domain", editable = "packages/neura-domain" },
     { name = "neura-llm", editable = "packages/neura-llm" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.50b0" },
@@ -944,12 +946,14 @@ source = { editable = "packages/neura-dispatch" }
 dependencies = [
     { name = "neura-core" },
     { name = "neura-evals" },
+    { name = "neura-llm" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "neura-core", editable = "packages/neura-core" },
     { name = "neura-evals", editable = "evals" },
+    { name = "neura-llm", editable = "packages/neura-llm" },
 ]
 
 [[package]]
