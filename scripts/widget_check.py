@@ -517,7 +517,7 @@ async def provision(
         await TenantRepository(session).create(
             tenant_id=tenant_id,
             name="widget check",
-            enabled_agents=[agent],
+            enabled_agents=_agent_keys(agent),
             # `--shadow` runs the real thing: a full turn whose reply is
             # withheld, so what the browser renders is `fallback_message` and
             # nothing else. It is the one case that cannot be produced by
@@ -559,10 +559,30 @@ _SCOPES = {
 }
 
 
+def _agent_keys(agent: str) -> list[str]:
+    """Split `--agent` into keys, preserving the order they were written in."""
+    keys = [part.strip() for part in agent.split(",") if part.strip()]
+    unknown = [k for k in keys if k not in _SCOPES]
+    if not keys or unknown:
+        raise SystemExit(
+            f"unknown agent {', '.join(unknown) or '(none given)'} — "
+            f"expected one or more of {', '.join(_SCOPES)}"
+        )
+    return keys
+
+
 def _scopes_for(agent: str) -> list[str]:
-    if agent not in _SCOPES:
-        raise SystemExit(f"unknown agent {agent!r} — expected one of {', '.join(_SCOPES)}")
-    return list(_SCOPES[agent])
+    """Every scope the named agents need, as one set.
+
+    A tenant running two agents needs a key holding both agents' scopes, or
+    ``POST /v1/chat`` dispatches correctly and is then refused at the scope
+    check — which reads as a broken dispatcher and is a provisioning fault
+    ([ADR-0031] §1).
+    """
+    scopes: set[str] = set()
+    for key in _agent_keys(agent):
+        scopes.update(_SCOPES[key])
+    return sorted(scopes)
 
 
 async def deprovision(tenant_id: str) -> None:
@@ -713,7 +733,10 @@ async def main() -> int:
     parser.add_argument(
         "--agent",
         default="care",
-        help="which agent the provisioned tenant runs — care (default) or sell",
+        help=(
+            "which agent(s) the provisioned tenant runs — comma-separated. "
+            "`care` (default), `sell`, or `care,sell` for a tenant that dispatches"
+        ),
     )
     args = parser.parse_args()
 
@@ -735,7 +758,17 @@ async def main() -> int:
             print()
             print("  Open this in your own browser:")
             print()
-            print(f"    {args.url.rstrip('/')}/v1/widget/demo?key={key}&agent={args.agent}")
+            # `&agent=` is a *pin*. A tenant running one agent gets pinned to
+            # it, which is what it would do anyway and makes the URL explicit.
+            # A tenant running two must NOT be pinned, or the demo page hands
+            # the widget one agent and dispatch never runs — which is exactly
+            # the defect this parameter caused on 2026-09-01 ([ADR-0031] §1).
+            keys = _agent_keys(args.agent)
+            pin = f"&agent={keys[0]}" if len(keys) == 1 else ""
+            print(f"    {args.url.rstrip('/')}/v1/widget/demo?key={key}{pin}")
+            if len(keys) > 1:
+                print()
+                print(f"    This tenant runs {', '.join(keys)} — the server picks per message.")
             print()
             print(f"  Mode: {'SHADOW — the reply is withheld' if args.shadow else 'LIVE'}")
             print(f"  When you are done:  make tenant-drop TENANT={tenant_id}")

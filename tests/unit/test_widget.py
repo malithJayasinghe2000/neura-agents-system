@@ -299,3 +299,36 @@ class TestPerTenantCors:
     def test_a_real_origin_is_accepted(self) -> None:
         assert is_valid_origin("https://shop.example")
         assert is_valid_origin("http://localhost:3000")
+
+
+class TestTheDemoPageDoesNotChooseTheAgent:
+    """[ADR-0031] §1 — and the one place the fix was missed.
+
+    `widget.js` stopped defaulting to `care` on 2026-09-01. The demo route did
+    not, so the one page anybody actually opens in a browser wrote
+    ``data-neura-agent="care"`` into every page it served, pinned every message
+    to CARE, and dispatch never ran. Found by the project owner typing into the
+    demo widget and getting the same agent for everything — which is A13's own
+    defect, reintroduced one layer above the fix.
+
+    A page that renders `.js` correctly and then hardcodes what it passes to it
+    is a page whose correctness is not covered by the `.js` tests.
+    """
+
+    def test_no_agent_is_pinned_by_default(self, client: TestClient) -> None:
+        body = client.get("/v1/widget/demo", params={"key": "fn_pk_test_abc"}).text
+        assert 'data-neura-agent=""' in body
+
+    def test_an_explicit_agent_is_still_honoured(self, client: TestClient) -> None:
+        """The demo is how a single-agent embed gets driven by hand."""
+        body = client.get("/v1/widget/demo", params={"key": "fn_pk_test_abc", "agent": "sell"}).text
+        assert 'data-neura-agent="sell"' in body
+
+    def test_a_junk_agent_falls_back_to_dispatch_not_to_care(self, client: TestClient) -> None:
+        """The sanitiser used to end in `or "care"`, which is the same bug again.
+
+        A parameter that survives stripping as empty must mean "let the server
+        choose", not "silently use one particular agent".
+        """
+        body = client.get("/v1/widget/demo", params={"key": "fn_pk_test_abc", "agent": "<>/"}).text
+        assert 'data-neura-agent=""' in body

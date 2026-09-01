@@ -86,7 +86,7 @@ async def snippet(
 )
 async def demo(
     key: Annotated[str, Query(max_length=128)] = "",
-    agent: Annotated[str, Query(max_length=32)] = "care",
+    agent: Annotated[str, Query(max_length=32)] = "",
 ) -> Response:
     """The widget on a page, under the CSP a merchant would be asked to run.
 
@@ -102,7 +102,17 @@ async def demo(
     safe_key = "".join(c for c in key if c.isalnum() or c in "_-")
     # Same treatment, same reason: it lands in an attribute value, and an agent
     # key is `[a-z]` in every manifest this will ever load.
-    safe_agent = "".join(c for c in agent if c.isalnum() or c in "_-") or "care"
+    #
+    # **Empty means dispatch**, and both halves of that had to change together.
+    # This defaulted to `"care"` — and fell back to `"care"` when the parameter
+    # was junk — so the demo page wrote `data-neura-agent="care"` into every
+    # page it served. `widget.js` stopped choosing an agent on 2026-09-01
+    # ([ADR-0031] §1); this did not, so the one page anybody actually opens in a
+    # browser pinned every message to CARE and dispatch never ran. Found by the
+    # project owner typing into the demo widget and getting the same agent for
+    # everything, which is precisely the defect A13 records — reintroduced one
+    # layer above the fix.
+    safe_agent = "".join(c for c in agent if c.isalnum() or c in "_-")
     return Response(
         content=DEMO_HTML.replace("__KEY__", safe_key).replace("__AGENT__", safe_agent),
         media_type="text/html; charset=utf-8",
