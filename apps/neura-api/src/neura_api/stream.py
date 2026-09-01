@@ -61,22 +61,116 @@ CLOSE_FORBIDDEN = 4403
 CLOSE_RATE_LIMITED = 4429
 
 
+def _dispatch_candidates(caller: Any) -> tuple[Any, ...]:
+    """The agents this merchant pays for, as dispatch candidates.
+
+    Resolved once per connection rather than per message: entitlement does not
+    change mid-socket, and re-reading the entry points for every sentence would
+    put package metadata on the latency path of a conversation.
+    """
+    from neura_core.errors import ForbiddenError
+    from neura_dispatch.candidates import enabled_candidates
+
+    candidates = enabled_candidates(caller.tenant.enabled_agents)
+    if not candidates:
+        raise ForbiddenError(
+            "This account has no agent enabled, so no message can be answered.",
+            code="NO_AGENTS_ENABLED",
+            details={"tenant": caller.tenant_id},
+        )
+    return candidates
+
+
+async def _dispatch_context(
+    websocket: WebSocket,
+    caller: Any,
+    candidates: tuple[Any, ...],
+    message: str,
+    token: str | None,
+) -> Any:
+    """Choose an agent for one message, then build its context.
+
+    The scope and entitlement checks are the per-agent route's own, reached
+    through ``agent_context_for_socket`` — so a dispatched socket is authorised
+    exactly as a named one is, one message later.
+    """
+    from neura_api.dependencies import agent_context_for_socket
+    from neura_dispatch.chooser import choose
+
+    decision = await choose(websocket.app.state.llm, message, candidates)
+    chosen = decision.agent or candidates[0].key
+    if decision.agent is None:
+        log.warning(
+            "dispatch_undecided",
+            tenant_id=caller.tenant_id,
+            candidates=[c.key for c in candidates],
+            reason=decision.reason,
+        )
+
+    log.info(
+        "dispatch_route",
+        transport="socket",
+        tenant_id=caller.tenant_id,
+        agent=chosen,
+        confidence=decision.confidence,
+        trivial=decision.trivial,
+    )
+    # The same credential the handshake used, re-checked against the *chosen*
+    # agent's scope and entitlement by the same function the named route uses.
+    # A socket carries no Authorization header, so the token has to travel
+    # with it — passing None here would authenticate nothing and fail every
+    # dispatched message.
+    return await agent_context_for_socket(
+        websocket, chosen, token=token, scopes=(f"{chosen}:chat:write",)
+    )
+
+
 async def run_streamed_turn(
     websocket: WebSocket,
     *,
-    agent_key: str,
+    agent_key: str | None,
     token: str | None,
 ) -> None:
-    """Accept a socket, authenticate it, and serve turns until it closes."""
-    from neura_api.dependencies import agent_context_for_socket
+    """Accept a socket, authenticate it, and serve turns until it closes.
+
+    ``agent_key`` of ``None`` is the dispatched socket ([ADR-0031]): the client
+    named no agent, so one is chosen **per message**.
+
+    **Per message, not per connection**, and that is the whole reason this is not
+    resolved once at the handshake. ADR-0031 §5 says a conversation may move
+    between services mid-thread — a shopper choosing a jacket who then asks where
+    their parcel is has changed subject — and a socket that picked an agent when
+    it opened would pin the whole conversation to whatever the first sentence
+    happened to be about.
+
+    The cost is that the agent-specific scope check moves inside the loop, so a
+    dispatched socket is accepted before it is known which scope it will need.
+    The key is still authenticated at the handshake and the origin lock still
+    applies; what a caller gains by connecting is the ability to be refused one
+    message later instead of at the door.
+    """
+    from neura_api.dependencies import agent_context_for_socket, authenticate_request
     from neura_api.routes.agent import AI_DISCLOSURE, ChatRequest, _rate_limit, _turn_input
 
     request_id = new_id(REQUEST)
+    dispatching = agent_key is None
+    context = None
 
     try:
-        context = await agent_context_for_socket(
-            websocket, agent_key, token=token, scopes=(f"{agent_key}:chat:write",)
-        )
+        # Tested directly rather than through `dispatching`, so the type checker
+        # narrows `agent_key` in the else-branch as a reader already does.
+        if agent_key is None:
+            # Authenticated, but no agent scope yet — there is no agent to name
+            # one after. `_dispatch_context` re-checks scope and entitlement for
+            # whichever agent each message is routed to.
+            caller = await authenticate_request(websocket, token=token)
+            candidates = _dispatch_candidates(caller)
+        else:
+            context = await agent_context_for_socket(
+                websocket, agent_key, token=token, scopes=(f"{agent_key}:chat:write",)
+            )
+            caller = context.caller
+            candidates = ()
     except NeuraError as exc:
         # Refused during the handshake: the socket is never accepted, so an
         # unauthenticated caller cannot hold a connection open at all.
@@ -128,6 +222,23 @@ async def run_streamed_turn(
             conversation_id = body.conversation_id or new_id(CONVERSATION)
 
             try:
+                if dispatching:
+                    # One choice per message. A failure here is reported to the
+                    # client rather than closing the socket: the next message
+                    # may route perfectly well, and dropping the connection
+                    # would make one undecidable sentence end the conversation.
+                    context = await _dispatch_context(
+                        websocket, caller, candidates, body.message, token
+                    )
+                # Never None by construction — a named socket resolved it at
+                # the handshake and a dispatched one resolved it a line ago.
+                # Stated as a raise rather than an `assert`, which `-O`
+                # strips: an invariant that disappears under optimisation is
+                # an invariant only in development.
+                if context is None:  # pragma: no cover - unreachable
+                    raise NeuraError("No agent resolved for this turn.", code="NO_AGENT")
+                turn_agent = context.agent_key
+
                 verdict = await _rate_limit(websocket, context.caller, conversation_id)
                 if not verdict.allowed:
                     await _send_error(
@@ -141,7 +252,7 @@ async def run_streamed_turn(
                 turn = _turn_input(
                     websocket,
                     context.caller,
-                    agent_key,
+                    turn_agent,
                     body.model_copy(update={"conversation_id": conversation_id}),
                 )
                 await _send(websocket, {"type": "accepted", "conversation_id": conversation_id})
@@ -189,6 +300,11 @@ async def run_streamed_turn(
                     "blocked": outcome.blocked,
                     "citations": [c.as_dict() for c in outcome.citations],
                     "ai_disclosure": AI_DISCLOSURE,
+                    # Which service answered. Constant on a named socket and
+                    # able to change between messages on a dispatched one, which
+                    # is exactly why it rides on every `done` rather than being
+                    # stated once at `accepted` ([ADR-0031] §5).
+                    "agent": turn_agent,
                     # The socket sent no `token` frame for this turn, so this is
                     # the only thing the shopper can be shown (ADR-0020). It
                     # carries the same value the REST payload does, from the

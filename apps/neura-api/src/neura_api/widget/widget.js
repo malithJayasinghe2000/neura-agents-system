@@ -31,7 +31,15 @@
 (function () {
   "use strict";
 
-  var AGENT_DEFAULT = "care";
+  // Empty means "the server chooses" ([ADR-0031]). It used to be "care", so a
+  // merchant who wrote no `data-neura-agent` silently got one agent for every
+  // message their shoppers ever sent — and a shop paying for two could only
+  // ever reach one of them (A13).
+  //
+  // `data-neura-agent` still works and is still honoured: an integrator who
+  // names an agent gets that agent's own route, and a single-agent shop has
+  // nothing to dispatch anyway.
+  var AGENT_DEFAULT = "";
   var TITLE_DEFAULT = "Chat with us";
   var PLACEHOLDER = "Ask a question…";
 
@@ -201,9 +209,15 @@
     };
   }
 
-  /** `chat` and `stream` URLs for an agent, including the socket scheme swap. */
+  /**
+   * `chat` and `stream` URLs, including the socket scheme swap.
+   *
+   * No agent means the dispatched door — `/v1/chat`, `/v1/stream` — where the
+   * server reads the merchant's enabled agents and picks one per message. A
+   * named agent keeps its own prefix, unchanged.
+   */
   function endpointFor(base, agent, kind) {
-    var path = base + "/v1/" + encodeURIComponent(agent);
+    var path = agent ? base + "/v1/" + encodeURIComponent(agent) : base + "/v1";
     if (kind === "stream") {
       return path.replace(/^http/, "ws") + "/stream";
     }
@@ -530,7 +544,11 @@
     };
 
     NeuraChat.prototype.storageKey = function () {
-      return "neura:" + this.config.agent + ":conversation";
+      // A dispatched widget stores under its own name rather than under the
+      // empty string. The key is per-agent on purpose — a shop that switches a
+      // page from one agent to another starts a new conversation rather than
+      // resuming one the other service never had.
+      return "neura:" + (this.config.agent || "dispatch") + ":conversation";
     };
 
     NeuraChat.prototype.toggle = function (force) {

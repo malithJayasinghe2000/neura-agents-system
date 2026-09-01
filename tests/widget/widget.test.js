@@ -107,7 +107,11 @@ test("the API base defaults to the origin that served the widget", () => {
   );
   assert.strictEqual(config.base, "https://api.example.com");
   assert.strictEqual(config.key, "fn_pk_live_abc");
-  assert.strictEqual(config.agent, "care");
+  // No agent, so the server chooses ([ADR-0031]). This asserted "care" until
+  // 2026-09-01, which is precisely the defect A13 records: a merchant who
+  // configured nothing got one agent for every message forever, and a shop
+  // paying for two could reach only one of them.
+  assert.strictEqual(config.agent, "");
 });
 
 test("an explicit API base wins over the script's own origin", () => {
@@ -134,6 +138,34 @@ test("endpoints are built per agent, and the socket swaps scheme", () => {
   assert.strictEqual(
     widget.endpointFor("http://localhost:8000", "care", "stream"),
     "ws://localhost:8000/v1/care/stream"
+  );
+});
+
+test("no agent means the dispatched door, on both transports", () => {
+  // [ADR-0031]. The shopper never chooses, so the widget does not either: it
+  // posts to `/v1/chat` and the server reads the merchant's enabled agents.
+  assert.strictEqual(
+    widget.endpointFor("https://api.example.com", "", "chat"),
+    "https://api.example.com/v1/chat"
+  );
+  assert.strictEqual(
+    widget.endpointFor("https://api.example.com", "", "stream"),
+    "wss://api.example.com/v1/stream"
+  );
+});
+
+test("a named agent still gets its own route", () => {
+  // ADR-0031 adds a door; it closes none. An integrator who names an agent —
+  // and every single-agent embed, which has nothing to dispatch — is unaffected.
+  const config = widget.configFrom(
+    { src: "https://api.example.com/v1/widget/widget.js",
+      dataset: { neuraKey: "k", neuraAgent: "sell" } },
+    { origin: "https://shop.example" }
+  );
+  assert.strictEqual(config.agent, "sell");
+  assert.strictEqual(
+    widget.endpointFor(config.base, config.agent, "chat"),
+    "https://api.example.com/v1/sell/chat"
   );
 });
 

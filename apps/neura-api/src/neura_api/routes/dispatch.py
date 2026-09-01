@@ -22,12 +22,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, Request, Response
+from fastapi import APIRouter, Header, Query, Request, Response
+from starlette.websockets import WebSocket
 
 from neura_api import idempotency as idem
 from neura_api.dependencies import agent_context, authenticate_request
 from neura_api.ratelimit import enforce
 from neura_api.routes.agent import ChatRequest, _chat_payload, _rate_limit, _turn_input
+from neura_api.stream import run_streamed_turn
 from neura_core import get_logger
 from neura_core.errors import ForbiddenError, NeuraError
 from neura_dispatch.candidates import enabled_candidates
@@ -171,6 +173,21 @@ async def dispatch_chat(
 
     await idempotency.complete(claim, status=200, body=payload)
     return payload
+
+
+@router.websocket("/stream")
+async def dispatch_stream(
+    websocket: WebSocket, token: Annotated[str | None, Query()] = None
+) -> None:
+    """The dispatched turn over a socket, with progress frames.
+
+    ``agent_key=None`` is what makes it dispatched: an agent is chosen **per
+    message**, so a conversation that changes subject changes service with it
+    ([ADR-0031] §5). Everything else — the frames, their order, and ADR-0016's
+    rule that no model-generated text is sent before ``verify`` has passed — is
+    the named socket's own code, unchanged.
+    """
+    await run_streamed_turn(websocket, agent_key=None, token=token)
 
 
 __all__ = ["NoAgentsEnabledError", "router"]
