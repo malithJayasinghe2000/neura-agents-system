@@ -146,6 +146,19 @@ conversation_messages = Table(
     #: Per-turn outcome, on the agent's message. Everything here is a fact the
     #: graph recorded, not a judgement made later.
     Column("intent", String(64), nullable=True),
+    #: Which agent produced this message — [ADR-0031] §5.
+    #:
+    #: `conversations.agent_key` records the agent a conversation *started*
+    #: with, and that used to be the whole truth: a shopper reached one agent's
+    #: own route and never moved. A dispatched conversation can change service
+    #: mid-thread, so the per-message answer is here and the per-conversation
+    #: one stays what the list view sorts by.
+    #:
+    #: Nullable, and it stays nullable. A message written before dispatch
+    #: existed has no answer, and back-filling it from the conversation would
+    #: be right for every historical row and wrong the moment one spanned two
+    #: agents — while looking identical either way.
+    Column("agent_key", String(64), nullable=True),
     Column("state", String(32), nullable=True),
     Column("citations", JSONB, nullable=False, server_default="[]"),
     Column("trace_id", String(64), nullable=True),
@@ -167,6 +180,9 @@ class Message:
     state: ConversationState | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime | None = None
+    #: Which agent wrote this message ([ADR-0031] §5). ``None`` on a shopper's
+    #: question, and on every message stored before a message could say.
+    agent_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,6 +358,7 @@ class ConversationRepository:
         citations: list[dict[str, Any]] | None = None,
         trace_id: str | None = None,
         prompt_revision: str | None = None,
+        agent_key: str | None = None,
     ) -> tuple[str, str]:
         """Write both messages of one turn and roll the conversation forward.
 
@@ -383,6 +400,11 @@ class ConversationRepository:
                         "citations": [],
                         "trace_id": trace_id,
                         "prompt_revision": None,
+                        # The shopper's question was not written by an agent.
+                        # Stated rather than omitted: the column list comes from
+                        # this first mapping, so a key missing here is a key
+                        # silently dropped from the agent's row too.
+                        "agent_key": None,
                     },
                     {
                         "tenant_id": tenant_id,
@@ -396,6 +418,10 @@ class ConversationRepository:
                         "citations": citations or [],
                         "trace_id": trace_id,
                         "prompt_revision": prompt_revision,
+                        # Which service answered ([ADR-0031] §5). On the message
+                        # rather than only on the conversation, because a
+                        # dispatched thread can change agent between turns.
+                        "agent_key": agent_key,
                     },
                 ]
             )
@@ -502,6 +528,7 @@ def _message_from_row(row: Any) -> Message:
         state=ConversationState(row.state) if row.state else None,
         citations=list(row.citations or []),
         created_at=row.created_at,
+        agent_key=getattr(row, "agent_key", None),
     )
 
 

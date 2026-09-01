@@ -41,6 +41,19 @@ export type TranscriptMessage = {
   /** Present on the agent's message, `null` on the shopper's. */
   state: ConversationState | null;
   citations: { type: string; id: string }[];
+  /**
+   * Which service wrote this message (ADR-0031 §5).
+   *
+   * `null` on the shopper's own message, and on anything stored before a
+   * message could say — so it is rendered where it exists rather than filled
+   * in from the conversation, which would be a guess dressed as a record.
+   *
+   * The conversation carries an `agent_key` too, and it is a different fact:
+   * that one is the service the thread *started* with. A dispatched
+   * conversation can change service mid-thread, which is exactly what makes
+   * this column worth reading.
+   */
+  agent: string | null;
   created_at: string | null;
 };
 

@@ -195,6 +195,11 @@ def _message_payload(message: Message) -> dict[str, Any]:
         # per-turn outcome belongs to the reply, not to the question.
         "state": message.state.value if message.state else None,
         "citations": message.citations,
+        # Which service wrote this ([ADR-0031] §5). `null` on the shopper's own
+        # message, and on anything stored before a message could say — the
+        # console renders it only where it exists rather than filling the gap
+        # from the conversation, which would be a guess dressed as a record.
+        "agent": message.agent_key,
         "created_at": message.created_at.isoformat() if message.created_at else None,
     }
 

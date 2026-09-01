@@ -285,6 +285,12 @@ class TurnService:
                     citations=[c.as_dict() for c in outcome.citations],
                     trace_id=turn.trace_id or None,
                     prompt_revision=outcome.prompt_revision,
+                    # Which service answered this turn ([ADR-0031] §5). Taken
+                    # from the turn rather than the conversation: a dispatched
+                    # thread can change agent between messages, and the
+                    # conversation's own `agent_key` records only the one it
+                    # started with.
+                    agent_key=turn.agent_key,
                 )
 
             await UsageMeter(session).record(

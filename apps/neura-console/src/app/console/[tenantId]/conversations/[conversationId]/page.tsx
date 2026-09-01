@@ -129,6 +129,13 @@ function MessageBubble({ message }: { message: TranscriptMessage }) {
           <span className="font-medium text-foreground">
             {fromShopper ? "Shopper" : "Assistant"}
           </span>
+          {/* Which service answered (ADR-0031 §5). A dispatched conversation can
+              change service mid-thread — the shopper asks for a jacket, then
+              asks where their parcel is — and the merchant reads one thread
+              rather than half a story told twice. Rendered only where it
+              exists: null on the shopper's message, and on anything stored
+              before a message could say. */}
+          {message.agent ? <Badge variant="outline">{message.agent}</Badge> : null}
           {message.intent ? <Badge variant="muted">{message.intent}</Badge> : null}
           {/* Per-turn outcome, on the reply. Null on the shopper's message,
               because the question did not have an outcome. */}
