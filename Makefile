@@ -114,10 +114,17 @@ widget-check-live:
 # Set a tenant up and hand you a URL to open in your OWN browser. A headless
 # pass proves the widget works; it does not show anybody what it looks like.
 #   make widget-demo SHOP=http://bagisto.test/neura/v1 TOKEN=... [SHADOW=1]
-widget-demo:  ## Provision a tenant + widget key and print a URL to open by hand
+#
+# AGENTS is comma-separated. `AGENTS=care,sell` provisions a tenant running
+# both, with a key holding both agents' scopes, and prints a URL that pins
+# neither — so the server chooses per message ([ADR-0031]). Without it the
+# tenant runs `care` alone and the URL pins it, which is what a single-agent
+# embed does anyway.
+widget-demo:  ## Provision a tenant + widget key and print a URL: make widget-demo SHOP=... TOKEN=... [AGENTS=care,sell]
 	uv run python scripts/widget_check.py --live --setup-only \
 	  --url $(or $(URL),http://localhost:8000) \
-	  --shop-url $(SHOP) --shop-token $(TOKEN) $(if $(SHADOW),--shadow,)
+	  --shop-url $(SHOP) --shop-token $(TOKEN) $(if $(SHADOW),--shadow,) \
+	  $(if $(AGENTS),--agent $(AGENTS),)
 
 tenant-drop:  ## Remove a tenant made by `make widget-demo`: make tenant-drop TENANT=tn_...
 	uv run python scripts/widget_check.py --drop $(TENANT)
