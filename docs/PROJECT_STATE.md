@@ -4,15 +4,105 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-08-30 (later) — **a shop can buy two agents and be delivered one ([ADR-0031], design only)**
+**Last updated:** 2026-09-01 — **[ADR-0031] built: a shop can buy two agents and be delivered both**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
-**Next action:** **Build [ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md), then get one real graded turn (E1).**
-Stage 8 is proved — `make console-check EMAIL=…` passes **33/33** in a real browser — but the
-console is a *reader* and has produced **no graded turn**, so E1 is blocked on one thing: a real
-shopper turn. Ahead of it sits a defect found this session and decided the same day: **a merchant
-who buys two agents can only be delivered one**, because the widget fixes the agent in their HTML
-and refuses to mount a second box. **B2 (a merchant) is still the top risk**, and the deployment
-blockers **K1** (production email) and **X2** (deploy target) are unchanged and both external.
+**Next action:** **Set the dispatch gate, decide [A19](open-questions.md), then get one real graded turn (E1).**
+ADR-0031 is built and verified live — one socket, one conversation, CARE's graph then SELL's, the
+shopper choosing nothing. What it does **not** have is a release gate: dispatch accuracy is
+**0.94 across three runs** and is reported *ungated* on purpose, because a threshold drawn from
+16 cases written the same week would be a number invented to be met. Setting it is a decision.
+**A19 is the other owner call** — CARE and SELL genuinely overlap on product questions, and which
+one should win is written in no ADR. Then **E1**: every case in this repository is still invented,
+the console is a reader and has produced no graded turn, and **B2 (no merchant) is still the top
+risk**. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
+both external.
+
+## Session 2026-08-30 → 09-01 — the shopper never chooses the agent, and now does not have to
+
+**[ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md) is built — all five
+steps — and [A13](open-questions.md) closes as built.** A merchant who buys two agents can now be
+delivered both. Before this they could not: the agent was fixed in their HTML, and the widget
+refused to mount a second box.
+
+**Verified live on one socket, one connection, two messages:**
+
+```
+"what is your returns policy?"     → agent=care  … act, triage
+"I need a warm jacket for winter"  → agent=sell  … act, shortlist
+```
+
+Two different graphs, the shopper choosing nothing.
+
+| step | shipped |
+|:--|:--|
+| 1 | `AgentManifest.handles` + `handles_examples` — an agent declares what it answers |
+| 2 | `neura-evals` measures a target that is **not an agent**; `neura-dispatch` holds the dataset |
+| 3 | the chooser, and `POST /v1/chat` — no agent in the path |
+| 4 | the widget stops choosing; `/v1/stream` dispatches **per message** |
+| 5 | `conversation_messages.agent_key` — one thread, marked |
+
+### 📏 First dispatch baseline, and the gate it does not have
+
+`ollama-dev`, llama3.2:3b on ROUTER, 16 synthetic cases, **n=3**: **dispatch accuracy 0.94 in all
+three runs**, p50 ~1.7s, the same single failure each time.
+
+```
+✔ care → care  x10     ← the direction that costs a human: 10 of 10
+✔ sell → sell  x5
+✘ sell → care  x1      ← the direction that costs a product card
+```
+
+**Reported and deliberately ungated.** ADR-0031 requires a gate before this ships and a threshold
+set now would be drawn from cases written the same week against a model nobody has measured on this
+workload — a number invented to be met (CLAUDE.md §4). **This is the baseline; the gate comes next
+and it is a decision, not a calculation.**
+
+**§7's deferred question has its first number.** A dispatched turn pays for two classifications —
+the dispatcher, then the chosen agent's own `route`. ~1.7s p50 locally, against the 7.7s
+[A11](open-questions.md) measured for the configured *cloud* router. Different models on different
+hardware and **not comparable**; what it supports is only that no `DISPATCHER` role is warranted
+yet, which is exactly what §7 said to decide by measurement.
+
+### 🔴 The one failing case is a product decision — [A19](open-questions.md), and it is for the owner
+
+*"What would you recommend for hiking in wet weather?"* reaches CARE, not SELL, 3 of 3. A
+diagnostic that **changed nothing** showed the declaration decides it: remove *"Also general
+questions about what the store sells"* from CARE's and the same message flips to `sell` at 0.9.
+
+**But CARE's declaration is accurate** — its `route.md` gives `product_qa` as *"…comparisons,
+**recommendations**"*. CARE really does answer shopping questions. So the overlap is real and the
+**dataset** is what encodes an undecided rule: *when both can answer, prefer the specialist*. That
+appears in no ADR.
+
+**Nothing was tuned.** Editing a declaration until a suite goes green is the 2026-07-30 mistake
+arriving through a manifest instead of a prompt. The cost of leaving it is known: this misroute
+loses the product cards and nothing else, because CARE answers the question.
+
+### Two defects found by building, both general rather than ours
+
+**The eval report inferred "nothing ran" from the target's *name*.** `target_name == "no-agent"`, so
+the first target that was neither an agent nor `--no-agent` printed **"16 passed, 0 failed" with no
+caveat**. Now keyed on the measurement, and the banner quotes the target's own reason. A name is not
+a measurement.
+
+**The zero-tool rule fired on dispatch cases** — the failure PROJECT_STATE predicted for CARE's 39
+silent cases, arriving on a new surface. Exempted narrowly, and a test proves it still bites a real
+zero-tool agent turn.
+
+### What is deliberately still open
+
+- **The dispatch gate.** Rule 4 is satisfied by *having* a suite; the release gate is not set.
+- **[A19](open-questions.md)** — the CARE/SELL overlap, a product question.
+- **Confidence is carried and nothing gates on it.** A bar is a rule ADR-0031 did not decide.
+- **E1, still.** All 16 dispatch cases are invented. A second synthetic dataset waiting on the same
+  real conversations everything else waits on.
+- **Scope stays blueprint-v2.** v1's larger SELL features are not re-opened; dynamic pricing needs a
+  superseding ADR for [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) and cart recovery is
+  an explicit reversal of `CLAUDE.md` §2.
+
+**Next:** set the dispatch gate with the owner, decide A19, then **E1 — one real graded turn**, and
+only then the remaining three agents.
+
 
 ## Session 2026-08-30 (later) — a shop can buy two agents and be delivered one
 

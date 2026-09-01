@@ -211,7 +211,7 @@ Optional attributes:
 |:--|:--|:--|
 | `data-neura-key` | *required* | The public key |
 | `data-neura-api` | the origin serving the script | Point at a different API host |
-| `data-neura-agent` | `care` | Which agent to talk to |
+| `data-neura-agent` | *(none — the server chooses)* | Pin the widget to **one** agent. Leave it out and every message is routed to whichever of the merchant's enabled agents declares that it answers that kind of question ([ADR-0031]) — which is what a shop running two agents wants, because a shopper does not know which of your services owns their question. Set it only to pin a page to one service. |
 | `data-neura-title` | `Chat with us` | The panel heading |
 | `data-neura-open` | `false` | Start with the panel open |
 

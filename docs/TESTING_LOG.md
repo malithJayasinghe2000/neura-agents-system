@@ -1228,6 +1228,129 @@ session. Worth recording that the hard rule is **not** the obstacle it appears t
 the agents does not make one agent import another, so `AGENTS.md` does not block it.
 
 
+
+## ADR-0031 built — the shopper never chooses the agent (2026-08-30 → 09-01)
+
+All five steps of [ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md),
+built and verified against the real shop. **[A13](open-questions.md) closes as built; the gate it
+owes does not exist yet.**
+
+### What a shopper can now do that they could not before
+
+One chat box, one connection, and **the service changes when the subject does**:
+
+```
+"what is your returns policy?"     → agent=care  … act, triage
+"I need a warm jacket for winter"  → agent=sell  … act, shortlist
+```
+
+Two different graphs, one socket, the shopper choosing nothing. Before this, that shop had to pick
+**one** agent in its HTML and the other was bought and unreachable.
+
+### The five pieces
+
+| step | what it is | proves |
+|:--|:--|:--|
+| 1 | `AgentManifest.handles` + `handles_examples` | an agent says what it answers, in its own words |
+| 2 | `neura-evals` measures a non-agent target | Rule 4 has somewhere to stand |
+| 3 | `neura-dispatch` + `POST /v1/chat` | the choice, and the door with no agent in its path |
+| 4 | widget stops sending `data-neura-agent`; `/v1/stream` | the socket chooses **per message** |
+| 5 | `conversation_messages.agent_key` | the merchant reads one thread, marked |
+
+### 📏 The first dispatch baseline
+
+`ollama-dev`, **llama3.2:3b** on ROUTER, 16 synthetic cases, **n=3**:
+
+| | run 1 | run 2 | run 3 |
+|:--|--:|--:|--:|
+| dispatch accuracy | **0.94** | **0.94** | **0.94** |
+| p50 | 1715ms | 1698ms | 1698ms |
+| failures | 1 | 1 | 1 — the same one |
+
+```
+dispatch  expected → chosen
+  ✔ care → care  x10        ← the expensive direction, 10 of 10
+  ✔ sell → sell  x5
+  ✘ sell → care  x1         ← the cheap direction
+```
+
+**The rate is reported and deliberately ungated.** A threshold set now would come from cases
+written the same week by whoever wrote the dispatcher, against a model nobody has measured on this
+workload — a number invented to be met. ADR-0031 requires a gate before this ships; **this is how a
+baseline gets taken**, and the gate comes after.
+
+**On latency, and it matters for [ADR-0031 §7](architecture/adr/0031-the-shopper-never-chooses-the-agent.md).**
+A dispatched turn pays for **two** classifications — the dispatcher, then the chosen agent's own
+`route`. Measured at **~1.7s p50 locally**, against the **7.7s** [A11](open-questions.md) recorded
+for the configured *cloud* router. Those are different models on different hardware and are not
+comparable; what can be said is that the local number is small enough that no `DISPATCHER` role is
+warranted yet, which is the decision §7 deferred to exactly this measurement.
+
+### 🔴 Finding 14: the one failing case is a product question, not a model failure — [A19](open-questions.md)
+
+*"What would you recommend for hiking in wet weather?"* → expected `sell`, got **`care`**, 3 of 3.
+
+A diagnostic — **run once, changed nothing** — removed one sentence from CARE's declaration:
+
+| CARE's declaration | chosen |
+|:--|:--|
+| as shipped | `care` (0.8) |
+| minus *"Also general questions about what the store sells"* | **`sell` (0.9)** |
+
+**So the declaration decides it — and CARE's declaration is correct.** `route.md` gives CARE's
+`product_qa` as *"availability, price, sizes, materials, stock, comparisons, **recommendations**"*.
+CARE genuinely answers shopping questions.
+
+**Which means the *dataset* holds the undecided policy**, not the code: *when both agents can
+answer, prefer the specialist* is a rule that appears in no ADR. Editing the declaration until the
+suite went green would be the **2026-07-30 mistake** — a prompt loosened to move a number — arriving
+through a manifest instead. **Nothing was changed.** Recorded as [A19](open-questions.md).
+
+The cost of leaving it is known and small: this misroute loses the product cards and nothing else,
+because CARE answers the question. **That is precisely why the matrix is printed beside the rate.**
+
+### What made the design work, and it was checked before it was offered
+
+**A layer *above* the agents is not one agent importing another**, so `AGENTS.md`'s hard rule was
+never the obstacle it looked like. And `neura-api` still does not know the word "care": agents
+declare what they answer in their own manifests, the dispatcher renders those declarations into its
+prompt, and the response schema is a `Literal` built from the keys on offer — so the model cannot
+name an agent that does not exist.
+
+**A single-agent shop makes no model call at all.** Asserted by passing a client that would raise if
+it were touched.
+
+### ⚠️ Finding 15: "nothing ran" was inferred from the target's *name*
+
+The eval report's loudest banner — *NO AGENT WAS RUN* — keyed on `target_name == "no-agent"`. So the
+first target that was neither an agent nor `--no-agent` printed **`16 passed, 0 failed` with no
+caveat at all.** True of the checks, false of everything a reader infers.
+
+Now keyed on the measurement, and the banner quotes the target's own reason. **A name is not a
+measurement** — the same lesson `coverage` already carried.
+
+### ⚠️ Finding 16: the socket had to change, and per-message is the requirement
+
+The widget prefers a WebSocket and `/v1/chat` had no `/stream` twin; leaving it would have quietly
+demoted every dispatched turn to the REST fallback. So `run_streamed_turn` takes
+`agent_key: str | None`, and a dispatched socket chooses **per message rather than per connection**.
+
+That is not an optimisation. A socket that resolved its agent at the handshake would pin the whole
+conversation to whatever its first sentence happened to be about — and §5's entire premise is that a
+shopper changes subject. The cost is stated: the agent-specific scope check moves inside the loop,
+so a dispatched socket is accepted before it is known which scope it will need. The key is still
+authenticated at the handshake and the origin lock still applies.
+
+### Verified, and what is still unverified
+
+**Verified live:** both transports, one key, no agent in the URL; the per-message column written
+correctly on a real two-subject conversation; `conversations.agent_key` still recording what the
+thread *started* with.
+
+**Not verified:** anything about whether a real shopper's messages route correctly. Every one of the
+16 cases is invented — **E1 again**, and the dispatch suite is now a second dataset waiting on the
+same real conversations the rest of the project is.
+
 ## Stage 9 — the new e-commerce ⬜
 
 The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the
