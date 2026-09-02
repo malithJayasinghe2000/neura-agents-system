@@ -7,7 +7,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
         test-integration test-widget widget-check widget-check-live widget-demo tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
-        care-check care-ask sell-ask llm-check judge-check \
+        care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
         api-check verify-probe router-probe console console-check
 
@@ -189,6 +189,14 @@ care-check:  ## Hold real conversations with CARE against a REAL shop: make care
 # to `as` — so `$(if $(AS),...)` is always true and every run would silently
 # authenticate as a customer called "as". It cost an afternoon: the anonymous
 # security case appeared to fail because the shopper was never anonymous.
+# Deliberately unlike `care-ask` and `sell-ask`, which drive one agent's graph
+# in-process. This goes over HTTP to the running API with a **public widget
+# key**, so it exercises what a browser exercises: the origin lock, the
+# entitlement check, the scope check, and the dispatcher's choice ([ADR-0031]).
+chat-ask:  ## Ask the dispatched endpoint, as a browser would: make chat-ask KEY=fn_pk_... Q="..."
+	uv run python scripts/chat_ask.py --key $(KEY) \
+	  $(if $(BASE),--base $(BASE),) $(if $(CONV),--conversation $(CONV),) -- "$(Q)"
+
 care-ask:  ## Ask CARE one question and watch every step: make care-ask Q="..." URL=... TOKEN=... [CUSTOMER=385]
 	uv run python scripts/care_ask.py --url $(URL) --token $(TOKEN) \
 	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
