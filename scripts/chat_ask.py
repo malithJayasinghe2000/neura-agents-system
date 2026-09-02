@@ -49,10 +49,24 @@ OUTCOMES = {
 }
 
 
-def ask(base: str, key: str, message: str, conversation_id: str | None) -> dict[str, Any]:
+def ask(
+    base: str,
+    key: str,
+    message: str,
+    conversation_id: str | None,
+    customer: str | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {"message": message}
     if conversation_id:
         payload["conversation_id"] = conversation_id
+    if customer:
+        # **Refused on a public key, in the route.** A browser cannot be trusted
+        # to name its own customer, so this only works with a secret key — which
+        # is the merchant's server speaking, not a shopper's tab. Passing it here
+        # is how the *other* half of the ownership gate gets exercised by hand:
+        # the same order number that escalates anonymously is answered for the
+        # customer who owns it, and returns nothing for one who does not.
+        payload["customer"] = {"external_id": customer}
 
     origin = base.rstrip("/")
     try:
@@ -82,13 +96,19 @@ def main() -> int:
     parser.add_argument("--base", default="http://localhost:8010")
     parser.add_argument("--key", required=True, help="a public widget key (fn_pk_...)")
     parser.add_argument("--conversation", default=None, help="continue an existing conversation")
+    parser.add_argument(
+        "--as-customer",
+        default=None,
+        help="a verified customer id — needs a SECRET key (fn_sk_), refused on a public one",
+    )
     parser.add_argument("message", nargs="+")
     args = parser.parse_args()
 
     message = " ".join(args.message)
-    print(f"\n{DIM}>{RESET} {BOLD}{message}{RESET}\n")
+    who = f"  {DIM}as customer {args.as_customer}{RESET}" if args.as_customer else ""
+    print(f"\n{DIM}>{RESET} {BOLD}{message}{RESET}{who}\n")
 
-    body = ask(args.base, args.key, message, args.conversation)
+    body = ask(args.base, args.key, message, args.conversation, args.as_customer)
 
     error = body.get("error")
     if isinstance(error, dict):

@@ -195,7 +195,8 @@ care-check:  ## Hold real conversations with CARE against a REAL shop: make care
 # entitlement check, the scope check, and the dispatcher's choice ([ADR-0031]).
 chat-ask:  ## Ask the dispatched endpoint, as a browser would: make chat-ask KEY=fn_pk_... Q="..."
 	uv run python scripts/chat_ask.py --key $(KEY) \
-	  $(if $(BASE),--base $(BASE),) $(if $(CONV),--conversation $(CONV),) -- "$(Q)"
+	  $(if $(BASE),--base $(BASE),) $(if $(CONV),--conversation $(CONV),) \
+	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
 
 care-ask:  ## Ask CARE one question and watch every step: make care-ask Q="..." URL=... TOKEN=... [CUSTOMER=385]
 	uv run python scripts/care_ask.py --url $(URL) --token $(TOKEN) \
