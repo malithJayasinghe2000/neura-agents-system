@@ -196,18 +196,18 @@ care-check:  ## Hold real conversations with CARE against a REAL shop: make care
 chat-ask:  ## Ask the dispatched endpoint, as a browser would: make chat-ask KEY=fn_pk_... Q="..."
 	uv run python scripts/chat_ask.py --key $(KEY) \
 	  $(if $(BASE),--base $(BASE),) $(if $(CONV),--conversation $(CONV),) \
-	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
+	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) $(if $(ORIGIN),--origin $(ORIGIN),) -- "$(Q)"
 
 care-ask:  ## Ask CARE one question and watch every step: make care-ask Q="..." URL=... TOKEN=... [CUSTOMER=385]
 	uv run python scripts/care_ask.py --url $(URL) --token $(TOKEN) \
-	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
+	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) $(if $(ORIGIN),--origin $(ORIGIN),) -- "$(Q)"
 
 # SELL's half of `care-ask`, and the reason it exists is specific: until it was
 # written, every measurement of SELL ran against four invented fixture products.
 # A recommender graded only on fixtures is graded on somebody's imagination.
 sell-ask:  ## Ask SELL one question and watch every step: make sell-ask Q="..." URL=... TOKEN=...
 	uv run python scripts/sell_ask.py --url $(URL) --token $(TOKEN) \
-	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) -- "$(Q)"
+	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) $(if $(ORIGIN),--origin $(ORIGIN),) -- "$(Q)"
 
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py

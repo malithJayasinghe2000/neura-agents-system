@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-02 — **the widget runs on a real storefront, and two findings make it unusable there**
+**Last updated:** 2026-09-02 (later) — **on a cloud model the whole path works: dispatch, retrieval, cards, and a verifier that refuses an invented adjective**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Next action:** **Measure [A20](open-questions.md) on a cloud model, then decide A20 and A21 with the owner.**
 The widget now runs on a real storefront and a conversation there dies at its second message: CARE's
@@ -20,6 +20,43 @@ one should win is written in no ADR. Then **E1**: every case in this repository 
 the console is a reader and has produced no graded turn, and **B2 (no merchant) is still the top
 risk**. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
 both external.
+
+## Session 2026-09-02 (later) — the product, working, on a cloud model
+
+`gemini-3.6-flash` on every role, `gemini-embedding-001` for retrieval, the real shop, the real
+widget key, `POST /v1/chat` with no agent in the path.
+
+| question | agent | outcome |
+|:--|:--|:--|
+| *do you sell jackets?* | care | ✅ names both jackets with prices and stock |
+| *I need a warm jacket for winter under 200* | sell | ✅ two grounded recommendations **with cards** |
+| *which is warmer, field jacket or rain shell?* | sell | ⚠️ `verify` caught an inserted adjective |
+| *where is my order NRA0001?* | care | 🚫 `ownership`, correctly ([A21](open-questions.md)) |
+
+**[A20](open-questions.md) does not reproduce on cloud** — 25 router calls across five history arms,
+0.95–1.00 throughout against `llama3.2:3b`'s flat 0.00. **🔴 → 🟡**, and it becomes a *sovereign-tier*
+defect rather than a design fault, because `sovereign` is `ollama-dev` pointed at a customer's host
+and is a shipping tier.
+
+**`verify` refused *"an **uninsulated** 2.5-layer waterproof shell"*** — the description says
+"2.5-layer waterproof shell" verbatim and never says uninsulated. A9 exactly, and the **opposite
+direction to Finding 10**, where this same model passed an invented "waterproof with taped seams".
+Two anecdotes, opposite ways: the argument for settling A9/S9 with a dataset rather than a story.
+
+### ⚠️ Two setup faults, and one nearly became a fabricated finding
+
+**`CLOUD_EMBEDDING_DIMENSIONS` defaults to 1536; `gemini-embedding-001` returns 3072.** Every turn
+logged `retrieve_failed` and carried on **without retrieval**, so the agent looked bad rather than
+misconfigured. The line is missing from `.env.example`.
+
+**And the dispatch tenant had never been indexed.** Before fixing both, *"do you sell jackets?"*
+answered *"We could not find any jackets in our catalogue"* about a shop with four — and the obvious
+reading was that A19's CARE misroute is expensive rather than cheap. **That reading was wrong.** With
+an index CARE answers correctly and carries no cards, which is exactly the cost A19 already claims.
+**A19 confirmed, not corrected** — the finding would have been built on a setup fault.
+
+**Next:** unchanged. The dispatch gate, A19, A20/A21 — all owner decisions — and **E1**, which four
+questions typed by the person who built the system do nothing for.
 
 ## Session 2026-09-02 — on a real storefront, and the first conversation dies at message two
 

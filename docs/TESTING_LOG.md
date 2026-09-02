@@ -1482,6 +1482,84 @@ value, so **the demo page wrote `data-neura-agent="care"` into every page it ser
 had stopped choosing; the page that loads it had not. Dispatch never ran in a browser until this was
 found — by the project owner, typing into the widget and getting the same agent for everything.
 
+
+## The product on a cloud model, through the dispatched door — 2026-09-02
+
+`gemini-3.6-flash` on every role, `gemini-embedding-001` for retrieval, the real Bagisto shop, the
+real widget key, `POST /v1/chat` with no agent in the path. **The first time this system has been
+seen working rather than surviving.**
+
+| question | agent | outcome |
+|:--|:--|:--|
+| *do you sell jackets?* | care | ✅ *"Yes, we sell jackets, including the Waxed Cotton Field Jacket for 165.00 USD and the Lightweight Rain Shell for 110.00 USD. Both items are currently in stock."* |
+| *I need a warm jacket for winter under 200* | sell | ✅ two grounded recommendations **with product cards** |
+| *which is warmer, the field jacket or the rain shell?* | sell | ⚠️ escalated — `verify` caught an inserted adjective |
+| *where is my order NRA0001?* | care | 🚫 `ownership`, correctly ([A21](open-questions.md)) |
+
+**The recommendation is worth quoting in full**, because it is what the product is supposed to do:
+
+> *"Product 1311 (Waxed Cotton Field Jacket, $165.00 USD) features 8oz waxed cotton to shed rain and
+> a storm flap over the zip… Product 1313 (Quilted Liner Vest, $84.00 USD) uses recycled polyester
+> fill and is cut slim to fit comfortably under an outer coat."*
+
+Cards: **Waxed Cotton Field Jacket, Quilted Liner Vest**. Every attribute traceable to the
+merchant's own description. [ADR-0030](architecture/adr/0030-a-product-card-is-data-the-widget-draws.md)
+working on real data, on a real storefront's key.
+
+### ✅ `verify` caught a fabrication that Finding 10's model let through
+
+*"which is warmer"* composed:
+
+> *"the Lightweight Rain Shell (1315) costs 110.00 USD and is an **uninsulated** 2.5-layer waterproof
+> shell"*
+
+The description: *"A 2.5-layer waterproof shell rated to 10,000mm with fully taped seams…"*.
+`110.00` is right, `2.5-layer waterproof shell` is verbatim — **`uninsulated` appears nowhere.** A
+rain shell not being insulated is true of the world and is not a claim this catalogue makes, which
+is [A9](open-questions.md) exactly. The turn escalated with the draft attached and nothing false
+reached the shopper.
+
+**Note the direction.** [Finding 10](#) recorded `gemini-3.6-flash`'s verifier *passing* an invented
+"waterproof with taped seams" while the local one caught it. Here the same model catches an inserted
+adjective. **One reply is not a measurement in either direction** — which is the argument for
+[S9](open-questions.md)/A9 being settled by a dataset rather than by anecdote, and this is a second
+anecdote pointing the other way.
+
+### ⚠️ Finding 19: two setup faults, and the first one is silent
+
+**`CLOUD_EMBEDDING_DIMENSIONS` defaults to 1536 and `gemini-embedding-001` returns 3072.** Every
+turn logged `retrieve_failed … vectors of different sizes are not comparable` and then **carried on
+without retrieval**, so the agent answered from tool calls alone and looked merely bad rather than
+misconfigured. The guard from llm-abstraction.md §5.2 did its job — it refused to compare
+incompatible vectors and said why — but nothing in the *reply* said retrieval was missing.
+
+`.env` needs the line, and it is not in `.env.example`:
+
+```bash
+CLOUD_EMBEDDING_DIMENSIONS=3072   # gemini-embedding-001; the default 1536 is wrong for it
+```
+
+**And the tenant had never been indexed at all.** A dispatch tenant was provisioned with a store
+connected and no `rag-check` run against it, so `retrieve` had nothing even once the dimensions were
+right. Both product questions failed until it was indexed; both answered correctly afterwards.
+
+**That near-miss is the lesson.** With no index, *"do you sell jackets?"* answered *"We could not
+find any jackets in our catalogue"* — about a shop with four — and the obvious reading was that
+[A19](open-questions.md)'s CARE misroute is expensive rather than cheap. **It is not**, and writing
+that down would have been a fabricated finding: with the index present CARE answers correctly, and
+A19's stated cost — *the shopper loses the product cards* — is exactly right. CARE's reply carried
+no cards; SELL's carried two. **A19 is confirmed, not corrected.**
+
+### What this does and does not say
+
+**Does:** the whole path works end to end on a cloud model — dispatch, retrieval, tools, grounded
+composition, cards, and a verifier that refuses an unsupported adjective. Roughly 8–26s per turn
+against 25–45s locally.
+
+**Does not:** say anything about quality. Four questions, one shop, one model, chosen by the person
+who built it. **E1 is untouched**, and these are exactly the invented cases the report banner warns
+about — the only difference is that a human typed them.
+
 ## Stage 9 — the new e-commerce ⬜
 
 The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the

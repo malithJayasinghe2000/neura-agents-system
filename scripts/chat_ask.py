@@ -55,6 +55,7 @@ def ask(
     message: str,
     conversation_id: str | None,
     customer: str | None = None,
+    origin: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"message": message}
     if conversation_id:
@@ -68,17 +69,22 @@ def ask(
         # customer who owns it, and returns nothing for one who does not.
         payload["customer"] = {"external_id": customer}
 
-    origin = base.rstrip("/")
+    # A key is locked to the origin it was issued for (ADR-0014 §3), and that is
+    # usually the merchant's storefront rather than the API's own host. Without
+    # an override, a storefront key tested from here is refused as
+    # ORIGIN_NOT_ALLOWED — the control working, and a confusing way to meet it.
+    endpoint = base.rstrip("/")
+    sent_origin = (origin or base).rstrip("/")
     try:
         response = httpx.post(
-            f"{origin}/v1/chat",
+            f"{endpoint}/v1/chat",
             json=payload,
             headers={
                 "Authorization": f"Bearer {key}",
                 # The key is origin-locked (ADR-0014 §3), so a request without
                 # this is refused before any model runs — the control working,
                 # not something to route around.
-                "Origin": origin,
+                "Origin": sent_origin,
             },
             timeout=600,
         )
@@ -97,6 +103,11 @@ def main() -> int:
     parser.add_argument("--key", required=True, help="a public widget key (fn_pk_...)")
     parser.add_argument("--conversation", default=None, help="continue an existing conversation")
     parser.add_argument(
+        "--origin",
+        default=None,
+        help="Origin header to send — the origin the key is locked to (default: --base)",
+    )
+    parser.add_argument(
         "--as-customer",
         default=None,
         help="a verified customer id — needs a SECRET key (fn_sk_), refused on a public one",
@@ -108,7 +119,7 @@ def main() -> int:
     who = f"  {DIM}as customer {args.as_customer}{RESET}" if args.as_customer else ""
     print(f"\n{DIM}>{RESET} {BOLD}{message}{RESET}{who}\n")
 
-    body = ask(args.base, args.key, message, args.conversation, args.as_customer)
+    body = ask(args.base, args.key, message, args.conversation, args.as_customer, args.origin)
 
     error = body.get("error")
     if isinstance(error, dict):
