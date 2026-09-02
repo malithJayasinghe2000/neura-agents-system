@@ -1351,6 +1351,102 @@ thread *started* with.
 16 cases is invented — **E1 again**, and the dispatch suite is now a second dataset waiting on the
 same real conversations the rest of the project is.
 
+
+## The widget on a real storefront — 2026-09-02
+
+The two-line snippet, pasted into Bagisto's own layout, on `bagisto.test`. **The first time this
+system has run on a real shop's page**, and it took about ten minutes.
+
+```html
+<script src="http://localhost:8010/v1/widget/widget.js" async
+        data-neura-key="fn_pk_test_…" data-neura-api="http://localhost:8010"></script>
+```
+
+**No `data-neura-agent`.** The bubble appeared, the origin lock held (`bagisto.test` allowed,
+`evil.example` → `ORIGIN_NOT_ALLOWED`), CORS resolved per key, and the server chose the agent per
+message. [ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md) working on a real
+storefront.
+
+**And the shop was unusable within three messages.** Two findings, and together they are worse than
+either.
+
+### 🔴 Finding 17: one handover poisons the conversation — [A20](open-questions.md)
+
+Every message after the first returned the handover sentence, *including* *"what is your returns
+policy?"* — which answers perfectly on a fresh conversation.
+
+**Reproduced deterministically**, `ollama-dev` / `llama3.2:3b`, calling `_classify` directly, five
+runs per arm:
+
+| history given to `route` | confidence | escalates |
+|:--|:--|--:|
+| none | **1.00** ×5 | 0/5 |
+| a benign prior turn (the real policy answer) | **1.00** ×5 | 0/5 |
+| *"hello" / "How can I help?"* | **1.00** ×5 | 0/5 |
+| **the handover sentence** | **0.00** ×5 | **5/5** |
+| **its first sentence alone** | **0.00** ×5 | **5/5** |
+
+`MIN_CONFIDENCE` is 0.5, so every one of those escalates — `llm_calls=1`, no tool call, no second
+chance.
+
+**The control is what makes it a finding rather than a guess.** History in general is fine; that
+specific text is not. **And it is CARE-only** — SELL scores 0.80 with and without its own handover
+in history, 5/5 either way. So it is an interaction between `route.md` and the sentence `escalate`
+writes, not a property of small routers.
+
+**Nothing was changed.** The obvious fix — keep the handover out of the history `route` sees — is
+defensible (it is a status written by `escalate`, not the shopper's words or the composer's) and it
+is a **decision**: the shopper did see it, and it changes what both agents route on. Rewording the
+sentence instead would be tuning a prompt against one model, which this file records going wrong
+twice already. **Unmeasured on a cloud model**, and that is the first thing to do about it.
+
+### 🟠 Finding 18: the widget can never say who the shopper is — [A21](open-questions.md)
+
+Every *"where is my order?"* from the storefront escalates at the ownership gate, and always will.
+**That is the security model working**, and the two halves were verified by hand:
+
+| asked as | result |
+|:--|:--|
+| anonymous (public key) | 🚫 `ownership` — refused, **`tool_calls=0`**, the shop was never asked |
+| `CUSTOMER=385`, secret key | ✅ *"shipped via DHL Express, tracking DHL4821960377"* |
+| `CUSTOMER=385` asking for **386's** order | ⬛ *"couldn't find an order with reference NRA0002"* |
+
+That third row is the guarantee Stage 5 describes, now confirmed over HTTP: a signed-in shopper
+fishing for someone else's order is not refused, they are shown **nothing**, and the sentence is the
+same one an order that does not exist would produce.
+
+**What is missing is the other end of it.** [INTEGRATION_GUIDE §8](INTEGRATION_GUIDE.md) says only
+*"that must come from your server using a secret key"* — one sentence, no mechanism. So a merchant
+who pastes the snippet we publish gets an assistant that **cannot answer the commonest support
+question there is**, and one of CARE's three intents is unreachable.
+
+### The two findings compound, and that is the real result
+
+An anonymous shopper asks about an order → the gate correctly escalates (A21) → the handover lands
+in the transcript → **every later message escalates** (A20). The commonest opening message on any
+storefront leads directly into a conversation that cannot recover.
+
+**Neither is a dispatch fault.** `dispatch_route` chose correctly on every turn of every screenshot
+— the routing this week's work built is not what broke here.
+
+### Tooling added while testing this
+
+`make chat-ask KEY=… Q="…"` — one message through `POST /v1/chat`, over HTTP, with a public widget
+key, printing the agent the *server* chose, the outcome, and the tools used. Deliberately unlike
+`care-ask` and `sell-ask`, which drive one agent's graph in-process: this exercises what a browser
+exercises, including the origin lock and the entitlement check. `CUSTOMER=385` sends the identity a
+merchant's server would, and is refused on a public key exactly as the route intends.
+
+`make widget-demo … AGENTS=care,sell` provisions a tenant running both, with a key holding both
+agents' scopes, and prints a URL pinning neither.
+
+### ⚠️ And the fix that made all of this visible
+
+`/v1/widget/demo` defaulted its `agent` parameter to `"care"` and fell back to `"care"` on a junk
+value, so **the demo page wrote `data-neura-agent="care"` into every page it served**. `widget.js`
+had stopped choosing; the page that loads it had not. Dispatch never ran in a browser until this was
+found — by the project owner, typing into the widget and getting the same agent for everything.
+
 ## Stage 9 — the new e-commerce ⬜
 
 The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the

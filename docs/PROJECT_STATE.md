@@ -4,9 +4,13 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-01 — **[ADR-0031] built: a shop can buy two agents and be delivered both**
+**Last updated:** 2026-09-02 — **the widget runs on a real storefront, and two findings make it unusable there**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
-**Next action:** **Set the dispatch gate, decide [A19](open-questions.md), then get one real graded turn (E1).**
+**Next action:** **Measure [A20](open-questions.md) on a cloud model, then decide A20 and A21 with the owner.**
+The widget now runs on a real storefront and a conversation there dies at its second message: CARE's
+router returns confidence 0.00 after any handover, and the ownership gate guarantees a handover on
+the commonest opening question. Both are decisions rather than repairs, and neither has been
+measured on anything but `llama3.2:3b`. Then: the dispatch gate, [A19](open-questions.md), and E1.
 ADR-0031 is built and verified live — one socket, one conversation, CARE's graph then SELL's, the
 shopper choosing nothing. What it does **not** have is a release gate: dispatch accuracy is
 **0.94 across three runs** and is reported *ungated* on purpose, because a threshold drawn from
@@ -16,6 +20,63 @@ one should win is written in no ADR. Then **E1**: every case in this repository 
 the console is a reader and has produced no graded turn, and **B2 (no merchant) is still the top
 risk**. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
 both external.
+
+## Session 2026-09-02 — on a real storefront, and the first conversation dies at message two
+
+**The widget is running on Bagisto's own storefront**, embedded with the published two-line snippet
+and **no `data-neura-agent`** — so the server picks the agent per message. Origin lock held
+(`bagisto.test` allowed, a stranger's origin refused), CORS resolved per key, dispatch chose
+correctly on every turn. [ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md)
+works on a real shop's page.
+
+**And the shop is unusable within three messages.** Two findings, and they compound.
+
+### 🔴 [A20](open-questions.md) — one handover poisons the conversation
+
+After CARE escalates once, its router returns **confidence 0.00 for every later message**, so every
+later message escalates. `MIN_CONFIDENCE` is 0.5; `llm_calls=1`; no tool call, no second chance.
+
+Reproduced deterministically on `llama3.2:3b`, five runs per arm: no history **1.00 ×5**, a benign
+prior turn **1.00 ×5**, *"hello"/"How can I help?"* **1.00 ×5** — and the handover sentence
+**0.00 ×5**, or its first sentence alone, **0.00 ×5**. **CARE-only:** SELL scores 0.80 with and
+without its own handover.
+
+**Nothing was changed.** Keeping the handover out of routing history is defensible and is a
+*decision* — the shopper did see it, and it changes what both agents route on. Rewording it instead
+would be tuning a prompt against one model, which this file records going wrong twice.
+**Unmeasured on a cloud model**, and that is the first thing to do about it.
+
+### 🟠 [A21](open-questions.md) — the widget can never say who the shopper is
+
+Every *"where is my order?"* from a storefront escalates at the ownership gate, and always will.
+**The gate is right** and both halves were verified over HTTP: anonymous refused with
+`tool_calls=0`; `CUSTOMER=385` on a secret key answered with the real tracking number; 385 asking
+for **386's** order got *"couldn't find"* rather than a refusal — the indistinguishability Stage 5
+names as the guarantee.
+
+What is missing is the merchant→NEURA identity handshake. `INTEGRATION_GUIDE` §8 has one sentence
+and no mechanism, so a merchant pasting our published snippet gets an assistant that **cannot answer
+the commonest support question there is**.
+
+### The two together are the actual result
+
+Anonymous shopper asks about an order → the gate escalates (A21) → the handover enters the
+transcript → every later message escalates (A20). **The commonest opening message on any storefront
+leads into a conversation that cannot recover.** Neither is a dispatch fault.
+
+### Also this session
+
+**A real bug in ADR-0031's own delivery, found by the owner:** `/v1/widget/demo` defaulted `agent`
+to `"care"` and fell back to `"care"` on junk, so the demo page pinned every message to CARE and
+**dispatch never ran in a browser** until it was fixed. `widget.js` had stopped choosing; the page
+that loads it had not.
+
+**Tooling:** `make chat-ask KEY=… Q="…" [CUSTOMER=385]` — one message over HTTP with a widget key,
+printing the agent the *server* chose. `make widget-demo … AGENTS=care,sell` provisions a
+two-agent tenant with a key holding both scopes.
+
+**Next:** measure A20 on a cloud model before touching anything, then decide A20 and A21 with the
+owner. Both are decisions, not repairs. E1 is unchanged and still the deeper gap.
 
 ## Session 2026-08-30 → 09-01 — the shopper never chooses the agent, and now does not have to
 
