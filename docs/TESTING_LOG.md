@@ -1400,6 +1400,41 @@ is a **decision**: the shopper did see it, and it changes what both agents route
 sentence instead would be tuning a prompt against one model, which this file records going wrong
 twice already. **Unmeasured on a cloud model**, and that is the first thing to do about it.
 
+### ✅ A20 measured on a cloud model — it does not reproduce, and that changes what it is
+
+Run the same day, `gemini-3.6-flash` on ROUTER, the same five arms, five runs each, same message.
+
+| history given to `route` | `llama3.2:3b` | `gemini-3.6-flash` |
+|:--|:--|:--|
+| none | 1.00 ×5 | 0.98–1.00, **0/5** |
+| a benign prior turn | 1.00 ×5 | 0.95–0.98, **0/5** |
+| **the handover sentence** | **0.00 ×5** | **0.95–0.98, 0/5** |
+| its first sentence alone | **0.00 ×5** | 0.95–0.98, **0/5** |
+| three stacked handovers | **0.00 ×5** | 0.95–0.98, **0/5** |
+
+Intent `policy_qa` on all 25 cloud calls.
+
+**So the handover text is not inherently confusing — one model reads it and one collapses on it.**
+A20 is a small-model failure, not a design fault, and drops 🔴 → 🟡.
+
+**It is still a real defect for a real tier.** `sovereign` *is* `ollama-dev` pointed at a customer's
+own inference host, and it is a **shipping product tier**, not a development mode
+([blueprint §4.3](business/blueprint-v2.md)). A sovereign customer gets the death spiral.
+
+**And it changes the argument about the fix.** Excluding the handover from routing history would now
+be a change made to accommodate one weak model — the shape of the 2026-07-30 mistake rather than an
+escape from it. The honest options are to write it down as a sovereign-tier limitation, or to treat
+routing robustness as a **model-selection** criterion for that tier, which is
+[ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s argument applied to ROUTER instead of
+GUARD.
+
+**One message, 25 calls, one model.** It settles *"design fault or model?"* and nothing else.
+
+**⚠️ Getting there needed `load_env()` first** — [Finding 8](#) again. `roles.py` resolves cloud
+models through raw `os.getenv` while `get_settings()` reads `.env` through pydantic, so a script
+that forgets it gets *"Role map 'cloud-prod' needs configuration for role 'router'"* for values
+sitting in the file. Two days later, same trap.
+
 ### 🟠 Finding 18: the widget can never say who the shopper is — [A21](open-questions.md)
 
 Every *"where is my order?"* from the storefront escalates at the ownership gate, and always will.
