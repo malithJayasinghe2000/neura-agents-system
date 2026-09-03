@@ -83,8 +83,7 @@ export default async function ReviewPage({
         <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
         <p className="text-muted-foreground">
           Replies your assistant drafted while in shadow mode. Nobody was shown any of them. Your
-          verdicts are what decide whether it is safe to go live — and they become the examples it
-          is tested against.
+          verdicts are what decide whether it is safe to go live.
         </p>
       </div>
 

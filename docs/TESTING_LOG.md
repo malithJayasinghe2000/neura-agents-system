@@ -1560,6 +1560,153 @@ against 25–45s locally.
 who built it. **E1 is untouched**, and these are exactly the invented cases the report banner warns
 about — the only difference is that a human typed them.
 
+## The first graded turns, and three findings — 2026-09-03
+
+**E1 moved for the first time.** `tn_01M1A52SCZ11EYMK6ZM8M3M37Z` ("Dispatch Test Shop"), `cloud-prod`
+on every role, `gemini-embedding-001` for retrieval, SHADOW mode, the widget live on
+`bagisto.test`. **Eight shadow turns recorded and all eight graded by the project owner** —
+**7 `agree`, 1 `disagree`** — through the console's Review screen, in a tenant that had produced no
+graded turn before today.
+
+| turn | agent | intent | state | latency | verdict |
+|:--|:--|:--|:--|--:|:--|
+| *do you sell waterproof jackets?* | care | `product_qa` | resolved | 18.5s | agree |
+| *do you have anything warm for winter?* | sell | `recommend` | resolved | 23.8s | agree |
+| *what's your delivery time to Sri Lanka?* | care | `policy_qa` | resolved | 20.7s | **disagree** |
+| *can I return something after 40 days?* | care | `policy_qa` | resolved | 18.8s | agree |
+| *which jacket is best for heavy rain?* | sell | `recommend` | resolved | 18.0s | agree |
+| *do you sell shoes?* | care | `product_qa` | resolved | 14.7s | agree |
+| *what payment methods do you take?* | care | `policy_qa` | resolved | 32.7s | agree |
+| *I'm looking for a gift for my wife* | sell | `recommend` | **escalated** | 27.4s | agree |
+
+**Eight turns typed by the person who built the system is not a measurement**, and this table is not
+evidence of quality. What it *is*: the grading path works end to end for the first time — draft
+withheld, row written, verdict saved with `reviewed_by` and `reviewed_at`. Dispatch chose CARE for
+all four policy/availability questions and SELL for all three recommendations, unprompted.
+
+### 🔴 Finding 20: the console promised a feature that does not exist — and so do two design docs
+
+The Review screen read:
+
+> *"Your verdicts are what decide whether it is safe to go live — **and they become the examples it
+> is tested against.**"*
+
+**The second clause is false.** `ShadowVerdict` appears in exactly five places — `shadow.py` (the
+enum, the table, the counts), `routes/agent.py` (writes a verdict), `routes/console_review.py`
+(serves the queue), `tests/unit/test_review.py`, and nowhere else. **Nothing under any `evals/`
+directory reads `shadow_turns`.** All eleven datasets are hand-written YAML:
+
+```
+agents/care/.../datasets/  policy_qa product_qa order_status guard injection out_of_scope
+agents/sell/.../datasets/  recommend no_match injection out_of_scope
+neura-dispatch/.../        dispatch
+```
+
+**And the UI was repeating the architecture, not inventing it.** The same promise is made twice more,
+in documents that describe the target rather than the position:
+
+- [agent-runtime.md §6](architecture/agent-runtime.md) — *"Graded shadow conversations feed the
+  golden dataset, so the review effort compounds instead of evaporating."*
+- [evaluation-strategy.md §2](architecture/evaluation-strategy.md) — *"Graded shadow-mode
+  conversations flow back in ([agent-runtime.md §6]), so review effort compounds."*
+
+So this is **not a copywriting slip**. It is a designed feedback loop that was documented, referenced
+across two architecture documents, surfaced in the UI, and **never built**. The console is where it
+became visible because the console is the only place that makes a promise to a *user*.
+
+**Fixed today, minimally: the false clause was deleted from
+[`review/page.tsx`](../apps/neura-console/src/app/console/[tenantId]/review/page.tsx).** One line, no
+test depended on the string. **The loop itself was not built**, and the two architecture documents
+still describe it — deliberately, because they record intent and the intent has not changed. What
+changed is that the screen no longer promises a user something the code does not do.
+
+**This is E1's direct answer and it is now the largest unbuilt thing in the project.** It is also
+where inventing would be easy and wrong: a graded turn becoming an eval case touches Rule 4
+("nothing merges without an eval"), so a verdict would become able to change whether code merges.
+**Four questions are undecided and none are in any ADR:** what a `disagree` becomes
+(`must_contain`? `must_not_contain`? neither?); whether promotion is automatic or reviewed; whether
+eight owner-typed turns on one shop may enter a dataset at all (CLAUDE.md §4 says no); and what
+happens to a case whose grade was wrong. **Design session, then an ADR.**
+
+### 🟠 Finding 21: a message is lost, silently, whenever the socket dies — and the shopper is blamed
+
+Reported by the owner as *"one turn errored"*: **"is the field jacket good for hiking?" → "We could
+not reach the assistant."** The question is fine. Re-run over REST with the same key and origin it
+resolves cleanly — `grounded=true`, `verify_reason = every claim supported`, a Waxed Cotton Field
+Jacket card, 33.5s.
+
+**The message never reached the server.** No `conversation_messages` row, no `shadow_turns` row,
+nothing matching `%hiking%` anywhere. Every other browser turn that session wrote both. And the
+string is client-side only — [`widget.js:58`](../apps/neura-api/src/neura_api/widget/widget.js), in
+no server response.
+
+**The mechanism is three lines that are each defensible alone:**
+
+- `deliver()` guards on `this.transport.socket` being non-null — but that only becomes null *after*
+  `onclose` has fired.
+- `StreamTransport.send()` calls `this.socket.send(...)` with **no `readyState` check**.
+- `socket.onclose = function () {…}` takes **no `event`**, so the close code and reason are discarded.
+
+Socket dies → shopper sends before the browser has processed the close → bytes go into a dead socket
+→ `onclose` fires with `pending` true → `TRANSPORT_ERROR_MESSAGE`. The turn is gone, and the shopper
+is told to check their connection.
+
+**Two things could have killed that socket, both inside a 64-second window, and the client threw away
+the evidence that would distinguish them:**
+
+| | local time | close code |
+|:--|:--|:--|
+| `IDLE_TIMEOUT_S = 300.0` ([stream.py](../apps/neura-api/src/neura_api/stream.py)) — 5 min after the last message (22:07:57) | 22:12:57 | `1000` / `"idle"` |
+| **uvicorn `--reload` respawned the worker** — PID 88112 started while the reloader parent had been up since 2026-09-02 | **22:14:01** | `1006` |
+
+`reload=True` whenever `env is DEVELOPMENT`, watching `*.py`, `*.js`, `*.html`
+([`__main__.py`](../apps/neura-api/src/neura_api/__main__.py)) — so **every source edit kills every
+open shopper socket.** That is a development-only cause; the idle timeout is not.
+
+**The finding is not the reload.** It is that after *any* socket death the next message is lost with
+an error that misattributes the fault, and only the message *after that* succeeds — `onClose` sets
+`transport = null`, so a fresh socket opens. On a real storefront: a shopper pauses five minutes,
+types, is told their connection failed, types again, gets an answer. **The REST fallback does not
+cover this** — it catches a socket that fails to *open* only, never one that dies mid-session.
+
+**Nothing was changed.** Checking `readyState` and re-sending over REST is a small repair, but it
+changes widget behaviour on a path with no browser coverage: `make widget-check`'s scenarios contain
+no dead-socket case, so the fix and its regression test have to arrive together.
+
+### ⚠️ Finding 22: `verify` refused a comparison the merchant's own description makes
+
+The escalated SELL turn above, graded `agree` by the owner. **The catalogue says:**
+
+> *Woven from 70% silk and 30% viscose, **which drapes like pure silk but survives more washes.***
+
+**`compose` wrote:**
+
+> *…a blouse woven from 70% silk and 30% viscose, giving it a **soft drape that survives more washes
+> than pure silk**.*
+
+**`verify` refused it:** `grounded=false`, `unsupported claim: giving it a soft drape that survives
+more washes than pure silk`.
+
+**Three claims in one sentence, and only the middle one is `verify`'s error:**
+
+1. *"survives more washes"* — **verbatim** in the evidence. ✅
+2. *"than pure silk"* — the merchant's own `but` makes pure silk the comparand; the draft only made
+   the implicit explicit. **Refused, and it should not have been.** ❌
+3. *"soft drape"* — the source says *drapes like pure silk*, never *soft*. **An inserted adjective —
+   the same shape as the `uninsulated` catch of 2026-09-02 — and `verify` did not name it.**
+
+**Not the [A14](open-questions.md) pattern.** A14's `recommend_001` was clean: every attribute
+verbatim, `verify` simply wrong. This one is muddier — `verify` refused for the wrong reason *and*
+missed a real insertion in the same sentence, so a rule change aimed at (2) would not have caught (3).
+
+**Closer to [A9](open-questions.md), and arguably `verify.md` working as written.** Its prompt says:
+*"Not grounded: 'It's the warmest one we sell' — a comparison against products not in the evidence."*
+Pure silk is not a product in the shortlist. The rule cannot tell the difference between a comparison
+the *agent* invented and one the *merchant* published.
+
+**Nothing was changed.** One anecdote, and editing `verify.md` against it is the 2026-07-30 mistake
+this file records twice. It is a third data point for settling A9/S9 with a dataset.
+
 ## Stage 9 — the new e-commerce ⬜
 
 The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the

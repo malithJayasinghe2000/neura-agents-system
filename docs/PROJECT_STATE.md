@@ -4,9 +4,9 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-02 (later) — **on a cloud model the whole path works: dispatch, retrieval, cards, and a verifier that refuses an invented adjective**
+**Last updated:** 2026-09-03 — **the first eight graded turns, and a feedback loop promised in three places and built in none**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
-**Next action:** **Measure [A20](open-questions.md) on a cloud model, then decide A20 and A21 with the owner.**
+**Next action:** **Design the graded-turn → eval-case loop with the owner ([E1](open-questions.md)), then decide the dispatch gate, A19, A20 and A21.**
 The widget now runs on a real storefront and a conversation there dies at its second message: CARE's
 router returns confidence 0.00 after any handover, and the ownership gate guarantees a handover on
 the commonest opening question. Both are decisions rather than repairs, and neither has been
@@ -16,10 +16,102 @@ shopper choosing nothing. What it does **not** have is a release gate: dispatch 
 **0.94 across three runs** and is reported *ungated* on purpose, because a threshold drawn from
 16 cases written the same week would be a number invented to be met. Setting it is a decision.
 **A19 is the other owner call** — CARE and SELL genuinely overlap on product questions, and which
-one should win is written in no ADR. Then **E1**: every case in this repository is still invented,
-the console is a reader and has produced no graded turn, and **B2 (no merchant) is still the top
-risk**. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
+one should win is written in no ADR. Then **E1**, which changed shape on 2026-09-03: the console
+has now produced **eight graded turns**, and there is **no mechanism that uses them** — every eval
+case in this repository is still invented, and the loop that would fix that is promised in the UI
+and in two architecture documents and built nowhere. **B2 (no merchant) is still the top risk**, and
+eight owner-typed turns do not touch it. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
 both external.
+
+## Session 2026-09-03 — the first graded turns, and a promise made in three places and kept in none
+
+**E1 moved.** Eight shadow turns on the dispatch tenant, **all eight graded by the owner** — 7
+`agree`, 1 `disagree` — through the console's Review screen. Dispatch chose CARE for the four
+policy/availability questions and SELL for the three recommendations, unprompted. The grading path
+works end to end for the first time: draft withheld, row written, verdict saved with `reviewed_by`
+and `reviewed_at`.
+
+**It is not a measurement.** Eight questions, one shop, one model, typed by the person who built the
+system — the invented cases CLAUDE.md §4 and the report banner both warn about. What changed is that
+the *mechanism* has run, not that anything is known about quality.
+
+### 🔴 The console promised a feature that does not exist — and so do two architecture documents
+
+Review said *"your verdicts… become the examples it is tested against."* **Nothing under any
+`evals/` directory reads `shadow_turns`.** All eleven datasets are hand-written YAML. `ShadowVerdict`
+appears in five places, none of them an eval.
+
+**And the UI was repeating the architecture, not inventing it** — [agent-runtime.md
+§6](architecture/agent-runtime.md) (*"graded shadow conversations feed the golden dataset"*) and
+[evaluation-strategy.md §2](architecture/evaluation-strategy.md) (*"graded shadow-mode conversations
+flow back in"*) say the same thing. A designed feedback loop, documented twice, surfaced in the UI,
+**never built**.
+
+**The false clause was deleted from the console** — one line, no test depended on it. **The loop was
+not built**, and the two architecture documents keep their wording on purpose: they record intent,
+and the intent has not changed. What changed is that no screen now promises a *user* something the
+code does not do.
+
+**This is E1's direct answer and now the largest unbuilt thing in the project**, and it is smaller
+than it looks: the **receiving end is already built**. `EvalCase.synthetic` defaults to `False`
+(*"NEVER counted as validation"*), `RunReport.is_validation` and the *"Every case in this run is
+synthetic"* banner all exist and are waiting, and `load_all()` globs `*.yaml` so a new dataset file
+needs no registration. **One promoted case flips `is_validation`.** A graded turn already carries
+every `EvalCase` field except `must_contain`, which cannot be derived — a grade says a reply was
+good, not which words made it good.
+
+**Designed the same day: [ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md) —
+Proposed, design only, nothing built.** Promotion explicit and human (it is a Rule 4 surface: a
+verdict would become able to decide whether code merges), `synthetic: false`, its own `graded.yaml`,
+facts marked by hand rather than auto-extracted, `disagree` promoting to nothing by default, and
+real/synthetic scores reported apart so eight real cases cannot silently move a fourteen-case
+suite's rates. **The hazard it records and does not solve:** a promoted case puts a real shopper's
+words into this repository — harmless while the owner is the only shopper, a processor question the
+moment **B2** arrives. Four questions in it are open and are the owner's.
+
+### 🟠 A message is lost whenever the socket dies, and the shopper is blamed
+
+*"is the field jacket good for hiking?" → "We could not reach the assistant."* **The question is
+fine** — re-run over REST it resolves, grounded, with a card, in 33.5s. **The message never reached
+the server**: no transcript row, no shadow row.
+
+`widget.js` sends into a socket without checking `readyState`, guards on a `socket` field that only
+nulls *after* `onclose` fires, and **discards the close code entirely** — so an idle close (`1000`)
+and a crash (`1006`) are indistinguishable to the shopper and to us. Two candidates sat inside a
+64-second window: `IDLE_TIMEOUT_S = 300.0`, and **uvicorn `--reload` respawning the worker**, which
+kills every open shopper socket on any source edit in development.
+
+**The finding is not the reload.** After *any* socket death the next message is lost with an error
+that misattributes the fault, and only the one after that succeeds. The REST fallback covers a socket
+that fails to *open*, never one that dies mid-session. **Nothing was changed** — `widget-check` has
+no dead-socket scenario, so the fix and its regression test have to arrive together.
+
+### ⚠️ `verify` refused a comparison the merchant's own description makes
+
+Catalogue: *"drapes like pure silk **but survives more washes**"*. Draft: *"a soft drape that
+survives more washes **than pure silk**"*. Refused as unsupported.
+
+**Three claims, and only the middle is verify's error:** *survives more washes* is verbatim; *than
+pure silk* is the merchant's own comparison made explicit and should have passed; ***soft* is an
+inserted adjective that `verify` did not name.** **Not the [A14](open-questions.md) pattern** — A14's
+false positive was clean, this one refuses for the wrong reason *and* misses a real insertion.
+Closer to [A9](open-questions.md), and arguably `verify.md` working as written: its own rule forbids
+*"a comparison against products not in the evidence"*, and it cannot tell an agent's invented
+comparison from a merchant's published one. **Nothing was changed** — a third anecdote, and the
+argument for settling A9/S9 with a dataset.
+
+### Setup facts worth keeping
+
+- **`CLOUD_EMBEDDING_DIMENSIONS=3072` is still missing from `.env` and `.env.example`.** The API is
+  being run with it as a shell override. Restarting without it silently disables retrieval.
+- **`.env` still says `ollama-dev`.** Every cloud run this session came from shell overrides, not
+  the file. Check the environment, do not remember it.
+- **Shadow mode is per-tenant `config.mode`, set at provisioning (`SHADOW=1`), with no console
+  control.** Only `shadow` writes `shadow_turns`, so turning it off ends grading.
+
+**Next:** unchanged and now sharper. **The dispatch gate**, **[A19](open-questions.md)**, **A20/A21**
+— all owner decisions — and **E1**, which now has eight graded turns and no mechanism to use them.
+**B2 (no merchant) is still the top risk**, and eight owner-typed turns do not touch it.
 
 ## Session 2026-09-02 (later) — the product, working, on a cloud model
 
