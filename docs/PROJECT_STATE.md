@@ -80,8 +80,38 @@ to cost a CARE-only shop its product-question routing. It costs nothing: `handle
 by `neura-dispatch`, and `chooser.py` returns with no model call when one agent is enabled, so a
 single-agent shop never reads the declaration.
 
-**Next:** build ADR-0032's promotion step and ADR-0033 §3's gate; then A20/A21; then **Finding 21**,
-the message lost whenever a socket dies.
+### ✅ ADR-0033 §3's gate is built, and it is the first release gate this project has ever set
+
+`expensive_misroute_rate`, an upper bound of **0.00**, live in `THRESHOLDS` and printed by the
+report:
+
+```
+  metric                     value    gate           cases
+  dispatch accuracy           1.00       —           16/16    ← still ungated (§5)
+  expensive misroute rate     0.00    0.00    ✔      10/16
+  structured repair rate      0.00    0.05    ✔      16/16
+```
+
+**The coverage column is the point.** `10/16` says on its face that the gate covers the determined
+half only. A gate that silently spoke for all sixteen would be `tool_selection_accuracy`'s
+2026-08-27 failure again.
+
+**How the harness stays ignorant.** The ten CARE cases carry a new `expensive_miss` tag; `metrics.py`
+counts failures among tagged cases and **still does not contain the word `care`**. The assertion that
+every tagged case expects CARE lives in the dispatch package's own test, where knowing both agents is
+legitimate. `import-linter` confirms it: *"neura_agent_core must never learn an agent's name"* and all
+seven contracts KEPT.
+
+**A suite that tags nothing emits no metric** rather than a vacuous `0.00` that passes by measuring
+nothing — asserted by a test, because that is exactly how a gate becomes decorative.
+
+`make lint` ✔ · `make typecheck` ✔ (219 files) · `make arch` ✔ (7/7) · **`pytest tests/unit` 100%**,
+including four new gate tests and one rewritten: `test_dispatch_accuracy_is_not_gated_yet` becomes
+`test_dispatch_accuracy_is_still_not_gated`, and now cites ADR-0033 §5 as a decision rather than a
+pending one.
+
+**Next:** ADR-0032's promotion step; then **Finding 21**, the message lost whenever a socket dies;
+then A20/A21, both now sovereign-tier model-selection questions.
 
 ## Session 2026-09-03 — the first graded turns, and a promise made in three places and kept in none
 

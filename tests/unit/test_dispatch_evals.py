@@ -16,7 +16,7 @@ import asyncio
 import pytest
 from neura_evals.dataset import EvalCase, Expectation, load_all
 from neura_evals.discovery import discover_agents
-from neura_evals.metrics import score_case, summarise
+from neura_evals.metrics import EXPENSIVE_MISS, score_case, summarise
 from neura_evals.target import AgentResponse
 
 from neura_dispatch.evals import DispatchTarget, build_target
@@ -24,13 +24,14 @@ from neura_dispatch.evals import DispatchTarget, build_target
 DATASETS = next(a for a in discover_agents() if a.key == "dispatch").dataset_dir
 
 
-def _case(case_id: str, expected: str) -> EvalCase:
+def _case(case_id: str, expected: str, tags: list[str] | None = None) -> EvalCase:
     return EvalCase(
         id=case_id,
         intent="dispatch",
         input="a shopper said something",
         expect=Expectation(agent=expected),
         synthetic=True,
+        tags=tags or [],
     )
 
 
@@ -147,15 +148,94 @@ class TestTheAsymmetryStaysVisible:
         assert one.metrics["dispatch_accuracy"] == other.metrics["dispatch_accuracy"] == 0.0
         assert one.dispatch_matrix != other.dispatch_matrix
 
-    def test_dispatch_accuracy_is_not_gated_yet(self) -> None:
-        """ADR-0031 requires a gate before the dispatcher ships, and a threshold
+    def test_dispatch_accuracy_is_still_not_gated(self) -> None:
+        """ADR-0033 §5 — and now for a stated reason rather than a pending one.
 
-        set now would be drawn from cases written the same week, against a model
-        nobody has measured on this workload. The gate comes from a baseline.
+        One rate reports a lost product card and a summoned human identically.
+        The gate lives on ``expensive_misroute_rate`` instead, which covers only
+        the half where there is no product judgement.
         """
         from neura_evals.metrics import THRESHOLDS
 
         assert "dispatch_accuracy" not in THRESHOLDS
+
+
+class TestTheExpensiveDirectionIsGated:
+    """ADR-0033 §3. The gate is zero, and it is on the declared half only."""
+
+    def test_the_gate_is_zero_and_an_upper_bound(self) -> None:
+        from neura_evals.metrics import LOWER_IS_BETTER, THRESHOLDS
+
+        assert THRESHOLDS["expensive_misroute_rate"] == 0.0
+        assert "expensive_misroute_rate" in LOWER_IS_BETTER
+
+    def test_one_expensive_misroute_breaches_the_gate(self) -> None:
+        summary = summarise(  # type: ignore[arg-type]
+            [
+                _score(
+                    _case("a", "care", tags=["care", EXPENSIVE_MISS]),
+                    AgentResponse(reply="", dispatched_to="sell"),
+                ),
+                _score(
+                    _case("b", "care", tags=["care", EXPENSIVE_MISS]),
+                    AgentResponse(reply="", dispatched_to="care"),
+                ),
+            ]
+        )
+        assert summary.metrics["expensive_misroute_rate"] == 0.5
+        assert [name for name, _, _ in summary.gate_failures()] == ["expensive_misroute_rate"]
+
+    def test_the_cheap_direction_does_not_breach_it(self) -> None:
+        """A `sell -> care` miss is a lost product card, not a summoned human.
+
+        The rate must stay 0.00 while `dispatch_accuracy` falls, or the gate has
+        quietly become the flat rate ADR-0033 §5 refuses to gate.
+        """
+        summary = summarise(  # type: ignore[arg-type]
+            [
+                _score(
+                    _case("a", "care", tags=["care", EXPENSIVE_MISS]),
+                    AgentResponse(reply="", dispatched_to="care"),
+                ),
+                _score(
+                    _case("b", "sell", tags=["sell"]),
+                    AgentResponse(reply="", dispatched_to="care"),
+                ),
+            ]
+        )
+        assert summary.metrics["dispatch_accuracy"] == 0.5
+        assert summary.metrics["expensive_misroute_rate"] == 0.0
+        assert summary.gate_failures() == []
+
+    def test_a_suite_that_tags_nothing_reports_nothing(self) -> None:
+        """Rather than a vacuous 0.00 that would pass the gate by measuring none.
+
+        This is `tool_selection_accuracy`'s 2026-08-27 failure — a rate computed
+        from one case of fourteen and reported as if it covered the suite.
+        """
+        summary = summarise(  # type: ignore[arg-type]
+            [_score(_case("a", "care"), AgentResponse(reply="", dispatched_to="sell"))]
+        )
+        assert "expensive_misroute_rate" not in summary.metrics
+
+    def test_the_shipping_dataset_tags_its_determined_half(self) -> None:
+        """The gate is worth nothing if the dataset stops declaring severity."""
+        from pathlib import Path
+
+        from neura_evals.dataset import load_dataset
+
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "packages/neura-dispatch/src/neura_dispatch/evals/datasets/dispatch.yaml"
+        )
+        cases = load_dataset(path).cases
+        tagged = [c for c in cases if EXPENSIVE_MISS in c.tags]
+
+        assert len(tagged) == 10
+        # Every tagged case is one SELL answers by fetching a person. Asserted
+        # here, in the dataset's own package's test, and deliberately NOT in
+        # `metrics.py` — that module must not learn the word "care".
+        assert {c.expect.agent for c in tagged} == {"care"}
 
 
 class TestNothingRanIsNotEverythingPassed:

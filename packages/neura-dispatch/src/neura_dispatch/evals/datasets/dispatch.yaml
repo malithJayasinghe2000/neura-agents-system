@@ -27,6 +27,16 @@ description: >-
   that loses `care → sell` is broken. A run that loses `sell → care` is worse
   than it should be and still answers the shopper.
 
+  THE GATE IS ON THE DETERMINED HALF ONLY — ADR-0033 §3. The ten `care` cases
+  carry `expensive_miss`, and `expensive_misroute_rate` must be 0.00. That tag
+  is how the harness learns which misses are expensive WITHOUT learning that
+  `care` and `sell` exist: the severity is declared here by the person who knows
+  both agents, and counted there by code that does not.
+
+  The six `sell` cases are deliberately NOT tagged, and `dispatch_accuracy`
+  stays ungated. Gating the arguable half would settle ADR-0033 §1 by picking a
+  number instead of deciding it.
+
   DELIBERATELY ABSENT, because inventing the expectation would pin a guess as a
   golden:
     * Greetings ("hi"). Undecided, and currently `out_of_scope` on both agents.
@@ -44,7 +54,7 @@ cases:
     expect:
       agent: care
     synthetic: true
-    tags: [care, order]
+    tags: [care, order, expensive_miss]
 
   - id: dispatch_returns_window
     intent: dispatch
@@ -55,7 +65,7 @@ cases:
     notes: >-
       Says "send something back" rather than "return", so a dispatcher matching
       the word "return" from CARE's declaration has nothing to match on.
-    tags: [care, policy]
+    tags: [care, policy, expensive_miss]
 
   - id: dispatch_refund_chase
     intent: dispatch
@@ -64,7 +74,7 @@ cases:
     expect:
       agent: care
     notes: Names a product. It is still a refund question.
-    tags: [care, policy, names-a-product]
+    tags: [care, policy, names-a-product, expensive_miss]
 
   - id: dispatch_delivery_cost
     intent: dispatch
@@ -72,7 +82,7 @@ cases:
     synthetic: true
     expect:
       agent: care
-    tags: [care, policy]
+    tags: [care, policy, expensive_miss]
 
   - id: dispatch_delivery_on_a_product
     intent: dispatch
@@ -86,7 +96,7 @@ cases:
       mentions a product — 'how much is delivery on the boots?' is asking about
       delivery, not about boots." A dispatcher reading "field jacket" and
       choosing SELL costs a human.
-    tags: [care, policy, names-a-product]
+    tags: [care, policy, names-a-product, expensive_miss]
 
   - id: dispatch_payment_options
     intent: dispatch
@@ -94,7 +104,7 @@ cases:
     synthetic: true
     expect:
       agent: care
-    tags: [care, policy]
+    tags: [care, policy, expensive_miss]
 
   - id: dispatch_order_naming_a_product
     intent: dispatch
@@ -106,7 +116,7 @@ cases:
       Names a product in a sentence that is entirely about an order. The past
       tense — "I ordered" — is what separates it, and it is exactly what a
       dispatcher keying on product words will miss.
-    tags: [care, order, names-a-product]
+    tags: [care, order, names-a-product, expensive_miss]
 
   - id: dispatch_exchange_for_another_size
     intent: dispatch
@@ -117,7 +127,7 @@ cases:
     notes: >-
       Reads like a sizing question and is an exchange. "I bought" puts it after
       the sale, which is SELL's `needs_person` and CARE's territory.
-    tags: [care, policy, names-a-product]
+    tags: [care, policy, names-a-product, expensive_miss]
 
   - id: dispatch_damaged_arrival
     intent: dispatch
@@ -129,7 +139,7 @@ cases:
       Both agents route this to a person, so the reply is similar either way.
       It is here because dispatch is still wrong if it picks SELL — the handover
       a merchant reads should come from the agent that owns post-sale problems.
-    tags: [care, needs-person]
+    tags: [care, needs-person, expensive_miss]
 
   - id: dispatch_where_are_my_orders
     intent: dispatch
@@ -138,7 +148,7 @@ cases:
     expect:
       agent: care
     notes: No order number, no product name. Nothing here for a keyword to catch.
-    tags: [care, order]
+    tags: [care, order, expensive_miss]
 
   # ── SELL: the shopper is choosing something they have not bought. ───────────
   # A miss here goes to an agent that can still answer. See the description.
