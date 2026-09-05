@@ -1,0 +1,68 @@
+name: graded
+description: |
+  Cases promoted from graded shadow turns — ADR-0032.
+
+  EVERY CASE HERE IS REAL. `synthetic: false` is the whole point of this file:
+  each one is a question a person actually asked, answered by the agent, withheld
+  by shadow mode, and graded by a human who then chose which facts must survive.
+
+  DO NOT hand-write a case into this file. It is written by
+  `make promote TURN=... FACTS="..."`, which refuses a fact that is not in the
+  approved draft verbatim, refuses a turn that was already promoted, and refuses
+  a `disagree`. A hand-written case here would claim an authority it has not got.
+
+  To remove a case, delete it and say why in the commit message. There is
+  deliberately no disable flag (ADR-0032 §9): a switch that silences a failing
+  case is how a suite rots.
+cases:
+- id: graded_sell_001
+  intent: recommend
+  synthetic: false
+  input: which jacket is best for heavy rain?
+  expect:
+    intent: recommend
+    escalated: false
+    grounded: true
+    tools_called:
+    - search_products
+    must_contain:
+    - 10,000mm
+    - fully taped seams
+  tags:
+  - graded
+  - sell
+  - from-turn:msg_01M1M1ZZ8ASN9JMATBCWJ3EGKR
+  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
+  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.
+- id: graded_sell_002
+  intent: recommend
+  synthetic: false
+  input: do you have anything warm for winter?
+  expect:
+    intent: recommend
+    escalated: false
+    grounded: true
+    tools_called:
+    - search_products
+  tags:
+  - graded
+  - sell
+  - from-turn:msg_01M1M1WG2RKEFGYXKWQ2Q4S33N
+  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
+  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.
+- id: graded_sell_003
+  intent: recommend
+  synthetic: false
+  input: I'm looking for a gift for my wife
+  expect:
+    intent: recommend
+    escalated: true
+    grounded: false
+    tools_called:
+    - search_products
+  tags:
+  - graded
+  - sell
+  - from-turn:msg_01M1M24PXM4TWD2VW8NWWBD23T
+  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
+  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.

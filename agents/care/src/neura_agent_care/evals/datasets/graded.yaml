@@ -31,3 +31,57 @@ cases:
   - from-turn:msg_01M1M1Z8GN62C5KCCV1A7RJEDG
   - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
   notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.
+- id: graded_care_002
+  intent: product_qa
+  synthetic: false
+  input: do you sell waterproof jackets?
+  expect:
+    intent: product_qa
+    escalated: false
+    grounded: true
+    tools_called:
+    - search_products
+    must_contain:
+    - Lightweight Rain Shell
+    - '110.00'
+    - Waxed Cotton Field Jacket
+    - '165.00'
+  tags:
+  - graded
+  - care
+  - from-turn:msg_01M1M1SBDFY6XYCWKFJ17QC456
+  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
+  notes: Promoted from a verdict of `agree` on 2026-09-03. ok
+- id: graded_care_003
+  intent: product_qa
+  synthetic: false
+  input: do you sell shoes?
+  expect:
+    intent: product_qa
+    escalated: false
+    grounded: true
+    must_contain:
+    - Waterproof Hiking Shoe
+  tags:
+  - graded
+  - care
+  - from-turn:msg_01M1M20MGR4HN8F427RCFDVB5J
+  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
+  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.
+- id: graded_care_004
+  intent: policy_qa
+  synthetic: false
+  input: what payment methods do you take?
+  expect:
+    intent: policy_qa
+    escalated: false
+    grounded: true
+    must_contain:
+    - cash on delivery
+    - Sri Lanka
+  tags:
+  - graded
+  - care
+  - from-turn:msg_01M1M23Q9CZ6TNZ23NQGSE64CM
+  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
+  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.

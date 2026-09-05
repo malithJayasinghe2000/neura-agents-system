@@ -188,8 +188,51 @@ eval runs against the agent's **fixture** store. `graded_care_001` works only be
 [ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md) §12's problem arriving from a
 direction §12 does not describe.
 
-**Next:** the owner picks facts for the remaining seven grades — **that judgement is theirs and not a
-session's** (§4). Then A20/A21, both now sovereign-tier model-selection questions.
+### 🔴 All seven promoted — and the cases cannot run against the shop they were graded on
+
+**Every `agree` is now a case; the `disagree` refuses, as designed.** The owner chose the facts for
+each, one question at a time — that judgement is theirs and not a session's (§4). Four `graded_care_*`
+and three `graded_sell_*`, and the choices are worth keeping because each is a different rule:
+
+| case | asked | facts chosen | why |
+|:--|:--|:--|:--|
+| `care_001` | *return after 40 days?* | `30 days` | the number that must not drift |
+| `care_002` | *waterproof jackets?* | both names, both prices | a wrong price is what a shopper acts on |
+| `care_003` | *do you sell shoes?* | **one** name only | demanding all four would fail a correct reply that lists three |
+| `care_004` | *payment methods?* | `cash on delivery`, `Sri Lanka` | pins the promise **and** where it applies |
+| `sell_001` | *best for heavy rain?* | `10,000mm`, `fully taped seams` | [Finding 10](TESTING_LOG.md)'s invented specs, this time real — does it read the catalogue or guess? |
+| `sell_002` | *anything warm?* | **none** | *"anything warm"* has no single right answer; `recommend_003` failed on a word it was never shown |
+| `sell_003` | *gift for my wife?* | **none** (escalated) | locks in that it escalates |
+
+```
+CARE  2/4 passed   synthetic 0/4   is_validation True
+SELL  2/3 passed   synthetic 0/3   is_validation True
+```
+
+**Two of the three failures are not the agent's, and they prove the caveat recorded above rather than
+discovering it.** `care_002` answered *"We could not find any waterproof jackets in our catalogue"*
+and `care_004` listed *"Visa, Mastercard, American Express, Apple Pay, Google Pay"* with no cash on
+delivery — **correct answers about a different shop.** The grades came from the real Bagisto store;
+the eval runs against the agent's pinned `fixtures/store.json`. **`care_001` passes only by
+coincidence**, because both stores happen to say *30 days*.
+
+**So the promotion machine is finished and the cases it writes are not yet trustworthy.** This is the
+blocker on E1, and it is now a measured fact rather than a note.
+
+**The third failure is the one that earned its keep.** `sell_003` — *escalated=False, expected True*.
+The escalation the owner deliberately froze **has already stopped happening**. That case did its job
+on its first run, which is the whole argument for promoting a behaviour you are unsure about.
+
+**The shape of the fix, and why it is an ADR.** `EvalCase.fixtures` already exists — *"fixture files
+providing store data for this case"* — so a promoted case should carry a snapshot of the shop data
+its turn actually saw. **The data is not in `shadow_turns`**: the console says so on the screen
+(*"This lookup ran. What it returned is customer data and is kept in the audit log, not in this
+queue"*). So it must come from the audit log or be re-fetched, and either choice puts a real shop's
+data into the repository — the hazard [ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md)
+already refuses to settle before **B2**. **Not designed. Next session.**
+
+**Next:** design the promoted-case fixture (an ADR, and the last thing between E1 and a trustworthy
+number). Then A20/A21, both now sovereign-tier model-selection questions.
 **Finding 21 is closed as not-a-defect.**
 
 ## Session 2026-09-03 — the first graded turns, and a promise made in three places and kept in none
