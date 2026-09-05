@@ -67,7 +67,24 @@ facts marked by hand rather than auto-extracted, `disagree` promoting to nothing
 real/synthetic scores reported apart so eight real cases cannot silently move a fourteen-case
 suite's rates. **The hazard it records and does not solve:** a promoted case puts a real shopper's
 words into this repository — harmless while the owner is the only shopper, a processor question the
-moment **B2** arrives. Four questions in it are open and are the owner's.
+moment **B2** arrives.
+
+**Reviewed and accepted by the owner on 2026-09-05**, who put eleven questions to it. **Five were
+holes rather than answers** — who may promote, editing and deleting a case, promoting one turn
+twice, how facts are selected, and what a policy change does — and all five are now decided in
+§§8–13. Notably: promotion refuses a turn already promoted (a duplicate silently double-weights
+every rate); facts are marked by **highlighting the approved draft, never typed**, because free text
+lets a human assert something the agent never said; cases are edited and deleted **in git, not the
+console**, with **no disable flag**, because a switch that silences a failing case is how a suite
+rots; a policy change makes its case **fail loudly**, and the fingerprint that would flag it *stale*
+instead is recorded, unbuilt, and gated on a check nobody has run. `would_have_harmed` is
+**confirmed by a human and stays flagged until promoted or skipped with a reason** — silence is not
+an option.
+
+**One question stays open on purpose: the go-live threshold.** Its *shape* is not open — `shadow.py`
+already argues it, and it is at least a minimum volume, an agreement rate, and a **hard bar on
+`would_have_harmed` that is a gate rather than an average**. The numbers are blocked on real graded
+volume, which is blocked on **B2**.
 
 ### 🟠 A message is lost whenever the socket dies, and the shopper is blamed
 
