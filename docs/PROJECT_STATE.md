@@ -4,24 +4,84 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-03 — **the first eight graded turns, and a feedback loop promised in three places and built in none**
+**Last updated:** 2026-09-05 — **the dispatch gate is set, and the measurement cancelled the change it was meant to justify**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
-**Next action:** **Design the graded-turn → eval-case loop with the owner ([E1](open-questions.md)), then decide the dispatch gate, A19, A20 and A21.**
+**Next action:** **Build [ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md)'s promotion step and [ADR-0033](architecture/adr/0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) §3's gate. Then A20/A21 — both now sovereign-tier model-selection questions — and Finding 21's lost message.**
 The widget now runs on a real storefront and a conversation there dies at its second message: CARE's
 router returns confidence 0.00 after any handover, and the ownership gate guarantees a handover on
 the commonest opening question. Both are decisions rather than repairs, and neither has been
 measured on anything but `llama3.2:3b`. Then: the dispatch gate, [A19](open-questions.md), and E1.
-ADR-0031 is built and verified live — one socket, one conversation, CARE's graph then SELL's, the
-shopper choosing nothing. What it does **not** have is a release gate: dispatch accuracy is
-**0.94 across three runs** and is reported *ungated* on purpose, because a threshold drawn from
-16 cases written the same week would be a number invented to be met. Setting it is a decision.
-**A19 is the other owner call** — CARE and SELL genuinely overlap on product questions, and which
-one should win is written in no ADR. Then **E1**, which changed shape on 2026-09-03: the console
+ADR-0031 is built, verified live, and **now has the release gate it was missing**
+([ADR-0033](architecture/adr/0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md)
+§3): **zero misroutes in the direction that summons a human**, met on both measured models, with the
+flat rate still ungated on purpose. **A19 is decided and changed shape** — the rule is *CARE answers
+what the store HAS, SELL helps the shopper CHOOSE*, and **no declaration was edited**, because
+running the suite on a cloud model first returned **1.00 ×3** and cancelled the edit that was about
+to be made. Then **E1**, which changed shape on 2026-09-03: the console
 has now produced **eight graded turns**, and there is **no mechanism that uses them** — every eval
 case in this repository is still invented, and the loop that would fix that is promised in the UI
 and in two architecture documents and built nowhere. **B2 (no merchant) is still the top risk**, and
 eight owner-typed turns do not touch it. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
 both external.
+
+## Session 2026-09-05 — the dispatch gate, and a measurement that cancelled its own change
+
+**[A19](open-questions.md) is decided and nothing was edited to decide it.**
+[ADR-0033](architecture/adr/0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md)
+states the rule the dispatch dataset had always assumed and no ADR had ever contained:
+
+> **CARE answers what the store *has*. SELL helps the shopper *choose*.**
+
+**The change that was about to ship, and did not.** CARE's `handles` ends *"Also general questions
+about what the store sells"* — the vague clause that lets it win a `recommend`-shaped question, and
+a 2026-09-01 diagnostic had shown removing it flips A19's failing case to `sell`. The order agreed
+with the owner was **measure first, then change, then accept whatever comes out.** The first step
+ended it:
+
+| role map | ROUTER | runs | accuracy | matrix |
+|:--|:--|--:|:--|:--|
+| `ollama-dev` | `llama3.2:3b` | 3 | 0.94 ×3 | `care→care` 10/10 · `sell→sell` 5/6 |
+| `cloud-prod` | `gemini-3.6-flash` | 3 | **1.00 ×3** | `care→care` 10/10 · `sell→sell` **6/6** |
+
+**`dispatch_open_ended_advice` passes 3 of 3 on the cloud model** — A19's one stable failure, gone.
+So the declaration is not the fault, and narrowing it would have tuned a manifest against a failure
+the production model does not have: [A14](open-questions.md)'s *"mirror image of the 2026-07-30
+mistake"*, arriving through a manifest instead of a prompt. **Measuring first is the only reason
+that edit is not in this commit.**
+
+**The gate ADR-0031 was missing is now set** (ADR-0033 §3): **zero misroutes in the direction that
+sends a question to an agent which answers by fetching a human.** Zero on both models, on the ten
+cases the dataset calls *determined*, and it is the direction that costs the merchant money. The
+cheap direction and the flat `dispatch_accuracy` stay **ungated** — one rate reports a lost product
+card and a summoned human identically. **ADR-0031 is shippable.**
+
+**A19 changes shape rather than closing, and is downgraded 🟠 → 🟡.** A small ROUTER still breaks the
+rule, and `sovereign` is `ollama-dev` on a customer's host — so, like [A20](open-questions.md), it is
+now a **model-selection criterion for that tier**, not a dispatch defect.
+
+### Two things found by measuring, both corrections to this file
+
+**`.env` had no Gemini in it.** Every `CLOUD_*` role pointed at **OpenRouter free**
+(`nvidia/nemotron-…:free`), `CLOUD_MODEL_EMBEDDER` was unset, and `EVAL_JUDGE_*` was on the free tier
+too. Gemini was configured for the first time on 2026-09-05. **So there was no earlier cloud dispatch
+number**, and the eight graded turns of 2026-09-03 ran on models nobody can now name — the running
+worker loaded `.env` on 09-03 and the file has been edited since. `TESTING_LOG.md`'s claim of
+`gemini-embedding-001` on those turns was written from recollection and **has been corrected**.
+`cost_usd` is `0` on every row because `LLM_PRICING_JSON` is unset; **that zero is not evidence of a
+free tier**, and reading it as such was a wrong inference caught before it was written down.
+
+**`CLOUD_EMBEDDING_DIMENSIONS=3072` is *not* missing from `.env.example`.** It is at line 90 under
+`CLOUD_MODEL_EMBEDDER` with the reindex warning, and has been since commit `3836de4`. **Finding 19
+said it was missing, this file repeated it, and a third session repeated it again — none of the three
+had opened the file.** Only `.env` lacks it.
+
+**And one cost estimate in [A19](open-questions.md) is wrong.** Narrowing CARE's declaration was said
+to cost a CARE-only shop its product-question routing. It costs nothing: `handles` is read **only**
+by `neura-dispatch`, and `chooser.py` returns with no model call when one agent is enabled, so a
+single-agent shop never reads the declaration.
+
+**Next:** build ADR-0032's promotion step and ADR-0033 §3's gate; then A20/A21; then **Finding 21**,
+the message lost whenever a socket dies.
 
 ## Session 2026-09-03 — the first graded turns, and a promise made in three places and kept in none
 
@@ -119,8 +179,15 @@ argument for settling A9/S9 with a dataset.
 
 ### Setup facts worth keeping
 
-- **`CLOUD_EMBEDDING_DIMENSIONS=3072` is still missing from `.env` and `.env.example`.** The API is
-  being run with it as a shell override. Restarting without it silently disables retrieval.
+- **`CLOUD_EMBEDDING_DIMENSIONS=3072` is missing from `.env`** and is supplied as a shell override.
+  Restarting without it silently disables retrieval. **It is *not* missing from `.env.example`** —
+  it sits at line 90 under `CLOUD_MODEL_EMBEDDER` with the reindex warning, and has since commit
+  `3836de4`. Finding 19 said otherwise on 2026-09-02 and this file repeated it; **both were wrong,
+  and neither had opened the file.**
+- **`.env` points every `CLOUD_*` role at OpenRouter free, not Gemini**, and sets no
+  `CLOUD_MODEL_EMBEDDER`. `EVAL_JUDGE_*` is on OpenRouter free too. So `--role-map cloud-prod` from a
+  clean shell today runs **nemotron/gpt-oss/gemma**, not the models any document names. Read the file
+  before quoting a model.
 - **`.env` still says `ollama-dev`.** Every cloud run this session came from shell overrides, not
   the file. Check the environment, do not remember it.
 - **Shadow mode is per-tenant `config.mode`, set at provisioning (`SHADOW=1`), with no console

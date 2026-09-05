@@ -1562,9 +1562,21 @@ about — the only difference is that a human typed them.
 
 ## The first graded turns, and three findings — 2026-09-03
 
-**E1 moved for the first time.** `tn_01M1A52SCZ11EYMK6ZM8M3M37Z` ("Dispatch Test Shop"), `cloud-prod`
-on every role, `gemini-embedding-001` for retrieval, SHADOW mode, the widget live on
-`bagisto.test`. **Eight shadow turns recorded and all eight graded by the project owner** —
+**E1 moved for the first time.** `tn_01M1A52SCZ11EYMK6ZM8M3M37Z` ("Dispatch Test Shop"),
+`NEURA_ROLE_MAP=cloud-prod`, SHADOW mode, the widget live on `bagisto.test`.
+
+⚠️ **Which cloud models served these eight turns is NOT established, and this entry originally said
+`gemini-embedding-001` on the owner's recollection rather than on evidence.** Checked 2026-09-05:
+`.env` points every `CLOUD_*` role at **OpenRouter free** (`nvidia/nemotron-nano-9b-v2:free` on
+ROUTER, and so on), sets **no `CLOUD_MODEL_EMBEDDER` at all**, and the API process carries only three
+shell overrides — `NEURA_ROLE_MAP=cloud-prod`, `CLOUD_EMBEDDING_DIMENSIONS=3072`,
+`NEURA_API_PORT=8010`. The running worker loaded `.env` on 2026-09-03 and the file has been edited
+since, so **what it read cannot be recovered from here.** Nothing in the database records a model
+name, and `cost_usd` is 0 on every row because `LLM_PRICING_JSON` is unset — **that zero is not
+evidence of a free tier**, and a first reading of it as such was wrong.
+
+**So the eight grades stand as grades and the model behind them is unknown.** Recorded rather than
+guessed, because guessing it is [Finding 19](#)'s mistake in a new place. **Eight shadow turns recorded and all eight graded by the project owner** —
 **7 `agree`, 1 `disagree`** — through the console's Review screen, in a tenant that had produced no
 graded turn before today.
 

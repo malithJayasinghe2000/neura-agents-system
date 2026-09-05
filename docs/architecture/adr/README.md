@@ -39,3 +39,4 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0030](0030-a-product-card-is-data-the-widget-draws.md) | A Product Card Is Data The Widget Draws | Accepted |
 | [0031](0031-the-shopper-never-chooses-the-agent.md) | The Shopper Never Chooses The Agent | Accepted — **design only, nothing is built** |
 | [0032](0032-a-graded-turn-becomes-an-eval-case.md) | A Graded Turn Becomes An Eval Case | Accepted — **design only, nothing is built** |
+| [0033](0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) | CARE Answers What The Store Has; SELL Helps The Shopper Choose | Accepted |
