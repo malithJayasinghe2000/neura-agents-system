@@ -1719,6 +1719,80 @@ the *agent* invented and one the *merchant* published.
 **Nothing was changed.** One anecdote, and editing `verify.md` against it is the 2026-07-30 mistake
 this file records twice. It is a third data point for settling A9/S9 with a dataset.
 
+## Finding 21 investigated, and it was not what it was written up as — 2026-09-05
+
+**[Finding 21](#) claimed the widget sends into a dead socket and loses the shopper's message. A
+test built to reproduce it passes without the fix.**
+
+A fifth `widget-check` scenario was written — **the server answers a turn, then closes the socket
+exactly as `IDLE_TIMEOUT_S` does, and the shopper sends a second message.** It passes. Then
+`widget.js` was reverted to its unmodified state and the same scenario run again:
+
+```
+with the proposed fix:     ✔ a socket that died between turns loses no message
+without it, unmodified:    ✔ a socket that died between turns loses no message
+```
+
+**Identical, so the fix was reverted and is not in this repository.** The mechanism it guarded does
+not fire on a clean close: `onclose` nulls `NeuraChat.transport`, `deliver` finds no transport, and
+opens a fresh socket by itself. **That path already worked**, and the write-up's *"the guard asks
+whether the socket exists rather than whether it is open"* describes a race — `readyState` CLOSING or
+CLOSED before the close event is dispatched — that this harness cannot trigger and that nothing has
+been shown to hit in practice.
+
+**The likelier explanation fits every fact and needs no code.** The uvicorn worker respawned at
+**22:14:01** (measured: the reloader parent had been up since 09-02); the message was sent while the
+server was restarting; the socket could not open, the REST fallback could not reach it either, and
+the widget said so. **No transcript row, no shadow turn, and the correct message on screen.** A
+development server was briefly down.
+
+**Nothing in `widget.js` was changed.** A fix whose effect cannot be demonstrated, shipped under a
+comment asserting that it fixes a lost message, would mislead the next reader — including the next
+session — and that is the shape of the mistake this file records twice.
+
+### 🔴 Finding 23: `make widget-check` had been dead for four days, and passed nothing
+
+**Found only because Finding 21 sent someone to run it.** Before any change:
+
+```
+4 of 4 scenarios FAILED
+  ✘ an answered turn draws the reply
+      drawn as `error`, expected `assistant`
+        [error] 'We could not reach the assistant. Please check your connection…'
+```
+
+**Every scenario, including the three that had nothing to do with today.** Confirmed against an
+unmodified tree, so it was not caused by this session.
+
+**The cause is [ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md), shipped
+2026-09-01.** Step 4 made the widget stop choosing the agent — `AGENT_DEFAULT` became `""` — so it
+addresses **`/v1/chat`** and **`/v1/stream`** and the server dispatches per message. The stub in
+`scripts/widget_check.py` still served only **`/v1/care/chat`** and **`/v1/care/stream`**. From that
+day every scenario failed its socket, fell back to REST, took a 404, and drew the transport error —
+and the browser regression test for the one surface a shopper touches **asserted nothing for four
+days.**
+
+**This is the same failure as [Finding 12](#) and the `tool_selection_accuracy` vacuum**, on a third
+surface: a check that stopped checking and said so nowhere. It is also the second time ADR-0031's own
+delivery broke something one layer out — the first was `/v1/widget/demo` pinning every message to
+CARE, found by the owner on 2026-09-02. **A change that moves a route must be followed to every
+caller, and a stub is a caller.**
+
+**Fixed:** the stub now serves **both doors** — the dispatched pair and the agent-prefixed pair,
+which a single-agent embed still uses. Registered as stacked decorators on one handler, so the two
+cannot drift apart.
+
+```
+All 5 scenarios passed — in a real browser.
+```
+
+**And the fifth scenario stays**, despite proving current behaviour correct rather than fixing
+anything. `widget-check` had **no** two-turn case at all, so nothing exercised what a socket does
+*between* turns — which is where `IDLE_TIMEOUT_S` and every reload live. It also carries a guard of
+its own: a two-turn scenario asserts that **two** shopper rows and **two** replies were drawn, because
+a silently-dropped second message would otherwise leave the first turn's perfectly good reply as the
+last row and pass every check below it.
+
 ## Stage 9 — the new e-commerce ⬜
 
 The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the

@@ -110,8 +110,27 @@ including four new gate tests and one rewritten: `test_dispatch_accuracy_is_not_
 `test_dispatch_accuracy_is_still_not_gated`, and now cites ADR-0033 §5 as a decision rather than a
 pending one.
 
-**Next:** ADR-0032's promotion step; then **Finding 21**, the message lost whenever a socket dies;
-then A20/A21, both now sovereign-tier model-selection questions.
+### 🔴 `make widget-check` had been dead for four days — and Finding 21 was not a bug
+
+**Finding 21 was investigated and does not survive.** A fifth `widget-check` scenario was written to
+reproduce it — the server answers, then closes the socket as `IDLE_TIMEOUT_S` does, and the shopper
+sends again — and **it passes against an unmodified `widget.js`.** The proposed fix was reverted and
+is not in the tree. On a clean close `onclose` nulls the transport, `deliver` finds none, and opens a
+fresh socket; that path already worked. The likelier explanation needs no code: the uvicorn worker
+respawned at **22:14:01**, the message was sent during the restart, neither transport could reach a
+server, and the widget said so correctly.
+
+**Running it found the real defect.** Before any change, `make widget-check` failed **4 of 4** — every
+scenario, on an unmodified tree. **[ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md)
+shipped on 2026-09-01 made the widget stop naming an agent** (`AGENT_DEFAULT = ""`), so it addresses
+`/v1/chat` and `/v1/stream`; the stub still served only the `care`-prefixed pair. **The browser
+regression test for the one surface a shopper touches asserted nothing for four days.** Same failure
+as Finding 12 and the `tool_selection_accuracy` vacuum, on a third surface — and the *second* time
+ADR-0031's delivery broke something one layer out, after `/v1/widget/demo` pinning every message to
+CARE. **Fixed**: the stub serves both doors from one handler. **5 of 5 pass in a real browser.**
+
+**Next:** ADR-0032's promotion step; then A20/A21, both now sovereign-tier model-selection questions.
+**Finding 21 is closed as not-a-defect.**
 
 ## Session 2026-09-03 — the first graded turns, and a promise made in three places and kept in none
 

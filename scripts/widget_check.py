@@ -115,6 +115,9 @@ class Scenario:
     #: a turn REST answered when the socket was available is a regression even
     #: though the shopper sees the right thing.
     transport: str = "websocket"
+    #: A second message on the SAME page, sent after the first turn finished.
+    #: The only way to exercise what a socket does between turns.
+    follow_up: str | None = None
     why: str = ""
 
 
@@ -211,6 +214,14 @@ def build_stub() -> Any:
         _, _, script = token.partition(":")
         return script or "answer"
 
+    # **Both doors, and the undecorated one is the one that matters.** ADR-0031
+    # made the widget stop naming an agent (`AGENT_DEFAULT = ""`), so it now
+    # addresses `/v1/stream` and `/v1/chat` and the server dispatches per
+    # message. This stub served only the `care`-prefixed pair, so from the day
+    # that shipped every scenario here failed the socket, fell back to REST,
+    # 404ed, and drew "We could not reach the assistant" — and nobody ran it.
+    # The prefixed routes stay because a single-agent embed still uses them.
+    @app.websocket("/v1/stream")
     @app.websocket("/v1/care/stream")
     async def stream(websocket: WebSocket) -> None:
         script = _script_from(websocket.query_params.get("token", ""))
@@ -240,7 +251,15 @@ def build_stub() -> Any:
                     )
                     await asyncio.sleep(0.02)
             await websocket.send_json(done)
+            if script == "die":
+                # What the real server does after `IDLE_TIMEOUT_S`, and what
+                # `--reload` does to every open socket on any source edit. The
+                # turn succeeded; the socket is gone. Whatever the widget holds
+                # now, the shopper's NEXT message must still reach a server.
+                await websocket.close(code=1000, reason="idle")
+                return
 
+    @app.post("/v1/chat")
     @app.post("/v1/care/chat")
     async def chat(request: Request) -> dict[str, Any]:
         served["transport"] = "rest"
@@ -388,6 +407,13 @@ STUB_SCENARIOS = (
         why="the invariant, in a real browser rather than in a unit test",
     ),
     Scenario(
+        name="a socket that died between turns loses no message",
+        message="where is my order 1001?",
+        follow_up="and what is your returns policy?",
+        script="die",
+        why="Finding 21 — the second message must reach a server, not a dead socket",
+    ),
+    Scenario(
         name="a refused socket falls back to REST and still answers",
         message="where is my order 1001?",
         script="refuse",
@@ -416,6 +442,16 @@ def check(scenario: Scenario, state: dict[str, Any], transport: str | None = Non
     if not answers:
         return Result(scenario.name, False, "the shopper spoke and nothing came back", rows)
 
+    # A two-turn scenario must have drawn two turns. Asserted before the reply
+    # is read, because the failure it catches — the second message silently not
+    # happening — leaves the FIRST turn's perfectly good reply sitting on screen
+    # as `answers[-1]`, and everything below would pass on it.
+    if scenario.follow_up:
+        if len(shopper) < 2:
+            return Result(scenario.name, False, "the second message was never echoed", rows)
+        if len(answers) < 2:
+            return Result(scenario.name, False, "the second message got no reply at all", rows)
+
     reply = answers[-1]
     # The invariant, stated once: whatever the outcome, the bubble has words in
     # it. An empty bubble is the bug 1.16 exists to make impossible.
@@ -427,6 +463,7 @@ def check(scenario: Scenario, state: dict[str, Any], transport: str | None = Non
         "shadow": "system",
         "empty": "error",
         "refuse": "assistant",
+        "die": "assistant",
     }
     wanted = expected_role[scenario.script]
     if reply["role"] != wanted:
@@ -479,6 +516,9 @@ async def run_stub(chrome_binary: str) -> list[Result]:
                 )
                 await chrome.send_message(scenario.message)
                 state = await chrome.wait_until_idle(timeout=30)
+                if scenario.follow_up and not state.get("timed_out"):
+                    await chrome.send_message(scenario.follow_up)
+                    state = await chrome.wait_until_idle(timeout=30)
                 async with httpx.AsyncClient() as http:
                     served = (await http.get(f"http://127.0.0.1:{port}/served")).json()
                 results.append(check(scenario, state, served["transport"]))
