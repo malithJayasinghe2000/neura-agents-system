@@ -1,0 +1,33 @@
+name: graded
+description: |
+  Cases promoted from graded shadow turns — ADR-0032.
+
+  EVERY CASE HERE IS REAL. `synthetic: false` is the whole point of this file:
+  each one is a question a person actually asked, answered by the agent, withheld
+  by shadow mode, and graded by a human who then chose which facts must survive.
+
+  DO NOT hand-write a case into this file. It is written by
+  `make promote TURN=... FACTS="..."`, which refuses a fact that is not in the
+  approved draft verbatim, refuses a turn that was already promoted, and refuses
+  a `disagree`. A hand-written case here would claim an authority it has not got.
+
+  To remove a case, delete it and say why in the commit message. There is
+  deliberately no disable flag (ADR-0032 §9): a switch that silences a failing
+  case is how a suite rots.
+cases:
+- id: graded_care_001
+  intent: policy_qa
+  synthetic: false
+  input: can I return something after 40 days?
+  expect:
+    intent: policy_qa
+    escalated: false
+    grounded: true
+    must_contain:
+    - 30 days
+  tags:
+  - graded
+  - care
+  - from-turn:msg_01M1M1Z8GN62C5KCCV1A7RJEDG
+  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
+  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.

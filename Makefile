@@ -198,6 +198,28 @@ chat-ask:  ## Ask the dispatched endpoint, as a browser would: make chat-ask KEY
 	  $(if $(BASE),--base $(BASE),) $(if $(CONV),--conversation $(CONV),) \
 	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) $(if $(ORIGIN),--origin $(ORIGIN),) -- "$(Q)"
 
+# ── A graded turn becomes an eval case ───────────────────────────────────────
+# [ADR-0032]. The loop the console promised and nothing implemented. `promote`
+# writes a `graded.yaml` case with `synthetic: false`, which is the one flag
+# that makes a run VALIDATION rather than a harness self-test.
+#
+# It is a command and not a console button because [ADR-0032] §9 puts the case
+# in the repository, so that changing an assertion takes a diff and a name — and
+# a console served from a host with no working tree cannot do that.
+#
+#   make promote-list TENANT=tn_...
+#   make promote TENANT=tn_... TURN=msg_... FACTS="30 days|full refund"
+#
+# FACTS are pipe-separated spans of the APPROVED DRAFT. Each is checked against
+# the draft verbatim and refused if absent (§11) — a fact typed from memory is
+# an expectation nobody verified.
+promote-list:  ## Graded turns and whether each is promotable: make promote-list TENANT=tn_...
+	uv run python scripts/promote_turn.py --tenant $(TENANT)
+
+promote:  ## Promote one graded turn: make promote TENANT=tn_... TURN=msg_... FACTS="a|b"
+	uv run python scripts/promote_turn.py --tenant $(TENANT) --turn $(TURN) \
+	  $(if $(FACTS),--facts "$(FACTS)",) $(if $(DRY),--dry-run,)
+
 care-ask:  ## Ask CARE one question and watch every step: make care-ask Q="..." URL=... TOKEN=... [CUSTOMER=385]
 	uv run python scripts/care_ask.py --url $(URL) --token $(TOKEN) \
 	  $(if $(CUSTOMER),--as-customer $(CUSTOMER),) $(if $(ORIGIN),--origin $(ORIGIN),) -- "$(Q)"

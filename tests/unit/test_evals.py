@@ -52,10 +52,37 @@ class TestShippedDatasets:
         assert datasets, "no datasets found"
         assert sum(len(d.cases) for d in datasets) > 0
 
-    def test_every_shipped_case_is_marked_synthetic(self) -> None:
-        """None of these came from a real conversation, and the reports say so."""
+    def test_invented_datasets_are_wholly_invented(self) -> None:
+        """None of these came from a real conversation, and the reports say so.
+
+        Until 2026-09-05 this held for every shipped dataset. `graded.yaml` is
+        the deliberate exception (ADR-0032) and is asserted in the opposite
+        direction below — so the pair still says exactly which cases are
+        evidence and which are a harness self-test.
+        """
         for dataset in _shipped():
+            if dataset.name == "graded":
+                continue
             assert dataset.is_fully_synthetic, f"{dataset.name} claims non-synthetic cases"
+
+    def test_the_graded_dataset_is_wholly_real(self) -> None:
+        """The other half, and the one that can be broken by hand.
+
+        `graded.yaml` is written by `make promote`, which refuses a fact that is
+        not in the approved draft. A case typed straight into the file would
+        wear `synthetic: false` — and therefore count as validation — while
+        asserting something no human ever approved. If that file exists, every
+        case in it must be real.
+        """
+        graded = [d for d in _shipped() if d.name == "graded"]
+        for dataset in graded:
+            assert dataset.synthetic_count == 0, (
+                "a synthetic case is in graded.yaml — it would be counted as validation"
+            )
+            for case in dataset.cases:
+                assert any(t.startswith("from-turn:") for t in case.tags), (
+                    f"{case.id} claims to be real but names no shadow turn (ADR-0032 §6)"
+                )
 
     def test_case_ids_are_unique_within_a_dataset(self) -> None:
         for dataset in _shipped():

@@ -129,7 +129,67 @@ as Finding 12 and the `tool_selection_accuracy` vacuum, on a third surface — a
 ADR-0031's delivery broke something one layer out, after `/v1/widget/demo` pinning every message to
 CARE. **Fixed**: the stub serves both doors from one handler. **5 of 5 pass in a real browser.**
 
-**Next:** ADR-0032's promotion step; then A20/A21, both now sovereign-tier model-selection questions.
+### ✅ ADR-0032's promotion step is built, and the first real eval case found a defect on its first run
+
+**`is_validation` is `True` for the first time in this project's history.**
+
+```
+synthetic cases:  0 of 1
+is_validation  :  True        ← and the "every case is synthetic" banner did not print
+```
+
+`make promote-list TENANT=…` and `make promote TENANT=… TURN=… FACTS="…"`
+([`scripts/promote_turn.py`](../scripts/promote_turn.py)) turn a graded shadow turn into an ordinary
+`EvalCase` with `synthetic: false`, in a per-agent `graded.yaml` that `load_all()`'s glob discovers
+with no registration.
+
+**It is a command rather than a console button, and that is a gap ADR-0032 did not see.** §9 puts
+cases in the repository so that changing an assertion takes a diff and a name — and **a console
+served from a host with no working tree cannot do that.** So the console keeps grading, which is the
+merchant's judgement, and promotion is run by somebody holding the repository. A console flow can
+feed this later without changing what it writes.
+
+**Four refusals, each one a rule enforced rather than described, and all four verified by hand:**
+
+| refused | why |
+|:--|:--|
+| a fact not in the draft, verbatim | §11 — free text asserts something the agent never said |
+| a `disagree` | §5 — records that a reply was wrong, not what right would have been |
+| a turn already promoted | §10 — a duplicate counts the same question twice in every rate |
+| `must_contain` on an **escalated** turn | **not in the ADR** — A14's `recommend_004` failed only because escalation replaced the draft with the handover, so the assertion was unsatisfiable before the model saw it |
+
+**`graded_care_001` is the first case in this repository that is evidence.** *"can I return something
+after 40 days?"* → `must_contain: ["30 days"]`, promoted from the owner's `agree` of 2026-09-03.
+
+**And it failed on its first run, on a third instance of [A9](open-questions.md).** `verify` refused:
+
+> `unsupported claim: 40 days is past this 30-day window`
+
+**That is arithmetic.** 40 > 30 is true of the world and is not a claim about the catalogue — the
+same shape as *"uninsulated"* (09-02) and *"survives more washes than pure silk"* (Finding 22).
+**Three anecdotes are a pattern, and one of them is now a repeatable case rather than a story** —
+which is the entire argument for E1, demonstrated by the first case to exist.
+
+**What may not be claimed: that this is a regression.** The graded turn ran on 2026-09-03 against
+models that can no longer be identified (`.env` pointed at OpenRouter free and has since been
+edited). *"It used to pass"* is unknowable. What is knowable: a human approved a reply, and the agent
+no longer produces one that satisfies it.
+
+**The shipped-dataset invariant changed deliberately and got stronger.**
+`test_every_shipped_case_is_marked_synthetic` had been true of every dataset and is now false by
+design, so it is replaced by a **pair**: invented datasets must be wholly invented, and `graded.yaml`
+must be wholly real **and every case in it must name the shadow turn it came from**. A case typed by
+hand into that file would wear `synthetic: false`, count as validation, and assert something no human
+approved. **958 tests pass.**
+
+**One structural caveat, unresolved.** A promoted case asserts facts from the **real shop**, and the
+eval runs against the agent's **fixture** store. `graded_care_001` works only because both say
+*30 days*. When they diverge, the case fails for a reason that has nothing to do with the agent —
+[ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md) §12's problem arriving from a
+direction §12 does not describe.
+
+**Next:** the owner picks facts for the remaining seven grades — **that judgement is theirs and not a
+session's** (§4). Then A20/A21, both now sovereign-tier model-selection questions.
 **Finding 21 is closed as not-a-defect.**
 
 ## Session 2026-09-03 — the first graded turns, and a promise made in three places and kept in none
