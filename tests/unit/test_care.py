@@ -784,3 +784,129 @@ class TestPolicyIntegration:
             "get_order_status", {"order_ref": "1001"}, runtime.ctx, runtime.budget
         )
         assert decision.outcome is Outcome.ESCALATE
+
+
+class TestAProviderThatDidNotAnswer:
+    """Open question E9 / [ADR-0036], driven by a deterministic stub provider.
+
+    The classification lives in `neura-agent-core`, but the only way to show it
+    holds is to run a real graph into it. These stubs raise the same exception
+    types a real provider outage raises; **no model server is involved, and none
+    is taken away** — E9 was found by Ollama dying mid-suite, which is not a
+    thing an automated test may wait for.
+    """
+
+    def _case(self, **kwargs: Any) -> EvalCase:
+        return EvalCase(
+            id="t1",
+            intent=Intent.ORDER_STATUS,
+            input="Where is my order 1001?",
+            expect=Expectation(),
+            synthetic=True,
+            **kwargs,
+        )
+
+    def _ran(self, llm: Any, **case_kwargs: Any) -> Any:
+        return asyncio.run(CareTarget(llm).run(self._case(**case_kwargs)))
+
+    @staticmethod
+    def _looks_up_the_order(base: type) -> type:
+        """A stub whose planner actually calls a tool.
+
+        `verify` short-circuits before any model call when the turn produced no
+        evidence — a reply asserting nothing cannot be ungrounded. So the two
+        tests about `verify` need a turn that fetched something, or they would
+        pass while never reaching the branch they are about.
+        """
+
+        class Planner(base):  # type: ignore[valid-type, misc]
+            async def chat(self, role: Any, request: Any) -> Any:
+                from neura_llm import ToolCall
+
+                response = await super().chat(role, request)
+                if request.tools:
+                    response.tool_calls = [
+                        ToolCall(id="1", name="get_order_status", arguments={"order_ref": "1001"})
+                    ]
+                return response
+
+        return Planner
+
+    def _verified_turn(self, llm_class: type) -> Any:
+        """One turn that reaches `verify` with real evidence behind it."""
+        return self._ran(
+            self._looks_up_the_order(llm_class)(),
+            fixtures=["orders/cust_88_shipped.json"],
+            session=SessionContext(verified_customer_id="cust_88"),
+        )
+
+    def test_an_unreachable_provider_marks_the_turn_as_infrastructure(self) -> None:
+        from neura_llm import ProviderUnavailableError
+
+        class Down(StubLLM):
+            async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
+                raise ProviderUnavailableError("Could not reach ollama.")
+
+        response = self._ran(Down())
+        assert response.infrastructure_error
+        assert response.escalated, "the graph still degrades to a person"
+
+    def test_a_rate_limited_provider_is_infrastructure_too(self) -> None:
+        """**The sharper half of Finding 27.**
+
+        `ProviderRateLimitedError` is a sibling of `ProviderUnavailableError`,
+        not a subclass, so until 2026-09-06 a quota exhaustion was scored as
+        agent behaviour. Every turn escalated without proposing a tool, and the
+        guard-off suite reported `injection resistance 1.00 ✔` — the project's
+        one release-blocking gate, satisfied by a rate limiter.
+        """
+        from neura_llm import ProviderRateLimitedError
+
+        class Throttled(StubLLM):
+            async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
+                raise ProviderRateLimitedError("Rate limit exceeded: free-models-per-day")
+
+        response = self._ran(Throttled())
+        assert response.infrastructure_error, (
+            "a quota running out must not be indistinguishable from a defence working"
+        )
+
+    def test_a_provider_failure_at_verify_is_infrastructure(self) -> None:
+        """`route` and `plan` marked themselves; `verify` did not.
+
+        So a provider dying at the last node produced a turn that escalated with
+        no marker at all, and the suite scored it as an escalation the agent
+        chose — costing escalation precision for an outage.
+        """
+        from neura_llm import ProviderTimeoutError
+
+        class DiesAtVerify(StubLLM):
+            async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
+                if schema.__name__ == "Groundedness":
+                    raise ProviderTimeoutError("ollama timed out.")
+                return await super().chat_structured(role, request, schema)
+
+        response = self._verified_turn(DiesAtVerify)
+        assert response.tool_names, "the turn must reach verify with evidence"
+        assert response.infrastructure_error
+        assert response.escalated, "and it still fails closed — the draft is not sent"
+
+    def test_a_model_that_answers_badly_at_verify_is_still_the_agent(self) -> None:
+        """The other half of the same change, and the reason it is narrow.
+
+        Only a *provider* failure is infrastructure. A model returning something
+        unparseable is a model being unsuitable for the role, which is exactly
+        what `structured_repair_rate` and ADR-0018 exist to measure — marking it
+        unmeasured would delete the evidence.
+        """
+
+        class Unparseable(StubLLM):
+            async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
+                if schema.__name__ == "Groundedness":
+                    raise ValueError("could not parse the model's JSON")
+                return await super().chat_structured(role, request, schema)
+
+        response = self._verified_turn(Unparseable)
+        assert response.tool_names, "the turn must reach verify with evidence"
+        assert response.infrastructure_error is None
+        assert response.escalated, "still fails closed, still scored as the agent's turn"

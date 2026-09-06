@@ -12,23 +12,36 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from neura_evals.metrics import LOWER_IS_BETTER, THRESHOLDS, RunSummary
-from neura_evals.runner import RunReport, compare
+from neura_evals.metrics import LOWER_IS_BETTER, THRESHOLDS, CaseOutcome, RunSummary
+from neura_evals.runner import RunReport, RunVerdict, compare
 
 console = Console()
 
 
-def print_report(report: RunReport) -> None:
+def print_report(report: RunReport, verdict: RunVerdict | None = None) -> None:
     console.print()
     console.rule(f"[bold]Eval — {report.target_name}")
 
     _print_caveats(report)
 
     summary = report.summary
-    console.print(
-        f"\n  cases       {summary.total}  "
-        f"([green]{summary.passed} passed[/], [red]{summary.total - summary.passed} failed[/])"
-    )
+    # Four counts, not two. `total - passed` was the arithmetic behind Finding
+    # 27's headline — with 47 cases unreachable it printed `47 passed, 0 failed`
+    # directly under a panel saying 47 of 47 had reached no model (E9).
+    #
+    # `errored` and `skipped` are printed only when non-zero, so an ordinary
+    # green run reads exactly as it always has.
+    parts = [f"[green]{summary.passed} passed[/]", f"[red]{summary.failed} failed[/]"]
+    if summary.errored:
+        parts.append(f"[magenta]{summary.errored} errored[/]")
+    if summary.skipped:
+        parts.append(f"[yellow]{summary.skipped} skipped[/]")
+    console.print(f"\n  cases       {summary.total}  ({', '.join(parts)})")
+    if summary.errored or summary.skipped:
+        console.print(
+            f"  [dim]measured    {summary.measured} of {summary.total} — "
+            "errored and skipped cases were never measured and are not results[/]"
+        )
     console.print(f"  datasets    {', '.join(report.datasets)}")
     trust_label = f" [{report.judge_trust.value}]" if report.judge_trust else " (skipped)"
     console.print(f"  judge       {report.judge_model}{trust_label}")
@@ -73,9 +86,14 @@ def print_report(report: RunReport) -> None:
     )
     console.print(f"  cost        ${summary.total_cost_usd}\n")
 
-    failures = [r for r in report.results if not r.passed]
+    _print_errors(report)
+
+    # `r.failed`, not `not r.passed`. The difference is the point: an errored
+    # case is listed under Errors above, in its own colour, and never among the
+    # agent's failures.
+    failures = [r for r in report.results if r.failed]
     if failures:
-        console.print("[bold red]Failures[/]\n")
+        console.print("[bold red]Failures[/]  [dim]— the agent got these wrong[/]\n")
         for result in failures[:20]:
             console.print(f"  [red]✘[/] {result.case_id}  [dim]({result.intent})[/]")
             for check in result.failures:
@@ -110,6 +128,58 @@ def print_report(report: RunReport) -> None:
         console.print(
             Panel("\n".join(lines), title="[red]Gates not met", border_style="red", expand=False)
         )
+
+    _print_verdict(verdict)
+
+
+def _print_verdict(verdict: RunVerdict | None) -> None:
+    """What the process is about to exit with, and why.
+
+    Printed last and printed always, because the failure E9 records is a run
+    whose warnings were all correct and whose exit code was 0. A reader should
+    not have to reconstruct the verdict from four panels.
+    """
+    if verdict is None:
+        return
+
+    if verdict.ok:
+        if verdict.required:
+            console.print(
+                f"  [green]✔ run OK[/]  [dim]required: "
+                f"{', '.join(n.replace('_', ' ') for n in verdict.required)}[/]\n"
+            )
+        return
+
+    console.print(
+        Panel(
+            "\n".join(f"• {reason}" for reason in verdict.reasons),
+            title=f"[red]RUN FAILED — exit {verdict.exit_code}",
+            border_style="red",
+            expand=False,
+        )
+    )
+
+
+def _print_errors(report: RunReport) -> None:
+    """Cases that never produced a result, kept away from the agent's failures.
+
+    Separate section, separate colour, separate word. Finding 27's report had
+    every one of these and called them passes.
+    """
+    errored = [r for r in report.results if r.outcome is CaseOutcome.ERRORED]
+    if not errored:
+        return
+
+    console.print(
+        "[bold magenta]Errors[/]  [dim]— these never reached a result. Not agent failures.[/]\n"
+    )
+    for result in errored[:10]:
+        detail = result.response.infrastructure_error or result.response.error or "unknown"
+        console.print(f"  [magenta]![/] {result.case_id}  [dim]({result.intent})[/]")
+        console.print(f"      {detail[:200]}")
+    if len(errored) > 10:
+        console.print(f"\n  ... and {len(errored) - 10} more")
+    console.print()
 
 
 def _print_dispatch_matrix(summary: RunSummary) -> None:
@@ -150,6 +220,30 @@ def _print_caveats(report: RunReport) -> None:
     # the first target that was neither an agent nor `--no-agent` printed
     # "16 passed, 0 failed" with no caveat (found 2026-08-30, ADR-0031 §6).
     # A name is not a measurement — the same lesson `coverage` already carries.
+    if report.summary.errored:
+        # Said first and said loudly, above every other caveat — which is what
+        # this comment claimed before 2026-09-06 while the block sat fourth, so
+        # a reader met "the judge was skipped" before "no case reached a model".
+        #
+        # A run that lost cases to a dead model server is not a weak result — it
+        # is not a result. Measured 2026-07-31: Ollama died mid-run, the graph
+        # degraded correctly to escalation on every case, and the suite reported
+        # intent accuracy 0.00. Nothing about the agent had changed.
+        everything = report.summary.errored == report.summary.total
+        headline = (
+            "[bold]NOTHING WAS MEASURED. No case reached a result.[/]"
+            if everything
+            else f"[bold]{report.summary.errored} of {report.summary.total} cases "
+            "never reached a result.[/]"
+        )
+        warnings.append(
+            f"{headline}\n"
+            "They are ERRORED — neither passed nor failed, because they were never\n"
+            "measured. Every metric below covers only the cases that did run, so it is\n"
+            "real and narrower than it looks. Check the provider is up and re-run before\n"
+            "comparing this against anything."
+        )
+
     if report.summary.unmeasured and report.summary.unmeasured == report.summary.total:
         reason = next(
             (r.response.error for r in report.results if r.response.error),
@@ -186,18 +280,14 @@ def _print_caveats(report: RunReport) -> None:
         )
 
     if report.summary.unavailable:
-        # Said first and said loudly, above every other caveat. A run that lost
-        # half its cases to a dead model server is not a weak result — it is not
-        # a result. Measured 2026-07-31: Ollama died mid-run, the graph degraded
-        # correctly to escalation on every case, and the suite reported intent
-        # accuracy 0.00. Nothing about the agent had changed.
+        # The subset of `errored` whose cause was the provider specifically,
+        # rather than a target that raised. Named separately because the two
+        # need different people: one restarts Ollama, the other reads a stack.
         warnings.append(
             f"[bold]{report.summary.unavailable} of {report.summary.total} cases could not "
             "reach the model provider.[/]\n"
-            "Those cases are SKIPPED, not failed — they were never measured. Every metric\n"
-            "below covers only the cases that actually ran, so it is real but narrower\n"
-            "than it looks. Check the provider is up and re-run before comparing this\n"
-            "against anything."
+            "Rate limit, quota or outage. `make eval` and `make eval-guard-off` exit 3 on\n"
+            "this rather than 0 — a suite that measured nothing must not report green."
         )
 
     if report.summary.unjudged:

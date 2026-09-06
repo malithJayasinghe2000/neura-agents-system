@@ -12,9 +12,10 @@ from neura_evals.config import judge_from_env
 from neura_evals.dataset import Dataset, load_all, load_dataset
 from neura_evals.discovery import DiscoveredAgent, discover_agents
 from neura_evals.judge import Judge
+from neura_evals.metrics import REPORTED_METRICS
 from neura_evals.persist import default_path, write_report
 from neura_evals.report import print_report
-from neura_evals.runner import DEFAULT_CONCURRENCY, run_eval
+from neura_evals.runner import DEFAULT_CONCURRENCY, judge_run, run_eval
 from neura_evals.target import EvalTarget, NotImplementedTarget
 
 #: The role map an eval runs under, unless told otherwise. Local by default so
@@ -86,7 +87,28 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--fail-on-gate",
         action="store_true",
-        help="Exit non-zero if any gate is not met. Used by CI.",
+        help="Exit 1 if ANY gate is not met, required or not. Opt-in.",
+    )
+    parser.add_argument(
+        "--require",
+        action="append",
+        default=[],
+        metavar="METRIC",
+        help=(
+            "A metric this run must PRODUCE, and must meet the gate for. Repeatable. "
+            "A required metric that was never measured fails the run (exit 1) — the "
+            "gap open question E9 records, where `injection_resistance` was absent "
+            "rather than 0.00 and the run exited 0."
+        ),
+    )
+    parser.add_argument(
+        "--fail-on-unmeasured",
+        action="store_true",
+        help=(
+            "Exit 3 if any case never reached a result — provider unreachable, rate "
+            "limited, or the target raised. A partial suite is not comparable with a "
+            "full one, and a suite that measured nothing is not a result at all."
+        ),
     )
     parser.add_argument(
         "--list-agents",
@@ -242,7 +264,14 @@ def _build_target(agent: DiscoveredAgent | None, role_map: str, no_agent: bool) 
     return agent.build(LLMClient.from_role_map_name(role_map))
 
 
-async def _run(args: argparse.Namespace) -> int:
+async def _run(args: argparse.Namespace, *, target: EvalTarget | None = None) -> int:
+    """One run, start to exit code.
+
+    ``target`` is injectable so the exit-code paths can be tested against a
+    deterministic stub rather than by taking a model server away — which is not
+    a thing an automated test may depend on, and is how E9 was found rather than
+    how it should be reproduced.
+    """
     if args.check_judge:
         return await _check_judge()
     if args.list_agents:
@@ -271,7 +300,8 @@ async def _run(args: argparse.Namespace) -> int:
 
     datasets = _load_datasets(directory, args.dataset)
     judge = None if args.no_judge else Judge(judge_from_env())
-    target = _build_target(agent, args.role_map, args.no_agent)
+    if target is None:
+        target = _build_target(agent, args.role_map, args.no_agent)
 
     report = await run_eval(
         target=target,
@@ -279,25 +309,44 @@ async def _run(args: argparse.Namespace) -> int:
         judge=judge,
         concurrency=args.concurrency,
     )
-    print_report(report)
 
-    # Written after printing and before the gate check, so a run that exits
-    # non-zero still leaves its evidence behind. A gate failure is precisely the
-    # run somebody will want to read again (E7).
+    # Decided before anything is printed or written, so the terminal, the file
+    # and the exit code cannot disagree. They did on 2026-09-06: the report said
+    # 47 of 47 cases reached no model and the process exited 0 (E9).
+    verdict = judge_run(
+        report,
+        required=args.require,
+        fail_on_gate=args.fail_on_gate,
+        fail_on_unmeasured=args.fail_on_unmeasured,
+    )
+    print_report(report, verdict)
+
+    # Written whatever the verdict, so a run that exits non-zero still leaves its
+    # evidence behind. A failing run is precisely the one somebody will want to
+    # read again (E7).
     if args.out is not None:
         out = default_path(target.name) if args.out == _DEFAULT_OUT else args.out
-        print(f"  run written to {write_report(report, out)}\n")
+        print(f"  run written to {write_report(report, out, verdict)}\n")
 
-    if args.fail_on_gate and report.summary.gate_failures():
-        return 1
-    return 0
+    return verdict.exit_code
 
 
 def main() -> None:
     # Before anything reads configuration: judge settings live in .env, and
     # os.getenv cannot see a file nobody loaded.
     load_env()
-    args = _build_parser().parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    # A `--require` naming a metric this harness cannot emit would be a command
+    # that fails for ever for a reason nobody could act on, so a typo is a usage
+    # error (argparse's exit 2) rather than a gate failure.
+    if unknown := [name for name in args.require if name not in REPORTED_METRICS]:
+        parser.error(
+            f"unknown metric(s) for --require: {', '.join(sorted(unknown))}. "
+            f"Available: {', '.join(sorted(REPORTED_METRICS))}"
+        )
+
     raise SystemExit(asyncio.run(_run(args)))
 
 

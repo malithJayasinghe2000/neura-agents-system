@@ -147,6 +147,23 @@ gate. That run disables every rule and measures the structural defence alone, an
 **injection resistance must be 1.00 in it**. If it is not, what broke is the
 policy engine, and no rule in the guard is the fix ([ADR-0011](docs/architecture/adr/0011-deterministic-guard-not-classifier.md)).
 
+**That sentence is now enforced by the command rather than by a human reading a
+table** ([ADR-0036](docs/architecture/adr/0036-a-run-that-measured-nothing-fails.md)).
+`make eval` and `make eval-guard-off` pass `--require injection_resistance`, so a
+run in which the metric is **absent** fails just as one in which it is low does —
+until 2026-09-06 a run that reached no model omitted it entirely and exited 0.
+They also pass `--fail-on-unmeasured`: **exit 3** means a case never reached a
+result (provider down, rate limited, target raised), **exit 1** means the agent
+missed a required gate, and the two are kept apart so a dead model server is not
+read as a regression. A rate limit counts as a provider failure for the same
+reason — a quota running out must not be indistinguishable from a defence working.
+
+**Only `injection_resistance` blocks.** Every other gate is reported and does not
+fail the command, deliberately: `tool_selection_accuracy` fails today for
+documented reasons and `eval-guard-off` fails escalation precision *by design*, and
+a command that is permanently red is a command whose red stops meaning anything.
+`--fail-on-gate` is still there for a run that wants everything.
+
 ---
 
 ## Conventions
@@ -291,7 +308,9 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | Webhooks stop being delivered after a restart | The drainer's tenant index lives in Redis (open question **P7**). Rows are safe, the schedule is not — `make webhook-drain TENANT=…` |
 | A webhook endpoint quietly stops receiving events | 20 consecutive failures auto-disables it. Check `GET /v1/webhooks` for `status: disabled`, and `GET /v1/webhooks/deliveries?status=dead` for what was lost |
 | A WebSocket delivers the whole reply at once with no `token` frames | The turn was blocked or escalated. Those replies are fixed text delivered whole — typing out a refusal is theatre (ADR-0016) |
-| `make eval` ran locally after you set `NEURA_ROLE_MAP=cloud-prod` | **`neura-eval` does not read `NEURA_ROLE_MAP`.** It has its own `--role-map`, defaulting to `ollama-dev` so the suite costs nothing by accident. Every other entry point honours the env var, so this reads as a bug and is deliberate. **The only clue is the report filename** — `care@ollama-dev-…json` — and a run whose provider is down still exits 0 (**E9**). Pass `--role-map cloud-prod` explicitly; `make eval` has no passthrough, so invoke `uv run neura-eval` directly or use `make eval-compare A=… B=…` |
+| `make eval` ran locally after you set `NEURA_ROLE_MAP=cloud-prod` | **`neura-eval` does not read `NEURA_ROLE_MAP`.** It has its own `--role-map`, defaulting to `ollama-dev` so the suite costs nothing by accident. Every other entry point honours the env var, so this reads as a bug and is deliberate. **The only clue is the report filename** — `care@ollama-dev-…json`. (A run whose provider is down no longer exits 0 — it exits 3, [ADR-0036](docs/architecture/adr/0036-a-run-that-measured-nothing-fails.md).) Pass `--role-map cloud-prod` explicitly; `make eval` has no passthrough, so invoke `uv run neura-eval` directly or use `make eval-compare A=… B=…` |
+| `make eval` exits 3 | A case never reached a result — the provider is down, rate limited, or a target raised. **Not an agent failure**, and the numbers in that run are not a measurement. Fix the provider and re-run; do not compare it against anything ([ADR-0036](docs/architecture/adr/0036-a-run-that-measured-nothing-fails.md)) |
+| `make eval` exits 1 saying a metric "was never measured" | The suite produced no `injection_resistance` at all. Either no adversarial case ran, or the datasets stopped asserting `unauthorised_tool_calls`. A gate cannot be met by a number that does not exist, which is why absence fails rather than being skipped (**E9**) |
 | `AGENT_NOT_RUNNABLE` (403) rather than 404 | The agent declares `neura.agents` and not `neura.agent_runners`, or its `build_runner` raised at startup. "We have it and it is broken" is a different problem from "we do not have it" |
 
 ---

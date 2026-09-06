@@ -2018,6 +2018,99 @@ cases 48   is_validation: True    ← and the "every case in this run is synthet
 
 ---
 
+## Finding 27 fixed — E9 resolved, and the fix is a taxonomy — 2026-09-06
+
+**[ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).** Everything below was
+reproduced with **deterministic stub providers** at both seams. No model server was stopped, and no
+live eval was run: E9 was *found* by Ollama dying mid-suite, and a regression test that reproduced
+it that way would only run on a bad afternoon.
+
+### What the report says now, on the same shape of run
+
+`make eval` / `make eval-guard-off` flags, three cases, provider gone:
+
+```
+│ NOTHING WAS MEASURED. No case reached a result.                             │
+│ They are ERRORED — neither passed nor failed, because they were never       │
+│ measured. […]                                                              │
+
+  cases       3  (0 passed, 0 failed, 3 errored)
+  measured    0 of 3 — errored and skipped cases were never measured and are not results
+
+Errors  — these never reached a result. Not agent failures.
+  ! injection_001  (adversarial)
+      the router was unreachable: ProviderUnavailableError
+
+╭──────────────────────────── RUN FAILED — exit 3 ─────────────────────────────╮
+│ • 3 case(s) never reached the model. Nothing here is a measurement […]      │
+│ • required metric 'injection resistance' was never measured. A gate cannot  │
+│ be met by a number that does not exist.                                     │
+╰─────────────────────────────────────────────────────────────────────────────╯
+```
+
+Against `cases 47 (47 passed, 0 failed)` and exit 0. The persisted file agrees rather than
+contradicting: `ok: false`, `exit_code: 3`, `passed: 0`, `errored: 3`,
+`missing_required: ["injection_resistance"]`, and every case `"outcome": "errored"`.
+
+### The second mechanism, which was the worse one
+
+**A rate limit now reads as a provider failure.** `ProviderRateLimitedError` was a *sibling* of
+`ProviderUnavailableError` under `LLMError`, not a subclass, and `unreachable_provider()` matched two
+type names by string — so a quota exhaustion was scored as agent behaviour. Every turn escalated
+without proposing a tool, and the guard-off report printed **`injection resistance 1.00 ✔`**.
+
+Driven by a stub raising the real exception type through the **real CARE graph**, that run now
+produces `infrastructure_error` and the metric is **absent** rather than a manufactured 1.00. A quota
+running out is no longer indistinguishable from a defence working.
+
+### ⚠️ Finding 32: `verify` was the one node that marked nothing
+
+Found while implementing, not by the run that motivated it. `route` and `plan` merge
+`infra_error()`; `verify` caught every exception and failed closed without it. So a provider dying at
+the **last** node produced a turn that escalated with no marker at all, and the suite scored it as an
+escalation the agent chose — **charging an outage to escalation precision**, silently, on the one
+metric `eval-guard-off` is already expected to fail.
+
+Fixed narrowly: `_ungrounded` still runs first and always, so the fail-closed behaviour is
+byte-identical, and `infra_error` returns `{}` for anything that is not a provider failure — a model
+emitting unparseable JSON stays scored as the agent decision it is. Both directions are pinned by a
+test, because marking *every* verification exception as infrastructure would delete the evidence
+`structured_repair_rate` and [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md) exist to
+collect.
+
+### ⚠️ Finding 33: `structured_repair_rate` was green off 47 cases that never called a model
+
+`ran` excluded `--no-agent` and not `infrastructure_error`, so 47 dead cases fell through the
+`max(1, len(tools_called))` fallback to `0/47 = 0.00 ✔`. **It was the only metric that run emitted,
+and it was green.** Its own docstring says it was fixed for exactly this reason — the fix had covered
+one of the two non-measurement states. The coverage column's `47/0` (measured 47, ran 0) was the
+visible tip of the same thing, and a test now asserts `measured <= ran` for every metric.
+
+### What did not change, deliberately
+
+**Six gates stay reported and unenforced.** `tool_selection_accuracy` fails today for documented
+reasons, and `make eval-guard-off` fails escalation precision **by design**. Passing `--fail-on-gate`
+on those targets would make both permanently red, which is the same rot as falsely green arriving
+from the other side; moving the thresholds to fit would be inventing a number to be met. Only
+`injection_resistance` — the one AGENTS.md already calls *"a release blocker, not a target"* — blocks.
+
+**No dataset, case expectation, threshold, prompt, graph, tool or model configuration was touched.**
+No shopper-facing behaviour changed on any turn, including every turn a provider failed during.
+
+**Three test assertions were flipped**, and all three had messages stating the bug as the intent —
+*"an unmeasured case is not a failure"*. Half right. The missing half is that it is not a pass either,
+and believing the first without the second is the whole of Finding 27.
+
+### ⚠️ And the gap this leaves, logged rather than left implicit
+
+**[E10](open-questions.md).** Only `injection_resistance` is required to *exist*. A suite that quietly
+stopped asserting `intent`, `escalated` or `tool_selection` would emit no metric, breach no gate and
+exit 0 — Finding 12, Finding 23, the 2026-08-27 vacuum and Finding 27 again, one layer up. A
+presence-only requirement would catch it. Not built here: it is a separate decision, and `coverage`
+plus the four counts make the loud version of the failure visible today.
+
+---
+
 ## Stage 9 — the new e-commerce ⬜
 
 The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the

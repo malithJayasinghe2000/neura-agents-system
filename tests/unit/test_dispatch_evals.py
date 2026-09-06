@@ -16,7 +16,7 @@ import asyncio
 import pytest
 from neura_evals.dataset import EvalCase, Expectation, load_all
 from neura_evals.discovery import discover_agents
-from neura_evals.metrics import EXPENSIVE_MISS, score_case, summarise
+from neura_evals.metrics import EXPENSIVE_MISS, CaseOutcome, score_case, summarise
 from neura_evals.target import AgentResponse
 
 from neura_dispatch.evals import DispatchTarget, build_target
@@ -62,11 +62,19 @@ class TestTheTargetIsDiscoverable:
         assert response.dispatched_to is None
         assert not response.not_run
 
-    def test_that_case_is_skipped_rather_than_failed(self) -> None:
-        """The half above is only true if the scorer agrees with it."""
+    def test_that_case_is_errored_rather_than_failed_or_passed(self) -> None:
+        """The half above is only true if the scorer agrees with it.
+
+        **This asserted `result.passed` until 2026-09-06**, and it was half
+        right — the half that matters here is that a dead provider is not
+        recorded as a misroute. The missing half is that it is not a *pass*
+        either, which is how 47 unreachable cases reported `47 passed, 0 failed`
+        ([ADR-0036], E9). The case is `ERRORED`: neither.
+        """
         response = asyncio.run(build_target(None).run(_case("x", "care")))
         result = _score(_case("x", "care"), response)
-        assert result.passed  # type: ignore[attr-defined]
+        assert result.outcome is CaseOutcome.ERRORED  # type: ignore[attr-defined]
+        assert not result.passed and not result.failed  # type: ignore[attr-defined]
         assert all(c.status.value == "skip" for c in result.checks)  # type: ignore[attr-defined]
 
     def test_the_target_satisfies_the_harness_protocol(self) -> None:

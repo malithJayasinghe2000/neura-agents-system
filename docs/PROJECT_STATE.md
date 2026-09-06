@@ -4,8 +4,37 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-06 — **a promoted case now replays the evidence its turn captured, and the seven that could not were deleted**
+**Last updated:** 2026-09-06 — **the release gate cannot be satisfied by a dead model server any more; E9 resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md)**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
+**Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
+[E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
+A case is now one of **four** outcomes rather than a boolean — `PASSED`, `FAILED`, `ERRORED`,
+`SKIPPED` — with `outcome` derived from the same fields `score_case` branches on, so an unmeasured
+case *cannot* be constructed as a pass; `total == passed + failed + errored + skipped` is asserted
+inside `summarise()`. `make eval` and `make eval-guard-off` pass **`--require injection_resistance`**
+(absence fails, not only breach) and **`--fail-on-unmeasured`**. Exit codes separate the kinds of
+failure: **1** the agent, **3** the infrastructure, 2 left to argparse. **The rate-limit half was the
+sharper one**: `ProviderRateLimitedError` was a sibling rather than a subclass of
+`ProviderUnavailableError`, so a quota exhaustion scored as agent behaviour and printed
+`injection resistance 1.00 ✔` — a rate limiter manufacturing the project's one release-blocking gate.
+It is now a provider failure, as is one at `verify`, which had marked nothing and so charged outages
+to escalation precision. **Only `injection_resistance` blocks**: `tool_selection_accuracy` and
+guard-off's escalation precision stay reported and unenforced on purpose, because a permanently red
+command rots the same way a falsely green one does — and no threshold, dataset, prompt, graph, tool
+or model configuration was touched. Every regression test uses **deterministic stub providers** at
+both seams; no test depends on a model being absent. `make lint`, `make arch`, `make test` (1085
+passed) and `make eval-fast` all green. **Then validated live on Gemini and accepted by the owner**
+— `cloud-prod`, `gemini-3.6-flash` on every role, `--no-judge` on both runs, 48 cases each:
+**injection resistance 1.00 ✔ in both**, **0 errored, 0 unavailable, 0 provider errors**, both
+**exit 0**, and the persisted schema-2 totals sum honestly (39/9/0/0 and 31/17/0/0). The two known
+breaches reported and deliberately not blocking: **tool selection 0.53 / 0.50 ✘** on both, and
+**escalation precision 0.70 ✘ guard-off, which is by design**. **Two follow-ups left open on
+purpose.** [E10](open-questions.md): only one metric is required to *exist*, so a suite that quietly
+stopped asserting `intent` or `escalated` would still exit 0. [E11](open-questions.md): on
+`cloud-prod` the judge and the agent are both `gemini-3.6-flash`, and `judge_from_env()` decides
+trust from the model name alone — so a **judged** cloud run would label self-judging `trusted`. The
+accepted validation avoided it with `--no-judge`; nothing is fixed.
+
 **Next action:** **Grade more turns and promote them.** The loop is closed end to end and one real case ships; everything from here is volume, and volume is what [E1](open-questions.md) needs before any score is called validation. Note the `.env` now points at Gemini — `gemini-2.5-flash` and `-flash-lite` are **retired for new API keys** and were replaced with `gemini-3.5-flash` / `gemini-3.5-flash-lite`. The promotion machine and its evidence layer are built ([ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md), [ADR-0034](architecture/adr/0034-a-promoted-case-carries-the-shop-it-was-graded-on.md)); there are currently **zero promoted cases**, on purpose. Then A20/A21 — both sovereign-tier model-selection questions.
 The widget now runs on a real storefront and a conversation there dies at its second message: CARE's
 router returns confidence 0.00 after any handover, and the ownership gate guarantees a handover on

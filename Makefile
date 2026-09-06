@@ -246,12 +246,30 @@ judge-check:  ## Verify the eval judge is reachable AND catches a hallucination
 # gates in AGENTS.md were measured against.
 AGENT ?= care
 
+# The metric(s) this run must PRODUCE and must meet the gate for — [ADR-0036].
+#
+# `injection_resistance` and nothing else, and the shortness of the list is the
+# decision rather than an oversight. AGENTS.md already calls it *"a release
+# blocker, not a target"*; every other gate stays REPORTED, because
+# `tool_selection_accuracy` and `escalation_precision` fail today for documented
+# reasons (A7/A14, and guard-off fails precision BY DESIGN), and a command that
+# is permanently red is a command whose red stops meaning anything — the same rot
+# as one that is falsely green.
+#
+# The dispatch suite requires a different metric, since it cannot produce this
+# one:  make eval AGENT=dispatch REQUIRE=expensive_misroute_rate
+REQUIRE ?= injection_resistance
+_require = $(foreach metric,$(REQUIRE),--require $(metric))
+
 # `--out` is not optional here, and that is the point of open question E7. A
 # suite run costs twenty minutes of local inference and used to leave nothing
 # behind but terminal scrollback — so the second look at a failure cost another
 # twenty minutes, twice, on 2026-08-02 and 2026-08-26.
+#
+# `--fail-on-unmeasured` exits 3 when any case never reached a result. Added
+# 2026-09-06: this command exited 0 having measured nothing at all (E9).
 eval:  ## Run an agent against its golden datasets: make eval [AGENT=sell OUT=path.json]
-	uv run neura-eval --agent $(AGENT) --out $(if $(OUT),$(OUT),)
+	uv run neura-eval --agent $(AGENT) $(_require) --fail-on-unmeasured --out $(if $(OUT),$(OUT),)
 
 # Every installed agent, not just one. Datasets parsing is a property of the
 # repository rather than of whichever agent happens to be the default, and a
@@ -273,11 +291,23 @@ eval-fast:  ## Every agent's datasets + the harness — no agent run, no models,
 #
 # **Injection resistance must be 1.00 here.** If it is not, the thing that broke
 # is the policy engine, and no rule in the guard is the fix (ADR-0011).
+#
+# That sentence was enforced by a human reading a table until 2026-09-06, when
+# this command printed "47 of 47 cases could not reach the model provider",
+# omitted injection resistance from the metrics table entirely, and exited 0
+# (E9, Finding 27). `--require` now fails the run when the number is ABSENT, not
+# only when it is low — a gate cannot be met by a number that does not exist.
 eval-guard-off:  ## The suite with the guard disabled — proves the defence is structural
-	NEURA_GUARD_ENABLED=false uv run neura-eval --agent $(AGENT) --no-judge --out
+	NEURA_GUARD_ENABLED=false uv run neura-eval --agent $(AGENT) --no-judge \
+		$(_require) --fail-on-unmeasured --out
 
+# No `--require`: which metrics a single dataset can produce depends on which
+# dataset it is, and `product_qa.yaml` has no adversarial case in it. Requiring
+# injection resistance here would fail a legitimate run for asking the wrong
+# question of it. `--fail-on-unmeasured` still applies — a dataset run that
+# reached no model is no more a result than a whole suite that did not.
 eval-one:  ## One dataset against the real agent: make eval-one D=injection [AGENT=sell OUT=path.json]
-	uv run neura-eval --agent $(AGENT) --dataset $(D) --out $(if $(OUT),$(OUT),)
+	uv run neura-eval --agent $(AGENT) --dataset $(D) --fail-on-unmeasured --out $(if $(OUT),$(OUT),)
 
 eval-agents:  ## Which installed agents can be evaluated
 	uv run neura-eval --list-agents

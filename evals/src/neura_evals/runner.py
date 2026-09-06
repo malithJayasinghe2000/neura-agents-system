@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,6 +88,115 @@ async def run_eval(
         duration_s=round(time.perf_counter() - clock, 2),
         results=list(results),
         summary=summarise(list(results)),
+    )
+
+
+#: The process exited without complaint.
+EXIT_OK = 0
+#: **About the agent.** A required metric was missing, or a gate was not met.
+EXIT_GATE = 1
+#: **About the infrastructure.** At least one case never reached the model, so
+#: the run is not a measurement whatever its numbers say.
+#:
+#: Three rather than two: argparse exits 2 on a usage error, and a CI job that
+#: could not tell "you typed the flag wrong" from "the model server is down"
+#: would retry the first for ever and page nobody for the second.
+EXIT_UNMEASURED = 3
+
+
+@dataclass(frozen=True, slots=True)
+class RunVerdict:
+    """Did this run pass, and what does the process exit with?
+
+    **Separated from the report on purpose.** A `RunReport` is what was measured;
+    a verdict is what was *required*, and the requirement comes from the command
+    line because it depends on which datasets the run was pointed at. CARE's
+    suite must produce `injection_resistance`; the dispatch suite cannot, and
+    must produce `expensive_misroute_rate` instead. A single answer baked into
+    this module would be wrong for one of them (open question E9).
+    """
+
+    required: tuple[str, ...] = ()
+    #: Required metrics the run never emitted. Finding 27's actual failure.
+    missing_required: tuple[str, ...] = ()
+    #: ``(metric, actual, threshold)`` for required metrics whose gate was not met.
+    required_breached: tuple[tuple[str, float, float], ...] = ()
+    #: Every gate breach, required or not. Reported always; blocking only under
+    #: ``--fail-on-gate``.
+    gate_failures: tuple[tuple[str, float, float], ...] = ()
+    #: Cases that never reached the model. Blocking under ``--fail-on-unmeasured``.
+    errored: int = 0
+    fail_on_gate: bool = False
+    fail_on_unmeasured: bool = False
+
+    @property
+    def reasons(self) -> list[str]:
+        """Why this run failed, in the order the exit code is decided."""
+        out: list[str] = []
+        if self.fail_on_unmeasured and self.errored:
+            out.append(
+                f"{self.errored} case(s) never reached the model. "
+                "Nothing here is a measurement — fix the provider and re-run."
+            )
+        for name in self.missing_required:
+            out.append(
+                f"required metric {name.replace('_', ' ')!r} was never measured. "
+                "A gate cannot be met by a number that does not exist."
+            )
+        for name, actual, threshold in self.required_breached:
+            out.append(
+                f"required gate {name.replace('_', ' ')} {actual:.2f} (gate {threshold:.2f})"
+            )
+        if self.fail_on_gate:
+            required = {n for n, _, _ in self.required_breached}
+            out += [
+                f"gate {name.replace('_', ' ')} {actual:.2f} (gate {threshold:.2f})"
+                for name, actual, threshold in self.gate_failures
+                if name not in required
+            ]
+        return out
+
+    @property
+    def exit_code(self) -> int:
+        """Infrastructure first, and that ordering is the decision.
+
+        A run that could not reach the model has numbers that mean nothing, so
+        reporting *"injection resistance missing"* as the headline would send
+        somebody looking at the datasets. The provider is the thing to fix, and
+        the exit code says so.
+        """
+        if self.fail_on_unmeasured and self.errored:
+            return EXIT_UNMEASURED
+        if self.missing_required or self.required_breached:
+            return EXIT_GATE
+        if self.fail_on_gate and self.gate_failures:
+            return EXIT_GATE
+        return EXIT_OK
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_code == EXIT_OK
+
+
+def judge_run(
+    report: RunReport,
+    *,
+    required: Sequence[str] = (),
+    fail_on_gate: bool = False,
+    fail_on_unmeasured: bool = False,
+) -> RunVerdict:
+    """Turn a report plus what was asked of it into a pass or a fail."""
+    gate_failures = tuple(report.summary.gate_failures())
+    required = tuple(required)
+    missing = tuple(report.summary.missing_required(required))
+    return RunVerdict(
+        required=required,
+        missing_required=missing,
+        required_breached=tuple(f for f in gate_failures if f[0] in set(required)),
+        gate_failures=gate_failures,
+        errored=report.summary.errored,
+        fail_on_gate=fail_on_gate,
+        fail_on_unmeasured=fail_on_unmeasured,
     )
 
 

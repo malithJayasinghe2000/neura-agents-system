@@ -48,7 +48,7 @@ from typing import Any, cast
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
-from neura_agent_core.graph.state import AgentState, runtime_of
+from neura_agent_core.graph.state import AgentState, infra_error, runtime_of
 from neura_agent_core.graph.usage import accrue
 from neura_agent_core.guard import find_leaks
 from neura_core import get_logger
@@ -150,8 +150,23 @@ async def verify(state: AgentState, config: RunnableConfig) -> AgentState:
     except Exception as exc:
         # Fails closed. A verifier that lets answers through when it breaks is
         # worse than no verifier, because it looks like protection.
+        #
+        # **The shopper's outcome is identical either way**, and that is the
+        # point of merging rather than branching: `_ungrounded` runs first and
+        # always. What `infra_error` adds is the *reason*, and only when the
+        # reason was the provider — it returns `{}` for everything else, so a
+        # model emitting unparseable JSON stays scored as the agent decision it
+        # is (open question E9, [ADR-0036]).
+        #
+        # Without it, a provider dying at this node alone was invisible: `route`
+        # and `plan` mark themselves and `verify` did not, so those turns landed
+        # in the suite as escalations the agent chose, costing escalation
+        # precision for an outage.
         log.warning("verify_failed", conversation_id=state.get("conversation_id"), error=str(exc))
-        return _ungrounded(f"verification could not be completed: {type(exc).__name__}")
+        return {
+            **_ungrounded(f"verification could not be completed: {type(exc).__name__}"),
+            **infra_error(exc, "the verifier was unreachable"),
+        }
 
     # Charged on both branches. `verify` runs on GUARD, and what a cloud model
     # in that role would cost is the measurement ADR-0025 is parked on — a

@@ -49,7 +49,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from neura_evals.runner import RunReport
+from neura_evals.runner import RunReport, RunVerdict
+
+#: Bumped whenever the meaning of a field in this file changes. Version 2
+#: (2026-09-06, [ADR-0036]) made `passed` false for a case that never ran and
+#: added the four-outcome counts; version 1 files record `passed: true` for
+#: cases that reached no model.
+REPORT_SCHEMA_VERSION = 2
 
 
 def default_path(agent: str, *, directory: Path | None = None) -> Path:
@@ -63,14 +69,16 @@ def default_path(agent: str, *, directory: Path | None = None) -> Path:
     return (directory or Path("evals/reports")) / f"{agent}-{stamp}.json"
 
 
-def write_report(report: RunReport, path: Path) -> Path:
+def write_report(report: RunReport, path: Path, verdict: RunVerdict | None = None) -> Path:
     """Serialise the whole run. Returns the path actually written."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(_as_json(report), indent=2, default=_fallback), encoding="utf-8")
+    path.write_text(
+        json.dumps(_as_json(report, verdict), indent=2, default=_fallback), encoding="utf-8"
+    )
     return path
 
 
-def _as_json(report: RunReport) -> dict[str, Any]:
+def _as_json(report: RunReport, verdict: RunVerdict | None = None) -> dict[str, Any]:
     """The run as plain JSON.
 
     Built field by field rather than by dumping the dataclass, so that the two
@@ -79,6 +87,19 @@ def _as_json(report: RunReport) -> dict[str, Any]:
     and are asserted on in `tests/unit`.
     """
     return {
+        # Bumped to 2 on 2026-09-06 (E9, [ADR-0036]). In version 1 a case that
+        # never reached the model was written `"passed": true` and the summary
+        # read `total: 47, passed: 47, pass_rate: 1.0`. A reader six weeks later
+        # — or a CI job — could not tell that file from a clean run, so the
+        # version is here to say which meaning `passed` carries.
+        "report_schema_version": REPORT_SCHEMA_VERSION,
+        # What the process exited with, and whether it was satisfied. Written so
+        # a machine reader needs one field rather than a rule for combining five.
+        "ok": verdict.ok if verdict else None,
+        "exit_code": verdict.exit_code if verdict else None,
+        "required_metrics": list(verdict.required) if verdict else [],
+        "missing_required": list(verdict.missing_required) if verdict else [],
+        "failure_reasons": verdict.reasons if verdict else [],
         "target": report.target_name,
         "datasets": list(report.datasets),
         "judge": {
@@ -95,7 +116,15 @@ def _as_json(report: RunReport) -> dict[str, Any]:
         "duration_s": report.duration_s,
         "summary": {
             "total": report.summary.total,
+            # Four counts that sum to `total`. `passed` no longer includes a
+            # case that never ran, and `failed` is no longer `total - passed`.
             "passed": report.summary.passed,
+            "failed": report.summary.failed,
+            "errored": report.summary.errored,
+            "skipped": report.summary.skipped,
+            #: Cases that produced evidence about the agent, and the denominator
+            #: `pass_rate` is now stated against.
+            "measured": report.summary.measured,
             "synthetic": report.summary.synthetic,
             "unjudged": report.summary.unjudged,
             "unavailable": report.summary.unavailable,
@@ -134,7 +163,13 @@ def _case(result: Any) -> dict[str, Any]:
         "case_id": result.case_id,
         "intent": result.intent,
         "synthetic": result.synthetic,
+        # `outcome` is the field to read; `passed` is kept beside it and is now
+        # true only of a case that ran and held. In schema 1 both an unreachable
+        # provider and a clean answer wrote `"passed": true`.
+        "outcome": _plain(result.outcome),
         "passed": result.passed,
+        "failed": result.failed,
+        "measured": result.measured,
         "groundedness_score": result.groundedness_score,
         "checks": [
             {"name": c.name, "status": _plain(c.status), "detail": c.detail} for c in result.checks
@@ -199,4 +234,4 @@ def _fallback(value: Any) -> Any:
     return str(value)
 
 
-__all__ = ["default_path", "write_report"]
+__all__ = ["REPORT_SCHEMA_VERSION", "default_path", "write_report"]
