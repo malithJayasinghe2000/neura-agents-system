@@ -21,8 +21,12 @@ three things a ``shadow_turns`` row does not:
   ``document_chunks``. "Cited policy:returns" is a reference; the returns policy
   is evidence.
 * **an explicit statement of what is not recorded.** A tool citation names the
-  lookup and not the record it returned, deliberately — the record is customer
-  data and lives under the audit log's retention policy (`serving.Citation`).
+  lookup and not the record it returned, deliberately — the record is the
+  merchant's own data (`serving.Citation`). **This paragraph used to say it was
+  kept in the audit log; it never was**, and both it and the sentence on screen
+  were corrected on 2026-09-06 ([ADR-0034] §10). What a graded turn's boundary
+  *is* recorded in, since that date, is `shadow_evidence` — which exists to make
+  the turn replayable, is not shown here, and is not an audit trail.
   The queue says so rather than showing an empty panel, for the same reason
   [ADR-0020](../../../../docs/architecture/adr/0020-a-withheld-turn-says-so.md)
   gave a withheld reply words: silence is the one outcome indistinguishable
@@ -111,12 +115,20 @@ class Evidence:
     """Why there is no text, in words a merchant can act on. Empty when there is."""
 
 
-#: What a tool citation can honestly say. Not a failure — the record it returned
-#: is the shopper's own order data, and it is in the audit log under the
-#: retention policy that data belongs to, not in a queue read for six weeks.
+#: What a tool citation can honestly say.
+#:
+#: **It used to say the result was "kept in the audit log", and that was false.**
+#: `audit_log` has only ever held `guard.block` entries — `TOOL_EXECUTED` and
+#: `TOOL_DECISION` are defined and written by nothing — so a merchant reading
+#: that sentence was told a record existed that did not. Corrected 2026-09-06
+#: ([ADR-0034] §10); this is [Finding 20](../../../../docs/TESTING_LOG.md) on the
+#: same screen, and the fix is the same one: delete the false clause rather than
+#: build a feature to make it true.
+#:
+#: What is true is narrower and is all this says: the lookup ran, what it
+#: returned is the merchant's own data, and this queue does not hold it.
 TOOL_NOT_RECORDED = (
-    "This lookup ran. What it returned is customer data and is kept in the "
-    "audit log, not in this queue."
+    "This lookup ran. What it returned is the store's own data and is not kept in this queue."
 )
 
 #: A cited source that is no longer indexed. Re-indexing under a new id and a

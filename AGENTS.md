@@ -291,6 +291,7 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | Webhooks stop being delivered after a restart | The drainer's tenant index lives in Redis (open question **P7**). Rows are safe, the schedule is not — `make webhook-drain TENANT=…` |
 | A webhook endpoint quietly stops receiving events | 20 consecutive failures auto-disables it. Check `GET /v1/webhooks` for `status: disabled`, and `GET /v1/webhooks/deliveries?status=dead` for what was lost |
 | A WebSocket delivers the whole reply at once with no `token` frames | The turn was blocked or escalated. Those replies are fixed text delivered whole — typing out a refusal is theatre (ADR-0016) |
+| `make eval` ran locally after you set `NEURA_ROLE_MAP=cloud-prod` | **`neura-eval` does not read `NEURA_ROLE_MAP`.** It has its own `--role-map`, defaulting to `ollama-dev` so the suite costs nothing by accident. Every other entry point honours the env var, so this reads as a bug and is deliberate. **The only clue is the report filename** — `care@ollama-dev-…json` — and a run whose provider is down still exits 0 (**E9**). Pass `--role-map cloud-prod` explicitly; `make eval` has no passthrough, so invoke `uv run neura-eval` directly or use `make eval-compare A=… B=…` |
 | `AGENT_NOT_RUNNABLE` (403) rather than 404 | The agent declares `neura.agents` and not `neura.agent_runners`, or its `build_runner` raised at startup. "We have it and it is broken" is a different problem from "we do not have it" |
 
 ---

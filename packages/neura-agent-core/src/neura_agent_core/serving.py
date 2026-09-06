@@ -187,6 +187,18 @@ class TurnOutcome:
     intent: str | None = None
     citations: list[Citation] = field(default_factory=list)
     tool_calls: int = 0
+    #: Whether any successful tool this turn declared ``pii_output``.
+    #:
+    #: A property of the tool's *declaration*, not of its result — no argument
+    #: and no returned record is anywhere near this field, which is why it may
+    #: exist on an object a transport can see. It exists so that
+    #: `neura-agent-core` can refuse to put customer data in a git repository
+    #: (ADR-0034 §8) **without holding a list of tool names**, which would be an
+    #: agent's knowledge living in the engine and would silently omit the next
+    #: agent's PII-bearing tool.
+    #:
+    #: No route reads it. It travels from the graph to `shadow_evidence`.
+    pii_output: bool = False
     #: Set when the provider was unreachable — Ollama down, a cloud API
     #: refusing. **Not an agent decision**, and a caller that scores it as one
     #: repeats the bug that reported intent accuracy 0.00 for a dead server

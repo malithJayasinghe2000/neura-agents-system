@@ -4,9 +4,9 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-05 — **the dispatch gate is set, and the measurement cancelled the change it was meant to justify**
+**Last updated:** 2026-09-06 — **a promoted case now replays the evidence its turn captured, and the seven that could not were deleted**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
-**Next action:** **Build [ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md)'s promotion step and [ADR-0033](architecture/adr/0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) §3's gate. Then A20/A21 — both now sovereign-tier model-selection questions — and Finding 21's lost message.**
+**Next action:** **Grade more turns and promote them.** The loop is closed end to end and one real case ships; everything from here is volume, and volume is what [E1](open-questions.md) needs before any score is called validation. Note the `.env` now points at Gemini — `gemini-2.5-flash` and `-flash-lite` are **retired for new API keys** and were replaced with `gemini-3.5-flash` / `gemini-3.5-flash-lite`. The promotion machine and its evidence layer are built ([ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md), [ADR-0034](architecture/adr/0034-a-promoted-case-carries-the-shop-it-was-graded-on.md)); there are currently **zero promoted cases**, on purpose. Then A20/A21 — both sovereign-tier model-selection questions.
 The widget now runs on a real storefront and a conversation there dies at its second message: CARE's
 router returns confidence 0.00 after any handover, and the ownership gate guarantees a handover on
 the commonest opening question. Both are decisions rather than repairs, and neither has been
@@ -17,12 +17,211 @@ ADR-0031 is built, verified live, and **now has the release gate it was missing*
 flat rate still ungated on purpose. **A19 is decided and changed shape** — the rule is *CARE answers
 what the store HAS, SELL helps the shopper CHOOSE*, and **no declaration was edited**, because
 running the suite on a cloud model first returned **1.00 ×3** and cancelled the edit that was about
-to be made. Then **E1**, which changed shape on 2026-09-03: the console
-has now produced **eight graded turns**, and there is **no mechanism that uses them** — every eval
-case in this repository is still invented, and the loop that would fix that is promised in the UI
-and in two architecture documents and built nowhere. **B2 (no merchant) is still the top risk**, and
-eight owner-typed turns do not touch it. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
-both external.
+to be made. **E1 has moved twice and is still open.** The loop promised in the UI and in two
+architecture documents is now built end to end — a graded turn becomes an eval case ([ADR-0032],
+2026-09-05), and that case replays the evidence its turn captured ([ADR-0034], 2026-09-06). But
+**there are zero promoted cases right now**: the seven made on 09-06 predate evidence capture, could
+not be reproduced, and were deleted rather than repaired, so the *"every case in this run is
+synthetic"* banner prints again. That is the honest state. **What E1 actually asks is untouched** —
+every turn this machinery can promote is still one the owner typed into his own test shop, which is
+reproducibility rather than validation. **E1 closes with B2, not with a mechanism**, and
+**B2 (no merchant) is still the top risk** — now doubly so: **[C6](open-questions.md) means the loop cannot even be *validated* on the Bagisto harness**, because that shop's own text names a commerce platform and rule 1 refuses every promotion from it. Deployment blockers **K1** (production email) and
+**X2** (deploy target) are unchanged and both external.
+
+## Session 2026-09-06 (C6 resolved) — the first real eval case is in the repository, and `is_validation` is True
+
+**[C6](open-questions.md) is decided by the owner and built: [ADR-0035](architecture/adr/0035-captured-evidence-is-merchant-data-not-behaviour.md).**
+
+> **Automatically captured, content-addressed replay evidence under `agents/*/src/*/evals/fixtures/graded/*.json` is merchant data, not application behaviour. Platform names occurring inside its free-text values or URLs do not violate platform independence.**
+
+**Rule 1 is unchanged and this must not be read as narrowing it.** No platform-specific branching, adapter, import or configuration outside `packages/neura-adapters/` — in an evidence file or anywhere else. What narrowed is the *check*.
+
+### How narrow, exactly
+
+**Segment-exact**, matched one path element at a time — not a glob. It *was* an `fnmatch` glob, and that was a hole: `fnmatch` lets `*` cross `/` while `Path.glob` does not, so the exemption covered `…/extra/src/…`, `…/graded/nested/…` and `…/src/x/y/…` while the structural validator did not. **The exemption was wider than the check paying for it.** Both scripts now import one `is_graded_evidence()`, and a test compares the two file sets over the real repository. Still scanned, each entry a way this could have been over-applied: **Python · prompts · YAML datasets (including `graded.yaml`) · hand-written fixtures like `store.json` · configuration · every other JSON, anywhere.** Asserted by `test_the_exemption_is_exactly_generated_graded_json`, which lists eight paths that must still be scanned.
+
+### And it is paid for
+
+`scripts/check_graded_evidence.py`, new, run by `make arch` beside the platform check because the two are one decision. Every artefact must satisfy: schema supported and ≥ 2 · **filename, embedded and recomputed hashes all agree** · no `raw` **at any depth** · no `platform`, `tenant_id`, `neura_id`, `synced_at`, `store_id` · no credential · `pii_output` false · only known top-level keys.
+
+**Textual where it was, structural where it now is — and structural is the harder bar.** A platform name may appear in a merchant's policy text; a platform *field* may not appear at all. The promotion refusal added hours earlier is removed with the reason for it; every other refusal stands.
+
+### 🟢 `is_validation` is `True`, on a case that can be re-run
+
+```
+  cases 48   is_validation: True   ← and the "every case is synthetic" banner did not print
+```
+
+`graded_care_001` — *"what is your returns policy?"* → `must_contain: ["30 days", "full refund"]`, `tools_called: []` — promoted from a turn **the owner graded in the console the same afternoon**, replaying evidence captured while that turn ran. It **passes 1/1**: groundedness 1.00, intent 1.00, tool selection 1.00.
+
+**It was `True` once before, on 2026-09-06 morning, for one day and on seven cases that could not be re-run.** The difference is the whole of ADR-0034 and ADR-0035: this one replays a recorded boundary, its artefact is content-addressed and verified three ways, and deleting the shop's data would delete the case's evidence with it.
+
+**What it still is not: validation.** One turn, one shop, one model, a question typed by the person who built the system. [E1](open-questions.md) stays open and closes with **B2**.
+
+### Checks — all measured, nothing skipped
+
+`git diff --check` ✔ · `make lint` ✔ · format ✔ · `mypy` ✔ (221 files) · **`make arch` ✔** — 7/7 contracts, platform independence, **1 artefact structurally sound** · **`make test` 1053 unit + 23 widget** ✔ · **22 PostgreSQL integration** ✔ · `make eval-fast` ✔ (48/16/14).
+
+**Live models on Gemini — 0 unreachable cases and 0 provider errors in both runs:**
+
+| metric | gate | `make eval` | `make eval-guard-off` |
+|:--|:--|:--|:--|
+| **injection resistance** | **1.00** | **1.00 ✔** | **1.00 ✔** |
+| escalation recall | 0.95 | 1.00 ✔ | 1.00 ✔ |
+| escalation precision | 0.85 | 1.00 ✔ | 0.70 ✘ (guard off — expected) |
+| groundedness | 0.95 | 1.00 ✔ | — |
+| intent accuracy | 0.90 | 1.00 ✔ | 1.00 ✔ |
+| structured repair rate | 0.05 | 0.00 ✔ | 0.00 ✔ |
+| tool selection accuracy | 0.90 | 0.53 ✘ | 0.53 ✘ |
+
+**`tool_selection_accuracy` 0.50 → 0.53 because the real case scores 1.00 on it** — the first promoted case *improves* the metric it was failing. It still misses the gate, on the pre-change tree too, and remains a dataset gap rather than this work.
+
+**CARE and SELL prompts, graphs and behaviour are untouched.** Every number above except `tool_selection_accuracy`'s coverage is identical to the pre-hardening run.
+
+
+## Session 2026-09-06 (later) — ADR-0034 hardened, and the loop ran end to end for the first time
+
+**Four hardening fixes, and the end-to-end check found four defects that every unit test had passed.**
+
+| # | fixed |
+|:--|:--|
+| 1 | The `pii_output` refusal read **a list of three tool names held in `neura-agent-core`** — agent knowledge in the engine, and a list a new agent's PII tool would not be on. Now reads `ToolSpec.pii_output` through the bundle; schema **1 → 3** |
+| 2 | Immutability was a Python method. Now **`UPDATE` is revoked from the app role** in PostgreSQL, with a composite FK to `shadow_turns` and `ON DELETE CASCADE` so a merchant's catalogue cannot outlive the turn it was captured for |
+| 3 | The content hash covered `store_id`, **which is never exported** — the file could not reproduce its own address. Now hashed over the exported content and **verified three ways on read** (filename, embedded, recomputed) |
+| 4 | Staleness scanned the whole tenant. Now scoped to the evidence's own store, and **refuses** when two shops share a platform |
+
+### 🔴 Four findings, and the last one blocks E1 on the only shop we have
+
+**[Finding 28](TESTING_LOG.md) — the hash covered a field the artefact does not contain.** Adding one optional field retroactively invalidated an artefact nobody had touched. The tamper check was right and the hash was wrong: computed from the *model* rather than the *file*. A content address derived from a schema is not a content address.
+
+**[Finding 29](TESTING_LOG.md) — the unit test was shaped like the storage, not the caller.** `ReplayRetriever` returned the stored model; `retrieve` calls `as_context()`. The test asserted `result.context` and passed. **The first real case crashed.** This is the argument for an end-to-end check in one defect.
+
+**[Finding 30](TESTING_LOG.md) — a promoted case that omits `tools_called` cannot be scored.** It now always asserts, `[]` included: a promoted case knows exactly what ran, so silence is a gap rather than a fact.
+
+**[Finding 31](TESTING_LOG.md) / [C6](open-questions.md) — rule 1 and ADR-0034 collide.** `check_platform_independence.py` scans `agents/**/*.json`, which is where an artefact lands. The test shop's own T&Cs say *"every purchase made from bagisto"* and **every product URL is `http://bagisto.test/…`** — so **no turn on this shop is promotable**. Promotion refuses, `make arch` is green, and **the decision is the owner's**: the checker's own docstring excludes prose because *"prose cannot contain behaviour"*, and captured evidence is the merchant's data rather than our code — against a mechanical hard gate on the rule AGENTS.md calls the most important in the repository. **A real merchant's text would not trip it**, which makes this a block on *validation*, not on production.
+
+### ✅ The end-to-end check ran, owner-controlled, and passed
+
+A new shadow turn on the dispatch tenant → **the owner's 👍 in the console** → promotion through the real code → replay:
+
+```
+  expect.tools_called : []            expect.must_contain : ['30 days', 'full refund']
+  recorded calls      : none — this turn answered from retrieval (5 sources)
+
+  cases 1  (1 passed, 0 failed)
+  groundedness 1.00 ✔   intent accuracy 1.00 ✔   tool selection 1.00 ✔   repair 0.00 ✔
+```
+
+Evidence captured at schema 3 with `pii_output: false` and the correct `store_id`; the replayed agent answered *"…within 30 days of delivery for a full refund…"* and `verify` reported *"every claim supported"*. **Staged outside any committed state**, because C6 makes the artefact unkeepable — the repository is unchanged.
+
+**The seven historical cases were not reused**, and cannot be: their evidence does not exist.
+
+### Checks — all measured, none skipped
+
+`git diff --check` ✔ · `make lint` ✔ · format ✔ · `mypy` ✔ (221 files) · `make arch` ✔ (7/7 contracts **and** platform independence) · **`pytest tests/unit` 1046 passed** · **22 PostgreSQL integration tests** ✔ · `make test-widget` 23 ✔ · `make eval-fast` ✔ (47/16/14).
+
+**Live models on Gemini — 0 unreachable cases, 0 provider errors in both runs:**
+
+| metric | gate | `make eval` | `make eval-guard-off` |
+|:--|:--|:--|:--|
+| **injection resistance** | **1.00** | **1.00 ✔** | **1.00 ✔** |
+| escalation recall | 0.95 | 1.00 ✔ | 1.00 ✔ |
+| escalation precision | 0.85 | 1.00 ✔ | 0.70 ✘ (guard off — expected) |
+| groundedness | 0.95 | 1.00 ✔ | — |
+| intent accuracy | 0.90 | 1.00 ✔ | 1.00 ✔ |
+| structured repair rate | 0.05 | 0.00 ✔ | 0.00 ✔ |
+| tool selection accuracy | 0.90 | 0.50 ✘ | 0.50 ✘ |
+
+**`tool_selection_accuracy` fails on the pre-change tree too (0.53) and is not this work** — a dataset gap, unchanged. Everything else is identical to the pre-hardening run, so **the hardening changed no agent behaviour**, which was its constraint.
+
+
+## Session 2026-09-06 — a promoted case replays what its turn captured, and seven cases were deleted to get there
+
+**[ADR-0034](architecture/adr/0034-a-promoted-case-carries-the-shop-it-was-graded-on.md) is accepted and built.** The gap it closes was measured the same morning: of the seven cases promoted on 2026-09-06, **two of the three failures were the agent being right** — it answered correctly about the July fixture store while the assertion had come from the merchant's. A suite that cannot tell that from a regression reports numbers that mean nothing.
+
+**The obvious fix was proposed, then rejected on evidence.** A first draft of ADR-0034 rebuilt each case's store by joining `shadow_turns.citations` to `synced_entities`. It resolves — every cited entity was found — and it is still wrong three ways, all measured rather than argued:
+
+| | |
+|:--|:--|
+| **It reconstructs history from present state** | For `graded_care_002`, **all five** cited entities had `updated_at` later than the turn. The shop re-synced 09-05; the grades are from 09-03. |
+| **It cannot reproduce the boundary** | The merchant's store returned three products for *waterproof jacket*. The fixture matcher requires **every** term to match: `waterproof jacket` → **0**, `waterproof` → 3, `jacket` → 1. So the data is fixed and the case still fails. |
+| **It invites the wrong repair** | Loosening the matcher imitates a search engine no merchant has, and changes every existing invented case. |
+
+**And overlaying was measured as actively harmful:** layering the merchant's catalogue on the base fixture produced **two different products both called "Waterproof Hiking Shoe"**, at 119.00 GBP and 132.00 USD. A case asserting a price against that store is asserting it against a coin toss.
+
+### 🔴 The source PROJECT_STATE assumed does not exist, and the console promised it to the merchant
+
+> `select event_type, count(*) from audit_log` → **`guard.block`, 4.** Nothing else, ever.
+
+`AuditEvent` defines `TOOL_DECISION`, `TOOL_EXECUTED`, `LLM_CALL`, `RETRIEVAL` and `ESCALATION`, and **nothing in this repository writes any of them**; `executor.py` logs `tool_executed` to the structured logger, which is not durable. `agent_checkpoints` holds **0 rows**, so the fallback is gone too.
+
+**This file said the data "must come from the audit log or be re-fetched". It could not have come from the audit log.** And [`review.py`](../packages/neura-agent-core/src/neura_agent_core/review.py) told the *merchant* the same thing on screen — *"kept in the audit log, not in this queue"* — which is **[Finding 20](TESTING_LOG.md)'s exact shape on the same screen**: a UI promising a feature that does not exist. Corrected in the sentence and in the module docstring that repeated it; **no audit trail was built to make the old claim true**, because that is a security-model change with its own retention argument and this needed a different artefact with a different lifecycle.
+
+### What was built
+
+**Evidence is captured while the turn runs, or the turn is not promotable.** `RecordingAdapter` wraps the store on **every** turn — mode is resolved after the graph has run, so the turn worth grading cannot be known in advance — and `RecordingRetriever` records the other half onto the same bundle. It is written to a new `shadow_evidence` table **in the same transaction as the shadow turn**, under the same RLS policy as every tenant table, and **deliberately not in the audit log**: this holds a merchant's catalogue, must die with the turn under their retention policy, and in a hash chain a lawful deletion is indistinguishable from tampering.
+
+**Nothing about it reaches a response.** It is not on `TurnOutcome`, so no REST body, no socket frame and no progress event can carry a tool's arguments or its results.
+
+**`EvalCase` gains an explicit `fixture_mode`.** `overlay` is the default and is byte-for-byte what every invented case has always had; `replay` answers from the captured boundary and **does not load the base fixture**. Never inferred from a filename or from `synthetic` — a test asserts that every shipped invented case is still `overlay`.
+
+**A replay mismatch raises, naming what was asked and what was recorded.** This is the single most important line in the change: returning an empty result would be indistinguishable from a store that stocks nothing, which is the original defect reappearing one layer down where nobody would see it.
+
+**Promotion refuses five more things** (§8): no captured evidence, evidence recording nothing, any `pii_output` tool, anything credential-shaped, and **a store that has moved since the grade** — [ADR-0032 §12](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md)'s *"recorded and not built"* staleness check, now built. **Built differently from how §12 imagined it:** it does **not** read `synced_entities.fingerprint`, whose stability §12 named as an unmet precondition and which is still unverified. Both sides are hashed by one function over the canonical document, so the comparison is stable by construction and depends on nothing the sync engine does.
+
+**A stated, permanent loss:** order-status turns can never be promoted. Customer data may not enter this repository, and order status is CARE's commonest question.
+
+### 🔴 The seven cases of 2026-09-06 were deleted, not repaired
+
+They predate capture, their evidence is not recoverable faithfully, and attaching today's shop state to a two-day-old grade would manufacture exactly the false provenance `synthetic: false` exists to prevent. **Removed in git with the reason in the commit message** — ADR-0032 §9's own rule applied to its own output.
+
+**So there are currently zero promoted cases and the "every case is synthetic" banner prints again.** That is the honest state, and it is a step backwards that buys reproducibility. `is_validation` was `True` for one day on cases that could not be re-run.
+
+**One bug was found by a test rather than by review.** `raw` — a merchant platform's own payload — survived inside every recorded `search_products` result, because stripping ran only at the top level of a `Page` and not over its items. Provenance stripping is now recursive.
+
+### Checks
+
+`make lint` ✔ · `make typecheck` ✔ (221 files) · `make arch` ✔ (7/7 contracts) · **`pytest tests/unit` 1029 passed** (71 new) · `make test-widget` ✔ · `make eval-fast` ✔ · **10 new PostgreSQL integration tests** covering RLS isolation, two stores with the same `external_id`, transaction atomicity, immutability, and that editing `synced_entities` does not change a replay.
+
+**Pre-existing and untouched:** 7 failures in `tests/integration/test_api_postgres.py` (`TestTheReviewQueue`, `TestStreaming`). Confirmed against a stashed tree — a test stub's `_Response` lacks `structured_repairs`. **Not caused by this session and not fixed by it.**
+
+### ✅ The live-model evals ran, and the gate holds — on Gemini, after four failed attempts
+
+**`make eval` and `make eval-guard-off` both completed as real measurements**, 0 unreachable cases and 0 provider errors, judged by `gemini-3.6-flash`. **Compared against the pre-change tree on the same models**, because *"nothing merges without an eval"* asks for a comparison and not a number:
+
+| metric | gate | **before** (51 cases) | **after** (47 cases) |
+|:--|:--|:--|:--|
+| **injection resistance** | **1.00** | **1.00 ✔** | **1.00 ✔** |
+| injection resistance, `eval-guard-off` | **1.00** | — | **1.00 ✔** |
+| escalation recall | 0.95 | 1.00 ✔ | 1.00 ✔ |
+| escalation precision | 0.85 | 0.88 ✔ | **1.00 ✔** |
+| intent accuracy | 0.90 | 1.00 ✔ | 1.00 ✔ |
+| groundedness | 0.95 | — (judge off) | 1.00 ✔ |
+| structured repair rate | 0.05 | 0.00 ✔ | 0.00 ✔ |
+| **tool selection accuracy** | 0.90 | **0.53 ✘** | **0.50 ✘** |
+
+**`tool_selection_accuracy` fails the gate on both trees, so it is not this change.** 0.53 → 0.50 moves across a different case count (17 scored vs 16) and the failure text is the same on both: *"the agent called no tools, and this case does not say whether it should have. Add `expect.tools_called`."* **That is a dataset gap, pre-existing, and untouched here.**
+
+**Escalation precision improved, 0.88 → 1.00**, because the four removed CARE graded cases included over-escalating ones. A number that moved for a reason that is named rather than assumed.
+
+**The case count drops 51 → 47**: the seven promoted cases are gone (§ above), and `is_validation` is `False` again.
+
+### ⚠️ It took four attempts, and none of the first three was a measurement
+
+Recorded because the failure mode matters more than the eventual pass: **twice a run reported a green `injection resistance 1.00` having measured nothing.**
+
+| attempt | role map | outcome |
+|:--|:--|:--|
+| 1 | `ollama-dev` | Ollama died mid-suite — 6/47 unreachable; the guard-off run reached **0 of 47** and still printed `47 passed` |
+| 2 | `ollama-dev` | Ollama down throughout |
+| 3 | `cloud-prod` / OpenRouter | Two configured models **no longer exist** — `nvidia/nemotron-nano-9b-v2:free`, `openai/gpt-oss-20b:free` |
+| 4 | `cloud-prod` / OpenRouter | **Free-tier daily quota exhausted.** 47/47 rate-limited, and `injection resistance 1.00 ✔` printed anyway — zero unauthorised tool calls **by arithmetic**, which is [AGENTS.md](../AGENTS.md)'s own warning about this command with a rate limiter in the guard's place |
+| 5 | `cloud-prod` / **Gemini** | ✅ valid, above — after `gemini-2.5-flash` and `gemini-2.5-flash-lite` turned out to be **retired for new API keys**, exactly as `.env.example` warns |
+
+**That is [Finding 27](TESTING_LOG.md) / [E9](open-questions.md)**, found twice in one afternoon by two mechanisms. And **`neura-eval` ignores `NEURA_ROLE_MAP`** — it defaults to `ollama-dev` and needs `--role-map` explicitly; the only clue is the report filename. Now in AGENTS.md's gotchas.
+
+**[E1](open-questions.md) stays open and this must not be read as closing it.** What blocked E1 *mechanically* is fixed. What E1 asks — whether real graded volume exists from a real merchant — is untouched: every turn this design can promote is still one the owner typed into his own test shop. That is **reproducibility, not validation** ([CLAUDE.md §4](../CLAUDE.md)), and E1 closes with **B2**, not with this.
+
 
 ## Session 2026-09-05 — the dispatch gate, and a measurement that cancelled its own change
 

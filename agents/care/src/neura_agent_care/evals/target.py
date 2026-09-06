@@ -27,14 +27,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from neura_evals.dataset import EvalCase
+from neura_evals.dataset import EvalCase, FixtureMode
 from neura_evals.target import AgentResponse, ToolInvocation
 
-from neura_agent_care.evals.store import ALL_CAPABILITIES, load_store
+from neura_agent_care.evals.store import ALL_CAPABILITIES, FIXTURE_DIR, load_store
 from neura_agent_care.graph import compile_graph
 from neura_agent_care.runtime import build_runtime
 from neura_agent_care.tools import TOOL_SCOPES
 from neura_agent_core.audit import AuditEvent, InMemoryAuditLog
+from neura_agent_core.evidence import ReplayAdapter, ReplayRetriever, read_artefact
 from neura_agent_core.graph import CONFIG_KEY, initial_state, total_cost, total_tokens
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity
@@ -64,7 +65,7 @@ class CareTarget:
 
     async def run(self, case: EvalCase) -> AgentResponse:
         """One case, start to finish, through the real graph."""
-        store = load_store(self._tenant_id, case.fixtures)
+        store, capabilities, retriever = _store_for(case, self._tenant_id)
 
         # A real audit sink, in memory. `guard` writes its security event here,
         # so a blocked case can be checked against the RECORD rather than
@@ -78,14 +79,19 @@ class CareTarget:
             conversation_id=f"cnv_{case.id}",
             adapter=store,
             llm=self._llm,
-            capabilities=ALL_CAPABILITIES,
+            capabilities=capabilities,
             scopes=TOOL_SCOPES,
             identity=_identity(case),
-            # No retriever. The catalogue is reachable through tools here, and
-            # standing up pgvector per case would make the suite depend on a
-            # database to answer a question about the agent's reasoning.
-            # Retrieval has its own measured smoke test (`make rag-check`).
-            retriever=None,
+            # No retriever for an invented case. The catalogue is reachable
+            # through tools here, and standing up pgvector per case would make
+            # the suite depend on a database to answer a question about the
+            # agent's reasoning. Retrieval has its own measured smoke test
+            # (`make rag-check`).
+            #
+            # A promoted case is the exception, and only when its turn actually
+            # retrieved: replaying half a boundary would silently change what the
+            # graded turn had in front of it ([ADR-0034] §5).
+            retriever=retriever,
             audit=audit,
         )
 
@@ -108,6 +114,29 @@ class CareTarget:
             return AgentResponse(reply="", error=f"CARE raised: {type(exc).__name__}: {exc}")
 
         return _response(final, audit)
+
+
+def _store_for(case: EvalCase, tenant_id: str) -> tuple[Any, frozenset[Any], Any]:
+    """The store this case runs against, and what the store could do — [ADR-0034] §5.
+
+    Two modes, chosen by the case and never inferred. An **overlay** case gets
+    exactly what it has always got: the base fixture with its own files layered
+    on. A **replay** case gets the boundary its turn recorded, and the base
+    fixture is not loaded at all — mixing them would put July's three invented
+    products into a catalogue beside a merchant's real ones.
+
+    The replayed store's capabilities come from the bundle, so a case captured
+    against a store that could not search does not run as though it could.
+    """
+    if case.fixture_mode is not FixtureMode.REPLAY:
+        return load_store(tenant_id, case.fixtures), ALL_CAPABILITIES, None
+
+    # `evidence` is guaranteed present by `EvalCase`'s validator; a replay case
+    # without it never parses.
+    bundle = read_artefact(FIXTURE_DIR, str(case.evidence))
+    replay = ReplayAdapter(bundle, tenant_id=tenant_id)
+    retriever = ReplayRetriever(bundle) if bundle.retrieval else None
+    return replay, replay.capabilities or ALL_CAPABILITIES, retriever
 
 
 def _identity(case: EvalCase) -> SessionIdentity:

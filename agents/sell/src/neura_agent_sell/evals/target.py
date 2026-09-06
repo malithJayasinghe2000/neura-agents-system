@@ -24,14 +24,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from neura_evals.dataset import EvalCase
+from neura_evals.dataset import EvalCase, FixtureMode
 from neura_evals.target import AgentResponse, ToolInvocation
 
 from neura_agent_core.audit import AuditEvent, InMemoryAuditLog
+from neura_agent_core.evidence import ReplayAdapter, ReplayRetriever, read_artefact
 from neura_agent_core.graph import CONFIG_KEY, initial_state, total_cost, total_tokens
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity
-from neura_agent_sell.evals.store import ALL_CAPABILITIES, load_store
+from neura_agent_sell.evals.store import ALL_CAPABILITIES, FIXTURE_DIR, load_store
 from neura_agent_sell.graph import compile_graph
 from neura_agent_sell.runtime import build_runtime
 from neura_agent_sell.tools import TOOL_SCOPES
@@ -61,7 +62,7 @@ class SellTarget:
 
     async def run(self, case: EvalCase) -> AgentResponse:
         """One case, start to finish, through the real graph."""
-        store = load_store(self._tenant_id, case.fixtures)
+        store, capabilities, retriever = _store_for(case, self._tenant_id)
         audit = InMemoryAuditLog()
 
         runtime = build_runtime(
@@ -69,13 +70,18 @@ class SellTarget:
             conversation_id=f"cnv_{case.id}",
             adapter=store,
             llm=self._llm,
-            capabilities=ALL_CAPABILITIES,
+            capabilities=capabilities,
             scopes=TOOL_SCOPES,
             identity=SessionIdentity(customer_external_id=case.session.verified_customer_id),
-            # No retriever. The catalogue is reachable through tools here, and
-            # standing up pgvector per case would make the suite depend on a
-            # database to answer a question about the agent's reasoning.
-            retriever=None,
+            # No retriever for an invented case. The catalogue is reachable
+            # through tools here, and standing up pgvector per case would make
+            # the suite depend on a database to answer a question about the
+            # agent's reasoning.
+            #
+            # A promoted case is the exception, and only when its turn actually
+            # retrieved: replaying half a boundary would silently change what the
+            # graded turn had in front of it ([ADR-0034] §5).
+            retriever=retriever,
             audit=audit,
         )
 
@@ -184,6 +190,29 @@ def _evidence(final: dict[str, Any]) -> list[str]:
 
 def _was_refused(decisions: list[Any]) -> bool:
     return any(d.outcome in (Outcome.REJECT, Outcome.ESCALATE) for d in decisions)
+
+
+def _store_for(case: EvalCase, tenant_id: str) -> tuple[Any, frozenset[Any], Any]:
+    """The store this case runs against, and what the store could do — [ADR-0034] §5.
+
+    Two modes, chosen by the case and never inferred. An **overlay** case gets
+    exactly what it has always got: the base fixture with its own files layered
+    on. A **replay** case gets the boundary its turn recorded, and the base
+    fixture is not loaded at all — mixing them would put the invented catalogue
+    into the same store as a merchant's real one.
+
+    The replayed store's capabilities come from the bundle, so a case captured
+    against a store that could not search does not run as though it could.
+    """
+    if case.fixture_mode is not FixtureMode.REPLAY:
+        return load_store(tenant_id, case.fixtures), ALL_CAPABILITIES, None
+
+    # `evidence` is guaranteed present by `EvalCase`'s validator; a replay case
+    # without it never parses.
+    bundle = read_artefact(FIXTURE_DIR, str(case.evidence))
+    replay = ReplayAdapter(bundle, tenant_id=tenant_id)
+    retriever = ReplayRetriever(bundle) if bundle.retrieval else None
+    return replay, replay.capabilities or ALL_CAPABILITIES, retriever
 
 
 def build_target(llm: Any) -> SellTarget:

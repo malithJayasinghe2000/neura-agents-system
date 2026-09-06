@@ -37,6 +37,8 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0028](0028-only-the-catalogue-may-say-what-a-store-sells.md) | Only The Catalogue May Say What A Store Sells | Accepted |
 | [0029](0029-the-index-may-name-a-candidate-never-describe-one.md) | The Index May Name A Candidate, Never Describe One | Accepted |
 | [0030](0030-a-product-card-is-data-the-widget-draws.md) | A Product Card Is Data The Widget Draws | Accepted |
-| [0031](0031-the-shopper-never-chooses-the-agent.md) | The Shopper Never Chooses The Agent | Accepted — **design only, nothing is built** |
-| [0032](0032-a-graded-turn-becomes-an-eval-case.md) | A Graded Turn Becomes An Eval Case | Accepted — **design only, nothing is built** |
+| [0031](0031-the-shopper-never-chooses-the-agent.md) | The Shopper Never Chooses The Agent | Accepted — **built 2026-09-01**, verified live 2026-09-02; gated by [0033](0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) §3 |
+| [0032](0032-a-graded-turn-becomes-an-eval-case.md) | A Graded Turn Becomes An Eval Case | Accepted — **built 2026-09-05**; its reproducibility gap is closed by [0034](0034-a-promoted-case-carries-the-shop-it-was-graded-on.md) |
 | [0033](0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) | CARE Answers What The Store Has; SELL Helps The Shopper Choose | Accepted |
+| [0034](0034-a-promoted-case-carries-the-shop-it-was-graded-on.md) | A Promoted Case Replays The Evidence Its Turn Captured | Accepted — **built 2026-09-06** |
+| [0035](0035-captured-evidence-is-merchant-data-not-behaviour.md) | Captured Evidence Is Merchant Data, Not Behaviour | Accepted — **built 2026-09-06**; narrows the platform *check*, not [rule 1](../../../AGENTS.md) |

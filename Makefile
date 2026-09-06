@@ -77,6 +77,10 @@ typecheck:  ## mypy strict on packages/, apps/, agents/, evals/
 arch:  ## Architecture guardrails — layering + platform independence
 	uv run lint-imports
 	uv run python scripts/check_platform_independence.py
+# Captured replay evidence is exempt from the platform-name scan (ADR-0035)
+# because it is merchant data. This is what it is held to instead, and the two
+# run together because they are one decision.
+	uv run python scripts/check_graded_evidence.py
 
 test-unit:  ## Unit tests (no external services)
 	uv run pytest tests/unit -m "not integration"

@@ -40,6 +40,70 @@ PLATFORM_NAMES = (
     "commercetools",
 )
 
+#: Captured replay evidence — [ADR-0035], and the ONE data-shaped exception.
+#:
+#: These files are written by `make promote`, never by hand. They hold a
+#: merchant's own catalogue text and storefront URLs verbatim, and a merchant may
+#: legitimately name a commerce platform in their own Terms & Conditions or host
+#: their shop at a domain containing one. That is **merchant data, not our
+#: behaviour**, and this check exists to stop the second.
+#:
+#: **Narrow on purpose**, and narrower than it first was. This began as an
+#: `fnmatch` glob, which was wrong in a way that is easy to miss: **`fnmatch`
+#: lets `*` cross `/`**, so `agents/care/**extra**/src/.../graded/a.json`,
+#: `.../graded/**nested**/a.json` and `agents/care/src/**x/y**/.../graded/a.json`
+#: were all exempted. `check_graded_evidence.py` used `Path.glob`, where `*` does
+#: **not** cross `/` — so the exemption was strictly wider than the structural
+#: check that is supposed to pay for it, which is the one relationship between
+#: them that must never hold.
+#:
+#: Now matched segment by segment, and both scripts use this one function.
+#:
+#: **And the exception is paid for.** These files are not unchecked — they are
+#: checked *differently*, by `scripts/check_graded_evidence.py`, which is
+#: structural where this one is textual: hashes must agree, provenance and `raw`
+#: must be absent, no credential, no PII. An exemption with nothing behind it
+#: would be the erosion this module's own docstring warns about.
+#: `agents/<agent>/src/<package>/evals/fixtures/graded/<file>.json` — exactly
+#: eight segments, no more, no fewer.
+_GRADED_SHAPE = ("agents", None, "src", None, "evals", "fixtures", "graded", None)
+
+
+def is_graded_evidence(rel_path: str) -> bool:
+    """Is this a generated replay-evidence artefact? — [ADR-0035] §1.
+
+    **The single definition of the exemption**, imported by
+    `check_graded_evidence.py` so the set of files exempted from the text scan
+    and the set held to the structural check cannot drift apart. They diverged
+    once, silently, because two scripts spelled the same intent with two
+    different glob dialects.
+
+    Segment-exact rather than a glob, so an extra or nested directory anywhere in
+    the path fails — which a `*` in either dialect would not reliably do.
+    """
+    parts = rel_path.split("/")
+    if len(parts) != len(_GRADED_SHAPE):
+        return False
+    for part, expected in zip(parts, _GRADED_SHAPE, strict=True):
+        if not part or part in (".", ".."):
+            return False
+        if expected is not None and part != expected:
+            return False
+    return parts[-1].endswith(".json")
+
+
+#: Local eval run output, and **not repository content** — `evals/reports/` is
+#: gitignored, so nothing under it is ever committed. It is listed here rather
+#: than left to trip the scan because a promoted case's report now embeds the
+#: merchant's own policy text (it is the evidence the judge scored against), so
+#: `make eval` would turn this check red on a file git does not track.
+#:
+#: **Distinct from ADR-0035's exemption**, which is about which *committed*
+#: files are merchant data. This one is about a directory whose contents are
+#: not in the repository at all. Pinned by
+#: `test_eval_reports_are_gitignored_and_therefore_exempt`.
+GENERATED_OUTPUT_PREFIXES = ("evals/reports/",)
+
 # Where a platform name is legitimate anywhere, prose or code.
 ALLOWED_PREFIXES = (
     "packages/neura-adapters/",
@@ -60,7 +124,11 @@ Violation = tuple[str, int, str]
 
 
 def _is_allowed(rel_path: str) -> bool:
-    return any(rel_path.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+    return (
+        any(rel_path.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+        or any(rel_path.startswith(prefix) for prefix in GENERATED_OUTPUT_PREFIXES)
+        or is_graded_evidence(rel_path)
+    )
 
 
 def _python_code_lines(source: str) -> dict[int, str]:

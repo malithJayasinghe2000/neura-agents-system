@@ -34,12 +34,15 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from neura_agent_core.conversations import ConversationRepository, ConversationState
+from neura_agent_core.evidence import RecordingAdapter, RecordingRetriever
 from neura_agent_core.rag import DatabaseVectorStore
 from neura_agent_core.rag.retrieval import Retriever
 from neura_agent_core.serving import AgentRunner, ProgressSink, TurnOutcome, TurnRequest
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
+from neura_agent_core.shadow_evidence import ShadowEvidenceRepository
 from neura_agent_core.tools import SessionIdentity
 from neura_api.audit import TenantAuditLog
 from neura_api.jobs.webhooks import enqueue_drain
@@ -198,6 +201,21 @@ class TurnService:
         # ── The turn ─────────────────────────────────────────────────────────
         metered = MeteredLLM(self._llm)
         store = await self._stores.connect(tenant_id)
+        # Everything the turn asks the store, recorded — [ADR-0034] §1. Wrapped
+        # on **every** turn, not only shadowed ones, because shadow mode is
+        # resolved after the graph has run (`agent-runtime.md` §6) and the turn
+        # worth grading cannot be known before it happens. The recording is
+        # bounded by the tool ceiling, is discarded when the turn was not
+        # withheld, and never reaches a response: it is not on `TurnOutcome`, so
+        # no REST body and no socket frame can carry a tool's arguments or its
+        # results.
+        recorder = RecordingAdapter(store.adapter, store_id=store.store_id)
+        # `Any` because a recorded retriever satisfies the same call structurally
+        # rather than by inheritance — the same reason `TurnRequest.adapter` is
+        # `Any` beside a `CommerceAdapter` Protocol.
+        retriever: Any = self._retriever(tenant_id, metered)
+        if retriever is not None:
+            retriever = RecordingRetriever(retriever, recorder)
         # Wall-clock, around the graph and nothing else. What a shopper waits
         # behind is the turn, not the sum of the model calls inside it: the
         # tool round-trips and the adapter's HTTP are exactly the part a
@@ -209,7 +227,7 @@ class TurnService:
                     tenant_id=tenant_id,
                     conversation_id=conversation_id,
                     message=turn.message,
-                    adapter=store.adapter,
+                    adapter=recorder,
                     llm=metered,
                     capabilities=store.capabilities,
                     # The key's scopes, not the manifest's. A key issued with
@@ -218,7 +236,7 @@ class TurnService:
                     scopes=turn.caller.scopes,
                     identity=SessionIdentity(customer_external_id=turn.customer_external_id),
                     history=history,
-                    retriever=self._retriever(tenant_id, metered),
+                    retriever=retriever,
                     audit=TenantAuditLog(self._db, tenant_id),
                     allowed_tools=policy.allowed_tools,
                     max_tool_calls=policy.max_tool_calls,
@@ -258,7 +276,7 @@ class TurnService:
                     shopper=turn.message,
                     trace_id=turn.trace_id or None,
                 )
-                await ShadowRepository(session).record(
+                shadow_id = await ShadowRepository(session).record(
                     _shadow_turn(
                         outcome,
                         metered,
@@ -269,6 +287,32 @@ class TurnService:
                         mode=mode,
                         latency_ms=latency_ms,
                     )
+                )
+                # In the same transaction as the turn it belongs to ([ADR-0034]
+                # §3), so "withheld from the shopper", "recorded for a human"
+                # and "reproducible later" cannot come apart. A turn whose
+                # evidence were written afterwards would be promotable or not
+                # depending on nothing anybody could see.
+                # Which tools ran, by name. Read from the citations rather than
+                # from the recorder, because a tool that reached no adapter
+                # method still ran — and `pii_output` tools are refused at
+                # promotion by *name* ([ADR-0034] §8), so a tool missing from
+                # this list is a refusal that does not fire.
+                # Names for provenance; the flag for the refusal. The flag comes
+                # from `ToolSpec.pii_output` by way of the runner, so a new
+                # agent's PII-bearing tool is refused at promotion with no edit
+                # to `neura-agent-core` ([ADR-0034] §8).
+                recorder.note_tools(
+                    [c.id for c in outcome.citations if c.type == "tool"],
+                    pii_output=outcome.pii_output,
+                )
+                await ShadowEvidenceRepository(session).record(
+                    tenant_id,
+                    shadow_id,
+                    recorder.bundle(
+                        capabilities=store.capabilities,
+                        prompt_revision=outcome.prompt_revision,
+                    ),
                 )
             else:
                 _, message_id = await conversations_repo.append_turn(

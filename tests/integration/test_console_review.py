@@ -183,12 +183,26 @@ class TestTheEvidenceIsThere:
         assert document["available"] is True
         assert document["excerpt"] == POLICY
 
-    def test_a_tool_is_named_and_says_where_its_result_went(self, client: TestClient, shop) -> None:
+    def test_a_tool_is_named_and_says_its_result_is_not_here(
+        self, client: TestClient, shop
+    ) -> None:
+        """It used to assert the screen said "audit log", and the screen was wrong.
+
+        `audit_log` has only ever held `guard.block` rows — `TOOL_EXECUTED` and
+        `TOOL_DECISION` are defined and written by nothing — so a merchant was
+        told a record existed that did not. Corrected 2026-09-06
+        ([ADR-0034] §10), and this test now asserts the *absence* of the claim as
+        well as the presence of a true one: deleting the false half must not
+        leave an empty panel, which is the one outcome indistinguishable from a
+        bug (ADR-0020's argument).
+        """
         answered = next(t for t in queue_of(client, shop) if t["id"] == shop.answered_turn)
         tool = next(e for e in answered["evidence"] if e["kind"] == "tool")
         assert tool["id"] == "get_order"
         assert tool["available"] is False
-        assert "audit log" in tool["reason"]
+        assert "audit log" not in tool["reason"].lower()
+        assert "This lookup ran." in tool["reason"]
+        assert "not kept in this queue" in tool["reason"]
 
 
 class TestAWithheldTurnIsInTheQueueAndLooksIt:

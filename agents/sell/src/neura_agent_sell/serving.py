@@ -142,6 +142,10 @@ def _outcome(final: dict[str, Any]) -> TurnOutcome:
         intent=final.get("intent"),
         citations=_citations(final),
         tool_calls=sum(1 for i in invocations if i.ok),
+        # Read off `ToolSpec.pii_output`, which the executor already
+        # copies onto every invocation. Only successful calls count: a
+        # refused one returned nothing to be careful about.
+        pii_output=any(i.pii_output for i in invocations if i.ok),
         infrastructure_error=final.get("infrastructure_error"),
         prompt_revision=usage.get("prompt_revision"),
         handoff=str(final.get("handoff", "")),

@@ -1,0 +1,37 @@
+{
+  "_note": "Captured from a real graded turn \u2014 ADR-0034. Not hand-written and not reconstructed. Provenance, platform payload and store id are absent by construction; external_id and locale are kept because a correct answer depends on them.",
+  "_captured_at": "2026-09-06T10:38:46.629736+00:00",
+  "schema_version": 2,
+  "capabilities": [
+    "category.read",
+    "customer.read",
+    "events.realtime",
+    "inventory.read",
+    "order.read",
+    "order.search",
+    "policy.read",
+    "product.read",
+    "product.search",
+    "sync.incremental"
+  ],
+  "prompt_revision": "662df2be46140e953c1c653722485334fb85e549c5550f57e224edd9923bc49d",
+  "calls": [],
+  "tools": [],
+  "pii_output": false,
+  "retrieval": {
+    "query": "what is your returns policy?",
+    "context": "<untrusted source=\"retrieved_document\" type=\"policy\" ref=\"2\" chunk=\"0\">\nReturns policy: Return Policy\n\nYou may return most items within 30 days of delivery for a full refund. Items must be unworn, unwashed, and with their original tags attached.\n\nTo start a return, contact support with your order number. We will send a prepaid label; the cost of return postage is deducted from your refund unless the item arrived faulty or we sent the wrong thing, in which case we cover it.\n\nRefunds are issued to the original payment method within 5 working days of the return reaching our warehouse. Underwear, swimwear and pierced jewellery cannot be returned for hygiene reasons.\n</untrusted>\n\n<untrusted source=\"retrieved_document\" type=\"policy\" ref=\"3\" chunk=\"0\">\nReturns policy: Refund Policy\n\nRefunds are issued to the original payment method and take 5 working days to process once your return has been received and checked, plus however long your bank takes to post it \u2014 usually another 2 to 5 days.\n\nIf an order is cancelled before dispatch, the refund is issued in full including any shipping charge. If it has already shipped, standard return terms apply.\n\nWhere an item arrived faulty, we refund the item, the original shipping and the return postage.\n</untrusted>\n\n<untrusted source=\"retrieved_document\" type=\"policy\" ref=\"18\" chunk=\"0\">\nWarranty policy: Warranty Policy\n\nEvery item we sell is covered against manufacturing defects for 12 months from the delivery date. This covers stitching that comes apart, zips and fastenings that fail in normal use, and soles that separate from the upper.\n\nIt does not cover ordinary wear, damage from washing against the care label, or alterations made after purchase.\n\nTo make a claim, contact support with your order number and a photograph of the fault. Approved claims are replaced where stock allows, or refunded in full where it does not. You do not need the original packaging.\n</untrusted>\n\n<untrusted source=\"retrieved_document\" type=\"policy\" ref=\"4\" chunk=\"0\">\nTerms policy: Terms & Conditions\n\nThese terms apply to every purchase made from bagisto.\n\nOrders. Placing an order is an offer to buy. A contract is formed only when we\nsend you a dispatch confirmation email. If an item turns out to be unavailable\nafter you order, we will cancel that line and refund it in full.\n\nPrices. All prices are shown in US dollars and include applicable sales tax\nwhere required. Shipping is calculated at checkout. If a product is listed at a\nclearly incorrect price due to an error, we may cancel the order and refund you\nrather than fulfil it.\n\nPayment. We accept major credit and debit cards. Payment is taken when your\norder is dispatched, not when it is placed.\n\nDelivery. Delivery estimates are estimates, not guarantees. Risk passes to you\nwhen the parcel is delivered to the address you gave us.\n\nAge. You must be at least 18 years old, or have a parent or guardian's\npermission, to place an order.\n\nCancellation. You may cancel an order at any time before it is dispatched by\nemailing support@example.com. After dispatch, our returns policy applies.\n</untrusted>\n\n<untrusted source=\"retrieved_document\" type=\"policy\" ref=\"4\" chunk=\"1\">\nCancellation. You may cancel an order at any time before it is dispatched by\nemailing support@example.com. After dispatch, our returns policy applies.\n\nLiability. Nothing in these terms limits our liability for death, personal\ninjury, or fraud. Otherwise, our liability for any order is limited to the\namount you paid for it.\n\nGoverning law. These terms are governed by the laws of the jurisdiction in\nwhich bagisto is registered.\n</untrusted>",
+    "sources": [
+      "policy:2#0",
+      "policy:3#0",
+      "policy:18#0",
+      "policy:4#0",
+      "policy:4#1"
+    ],
+    "diagnosis": null,
+    "top_score": 0.0
+  },
+  "entities": {},
+  "source_fingerprints": {},
+  "_content_hash": "42d1b7ff6aad91001a9dd901d300174f9cee9160a0430c7a208614e8e015f527"
+}

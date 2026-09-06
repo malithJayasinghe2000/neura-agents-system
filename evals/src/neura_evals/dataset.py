@@ -31,6 +31,32 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 ADVERSARIAL = "adversarial"
 
 
+class FixtureMode(StrEnum):
+    """How a case gets the store it runs against — [ADR-0034] §5.
+
+    **Explicit, never inferred.** There is deliberately no rule reading the
+    dataset's filename or the ``synthetic`` flag to decide this. A case that says
+    nothing keeps the behaviour every case has had since the harness was built,
+    and a case that replays says so in its own text where a reviewer sees it.
+    """
+
+    OVERLAY = "overlay"
+    """The base fixture store, plus the files this case names, later winning.
+
+    The default, and what every invented case uses. Unchanged by ADR-0034.
+    """
+
+    REPLAY = "replay"
+    """The captured boundary of one real turn answers, and the base fixture is
+    **not** loaded.
+
+    Promoted cases only. Mixing the two would put July's three invented products
+    into the same catalogue as a merchant's real ones — measured on 2026-09-06 as
+    two different products both called "Waterproof Hiking Shoe", at two different
+    prices, in two different currencies.
+    """
+
+
 class Intent(StrEnum):
     """The intents **CARE** uses. Kept for callers that want the constants.
 
@@ -153,6 +179,23 @@ class EvalCase(BaseModel):
     fixtures: list[str] = Field(
         default_factory=list, description="Fixture files providing store data for this case"
     )
+    fixture_mode: FixtureMode = Field(
+        default=FixtureMode.OVERLAY,
+        description=(
+            "How this case gets its store ([ADR-0034] §5). `overlay` — the default and "
+            "every existing case — layers `fixtures` over the base store. `replay` "
+            "answers from one real turn's captured boundary and does NOT load the base. "
+            "Never inferred from a filename."
+        ),
+    )
+    evidence: str | None = Field(
+        default=None,
+        description=(
+            "Content hash of the captured evidence this case replays. Names the "
+            "artefact under `fixtures/graded/`, which is content-addressed so its "
+            "meaning cannot move under the case that cites it ([ADR-0034] §4)."
+        ),
+    )
     synthetic: bool = Field(
         default=False,
         description="Invented rather than taken from a real conversation. NEVER counted as validation.",
@@ -171,6 +214,28 @@ class EvalCase(BaseModel):
             raise ValueError(
                 f"adversarial case '{self.id}' must set expect.unauthorised_tool_calls "
                 "(it should be 0) — asserting on reply text alone is not a safety test"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _replay_names_its_evidence(self) -> EvalCase:
+        """A mode and its artefact travel together, both ways — [ADR-0034] §5.
+
+        A `replay` case with no evidence would fall through to an empty store and
+        fail as though the shop stocked nothing, which is §6's failure arriving
+        before the replay adapter can raise. An `overlay` case naming evidence is
+        a case someone half-converted, and the half that did not convert is the
+        half that decides what it runs against.
+        """
+        if self.fixture_mode is FixtureMode.REPLAY and not self.evidence:
+            raise ValueError(
+                f"case '{self.id}' is fixture_mode: replay but names no evidence — "
+                "there would be nothing to replay"
+            )
+        if self.fixture_mode is FixtureMode.OVERLAY and self.evidence:
+            raise ValueError(
+                f"case '{self.id}' names evidence but is fixture_mode: overlay, so the "
+                "evidence would be ignored and the base fixture answered instead"
             )
         return self
 

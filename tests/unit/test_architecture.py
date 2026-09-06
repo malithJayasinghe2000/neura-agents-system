@@ -286,3 +286,170 @@ class TestCiRunsWhatTheMakefileRuns:
         assert migrate != -1, "CI never runs migrations"
         assert test != -1, "CI never runs the integration tests"
         assert migrate < test, "CI runs the integration tests before migrating"
+
+
+# The two checkers are scripts rather than packages — `make arch` runs them by
+# path. Importing them here rather than shelling out keeps the assertions on
+# specific rules instead of on an exit code.
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+
+class TestGradedEvidenceEarnsItsExemption:
+    """[ADR-0035]. Captured evidence leaves the platform *text* scan and enters a
+    structural one — and the exemption is only defensible while the second check
+    is real and the first stays narrow.
+    """
+
+    def test_the_exemption_is_exactly_generated_graded_json(self) -> None:
+        """Each `False` here is a way this could have been over-applied."""
+        from check_platform_independence import _is_allowed
+
+        assert _is_allowed("agents/care/src/neura_agent_care/evals/fixtures/graded/a.json")
+        assert _is_allowed("agents/sell/src/neura_agent_sell/evals/fixtures/graded/deadbeef.json")
+
+        for path in (
+            "agents/care/src/neura_agent_care/evals/fixtures/store.json",
+            "agents/care/src/neura_agent_care/evals/fixtures/graded/a.yaml",
+            "agents/care/src/neura_agent_care/evals/datasets/graded.yaml",
+            "agents/care/src/neura_agent_care/prompts/route.md",
+            "agents/care/src/neura_agent_care/tools/catalogue.py",
+            "packages/neura-agent-core/src/neura_agent_core/evidence.py",
+            "apps/neura-api/some-config.json",
+            "evals/fixtures/graded/a.json",
+        ):
+            assert not _is_allowed(path), f"{path} must still be scanned"
+
+    def test_a_star_may_not_cross_a_directory_separator(self) -> None:
+        """The bug this replaced, and it was invisible from either script alone.
+
+        The exemption was an `fnmatch` glob, where **`*` matches `/`**; the
+        structural check used `Path.glob`, where it does not. So every path below
+        was exempted from the platform scan and checked by nothing — the
+        exemption was strictly wider than the check that pays for it, which is
+        the one relationship between them that must never hold.
+
+        Both now call one segment-exact function.
+        """
+        from check_platform_independence import is_graded_evidence
+
+        for path in (
+            # an extra directory before `src`
+            "agents/care/extra/src/neura_agent_care/evals/fixtures/graded/a.json",
+            # a nested directory under `graded/`
+            "agents/care/src/neura_agent_care/evals/fixtures/graded/nested/a.json",
+            # an extra package level
+            "agents/care/src/x/y/evals/fixtures/graded/a.json",
+            # and traversal, for completeness
+            "agents/care/src/neura_agent_care/evals/fixtures/graded/../../store.json",
+        ):
+            assert not is_graded_evidence(path), f"{path} slipped through the exemption"
+
+    def test_the_exemption_and_the_structural_check_cover_one_set(self) -> None:
+        """[ADR-0035] §3's whole argument, asserted rather than asserted-in-prose.
+
+        Every file exempted from the platform-name scan must be a file the
+        structural validator checks. Compared over the repository as it actually
+        is, so a future artefact in an unexpected place fails here.
+        """
+        import check_graded_evidence
+        from check_platform_independence import SEARCH_SUFFIXES, _is_allowed, is_graded_evidence
+
+        exempted = {
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in REPO_ROOT.rglob("*")
+            if path.is_file()
+            and path.suffix in SEARCH_SUFFIXES
+            and is_graded_evidence(path.relative_to(REPO_ROOT).as_posix())
+        }
+        checked = {p.relative_to(REPO_ROOT).as_posix() for p in check_graded_evidence.artefacts()}
+
+        assert exempted == checked, (
+            "a file is exempt from the platform scan and not structurally checked, "
+            f"or the reverse: {exempted ^ checked}"
+        )
+        # And every one of them really is exempt by the platform checker itself,
+        # not merely by the predicate in isolation.
+        assert all(_is_allowed(path) for path in checked)
+
+    def test_eval_reports_are_gitignored_and_therefore_exempt(self) -> None:
+        """The exemption for `evals/reports/` is only honest while git ignores it.
+
+        A promoted case's run report embeds the merchant's own policy text — it
+        is the evidence the judge scored against — so `make eval` would otherwise
+        turn the platform check red on a file that is not in the repository. If
+        that directory ever stops being ignored, the exemption becomes a hole and
+        this test says so.
+        """
+        ignored = {
+            line.strip().rstrip("/")
+            for line in (REPO_ROOT / ".gitignore").read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+
+        assert "evals/reports" in ignored, (
+            "evals/reports/ is no longer gitignored — its platform-scan exemption is now a hole"
+        )
+
+    def test_every_shipped_artefact_is_structurally_sound(self) -> None:
+        """The check that pays for the exemption, run over what is committed."""
+        from check_graded_evidence import scan
+
+        assert scan() == []
+
+    def test_a_platform_field_is_still_refused(self) -> None:
+        """The line ADR-0035 draws: a platform *name in merchant prose* is fine;
+        a platform *field* is coupling and is refused."""
+        from check_graded_evidence import check_artefact
+
+        problems = check_artefact(
+            Path("deadbeef.json"),
+            {
+                "schema_version": 3,
+                "_content_hash": "x",
+                "entities": {"products": [{"platform": "x"}]},
+            },
+        )
+
+        assert any("forbidden field" in p for _, p in problems)
+
+    def test_a_raw_payload_nested_in_an_entity_is_refused(self) -> None:
+        """`raw` lives inside products, not at the top level — a shallow check
+        would pass a file carrying a platform's field names in every one."""
+        from check_graded_evidence import check_artefact
+
+        problems = check_artefact(
+            Path("deadbeef.json"),
+            {"schema_version": 3, "_content_hash": "x", "calls": [{"result": {"raw": {}}}]},
+        )
+
+        assert any("forbidden field" in p for _, p in problems)
+
+    def test_pii_output_evidence_is_refused(self) -> None:
+        from check_graded_evidence import check_artefact
+
+        problems = check_artefact(
+            Path("deadbeef.json"), {"schema_version": 3, "_content_hash": "x", "pii_output": True}
+        )
+
+        assert any("customer data" in p for _, p in problems)
+
+    def test_an_unknown_top_level_key_is_refused(self) -> None:
+        """An allowlist, because the failure that matters is a field nobody
+        thought about reaching a repository."""
+        from check_graded_evidence import check_artefact
+
+        problems = check_artefact(
+            Path("deadbeef.json"),
+            {"schema_version": 3, "_content_hash": "x", "pii_output": False, "surprise": 1},
+        )
+
+        assert any("unexpected top-level key" in p for _, p in problems)
+
+    def test_a_mismatched_hash_is_refused(self) -> None:
+        from check_graded_evidence import check_artefact
+
+        problems = check_artefact(
+            Path("aaaa.json"), {"schema_version": 3, "_content_hash": "bbbb", "pii_output": False}
+        )
+
+        assert any("filename does not match" in p for _, p in problems)

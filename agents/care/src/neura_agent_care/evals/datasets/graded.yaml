@@ -6,10 +6,17 @@ description: |
   each one is a question a person actually asked, answered by the agent, withheld
   by shadow mode, and graded by a human who then chose which facts must survive.
 
+  EVERY CASE HERE REPLAYS ITS OWN EVIDENCE. `fixture_mode: replay` means the base
+  fixture store is NOT loaded: the case runs against the boundary its turn actually
+  recorded, under `fixtures/graded/<content hash>.json` (ADR-0034). That is what
+  makes it reproducible rather than merely real.
+
   DO NOT hand-write a case into this file. It is written by
   `make promote TURN=... FACTS="..."`, which refuses a fact that is not in the
-  approved draft verbatim, refuses a turn that was already promoted, and refuses
-  a `disagree`. A hand-written case here would claim an authority it has not got.
+  approved draft verbatim, refuses a turn that was already promoted, refuses a
+  `disagree`, refuses a turn with no captured evidence, refuses one that touched
+  customer data, and refuses one whose store has changed since it was graded. A
+  hand-written case here would claim an authority it has not got.
 
   To remove a case, delete it and say why in the commit message. There is
   deliberately no disable flag (ADR-0032 §9): a switch that silences a failing
@@ -18,70 +25,20 @@ cases:
 - id: graded_care_001
   intent: policy_qa
   synthetic: false
-  input: can I return something after 40 days?
+  input: what is your returns policy?
+  fixture_mode: replay
+  evidence: 42d1b7ff6aad91001a9dd901d300174f9cee9160a0430c7a208614e8e015f527
   expect:
     intent: policy_qa
     escalated: false
     grounded: true
+    tools_called: []
     must_contain:
     - 30 days
+    - full refund
   tags:
   - graded
   - care
-  - from-turn:msg_01M1M1Z8GN62C5KCCV1A7RJEDG
+  - from-turn:msg_01M1V4S6B355FDMHD0SHKMCBNS
   - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
-  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.
-- id: graded_care_002
-  intent: product_qa
-  synthetic: false
-  input: do you sell waterproof jackets?
-  expect:
-    intent: product_qa
-    escalated: false
-    grounded: true
-    tools_called:
-    - search_products
-    must_contain:
-    - Lightweight Rain Shell
-    - '110.00'
-    - Waxed Cotton Field Jacket
-    - '165.00'
-  tags:
-  - graded
-  - care
-  - from-turn:msg_01M1M1SBDFY6XYCWKFJ17QC456
-  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
-  notes: Promoted from a verdict of `agree` on 2026-09-03. ok
-- id: graded_care_003
-  intent: product_qa
-  synthetic: false
-  input: do you sell shoes?
-  expect:
-    intent: product_qa
-    escalated: false
-    grounded: true
-    must_contain:
-    - Waterproof Hiking Shoe
-  tags:
-  - graded
-  - care
-  - from-turn:msg_01M1M20MGR4HN8F427RCFDVB5J
-  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
-  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.
-- id: graded_care_004
-  intent: policy_qa
-  synthetic: false
-  input: what payment methods do you take?
-  expect:
-    intent: policy_qa
-    escalated: false
-    grounded: true
-    must_contain:
-    - cash on delivery
-    - Sri Lanka
-  tags:
-  - graded
-  - care
-  - from-turn:msg_01M1M23Q9CZ6TNZ23NQGSE64CM
-  - promoted-by:usr_01M0ZP6TXA5D9QN5CA2QQEDW46
-  notes: Promoted from a verdict of `agree` on 2026-09-03. The reviewer left no note.
+  notes: Promoted from a verdict of `agree` on 2026-09-06. The reviewer left no note.
