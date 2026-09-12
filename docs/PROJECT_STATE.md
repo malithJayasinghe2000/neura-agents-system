@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-06 — **the release gate cannot be satisfied by a dead model server any more; E9 resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md)**
+**Last updated:** 2026-09-12 — **a model can no longer grade its own answer and call the result trusted; E11 resolved by [ADR-0037](architecture/adr/0037-a-model-may-not-grade-its-own-answer.md)**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -35,12 +35,27 @@ stopped asserting `intent` or `escalated` would still exit 0. [E11](open-questio
 trust from the model name alone — so a **judged** cloud run would label self-judging `trusted`. The
 accepted validation avoided it with `--no-judge`; nothing is fixed.
 
-**Next action:** **Resolve [E11](open-questions.md) so cloud groundedness can be measured honestly.**
-On `cloud-prod` the agent and the judge are both `gemini-3.6-flash`, and `judge_from_env()` decides
-trust from the model *name* alone — so a judged cloud run grades the model's own answer and would
-label it `trusted`. Until that is fixed **no groundedness figure from the cloud path may be quoted**,
-and [A9](open-questions.md) stays parked for the same reason. The two accepted live runs of
-2026-09-06 sidestepped it with `--no-judge`, which is why neither measured groundedness.
+**2026-09-12 — [E11](open-questions.md) is resolved by
+[ADR-0037](architecture/adr/0037-a-model-may-not-grade-its-own-answer.md), and it did not choose a
+judge.** `JudgeTrust.UNTRUSTED_SELF_JUDGING` had been declared since 1.4 and set by nothing; the
+judge is now compared against **every configured `ModelRole`**, on a normalised model name that
+ignores the endpoint. A self-judged or weak-judge score is still shown, listed in
+`untrusted_metrics`, printed as `untrusted` instead of a ✔, and **satisfies no requirement** —
+`--require groundedness` exits **1**. `--check-judge` separates *functioning* from *qualifying* and
+can no longer call this `.env` trusted. **Two fail-open edges were caught in review and closed**:
+only `RoleNotConfiguredError` means "this role is unconfigured", so any other inspection failure is
+`untrusted:unverified` rather than an empty set that read as trusted; and `sanitise_endpoint()` now
+persists the **origin only** and cannot raise on a malformed port. Report schema is **3**, and the reason matters: schemas 1
+and 2 never checked, so **`judge.trust: "trusted"` in an older file is not evidence of an
+independent judge** and any groundedness figure in one may have been self-judged.
+
+**Next action:** **Choose an independent judge model, by comparison rather than by preference.** It
+must serve no role in the map under test; `make judge-check` is the instrument and it already tests
+both directions. Until one exists there is still no quotable groundedness figure from `cloud-prod`,
+and [A9](open-questions.md) stays parked — the difference is that this is now a measurement task
+with a named blocker rather than a silent hole. Deliberately not decided in ADR-0037: it is a
+compatibility, quality and cost comparison, and E2's warning about free tiers training on
+submissions now bites, because `graded_care_001` is `synthetic: false`.
 
 The `.env` points at Gemini: `CLOUD_MODEL_ROUTER`, `_REASONER` and `_GUARD` are all
 `gemini-3.6-flash` (`gemini-2.5-flash` and `-flash-lite` are **retired for new API keys**). The

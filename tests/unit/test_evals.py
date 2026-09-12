@@ -1102,3 +1102,455 @@ class TestTheCli:
         finally:
             _sys.argv = original
         assert caught.value.code == 2
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Open question E11 / [ADR-0037] — a model may not grade its own answer.
+#
+# `JudgeTrust.UNTRUSTED_SELF_JUDGING` was declared in 1.4 and nothing ever set
+# it, so `cloud-prod` — one model on every chat role AND on the judge — reported
+# `trusted`. Deterministic throughout: no model is called, live or local.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestModelIdentity:
+    """What counts as "the same model", and what deliberately does not."""
+
+    def test_whitespace_and_case_are_not_identity(self) -> None:
+        from neura_evals.config import is_self_judging
+
+        assert is_self_judging("  Gemini-3.6-Flash ", ["gemini-3.6-flash"])
+
+    def test_the_free_tier_suffix_is_the_same_route(self) -> None:
+        """`x:free` and `x` are the same weights billed differently, so a judge
+        on the free tier of the model under test still marks its own homework."""
+        from neura_evals.config import is_self_judging
+
+        assert is_self_judging("openai/gpt-oss-20b", ["openai/gpt-oss-20b:free"])
+        assert is_self_judging("openai/gpt-oss-20b:free", ["openai/gpt-oss-20b"])
+
+    def test_the_same_model_through_a_different_endpoint_is_still_the_same_model(self) -> None:
+        """Endpoint-independent by design — the comparison never sees a URL.
+
+        The same weights reached through two gateways self-judge identically,
+        and requiring the base URLs to match too would miss the most plausible
+        way to configure this by accident.
+        """
+        from neura_evals.config import is_self_judging
+
+        assert is_self_judging("gemini-3.6-flash", ["gemini-3.6-flash"])
+
+    def test_a_different_version_is_a_different_model(self) -> None:
+        """No fuzzy family matching. Merging these would disqualify a judge that
+        is genuinely independent."""
+        from neura_evals.config import is_self_judging
+
+        assert not is_self_judging("gemini-3.6-flash", ["gemini-3.5-flash"])
+        assert not is_self_judging("llama3.1:8b", ["llama3.2:3b"])
+
+    def test_a_vendor_prefix_is_a_known_limitation_not_a_match(self) -> None:
+        """**Recorded rather than guessed** — [ADR-0037] §3.
+
+        A tier suffix names the same route; a vendor prefix names a different
+        one, and deciding two gateways mean the same thing by the same bare name
+        would be inventing a rule. This test exists so the gap is deliberate and
+        visible rather than discovered later.
+        """
+        from neura_evals.config import is_self_judging
+
+        assert not is_self_judging("google/gemini-3.6-flash", ["gemini-3.6-flash"])
+
+    def test_blank_models_never_match(self) -> None:
+        """`CLOUD_MODEL_EMBEDDER` is unset in some maps and resolves to ""."""
+        from neura_evals.config import is_self_judging
+
+        assert not is_self_judging("", ["gemini-3.6-flash"])
+        assert not is_self_judging("gemini-3.6-flash", ["", "   "])
+        assert not is_self_judging("gemini-3.6-flash", [])
+
+
+class TestJudgeTrustResolution:
+    @staticmethod
+    def _config(model: str = "gemini-3.6-flash", **kwargs: object):
+        from neura_evals.judge import JudgeConfig
+
+        return JudgeConfig(base_url="https://h/v1", api_key="k", model=model, **kwargs)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _seen(*models: str):
+        from neura_evals.config import RoleMapModels
+
+        return RoleMapModels(models=frozenset(models))
+
+    def test_a_judge_that_serves_a_role_is_self_judging(self) -> None:
+        from neura_evals.config import resolve_judge_trust
+
+        out = resolve_judge_trust(self._config(), self._seen("gemini-3.6-flash", "nomic-embed"))
+        assert out.trust is JudgeTrust.UNTRUSTED_SELF_JUDGING
+        assert not out.is_trusted
+
+    def test_an_independent_judge_keeps_its_trust(self) -> None:
+        from neura_evals.config import resolve_judge_trust
+
+        out = resolve_judge_trust(self._config(), self._seen("llama3.2:3b", "llama3.1:8b"))
+        assert out.trust is JudgeTrust.TRUSTED
+
+    def test_self_judging_outranks_weak_model(self) -> None:
+        """A small model grading itself is both. Self-judging is the more
+        specific fact about why the number cannot be believed."""
+        from neura_evals.config import resolve_judge_trust
+
+        weak = self._config(model="llama3.2:3b", trust=JudgeTrust.UNTRUSTED_WEAK_MODEL)
+        assert (
+            resolve_judge_trust(weak, self._seen("llama3.2:3b")).trust
+            is JudgeTrust.UNTRUSTED_SELF_JUDGING
+        )
+
+    def test_nothing_ran_is_not_the_same_as_nothing_checked(self) -> None:
+        """The fail-open edge, stated as the pair it is.
+
+        `--no-agent` legitimately sees no models and a judge stays trusted. A
+        failed inspection also sees no models — and must not.
+        """
+        from neura_evals.config import RoleMapModels, resolve_judge_trust
+
+        nothing_ran = resolve_judge_trust(self._config(), RoleMapModels())
+        nothing_checked = resolve_judge_trust(
+            self._config(), RoleMapModels(inspected=False, detail="boom")
+        )
+        assert nothing_ran.trust is JudgeTrust.TRUSTED
+        assert nothing_checked.trust is JudgeTrust.UNTRUSTED_UNVERIFIED
+        assert not nothing_checked.is_trusted
+
+    def test_an_uninspectable_map_outranks_even_a_matching_name(self) -> None:
+        """`inspected=False` is decided first: a partial model set gathered
+        before the failure cannot be used to conclude anything."""
+        from neura_evals.config import RoleMapModels, resolve_judge_trust
+
+        out = resolve_judge_trust(
+            self._config(), RoleMapModels(models=frozenset({"llama3.2:3b"}), inspected=False)
+        )
+        assert out.trust is JudgeTrust.UNTRUSTED_UNVERIFIED
+
+    def test_the_weak_model_check_still_works(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression: [ADR-0037] adds a second downgrade, it does not replace the first."""
+        from neura_evals.config import judge_from_env
+
+        monkeypatch.setenv("EVAL_JUDGE_BASE_URL", "https://h/v1")
+        monkeypatch.setenv("EVAL_JUDGE_API_KEY", "x")
+        monkeypatch.setenv("EVAL_JUDGE_MODEL", "some-3b-model")
+        assert judge_from_env().trust is JudgeTrust.UNTRUSTED_WEAK_MODEL
+
+
+class TestTheEndpointIsSanitised:
+    """A report is written to disk and pasted into terminals.
+
+    **Origin only** — scheme, host, valid port. Everything that can carry a
+    credential goes, including the path, and nothing here may raise.
+    """
+
+    def test_user_information_query_and_fragment_are_dropped(self) -> None:
+        from neura_evals.judge import sanitise_endpoint
+
+        cleaned = sanitise_endpoint("https://user:s3cret@api.example.com/v1/openai/?key=SEKRIT#f")
+        assert cleaned == "https://api.example.com"
+        for secret in ("s3cret", "SEKRIT", "user", "?", "#", "@"):
+            assert secret not in cleaned
+
+    def test_a_secret_in_a_path_segment_is_removed(self) -> None:
+        """The non-obvious one. A generic gateway may route by a secret in the
+        path, so a path is not safe merely because it usually is."""
+        from neura_evals.judge import sanitise_endpoint
+
+        cleaned = sanitise_endpoint("https://gw.example.com/v1/sk-live-abc123/openai")
+        assert cleaned == "https://gw.example.com"
+        assert "sk-live-abc123" not in cleaned
+
+    def test_a_valid_numeric_port_survives(self) -> None:
+        from neura_evals.judge import sanitise_endpoint
+
+        assert sanitise_endpoint("http://localhost:11434/v1") == "http://localhost:11434"
+
+    def test_an_invalid_textual_port_returns_empty_and_does_not_raise(self) -> None:
+        """`urlsplit` defers port validation to attribute access, so `.port` threw
+        outside the original `try` — a sanitiser that was a source of crashes."""
+        from neura_evals.judge import sanitise_endpoint
+
+        assert sanitise_endpoint("https://api.example.com:notaport/v1") == ""
+
+    def test_ipv6_keeps_its_brackets(self) -> None:
+        """`hostname` strips them, and `http://::1:11434` is not a URL."""
+        from neura_evals.judge import sanitise_endpoint
+
+        assert sanitise_endpoint("http://[::1]:11434/v1") == "http://[::1]:11434"
+        assert sanitise_endpoint("https://[2001:db8::1]/v1") == "https://[2001:db8::1]"
+
+    @pytest.mark.parametrize(
+        "malformed",
+        ["not a url", "", "   ", "://missing-scheme", "https://", "http://:8080", "%%%"],
+    )
+    def test_malformed_urls_say_less_rather_than_more(self, malformed: str) -> None:
+        from neura_evals.judge import sanitise_endpoint
+
+        assert sanitise_endpoint(malformed) == ""
+
+
+class _SelfJudge:
+    """A judge that approves everything, labelled as grading its own answer."""
+
+    model = "gemini-3.6-flash"
+    trust = JudgeTrust.UNTRUSTED_SELF_JUDGING
+    endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+    async def grounded(self, *, reply: str, evidence: str):
+        from neura_evals.judge import Verdict
+
+        return Verdict(passed=True, score=0.98, reasoning="looks great to me")
+
+
+def _judged_case(case_id: str = "g1") -> EvalCase:
+    return EvalCase(
+        id=case_id,
+        intent=Intent.POLICY_QA,
+        input="what is your returns policy?",
+        expect=Expectation(grounded=True, tools_called=[]),
+        synthetic=True,
+    )
+
+
+async def _judged_run(judge: object, **verdict_kwargs: object):
+    from neura_evals.runner import judge_run
+
+    report = await run_eval(
+        target=FakeTarget({"g1": AgentResponse(reply="30 days, full refund.", llm_calls=2)}),
+        datasets=[Dataset(name="d", cases=[_judged_case()])],
+        judge=judge,  # type: ignore[arg-type]
+    )
+    return report, judge_run(report, **verdict_kwargs)  # type: ignore[arg-type]
+
+
+class TestASelfJudgedScoreSatisfiesNothing:
+    async def test_the_score_is_still_produced_and_marked(self) -> None:
+        """Displayed for development, never believed — [ADR-0037] §4."""
+        report, _ = await _judged_run(_SelfJudge())
+        assert report.summary.metrics["groundedness"] == 1.0
+        assert report.summary.untrusted_metrics == frozenset({"groundedness"})
+        assert not report.scores_are_trustworthy
+
+    async def test_requiring_it_exits_one_not_three(self) -> None:
+        _, verdict = await _judged_run(_SelfJudge(), required=["groundedness"])
+        assert verdict.untrusted_required == ("groundedness",)
+        assert verdict.missing_required == (), "it is present — it just cannot be believed"
+        assert verdict.exit_code == 1, "a judge problem is not an infrastructure outage"
+        assert "cannot be believed" in " ".join(verdict.reasons)
+
+    async def test_a_mechanical_metric_is_untouched_by_the_judge(self) -> None:
+        """`injection_resistance` is read from the policy engine's own decisions.
+        No judge can make it wrong, so self-judging must not disqualify it."""
+        from neura_evals.runner import judge_run
+
+        report = await run_eval(
+            target=FakeTarget({"a1": AgentResponse(reply="no.", llm_calls=1)}),
+            datasets=[Dataset(name="d", cases=[_adversarial("a1")])],
+            judge=_SelfJudge(),  # type: ignore[arg-type]
+        )
+        assert report.summary.metrics["injection_resistance"] == 1.0
+        assert "injection_resistance" not in report.summary.untrusted_metrics
+        assert judge_run(report, required=["injection_resistance"]).exit_code == 0
+
+    async def test_a_trusted_judge_satisfies_the_requirement(self) -> None:
+        class Independent(_SelfJudge):
+            model = "some-independent-judge"
+            trust = JudgeTrust.TRUSTED
+
+        report, verdict = await _judged_run(Independent(), required=["groundedness"])
+        assert report.summary.untrusted_metrics == frozenset()
+        assert verdict.exit_code == 0
+
+    async def test_a_weak_judge_is_disqualified_the_same_way(self) -> None:
+        """The rule is about trust, not specifically about self-judging."""
+
+        class Weak(_SelfJudge):
+            model = "tinyllama"
+            trust = JudgeTrust.UNTRUSTED_WEAK_MODEL
+
+        report, verdict = await _judged_run(Weak(), required=["groundedness"])
+        assert report.summary.untrusted_metrics == frozenset({"groundedness"})
+        assert verdict.exit_code == 1
+
+    async def test_no_judge_marks_nothing(self) -> None:
+        report, _ = await _judged_run(None, required=["injection_resistance"])
+        assert report.summary.untrusted_metrics == frozenset()
+        assert "groundedness" not in report.summary.metrics
+
+
+class TestTheSelfJudgedReport:
+    async def test_the_banner_names_self_judging_and_not_a_weak_model(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from neura_evals.report import print_report
+
+        report, verdict = await _judged_run(_SelfJudge(), required=["groundedness"])
+        print_report(report, verdict)
+        out = capsys.readouterr().out
+        assert "GRADING ITS OWN ANSWER" in out
+        assert "weak model grading a weak model" not in out
+        assert "untrusted" in out, "the metrics table must say so beside the value"
+
+    async def test_the_file_records_trust_untrusted_metrics_and_a_clean_endpoint(
+        self, tmp_path: Path
+    ) -> None:
+        from neura_evals.persist import REPORT_SCHEMA_VERSION
+
+        report, verdict = await _judged_run(_SelfJudge(), required=["groundedness"])
+        written = json.loads(
+            write_report(report, tmp_path / "r.json", verdict).read_text()  # type: ignore[arg-type]
+        )
+        assert written["report_schema_version"] == REPORT_SCHEMA_VERSION >= 3
+        assert written["judge"]["trust"] == "untrusted:self-judging"
+        assert written["judge"]["scores_are_trustworthy"] is False
+        assert written["summary"]["untrusted_metrics"] == ["groundedness"]
+        assert written["untrusted_required"] == ["groundedness"]
+        assert written["ok"] is False and written["exit_code"] == 1
+        assert "@" not in written["judge"]["endpoint"], "no credentials in a committed file"
+
+
+class TestTheModelsUnderTestAreDiscoveredFromTheRealRoleMap:
+    """The wiring, against a real `LLMClient`. Config resolution only — no call
+    is made to any provider, so this is deterministic and free."""
+
+    @staticmethod
+    def _seen(role_map: str):
+        from neura_evals.__main__ import _models_in_play
+
+        from neura_llm import LLMClient
+
+        return _models_in_play(LLMClient.from_role_map_name(role_map))
+
+    def test_every_role_is_collected_not_just_the_two_that_write(self) -> None:
+        """Fail-closed: `REASONER` writes the reply and `GUARD` approved it, but
+        comparing against all of them costs nothing and cannot miss either."""
+        seen = self._seen("ollama-dev")
+        assert seen.inspected
+        assert len(seen.models) >= 3
+        assert all(m and m.strip() for m in seen.models)
+
+    def test_a_judge_on_a_local_role_is_caught(self) -> None:
+        from neura_evals.config import is_self_judging
+
+        seen = self._seen("ollama-dev")
+        assert is_self_judging(sorted(seen.models)[0], seen.models)
+
+    def test_an_unrelated_judge_is_not_caught(self) -> None:
+        from neura_evals.config import is_self_judging
+
+        assert not is_self_judging("a-model-nobody-configured", self._seen("ollama-dev").models)
+
+    def test_no_client_names_no_models_but_counts_as_inspected(self) -> None:
+        """`--no-agent`, or an injected target: nothing ran, so nothing to compare
+        — and that is a *known* empty, not a failed inspection."""
+        from neura_evals.__main__ import _models_in_play
+
+        seen = _models_in_play(None)
+        assert seen.models == frozenset()
+        assert seen.inspected
+
+    def test_an_unconfigured_role_is_skipped_not_a_failure(self) -> None:
+        """`RoleNotConfiguredError` is what `RoleMap.resolve()` raises for all
+        three legitimate cases — undefined role, unknown provider, unset env var
+        — so it must not make the whole inspection unknown."""
+        from neura_evals.__main__ import _models_in_play
+
+        from neura_llm import ModelRole, RoleNotConfiguredError
+
+        class PartlyConfigured:
+            def model_for(self, role: object) -> str:
+                if role is ModelRole.EMBEDDER:
+                    raise RoleNotConfiguredError("CLOUD_MODEL_EMBEDDER not set")
+                return "some-model"
+
+        seen = _models_in_play(PartlyConfigured())
+        assert seen.inspected, "an unconfigured role is ordinary, not a defect"
+        assert seen.models == frozenset({"some-model"})
+
+    def test_an_unexpected_exception_makes_qualification_unknown(self) -> None:
+        """**The fail-open edge.** This used to be swallowed into an empty set,
+        which the comparison then read as "matches nothing" — trusted."""
+        from neura_evals.__main__ import _models_in_play
+
+        class Broken:
+            def model_for(self, role: object) -> str:
+                raise RuntimeError("provider registry is corrupt")
+
+        seen = _models_in_play(Broken())
+        assert not seen.inspected
+        assert "RuntimeError" in seen.detail and "corrupt" in seen.detail
+
+    def test_an_unexpected_exception_can_never_yield_a_trusted_judge(self) -> None:
+        from neura_evals.__main__ import _models_in_play
+        from neura_evals.config import resolve_judge_trust
+        from neura_evals.judge import JudgeConfig
+
+        class Broken:
+            def model_for(self, role: object) -> str:
+                raise RuntimeError("boom")
+
+        config = JudgeConfig(base_url="https://h/v1", api_key="k", model="anything-at-all")
+        out = resolve_judge_trust(config, _models_in_play(Broken()))
+        assert out.trust is JudgeTrust.UNTRUSTED_UNVERIFIED
+        assert not out.is_trusted
+
+    def test_a_broken_role_map_is_reported_as_uninspectable(self) -> None:
+        """`--check-judge`'s path. It used to return `None`, which became an
+        empty set, which read as independent."""
+        from neura_evals.__main__ import _inspect_role_map
+
+        seen = _inspect_role_map("no-such-role-map")
+        assert not seen.inspected
+        assert "no-such-role-map" in seen.detail
+
+    def test_check_judge_exits_non_zero_on_an_uninspectable_map(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """And it does so **before** calling the judge, so a disqualified
+        configuration costs no API quota."""
+        import asyncio as _asyncio
+
+        from neura_evals.__main__ import _check_judge
+
+        code = _asyncio.run(_check_judge("no-such-role-map"))
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "QUALIFICATION UNKNOWN" in out
+        assert "untrusted:unverified" in out
+        assert "Judge is working" not in out
+
+
+class TestTheTrustLabelIsActuallyRendered:
+    """Found while building [ADR-0037]: rich ate it.
+
+    `f" [{trust.value}]"` is **markup** — rich parsed `[untrusted:self-judging]`
+    as a style tag and dropped it, so the judge's trust level had never once
+    appeared on the summary line. A label the renderer swallows is not a label,
+    and this ADR's whole purpose is that a reader can see this value.
+    """
+
+    async def test_the_trust_value_reaches_the_terminal(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from neura_evals.report import print_report
+
+        report, verdict = await _judged_run(_SelfJudge(), required=["groundedness"])
+        print_report(report, verdict)
+        assert "untrusted:self-judging" in capsys.readouterr().out
+
+    async def test_a_trusted_judge_says_so_too(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from neura_evals.report import print_report
+
+        class Independent(_SelfJudge):
+            model = "an-independent-judge"
+            trust = JudgeTrust.TRUSTED
+
+        report, verdict = await _judged_run(Independent(), required=["groundedness"])
+        print_report(report, verdict)
+        assert "(trusted)" in capsys.readouterr().out

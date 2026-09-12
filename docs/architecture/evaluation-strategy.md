@@ -100,10 +100,29 @@ The judge is reached over the same OpenAI-compatible interface as every other pr
 
 | Trust | When | Consequence |
 |:--|:--|:--|
-| `trusted` | A strong model, distinct from the model under test | Scores may be quoted |
-| `untrusted:weak-model` | A small local model — the zero-budget fallback | Report carries a warning banner; scores are directional only |
-| `untrusted:self-judging` | Judge is the model being evaluated | Marking its own homework |
+| `trusted` | A strong model, distinct from every model under test | Scores may be quoted |
+| `untrusted:weak-model` | A small local model — the zero-budget fallback | Warning banner; score shown, **satisfies no requirement** |
+| `untrusted:self-judging` | The judge serves a role in the run under test | Marking its own homework. Warning banner; score shown, **satisfies no requirement** |
+| `untrusted:unverified` | The role map could not be inspected, so self-judging was not ruled out | *"We did not check"* is not *"it is fine"*. Warning banner; score shown, **satisfies no requirement** |
 | *(skipped)* | `--no-judge` | Mechanical checks stand alone; groundedness simply unmeasured |
+
+**The last column was aspirational until 2026-09-12.** `untrusted:self-judging` was declared in
+milestone 1.4 and **nothing ever set it**: trust was decided from the judge's model *name*, so
+`cloud-prod` — one model on every chat role and on the judge — reported `trusted` while grading its
+own answer ([E11](../open-questions.md)). It is now detected by comparing the judge against every
+configured `ModelRole`, and an untrusted judged metric is reported, listed in `untrusted_metrics`,
+and **cannot satisfy `--require groundedness`** — requiring it exits 1
+([ADR-0037](adr/0037-a-model-may-not-grade-its-own-answer.md)).
+
+**Only `RoleNotConfiguredError` counts as "this role is not configured".** Any other failure while
+inspecting the role map makes the qualification `untrusted:unverified` rather than silently
+concluding the judge is independent — a detector whose failure mode is *"everything is fine"* is not
+a detector. `make judge-check` prints the models it compared against, and **exits non-zero without
+calling the judge** if the role map cannot be read.
+
+> **Reading an older report.** Report schema **3** is the first that checked this. In a schema<3
+> file, `judge.trust: "trusted"` means only that the model name matched no weak-model marker — **not
+> that the judge was independent.** Any groundedness figure in one may have been self-judged.
 
 This exists because an untrusted score looks exactly like a real one. Without the label, a project quotes its own guesses back to itself within a month.
 

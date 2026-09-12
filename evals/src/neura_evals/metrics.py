@@ -17,7 +17,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from neura_evals.dataset import ADVERSARIAL, EvalCase
-from neura_evals.judge import Judge
+from neura_evals.judge import Judge, JudgeTrust
 from neura_evals.target import AgentResponse
 
 
@@ -177,6 +177,13 @@ CHECK_METRICS: tuple[tuple[str, str], ...] = (
     # gate comes from a baseline, and this is how the baseline gets taken.
     ("dispatch_accuracy", "dispatch"),
 )
+
+#: Metrics produced by asking a model, rather than by comparing strings.
+#:
+#: These are the only ones a judge's trust can invalidate. Everything else here
+#: is mechanical — `injection_resistance` is read from the policy engine's own
+#: decisions, and no judge can make it wrong ([ADR-0037]).
+JUDGED_METRICS: frozenset[str] = frozenset({"groundedness"})
 
 #: Every metric name :func:`summarise` can emit — the vocabulary ``--require``
 #: is checked against, so a typo is a usage error rather than a run that fails
@@ -528,6 +535,14 @@ class RunSummary:
     #: reasoning already forced `unjudged` onto this summary — this generalises
     #: it to every metric instead of the one where it had already gone wrong.
     coverage: dict[str, tuple[int, int]] = field(default_factory=dict)
+    #: Metrics whose value exists but **may not be believed** — the judge that
+    #: produced them was weak, or was one of the models under test ([ADR-0037]).
+    #:
+    #: Present and non-qualifying is a third state, and it needed to exist. A
+    #: number that is merely *labelled* untrusted can still satisfy a gate, which
+    #: is the false-green shape [ADR-0036] removed for absent metrics and left
+    #: open for this one. `RunVerdict` refuses to let one satisfy `--require`.
+    untrusted_metrics: frozenset[str] = frozenset()
     #: ``expected agent -> chosen agent -> count``, over the cases that asserted
     #: a dispatch — [ADR-0031].
     #:
@@ -748,7 +763,19 @@ def _percentile(values: list[int], pct: float) -> int:
     return ordered[index]
 
 
-def summarise(results: list[CaseResult]) -> RunSummary:
+def summarise(results: list[CaseResult], *, judge_trust: JudgeTrust | None = None) -> RunSummary:
+    """Aggregate one run.
+
+    ``judge_trust`` is optional and only ever *subtracts* confidence: given an
+    untrusted judge, the judged metrics are still computed and reported, and are
+    additionally listed in :attr:`RunSummary.untrusted_metrics` so that nothing
+    downstream can quote them or count them as satisfied. ``None`` means no
+    judge ran, which invalidates nothing — the mechanical checks stand alone.
+    """
+    return _summarise(results, judge_trust)
+
+
+def _summarise(results: list[CaseResult], judge_trust: JudgeTrust | None) -> RunSummary:
     summary = RunSummary(
         total=len(results),
         passed=sum(1 for r in results if r.outcome is CaseOutcome.PASSED),
@@ -833,5 +860,11 @@ def summarise(results: list[CaseResult]) -> RunSummary:
     # counter would otherwise vanish silently into the gap between `total` and
     # the parts, which is precisely how "47 passed, 0 failed" happened.
     assert summary.total == summary.passed + summary.failed + summary.errored + summary.skipped
+
+    # Reported, and marked. A judged metric survives an untrusted judge — a
+    # self-judged 0.40 still says something is badly wrong — but it stops being
+    # able to satisfy anything ([ADR-0037] §4).
+    if judge_trust is not None and judge_trust is not JudgeTrust.TRUSTED:
+        summary.untrusted_metrics = frozenset(JUDGED_METRICS & set(summary.metrics))
 
     return summary

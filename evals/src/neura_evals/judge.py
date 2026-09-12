@@ -25,6 +25,7 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urlsplit
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -50,7 +51,32 @@ class JudgeTrust(StrEnum):
     """A small local model. Scores are directional at best."""
 
     UNTRUSTED_SELF_JUDGING = "untrusted:self-judging"
-    """The judge is the same model being evaluated — marking its own homework."""
+    """The judge is the same model being evaluated — marking its own homework.
+
+    **Declared in milestone 1.4 and unreachable until 2026-09-12** ([ADR-0037]).
+    Nothing set it, and `judge_from_env()` decided trust from the model *name*
+    alone, so `cloud-prod` — where `.env` puts `gemini-3.6-flash` on every chat
+    role *and* on the judge — reported `trusted` while the model graded its own
+    answer (open question E11). :func:`neura_evals.config.resolve_judge_trust`
+    now reaches it.
+
+    It outranks :attr:`UNTRUSTED_WEAK_MODEL`: a small model grading itself is
+    both, and self-judging is the more specific fact about why the number
+    cannot be believed.
+    """
+
+    UNTRUSTED_UNVERIFIED = "untrusted:unverified"
+    """**Whether the judge grades its own answer could not be determined.**
+
+    The role map under test could not be inspected — an unknown map name, a
+    provider that could not be built, or `model_for()` failing for a reason that
+    is not `RoleNotConfiguredError`. The judge may well be independent; nobody
+    knows, and *"nobody knows"* is not *"yes"*.
+
+    Distinct from the other two because the fix is different: this one is a
+    defect or a misconfiguration to go and find, not a judge to replace. It is
+    non-qualifying for the same reason they are ([ADR-0037] §1).
+    """
 
 
 class Verdict(BaseModel):
@@ -122,6 +148,43 @@ Respond with JSON only:
 }}"""
 
 
+def sanitise_endpoint(url: str) -> str:
+    """The **origin** of an endpoint — scheme, host and valid port, nothing else.
+
+    A report is written to disk and pasted into terminals, so everything that
+    can carry a credential is removed:
+
+    * **user information** — `https://user:secret@host/` is a legal base URL;
+    * **query string** — plenty of gateways accept `?key=…`;
+    * **fragment** — the same, and it survives copy-paste;
+    * **the path** — and this one is not obvious. A generic gateway may route by
+      a secret in a path segment (`/v1/sk-live-…/openai`), so a path is not safe
+      merely because it usually is. The diagnostic value of *"which product"* is
+      not worth the class of leak, and the host already answers *"which vendor"*.
+
+    **Never raises.** `urlsplit` defers port validation to attribute access, so
+    `https://host:notaport/v1` raises `ValueError` on `.port` — outside the
+    original `try` in the first version of this function, which made a sanitiser
+    a source of crashes. Anything malformed degrades to the empty string rather
+    than to the raw value: the failure has to be safe in the direction of saying
+    less.
+
+    IPv6 literals keep their brackets, which `hostname` strips.
+    """
+    try:
+        parsed = urlsplit(url.strip())
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return ""
+
+    if not host or not parsed.scheme:
+        return ""
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{parsed.scheme}://{host}:{port}" if port else f"{parsed.scheme}://{host}"
+
+
 @dataclass(frozen=True, slots=True)
 class JudgeConfig:
     """Where the judge lives. Any OpenAI-compatible endpoint."""
@@ -135,6 +198,11 @@ class JudgeConfig:
     @property
     def is_trusted(self) -> bool:
         return self.trust is JudgeTrust.TRUSTED
+
+    @property
+    def endpoint(self) -> str:
+        """The base URL reduced to its origin — no credentials anywhere in it."""
+        return sanitise_endpoint(self.base_url)
 
 
 class Judge:
@@ -155,6 +223,11 @@ class Judge:
     @property
     def model(self) -> str:
         return self._config.model
+
+    @property
+    def endpoint(self) -> str:
+        """Where this judge lives, **sanitised**. The raw base URL never leaves here."""
+        return self._config.endpoint
 
     async def grounded(self, *, reply: str, evidence: str) -> Verdict:
         """Is every factual claim supported? The metric that protects the customer."""

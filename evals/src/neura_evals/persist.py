@@ -51,11 +51,17 @@ from typing import Any
 
 from neura_evals.runner import RunReport, RunVerdict
 
-#: Bumped whenever the meaning of a field in this file changes. Version 2
-#: (2026-09-06, [ADR-0036]) made `passed` false for a case that never ran and
-#: added the four-outcome counts; version 1 files record `passed: true` for
-#: cases that reached no model.
-REPORT_SCHEMA_VERSION = 2
+#: Bumped whenever the meaning of a field in this file changes.
+#:
+#: * **1** — `passed: true` for cases that reached no model.
+#: * **2** (2026-09-06, [ADR-0036]) — `passed` is false for a case that never
+#:   ran; the four-outcome counts appear.
+#: * **3** (2026-09-12, [ADR-0037]) — self-judging is *checked*. In 1 and 2 it
+#:   was not, so **`judge.trust: "trusted"` in an older file is not evidence
+#:   that the judge was independent** — it only means the model name matched no
+#:   weak-model marker. Any groundedness figure in a schema<3 file may have been
+#:   self-judged and must not be quoted without checking what the role map was.
+REPORT_SCHEMA_VERSION = 3
 
 
 def default_path(agent: str, *, directory: Path | None = None) -> Path:
@@ -99,6 +105,10 @@ def _as_json(report: RunReport, verdict: RunVerdict | None = None) -> dict[str, 
         "exit_code": verdict.exit_code if verdict else None,
         "required_metrics": list(verdict.required) if verdict else [],
         "missing_required": list(verdict.missing_required) if verdict else [],
+        # Required, present, and not believable — [ADR-0037]. Kept apart from
+        # `missing_required` because the fix is different: one needs the suite to
+        # measure something, the other needs a different judge.
+        "untrusted_required": list(verdict.untrusted_required) if verdict else [],
         "failure_reasons": verdict.reasons if verdict else [],
         "target": report.target_name,
         "datasets": list(report.datasets),
@@ -107,6 +117,12 @@ def _as_json(report: RunReport, verdict: RunVerdict | None = None) -> dict[str, 
             "trust": _plain(report.judge_trust),
             "enabled": report.judge_enabled,
             "scores_are_trustworthy": report.scores_are_trustworthy,
+            # The **origin only** — scheme, host, valid port — sanitised upstream
+            # by `Judge.endpoint`. No user information, no query, no fragment,
+            # and no path: a generic gateway may route by a secret in a path
+            # segment, and this file is written to disk and pasted into
+            # terminals. Files written before 2026-09-12 may contain a path.
+            "endpoint": report.judge_endpoint,
         },
         # Carried into the file because a number read six weeks later without it
         # is a number somebody will quote as validation. `is_validation` is the
@@ -130,6 +146,9 @@ def _as_json(report: RunReport, verdict: RunVerdict | None = None) -> dict[str, 
             "unavailable": report.summary.unavailable,
             "pass_rate": report.summary.pass_rate,
             "metrics": dict(report.summary.metrics),
+            # Which of those values may not be quoted. Sorted so the file diffs
+            # cleanly between runs.
+            "untrusted_metrics": sorted(report.summary.untrusted_metrics),
             # Beside every rate, how many cases produced it. Written because the
             # question this file exists to answer six weeks later — "was that
             # 1.00 real?" — is unanswerable from the rate alone.

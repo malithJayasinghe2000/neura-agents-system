@@ -43,3 +43,4 @@ Each ADR captures one significant decision: the context that forced it, the deci
 | [0034](0034-a-promoted-case-carries-the-shop-it-was-graded-on.md) | A Promoted Case Replays The Evidence Its Turn Captured | Accepted — **built 2026-09-06** |
 | [0035](0035-captured-evidence-is-merchant-data-not-behaviour.md) | Captured Evidence Is Merchant Data, Not Behaviour | Accepted — **built 2026-09-06**; narrows the platform *check*, not [rule 1](../../../AGENTS.md) |
 | [0036](0036-a-run-that-measured-nothing-fails.md) | A Run That Measured Nothing Fails, And A Missing Gate Is A Failure | Accepted — **built 2026-09-06**; upholds and extends [0033](0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) §3 |
+| [0037](0037-a-model-may-not-grade-its-own-answer.md) | A Model May Not Grade Its Own Answer | Accepted — **built 2026-09-12**; completes [0036](0036-a-run-that-measured-nothing-fails.md) in the judged dimension |

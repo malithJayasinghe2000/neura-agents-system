@@ -8,6 +8,8 @@ quietly wrong. Every report carries the judge's trust level.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 
 from neura_core import get_logger
 from neura_evals.judge import JudgeConfig, JudgeTrust
@@ -93,3 +95,118 @@ def judge_from_env() -> JudgeConfig:
         model=fallback_model,
         trust=JudgeTrust.UNTRUSTED_WEAK_MODEL,
     )
+
+
+# ── Self-judging: is the judge one of the models under test? ─────────────────
+#
+# Open question E11, [ADR-0037]. `judge_from_env()` decides trust from the model
+# name and has no idea what the agent is running on, so on `cloud-prod` — where
+# `.env` puts `gemini-3.6-flash` on every chat role **and** on the judge — a run
+# would grade the model's own answer and label the score `trusted`.
+
+#: The one routing suffix stripped before comparing two model names.
+#:
+#: `openrouter/x:free` and `openrouter/x` are the same weights on the same route
+#: with different billing, so a judge on the free tier of the model under test is
+#: still marking its own homework. **Nothing else is stripped**, and that is the
+#: line: a *tier* suffix names the same route, a *vendor prefix* names a
+#: different one, and deciding that `google/gemini-x` is `gemini-x` would be
+#: guessing that two gateways mean the same thing by the same bare name.
+_TIER_SUFFIX = ":free"
+
+
+def normalise_model(name: str) -> str:
+    """A model name reduced to what identity comparison should see.
+
+    Whitespace, case and the recognised tier suffix — nothing more. Deliberately
+    **not** a fuzzy matcher: `gemini-3.6-flash` and `gemini-3.5-flash` are
+    different models and a rule that merged them would silently disqualify a
+    legitimate judge.
+    """
+    cleaned = name.strip().casefold()
+    return cleaned.removesuffix(_TIER_SUFFIX) if cleaned.endswith(_TIER_SUFFIX) else cleaned
+
+
+def is_self_judging(judge_model: str, agent_models: Iterable[str]) -> bool:
+    """Does the judge share a model with any role in the run under test?
+
+    **Endpoint-independent, and that is the point.** The same weights reached
+    through two gateways self-judge identically, so requiring the base URLs to
+    match as well would miss the most plausible way to configure it by accident.
+
+    Compared against **every** configured role rather than only the two that
+    touch the graded text (`REASONER` writes the reply, `GUARD` has already
+    ruled it grounded). Fail-closed: the two that matter are always included,
+    and a map that shares a model between roles is the ordinary case here.
+    """
+    judge = normalise_model(judge_model)
+    if not judge:
+        return False
+    return any(normalise_model(model) == judge for model in agent_models if model.strip())
+
+
+@dataclass(frozen=True, slots=True)
+class RoleMapModels:
+    """Which models a run uses — **and whether we actually managed to find out**.
+
+    The distinction is the whole of [ADR-0037] §1. An empty set has two possible
+    meanings that must never be confused:
+
+    * ``inspected=True, models=frozenset()`` — nothing ran (`--no-agent`, or an
+      injected target). Nothing was self-judged, so a judge stays trusted.
+    * ``inspected=False`` — the role map could not be read. The judge may be
+      independent; **nobody knows**, and the first version of this code answered
+      that question with "trusted" by handing an empty set to the comparison.
+    """
+
+    models: frozenset[str] = frozenset()
+    #: False when inspection failed. Never trust a judge against an uninspected map.
+    inspected: bool = True
+    #: Why inspection failed, for the reader who has to go and fix it.
+    detail: str = ""
+
+    @property
+    def described(self) -> str:
+        return ", ".join(sorted(self.models)) or "(none)"
+
+
+def resolve_judge_trust(config: JudgeConfig, agent_models: RoleMapModels) -> JudgeConfig:
+    """Downgrade a judge that is grading itself, or that we could not check.
+
+    Applied **after** `judge_from_env()`, because only the caller knows which
+    role map is being run. It only ever *subtracts* confidence.
+
+    Three outcomes, and the middle one exists because its absence was a
+    fail-open edge: an inspection that blew up looked exactly like a run with no
+    models in it, and a run with no models in it is legitimately trusted.
+
+    ============================  ===========================================
+    ``inspected=False``           ``UNTRUSTED_UNVERIFIED`` — we did not check
+    judge matches a role          ``UNTRUSTED_SELF_JUDGING``
+    otherwise                     unchanged
+    ============================  ===========================================
+
+    Self-judging outranks a weak-model label: both are true of a small model
+    grading itself, and this one says why the number cannot be believed.
+    """
+    if not agent_models.inspected:
+        log.error(
+            "judge_qualification_unknown",
+            model=config.model,
+            detail=agent_models.detail
+            or "the role map under test could not be inspected; self-judging was not ruled out",
+        )
+        return replace(config, trust=JudgeTrust.UNTRUSTED_UNVERIFIED)
+
+    if not is_self_judging(config.model, agent_models.models):
+        return config
+
+    log.warning(
+        "judge_is_self_judging",
+        model=config.model,
+        detail=(
+            "the judge is one of the models under test; groundedness from this run "
+            "is not evidence and cannot satisfy a required metric"
+        ),
+    )
+    return replace(config, trust=JudgeTrust.UNTRUSTED_SELF_JUDGING)

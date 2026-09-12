@@ -29,6 +29,11 @@ class RunReport:
     judge_trust: JudgeTrust | None
     started_at: datetime
     duration_s: float
+    #: Where the judge lives, **already sanitised** by `Judge.endpoint` — no user
+    #: information, no query string, no fragment. Recorded because "which judge
+    #: produced this number" is unanswerable six weeks later from the model name
+    #: alone, and defaulted because a run with no judge has no endpoint.
+    judge_endpoint: str = ""
     results: list[CaseResult] = field(default_factory=list)
     summary: RunSummary = field(default_factory=RunSummary)
 
@@ -84,10 +89,14 @@ async def run_eval(
         datasets=[d.name for d in datasets],
         judge_model=judge.model if judge else "none",
         judge_trust=judge.trust if judge else None,
+        judge_endpoint=judge.endpoint if judge else "",
         started_at=started,
         duration_s=round(time.perf_counter() - clock, 2),
         results=list(results),
-        summary=summarise(list(results)),
+        # The judge's trust reaches the summary here and nowhere else, so a
+        # judged metric is marked untrusted at the moment it is aggregated
+        # rather than by a caller remembering to ([ADR-0037]).
+        summary=summarise(list(results), judge_trust=judge.trust if judge else None),
     )
 
 
@@ -119,6 +128,13 @@ class RunVerdict:
     required: tuple[str, ...] = ()
     #: Required metrics the run never emitted. Finding 27's actual failure.
     missing_required: tuple[str, ...] = ()
+    #: Required metrics that **exist and may not be believed** — the judge was
+    #: weak, or was one of the models under test ([ADR-0037], open question E11).
+    #:
+    #: A third way to fail a requirement, beside absent and breached. Without it
+    #: a self-judged `groundedness 0.98` satisfies `--require groundedness`, which
+    #: is [ADR-0036]'s false green wearing a number instead of a gap.
+    untrusted_required: tuple[str, ...] = ()
     #: ``(metric, actual, threshold)`` for required metrics whose gate was not met.
     required_breached: tuple[tuple[str, float, float], ...] = ()
     #: Every gate breach, required or not. Reported always; blocking only under
@@ -142,6 +158,12 @@ class RunVerdict:
             out.append(
                 f"required metric {name.replace('_', ' ')!r} was never measured. "
                 "A gate cannot be met by a number that does not exist."
+            )
+        for name in self.untrusted_required:
+            out.append(
+                f"required metric {name.replace('_', ' ')!r} was measured by a judge that "
+                "cannot be believed, so it satisfies nothing. Configure a judge that is not "
+                "one of the models under test."
             )
         for name, actual, threshold in self.required_breached:
             out.append(
@@ -167,7 +189,7 @@ class RunVerdict:
         """
         if self.fail_on_unmeasured and self.errored:
             return EXIT_UNMEASURED
-        if self.missing_required or self.required_breached:
+        if self.missing_required or self.untrusted_required or self.required_breached:
             return EXIT_GATE
         if self.fail_on_gate and self.gate_failures:
             return EXIT_GATE
@@ -189,9 +211,11 @@ def judge_run(
     gate_failures = tuple(report.summary.gate_failures())
     required = tuple(required)
     missing = tuple(report.summary.missing_required(required))
+    untrusted = tuple(n for n in required if n in report.summary.untrusted_metrics)
     return RunVerdict(
         required=required,
         missing_required=missing,
+        untrusted_required=untrusted,
         required_breached=tuple(f for f in gate_failures if f[0] in set(required)),
         gate_failures=gate_failures,
         errored=report.summary.errored,

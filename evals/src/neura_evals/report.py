@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from neura_evals.judge import JudgeTrust
 from neura_evals.metrics import LOWER_IS_BETTER, THRESHOLDS, CaseOutcome, RunSummary
 from neura_evals.runner import RunReport, RunVerdict, compare
 
@@ -43,7 +44,12 @@ def print_report(report: RunReport, verdict: RunVerdict | None = None) -> None:
             "errored and skipped cases were never measured and are not results[/]"
         )
     console.print(f"  datasets    {', '.join(report.datasets)}")
-    trust_label = f" [{report.judge_trust.value}]" if report.judge_trust else " (skipped)"
+    # Parentheses, not square brackets. `[untrusted:self-judging]` is rich
+    # *markup*: it was parsed as a style tag and silently swallowed, so the
+    # judge's trust level has never once appeared on this line. Found 2026-09-12
+    # while building [ADR-0037], whose entire purpose is that a reader can see
+    # this value — a label the renderer eats is not a label.
+    trust_label = f" ({report.judge_trust.value})" if report.judge_trust else " (skipped)"
     console.print(f"  judge       {report.judge_model}{trust_label}")
     console.print(f"  duration    {report.duration_s}s\n")
 
@@ -52,7 +58,10 @@ def print_report(report: RunReport, verdict: RunVerdict | None = None) -> None:
         table.add_column("metric")
         table.add_column("value", justify="right")
         table.add_column("gate", justify="right")
-        table.add_column("", width=3)
+        # Not `width=3` any more: an untrusted metric prints the word rather than
+        # a tick, because a ✔ beside a self-judged score is exactly the thing
+        # somebody skim-reads as "met" ([ADR-0037]).
+        table.add_column("")
         # How much of the run each rate was asked about. A gate met on one case
         # of fourteen prints identically to one met on all fourteen unless the
         # column is here — which is what SELL's 2026-08-26 tool selection figure
@@ -67,6 +76,11 @@ def print_report(report: RunReport, verdict: RunVerdict | None = None) -> None:
                 breached = value > threshold if name in LOWER_IS_BETTER else value < threshold
                 mark = "[red]✘[/]" if breached else "[green]✔[/]"
                 gate = f"{threshold:.2f}"
+            # Overrides the tick entirely rather than sitting beside it. The
+            # value is still shown — a self-judged 0.40 still says something is
+            # wrong — but it can satisfy nothing, and the column says so.
+            if name in summary.untrusted_metrics:
+                mark = "[yellow]untrusted[/]"
             measured, scoreable = summary.coverage.get(name, (0, 0))
             covered = f"{measured}/{scoreable}"
             if scoreable and measured < scoreable:
@@ -268,6 +282,28 @@ def _print_caveats(report: RunReport) -> None:
             "Groundedness and relevance were not measured. The mechanical checks\n"
             "below are still valid; there is simply no evidence here about whether\n"
             "replies were truthful."
+        )
+    elif report.judge_trust is JudgeTrust.UNTRUSTED_SELF_JUDGING:
+        # Its own banner, because the weak-model wording below is the wrong
+        # sentence: this judge may be an excellent model. The problem is that it
+        # is *this* model ([ADR-0037], open question E11).
+        warnings.append(
+            "[bold]THE JUDGE IS GRADING ITS OWN ANSWER.[/]\n"
+            f"{report.judge_model} serves a role in the run under test and is also the\n"
+            "judge, so groundedness here is the model marking its own homework. The score\n"
+            "is shown, labelled untrusted, and **cannot satisfy `--require groundedness`**.\n"
+            "Point EVAL_JUDGE_MODEL at a model that serves no role in this role map."
+        )
+    elif report.judge_trust is JudgeTrust.UNTRUSTED_UNVERIFIED:
+        # Its own banner too: nothing is known to be wrong with this judge, and
+        # that is exactly the problem. "We did not check" must not read as
+        # either "it is fine" or "it is bad" ([ADR-0037] §1).
+        warnings.append(
+            "[bold]THE JUDGE COULD NOT BE QUALIFIED.[/]\n"
+            "The role map under test could not be inspected, so whether "
+            f"{report.judge_model}\nalso serves a role in it is unknown — and unknown is not "
+            "no. Judged scores\nbelow are shown, labelled untrusted, and satisfy no requirement.\n"
+            "This is a misconfiguration or a defect to find, not a judge to replace."
         )
     elif not report.scores_are_trustworthy:
         trust = report.judge_trust.value if report.judge_trust else "unknown"

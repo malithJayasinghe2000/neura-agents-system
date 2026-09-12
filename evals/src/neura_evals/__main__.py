@@ -6,16 +6,17 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
-from neura_core import load_env
-from neura_evals.config import judge_from_env
+from neura_core import get_logger, load_env
+from neura_evals.config import RoleMapModels, judge_from_env, resolve_judge_trust
 from neura_evals.dataset import Dataset, load_all, load_dataset
 from neura_evals.discovery import DiscoveredAgent, discover_agents
-from neura_evals.judge import Judge
+from neura_evals.judge import Judge, JudgeTrust
 from neura_evals.metrics import REPORTED_METRICS
 from neura_evals.persist import default_path, write_report
 from neura_evals.report import print_report
-from neura_evals.runner import DEFAULT_CONCURRENCY, judge_run, run_eval
+from neura_evals.runner import DEFAULT_CONCURRENCY, EXIT_UNMEASURED, judge_run, run_eval
 from neura_evals.target import EvalTarget, NotImplementedTarget
 
 #: The role map an eval runs under, unless told otherwise. Local by default so
@@ -27,6 +28,8 @@ DEFAULT_ROLE_MAP = "ollama-dev"
 #: time because the default name contains the agent, which ``--agent`` may not
 #: have named — it is resolved after discovery.
 _DEFAULT_OUT = Path("-")
+
+log = get_logger(__name__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -123,22 +126,53 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _check_judge() -> int:
-    """Prove the judge works before trusting a single score from it.
+async def _check_judge(role_map: str) -> int:
+    """Prove the judge works, and say separately whether it *qualifies*.
 
-    Deliberately tests both directions. A judge that passes everything looks
-    identical to a working one until it silently approves a hallucination.
+    **Two questions, kept apart** ([ADR-0037] §6):
+
+    * **Does it function?** Reachable, accepts a grounded reply, catches a
+      hallucination. Both directions, because a judge that passes everything
+      looks identical to a working one until it approves a fabrication. **This
+      is what the exit code reports**, because it is what the command is for.
+    * **Does it qualify?** A functioning judge that is one of the models under
+      test still cannot produce evidence. Printed, never folded into the tick —
+      and it is why this takes ``role_map``: before 2026-09-12 this command
+      printed ``trust  trusted`` for a judge grading its own answer, which is
+      the one thing it must never say (open question E11).
     """
     from rich.console import Console
 
     console = Console()
-    config = judge_from_env()
+    models = _inspect_role_map(role_map)
+    config = resolve_judge_trust(judge_from_env(), models)
     judge = Judge(config)
 
     console.print()
-    console.print(f"  model   {config.model}")
-    console.print(f"  trust   {config.trust.value}")
-    if not config.is_trusted:
+    console.print(f"  model     {config.model}")
+    console.print(f"  endpoint  {config.endpoint or '(unset)'}")
+    console.print(f"  trust     {config.trust.value}")
+    console.print(f"  vs        role map {role_map} — {models.described}")
+
+    if not models.inspected:
+        # Exits before a single judge call. The question "is this judge
+        # qualified" has no answer here, and spending API quota to learn that it
+        # *functions* would bury the thing the operator has to fix.
+        console.print(
+            f"\n[red]  ✘ QUALIFICATION UNKNOWN — the role map could not be inspected.[/]"
+            f"\n    {models.detail}"
+            "\n    Self-judging was NOT ruled out, so this judge may not be treated as"
+            "\n    independent. Fix the role map, then re-run.\n"
+        )
+        return 1
+
+    if config.trust is JudgeTrust.UNTRUSTED_SELF_JUDGING:
+        console.print(
+            f"\n[red]  ✘ NOT QUALIFIED — {config.model} serves a role in {role_map}.[/]"
+            "\n    It would be grading its own answer. Groundedness from this"
+            "\n    configuration cannot satisfy `--require groundedness`."
+        )
+    elif not config.is_trusted:
         console.print(
             "\n[yellow]  ⚠ This judge is not trusted. Its scores are directional at best."
             "\n    Set EVAL_JUDGE_BASE_URL / EVAL_JUDGE_API_KEY / EVAL_JUDGE_MODEL in .env.[/]"
@@ -182,10 +216,43 @@ async def _check_judge() -> int:
 
     console.print()
     if ok_true and ok_false:
-        console.print("[green]  Judge is working.[/]\n")
+        # Never a bare "Judge is working." when it does not qualify: that reads
+        # as approval of the whole arrangement, which is the sentence E11 is
+        # about. Functionality decides the exit code; qualification is said out
+        # loud beside it.
+        if config.trust is JudgeTrust.UNTRUSTED_SELF_JUDGING:
+            console.print(
+                "[yellow]  Judge is FUNCTIONING but NOT QUALIFIED for this role map.[/]"
+                "\n  It answers correctly and it may not be used as evidence.\n"
+            )
+        elif not config.is_trusted:
+            console.print("[yellow]  Judge is functioning; its scores are labelled untrusted.[/]\n")
+        else:
+            console.print("[green]  Judge is working.[/]\n")
         return 0
     console.print("[red]  Judge is not behaving correctly — do not trust its scores.[/]\n")
     return 1
+
+
+def _inspect_role_map(role_map: str) -> RoleMapModels:
+    """What models does this role map use? Or: say plainly that we could not tell.
+
+    ``--check-judge`` must still report on the judge when the role map cannot be
+    built — an unknown name, missing provider configuration — rather than dying
+    on the way to the thing the user asked about. **But it must not then call the
+    judge independent.** The first version returned ``None`` here, which
+    `_models_in_play` turned into an empty set, which the comparison read as
+    "matches nothing", which printed `trusted`.
+    """
+    try:
+        llm = _build_client(role_map)
+    except Exception as exc:
+        log.error("role_map_unavailable", role_map=role_map, error=f"{type(exc).__name__}: {exc}")
+        return RoleMapModels(
+            inspected=False,
+            detail=f"role map {role_map!r} could not be loaded: {type(exc).__name__}: {exc}",
+        )
+    return _models_in_play(llm)
 
 
 def _list_agents() -> int:
@@ -249,19 +316,79 @@ def _load_datasets(directory: Path, name: str | None) -> list[Dataset]:
     return datasets
 
 
-def _build_target(agent: DiscoveredAgent | None, role_map: str, no_agent: bool) -> EvalTarget:
+def _build_client(role_map: str) -> Any:
+    """The one LLM client for this run.
+
+    Built here rather than inside :func:`_build_target` so that the same client
+    both runs the agent and answers *"which models is this run using?"* for the
+    self-judging check ([ADR-0037]). Two clients would be two answers, and the
+    one that mattered would be the one nobody looked at.
+    """
+    from neura_llm import LLMClient
+
+    return LLMClient.from_role_map_name(role_map)
+
+
+def _build_target(agent: DiscoveredAgent | None, llm: Any, no_agent: bool) -> EvalTarget:
     """The thing being measured.
 
     Falls back to ``NotImplementedTarget`` when no agent is available, and that
     fallback returns an explicit error for every case rather than a plausible
     empty response — a run against nothing must not be mistakable for a result.
+
+    The agent is still reached through its **entry point** — ``agent.build`` came
+    from ``neura.eval_targets`` — so this module continues not to know that an
+    agent called "care" exists.
     """
-    if no_agent or agent is None:
+    if no_agent or agent is None or llm is None:
         return NotImplementedTarget()
 
-    from neura_llm import LLMClient
+    return agent.build(llm)
 
-    return agent.build(LLMClient.from_role_map_name(role_map))
+
+def _models_in_play(llm: Any) -> RoleMapModels:
+    """Every model the active role map would use, for the self-judging check.
+
+    **Every role, not just the two that touch the graded text.** `REASONER`
+    writes the reply and `GUARD` has already ruled it grounded, so those are the
+    two that bias a verdict — but comparing against all of them is fail-closed,
+    always includes both, and costs nothing.
+
+    **Only `RoleNotConfiguredError` means "this role is not configured".** It is
+    what `RoleMap.resolve()` raises for all three legitimate cases — an undefined
+    role, an unknown provider, an unset environment variable — so anything else
+    is a defect, and the first version of this function swallowed every one of
+    them into an empty set that then read as *trusted*. An unexpected failure now
+    returns ``inspected=False``, which is non-qualifying rather than silent.
+
+    Never raises: a run whose mechanical metrics are valid should not be
+    destroyed because the *judge qualification* could not be worked out. It is
+    reported as unknown instead, and unknown satisfies nothing.
+    """
+    if llm is None:
+        # Known-empty: nothing ran, so nothing was self-judged.
+        return RoleMapModels()
+
+    from neura_llm import ModelRole, RoleNotConfiguredError
+
+    found: set[str] = set()
+    for role in ModelRole:
+        try:
+            found.add(str(llm.model_for(role)))
+        except RoleNotConfiguredError as exc:
+            log.debug("role_not_configured", role=role.value, error=str(exc))
+        except Exception as exc:
+            log.error(
+                "role_map_inspection_failed",
+                role=role.value,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return RoleMapModels(
+                inspected=False,
+                detail=(f"inspecting role {role.value!r} raised {type(exc).__name__}: {exc}"),
+            )
+
+    return RoleMapModels(models=frozenset(model for model in found if model.strip()))
 
 
 async def _run(args: argparse.Namespace, *, target: EvalTarget | None = None) -> int:
@@ -273,7 +400,7 @@ async def _run(args: argparse.Namespace, *, target: EvalTarget | None = None) ->
     how it should be reproduced.
     """
     if args.check_judge:
-        return await _check_judge()
+        return await _check_judge(args.role_map)
     if args.list_agents:
         return _list_agents()
 
@@ -299,9 +426,34 @@ async def _run(args: argparse.Namespace, *, target: EvalTarget | None = None) ->
         return 1
 
     datasets = _load_datasets(directory, args.dataset)
-    judge = None if args.no_judge else Judge(judge_from_env())
+
+    # One client, built once, used twice: it runs the agent and it names the
+    # models the judge is checked against. Skipped entirely when no agent will
+    # run, so `--no-agent` still needs no role map and no provider config.
+    llm = None
+    if not (args.no_agent or agent is None or target is not None):
+        try:
+            llm = _build_client(args.role_map)
+        except Exception as exc:
+            # No case can run without it, so this is not a gate failure — it is
+            # a run that never started. Reported like one rather than as a
+            # traceback ([ADR-0036]'s exit 3, [ADR-0037] §1).
+            print(
+                f"Role map {args.role_map!r} could not be loaded: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return EXIT_UNMEASURED
     if target is None:
-        target = _build_target(agent, args.role_map, args.no_agent)
+        target = _build_target(agent, llm, args.no_agent)
+
+    # The judge learns what it is being asked to grade. `judge_from_env()` stays
+    # ignorant of the role map — it is told, afterwards, and only ever downgraded
+    # ([ADR-0037], open question E11).
+    judge = (
+        None
+        if args.no_judge
+        else Judge(resolve_judge_trust(judge_from_env(), _models_in_play(llm)))
+    )
 
     report = await run_eval(
         target=target,
