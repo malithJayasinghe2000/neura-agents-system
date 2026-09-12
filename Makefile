@@ -182,9 +182,13 @@ verify-probe:  ## Can this model hold the GUARD role? Four arms, two controls. [
 
 # Open question A11. The cloud ROUTER is a reasoning model with no thinking
 # budget, on the latency path of every turn — measured at ~7 minutes per call.
+# `_role_map_set`, NOT `$(ROLE_MAP)`: this script defaults to `cloud-prod` on its
+# own, and that default is the whole point of the probe. Testing the variable's
+# value would pass `--role-map ollama-dev` on every bare run once ROLE_MAP has a
+# default, changing the provider with nothing to show for it.
 router-probe:  ## A11: can this model hold the ROUTER role? [MODEL=… ROLE_MAP=…]
 	uv run python scripts/router_probe.py \
-	  $(if $(ROLE_MAP),--role-map $(ROLE_MAP),) $(if $(MODEL),--model $(MODEL),)
+	  $(if $(_role_map_set),--role-map $(ROLE_MAP),) $(if $(MODEL),--model $(MODEL),)
 
 care-check:  ## Hold real conversations with CARE against a REAL shop: make care-check URL=... TOKEN=...
 	uv run python scripts/care_smoke_test.py --url $(URL) --token $(TOKEN)
@@ -238,8 +242,35 @@ sell-ask:  ## Ask SELL one question and watch every step: make sell-ask Q="..." 
 llm-check:  ## Verify the LLM layer against REAL models (needs Ollama running)
 	uv run python scripts/llm_smoke_test.py
 
-judge-check:  ## Verify the eval judge is reachable AND catches a hallucination
-	uv run neura-eval --check-judge
+# ── Which role map an eval command runs under ────────────────────────────────
+#
+# `neura-eval` deliberately does NOT read `NEURA_ROLE_MAP` — it has its own
+# `--role-map`, defaulting to `ollama-dev`, so a suite never costs money by
+# accident. Until now no `make` target passed it, so the only way to evaluate on
+# `cloud-prod` was to bypass `make` entirely, and `make judge-check` silently
+# qualified the judge against `ollama-dev` while the operator was thinking about
+# the cloud map ([ADR-0037] §6 makes that comparison the point of the command).
+#
+# The default here is the SAME `ollama-dev` the CLI already defaults to, so no
+# command changes behaviour when `ROLE_MAP` is unset.
+#
+# `ROLE_MAP` is not a built-in make variable. That is worth stating rather than
+# assuming: `AS`, `CC`, `CXX`, `AR`, `LD` and `RM` are, and one of them cost an
+# afternoon when `$(if $(AS),…)` turned out to be always true.
+ROLE_MAP ?= ollama-dev
+
+# Non-empty exactly when ROLE_MAP was set on the command line or in the
+# environment, rather than coming from the `?=` above.
+#
+# **This exists to stop the default leaking into `router-probe`**, which takes an
+# OPTIONAL `ROLE_MAP` and whose script defaults to `cloud-prod`. Giving ROLE_MAP
+# a value makes `$(if $(ROLE_MAP),…)` always true, so a bare `make router-probe`
+# would have silently switched from cloud-prod to ollama-dev — a different
+# provider, quietly, with no error. Same shape as the `AS` collision above.
+_role_map_set = $(filter-out file default undefined,$(firstword $(origin ROLE_MAP)))
+
+judge-check:  ## Verify the eval judge is reachable AND catches a hallucination: [ROLE_MAP=cloud-prod]
+	uv run neura-eval --check-judge --role-map $(ROLE_MAP)
 
 # Two agents are installed, so the harness refuses to guess which one — and it
 # is right to. AGENT=… picks one; the default is CARE, which is the agent the
@@ -268,8 +299,9 @@ _require = $(foreach metric,$(REQUIRE),--require $(metric))
 #
 # `--fail-on-unmeasured` exits 3 when any case never reached a result. Added
 # 2026-09-06: this command exited 0 having measured nothing at all (E9).
-eval:  ## Run an agent against its golden datasets: make eval [AGENT=sell OUT=path.json]
-	uv run neura-eval --agent $(AGENT) $(_require) --fail-on-unmeasured --out $(if $(OUT),$(OUT),)
+eval:  ## Run an agent against its golden datasets: make eval [AGENT=sell ROLE_MAP=cloud-prod OUT=path.json]
+	uv run neura-eval --agent $(AGENT) --role-map $(ROLE_MAP) $(_require) \
+		--fail-on-unmeasured --out $(if $(OUT),$(OUT),)
 
 # Every installed agent, not just one. Datasets parsing is a property of the
 # repository rather than of whichever agent happens to be the default, and a
@@ -297,21 +329,25 @@ eval-fast:  ## Every agent's datasets + the harness — no agent run, no models,
 # omitted injection resistance from the metrics table entirely, and exited 0
 # (E9, Finding 27). `--require` now fails the run when the number is ABSENT, not
 # only when it is low — a gate cannot be met by a number that does not exist.
-eval-guard-off:  ## The suite with the guard disabled — proves the defence is structural
-	NEURA_GUARD_ENABLED=false uv run neura-eval --agent $(AGENT) --no-judge \
-		$(_require) --fail-on-unmeasured --out
+eval-guard-off:  ## The suite with the guard disabled — proves the defence is structural: [ROLE_MAP=cloud-prod]
+	NEURA_GUARD_ENABLED=false uv run neura-eval --agent $(AGENT) --role-map $(ROLE_MAP) \
+		--no-judge $(_require) --fail-on-unmeasured --out
 
 # No `--require`: which metrics a single dataset can produce depends on which
 # dataset it is, and `product_qa.yaml` has no adversarial case in it. Requiring
 # injection resistance here would fail a legitimate run for asking the wrong
 # question of it. `--fail-on-unmeasured` still applies — a dataset run that
 # reached no model is no more a result than a whole suite that did not.
-eval-one:  ## One dataset against the real agent: make eval-one D=injection [AGENT=sell OUT=path.json]
-	uv run neura-eval --agent $(AGENT) --dataset $(D) --fail-on-unmeasured --out $(if $(OUT),$(OUT),)
+eval-one:  ## One dataset against the real agent: make eval-one D=injection [AGENT=sell ROLE_MAP=cloud-prod OUT=path.json]
+	uv run neura-eval --agent $(AGENT) --role-map $(ROLE_MAP) --dataset $(D) \
+		--fail-on-unmeasured --out $(if $(OUT),$(OUT),)
 
 eval-agents:  ## Which installed agents can be evaluated
 	uv run neura-eval --list-agents
 
+# Deliberately NOT using $(ROLE_MAP): comparing two maps means naming both, and
+# a default would make one of the two arms implicit — which is how a comparison
+# ends up reporting a map nobody chose.
 eval-compare:  ## Same suite on two role maps: make eval-compare A=ollama-dev B=cloud-prod
 	uv run neura-eval --agent $(AGENT) --role-map $(A)
 	uv run neura-eval --agent $(AGENT) --role-map $(B)

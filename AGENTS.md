@@ -103,9 +103,18 @@ make widget-check-live SHOP=… TOKEN=… [SHADOW=1]   # the same file against a
                                                    # and a real shop. One turn, not an eval
 make lint           # ruff + mypy
 make eval           # run the agent against its golden datasets (needs Ollama)
+make eval ROLE_MAP=cloud-prod   # …or against the cloud map. ROLE_MAP defaults to
+                    # ollama-dev — the SAME default the CLI already had, so an
+                    # unset value changes nothing. Honoured by eval, eval-one,
+                    # eval-guard-off and judge-check; eval-compare names both
+                    # maps itself and eval-fast runs no model at all
 make eval-fast      # datasets + harness only — no agent, no models. In `make check`
 make eval-guard-off # the same suite with the guard disabled — see below
 make eval-compare A=ollama-dev B=cloud-prod
+make judge-check [ROLE_MAP=cloud-prod]   # is the judge reachable, does it catch a
+                    # hallucination — and does it serve a role in THAT map
+                    # (ADR-0037). Without ROLE_MAP it qualifies against ollama-dev,
+                    # which is the right answer to a different question
 make migrate        # alembic upgrade head
 make tenant-new NAME="Acme Store" AGENTS=care   # create a tenant
 make key-new TENANT=tn_… SCOPES=care:chat:write # issue a key — printed ONCE
@@ -308,7 +317,7 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | Webhooks stop being delivered after a restart | The drainer's tenant index lives in Redis (open question **P7**). Rows are safe, the schedule is not — `make webhook-drain TENANT=…` |
 | A webhook endpoint quietly stops receiving events | 20 consecutive failures auto-disables it. Check `GET /v1/webhooks` for `status: disabled`, and `GET /v1/webhooks/deliveries?status=dead` for what was lost |
 | A WebSocket delivers the whole reply at once with no `token` frames | The turn was blocked or escalated. Those replies are fixed text delivered whole — typing out a refusal is theatre (ADR-0016) |
-| `make eval` ran locally after you set `NEURA_ROLE_MAP=cloud-prod` | **`neura-eval` does not read `NEURA_ROLE_MAP`.** It has its own `--role-map`, defaulting to `ollama-dev` so the suite costs nothing by accident. Every other entry point honours the env var, so this reads as a bug and is deliberate. **The only clue is the report filename** — `care@ollama-dev-…json`. (A run whose provider is down no longer exits 0 — it exits 3, [ADR-0036](docs/architecture/adr/0036-a-run-that-measured-nothing-fails.md).) Pass `--role-map cloud-prod` explicitly; `make eval` has no passthrough, so invoke `uv run neura-eval` directly or use `make eval-compare A=… B=…` |
+| `make eval` ran locally after you set `NEURA_ROLE_MAP=cloud-prod` | **`neura-eval` does not read `NEURA_ROLE_MAP`.** It has its own `--role-map`, defaulting to `ollama-dev` so the suite costs nothing by accident. Every other entry point honours the env var, so this reads as a bug and is deliberate. **The only clue is the report filename** — `care@ollama-dev-…json`. (A run whose provider is down no longer exits 0 — it exits 3, [ADR-0036](docs/architecture/adr/0036-a-run-that-measured-nothing-fails.md).) **Use `ROLE_MAP=`** — `make eval ROLE_MAP=cloud-prod`, and the same on `eval-guard-off`, `eval-one` and `judge-check`. Until 2026-09-12 there was no passthrough at all and the only route was `uv run neura-eval` directly |
 | `make eval` exits 3 | A case never reached a result — the provider is down, rate limited, or a target raised. **Not an agent failure**, and the numbers in that run are not a measurement. Fix the provider and re-run; do not compare it against anything ([ADR-0036](docs/architecture/adr/0036-a-run-that-measured-nothing-fails.md)) |
 | `make eval` exits 1 saying a metric "was never measured" | The suite produced no `injection_resistance` at all. Either no adversarial case ran, or the datasets stopped asserting `unauthorised_tool_calls`. A gate cannot be met by a number that does not exist, which is why absence fails rather than being skipped (**E9**) |
 | `AGENT_NOT_RUNNABLE` (403) rather than 404 | The agent declares `neura.agents` and not `neura.agent_runners`, or its `build_runner` raised at startup. "We have it and it is broken" is a different problem from "we do not have it" |

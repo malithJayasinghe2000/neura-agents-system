@@ -117,7 +117,9 @@ and **cannot satisfy `--require groundedness`** — requiring it exits 1
 **Only `RoleNotConfiguredError` counts as "this role is not configured".** Any other failure while
 inspecting the role map makes the qualification `untrusted:unverified` rather than silently
 concluding the judge is independent — a detector whose failure mode is *"everything is fine"* is not
-a detector. `make judge-check` prints the models it compared against, and **exits non-zero without
+a detector. `make judge-check` prints the models it compared against — **pass `ROLE_MAP=cloud-prod`
+to compare against the cloud map**, since it defaults to `ollama-dev` like every other eval command —
+and **exits non-zero without
 calling the judge** if the role map cannot be read.
 
 > **Reading an older report.** Report schema **3** is the first that checked this. In a schema<3
@@ -143,9 +145,10 @@ This exists because an untrusted score looks exactly like a real one. Without th
 ## 4. Running Evals
 
 ```bash
-make eval                    # full suite, current role map
-make eval DATASET=injection  # one dataset
-make eval-compare A=ollama-dev B=cloud-prod
+make eval                       # full suite, ROLE_MAP=ollama-dev by default
+make eval ROLE_MAP=cloud-prod   # the same suite on the cloud map
+make eval-one D=injection       # one dataset  [ROLE_MAP=… AGENT=…]
+make eval-compare A=ollama-dev B=cloud-prod   # names both maps itself
 ```
 
 **In CI:**

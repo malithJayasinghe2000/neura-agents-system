@@ -74,8 +74,15 @@ must serve no role in the map under test. **The instrument is now trustworthy an
 not yet anything** — Step 1 has been run once and failed, Steps 2 (consistency) and 3 (judge-vs-human
 agreement) are unbuilt and unapproved, and **a judge-quality dataset does not exist**: nothing in the
 repository implements evaluation-strategy §3.1's promise that judge-vs-human agreement is tracked and
-a drifting judge retired. Note `make judge-check` passes **no `--role-map`**, so it qualifies against
-`ollama-dev`; a `cloud-prod` answer needs the flag. Until a judge is qualified there is still no
+a drifting judge retired. **`make judge-check ROLE_MAP=cloud-prod`** is how the judge is qualified
+against the cloud map — until 2026-09-12 no `make` target passed `--role-map` at all, so
+`judge-check` silently answered for `ollama-dev` and the only route to a cloud answer was to bypass
+`make`. `ROLE_MAP` now reaches `eval`, `eval-one`, `eval-guard-off` and `judge-check`, defaulting to
+the `ollama-dev` the CLI already used. It is deliberately **not** wired into `eval-compare`, which
+names both maps itself, nor into `router-probe`, whose script defaults to `cloud-prod` — giving
+`ROLE_MAP` a value would have made that target's `$(if $(ROLE_MAP),…)` always true and switched its
+provider silently, which is the `AS` collision in AGENTS.md's gotcha table wearing a different name.
+Until a judge is qualified there is still no
 quotable groundedness figure from `cloud-prod`, and [A9](open-questions.md) stays parked — the
 difference is that this is now a measurement task with a named blocker rather than a silent hole.
 Deliberately not decided in ADR-0037: it is a compatibility, quality and cost comparison, and E2's

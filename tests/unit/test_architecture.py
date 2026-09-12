@@ -7,7 +7,9 @@ These correspond to docs/architecture/overview.md §8.
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -453,3 +455,133 @@ class TestGradedEvidenceEarnsItsExemption:
         )
 
         assert any("filename does not match" in p for _, p in problems)
+
+
+def _make_recipe(target: str, *overrides: str, env: dict[str, str] | None = None) -> str:
+    """What `make` WOULD run for a target, with **no side effect of any kind**.
+
+    `make -n` expands every variable and prints the recipe without executing a
+    line of it: no model, no Ollama, no API call, no judge. It is also the only
+    honest way to test this — asserting on the Makefile's raw text would happily
+    pass on a `$(VARIABLE)` that expands to nothing.
+
+    `make` is resolved to an absolute path rather than found on `PATH`, and an
+    absent one raises here rather than skipping: this whole suite is invoked
+    through `make`, so it cannot legitimately be missing, and a check that skips
+    itself on a misconfiguration reports green for the wrong reason.
+    """
+    executable = shutil.which("make")
+    assert executable, "make is not on PATH, and `make test` is how this suite runs"
+
+    result = subprocess.run(  # noqa: S603 — an absolute path and literal arguments
+        [executable, "-n", target, *overrides],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+    return result.stdout
+
+
+class TestTheRoleMapAnEvalRunsUnderIsExplicit:
+    """`neura-eval` deliberately ignores `NEURA_ROLE_MAP` and has its own
+    `--role-map`, defaulting to `ollama-dev` so a suite never costs money by
+    accident. No `make` target passed it, so evaluating on `cloud-prod` meant
+    bypassing `make`, and `make judge-check` qualified the judge against
+    `ollama-dev` while the operator was thinking about the cloud map — which is
+    the one comparison [ADR-0037] §6 exists to make.
+
+    **Every test here inspects command CONSTRUCTION via `make -n`.** Nothing is
+    executed: no model, no Ollama, no API call, no judge. `make -n` expands the
+    variables and prints the recipe, which is exactly the thing under test —
+    asserting on the Makefile's raw text would pass on a variable that expands
+    to nothing.
+    """
+
+    #: Every eval target that runs a model and therefore must name its map.
+    MODEL_RUNNING = ("judge-check", "eval", "eval-guard-off", "eval-one")
+
+    def test_every_model_running_eval_target_names_its_role_map(self) -> None:
+        """A contract over the set, not four copies of one assertion: a target
+        added later without a map is the failure this catches."""
+        missing = [t for t in self.MODEL_RUNNING if "--role-map" not in _make_recipe(t)]
+        assert not missing, (
+            f"{missing} run a model without naming a role map. The CLI would "
+            "silently default to ollama-dev, and the only clue is the report "
+            "filename."
+        )
+
+    def test_the_default_is_still_ollama_dev(self) -> None:
+        """Unset `ROLE_MAP` must change nothing — the default here is the same
+        one the CLI already had."""
+        for target in self.MODEL_RUNNING:
+            assert "--role-map ollama-dev" in _make_recipe(target), target
+
+    def test_an_explicit_role_map_reaches_every_one_of_them(self) -> None:
+        for target in self.MODEL_RUNNING:
+            recipe = _make_recipe(target, "ROLE_MAP=cloud-prod")
+            assert "--role-map cloud-prod" in recipe, target
+            assert "ollama-dev" not in recipe, (
+                f"{target} still mentions ollama-dev with ROLE_MAP=cloud-prod — "
+                "a run that reaches the local provider because of an omitted "
+                "argument is the bug this fixes."
+            )
+
+    def test_judge_check_can_be_pointed_at_the_map_under_test(self) -> None:
+        """The specific gap: [ADR-0037] §6 makes `--check-judge` compare the
+        judge against the map's models, and this target named no map at all."""
+        assert "--check-judge --role-map cloud-prod" in _make_recipe(
+            "judge-check", "ROLE_MAP=cloud-prod"
+        )
+
+    def test_eval_compare_still_names_both_maps_itself(self) -> None:
+        """Comparing two maps means naming both. A default would make one arm
+        implicit, which is how a comparison reports a map nobody chose."""
+        recipe = _make_recipe("eval-compare", "A=ollama-dev", "B=cloud-prod")
+
+        assert "--role-map ollama-dev" in recipe
+        assert "--role-map cloud-prod" in recipe
+        assert recipe.count("--role-map") == 2
+
+    def test_eval_fast_needs_no_role_map_and_is_given_none(self) -> None:
+        """`--no-agent` builds no client, so a map here would be decoration —
+        and `make check` runs this before every push."""
+        recipe = _make_recipe("eval-fast")
+
+        assert "--no-agent" in recipe
+        assert "--role-map" not in recipe
+
+
+class TestARoleMapDefaultDoesNotLeakIntoAnOptionalOne:
+    """**The trap this repository has already fallen into once.**
+
+    `router-probe` takes an OPTIONAL `ROLE_MAP` and its script defaults to
+    `cloud-prod`. Giving `ROLE_MAP` a Makefile default makes `$(if $(ROLE_MAP),…)`
+    always true, so a bare `make router-probe` would have started passing
+    `--role-map ollama-dev` — a different provider, silently, with no error and
+    nothing in the output to say so.
+
+    That is the `AS` collision in AGENTS.md's gotcha table wearing a different
+    name: a variable that is always truthy because something gave it a value.
+    """
+
+    def test_a_bare_router_probe_still_passes_no_role_map(self) -> None:
+        """So the script's own `cloud-prod` default stands, exactly as before."""
+        assert "--role-map" not in _make_recipe("router-probe")
+
+    def test_an_explicit_role_map_still_reaches_router_probe(self) -> None:
+        """The documented `make router-probe ROLE_MAP=…` keeps working."""
+        assert "--role-map hybrid" in _make_recipe("router-probe", "ROLE_MAP=hybrid")
+
+    def test_an_explicitly_chosen_ollama_dev_is_not_mistaken_for_the_default(self) -> None:
+        """A value test would have to special-case `ollama-dev` and would then
+        ignore somebody who asked for it by name. Origin is the honest question."""
+        assert "--role-map ollama-dev" in _make_recipe("router-probe", "ROLE_MAP=ollama-dev")
+
+    def test_the_environment_counts_as_explicit_too(self) -> None:
+        """`?=` does not override an environment variable, so an exported
+        ROLE_MAP must reach the probe as it did before."""
+        recipe = _make_recipe("router-probe", env={**os.environ, "ROLE_MAP": "sovereign"})
+
+        assert "--role-map sovereign" in recipe
