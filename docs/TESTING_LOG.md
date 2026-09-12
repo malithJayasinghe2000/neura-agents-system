@@ -2146,6 +2146,113 @@ plus the four counts make the loud version of the failure visible today.
 
 ---
 
+## The first judge functioning screen — it failed, and it was measuring itself wrong — 2026-09-12
+
+The Step 1 functioning screen for a candidate independent judge, run **once**, deliberately, against
+the judge already configured in `.env`. This is the measurement [ADR-0037](architecture/adr/0037-a-model-may-not-grade-its-own-answer.md)
+left unmade when it declined to select a model.
+
+```bash
+uv run neura-eval --check-judge --role-map cloud-prod
+```
+
+**Inputs were synthetic only.** Three string literals in `_check_judge`: one invented order-1001
+evidence line and two replies. The command returns before `_select_agent()` and `_load_datasets()`,
+so no dataset, fixture or promoted case is reachable from it. **`graded_care_001` and its captured
+evidence were not sent to any provider**, and no agent model ran.
+
+| | |
+|:--|:--|
+| candidate | `nvidia/nemotron-3-ultra-550b-a55b:free` |
+| endpoint origin | `https://openrouter.ai` |
+| independence | ✅ shares no normalised name with any `cloud-prod` role (`trust trusted`) |
+| **supported arm** | ❌ **ERRORED** — malformed success, no `choices` in the body |
+| **fabricated arm** | ✅ **answered correctly** — `score=0.0`, both fabrications named |
+| exit code | **1** |
+| duration | **~3m 18s** total |
+| HTTP attempts | **unknowable** — see below |
+
+**The candidate is UNQUALIFIED. It must not be re-run automatically**, and it has not been. One
+execution cannot tell a broken route from a transient one, and that question is Step 2, which is not
+approved.
+
+### 🔴 Finding 34: the screen printed a failure over an answer that was correct
+
+The two arms were ANDed — `reachable = grounded.available and hallucinated.available` — so the first
+arm's outage set both glyphs. The terminal read:
+
+```
+  ✘ rejects a hallucination     score=0.0
+        caught: 'order arrived yesterday'
+        caught: 'neighbour signed for it'
+```
+
+A red cross, and directly beneath it the two fabricated claims the judge had **correctly caught**.
+The second call worked perfectly and the report said it failed.
+
+**This is the house failure mode arriving from the other side.** Finding 12, Finding 23, the
+2026-08-27 `tool_selection_accuracy` vacuum and Finding 27 are all *a check that stopped checking,
+and said green*. This one checked, got the right answer, and printed red over the top of it. Both
+colours lie when the outcome has three states and the display has two.
+
+### 🔴 Finding 35: the published diagnosis named a Python operation, not a fault
+
+`judge unavailable: 'NoneType' object is not subscriptable`.
+
+The body was a **2xx whose `choices` was `null`**. `openai==2.48.0` defaults
+`_strict_response_validation` to `False`, so responses are built by `construct_type` —
+`model_construct`, no validation — and `ChatCompletion.choices`, declared required, arrives as `None`
+without complaint. `response.choices[0]` then raised, and `f"judge unavailable: {exc}"` published the
+subscript error. `choices: []` would have raised `IndexError` and read no better.
+
+That string is not merely printed: it becomes `Verdict.reasoning`, then a `Check` detail, then a line
+in the `--out` file. **The generic `str(exc)` path was the hazard ADR-0037 §7 closed for endpoints,
+still open one field away** — an SDK exception for a 4xx can carry the response body, the request URL
+and the headers that were sent.
+
+### 🔴 Finding 36: nobody can say how many requests that screen spent
+
+`Judge.__init__` passed `timeout` and left `max_retries` unset. The SDK default is **2**, and the
+retry loop is `range(max_retries + 1)` — **up to three attempts per logical call**, on timeouts,
+connection failures, `408`, `409`, `429` and `5xx`. So `timeout_s=60.0` bounded an *attempt*, not a
+call.
+
+Both arms exceeded that timeout — ~121s and ~76s — which **suggests** more than one attempt each and
+**does not prove it**: httpx timeouts bound a single operation rather than total elapsed time, so a
+slow single attempt and a retried pair produce the same wall clock. The honest statement is that **2
+logical calls consumed between 2 and 6 HTTP requests and nothing in the code could tell you which**,
+against a tier that allows 50 a day. An earlier note in this session implied the multiplier had been
+*observed*; it had not, and that over-reach is itself the finding — the number was never measured.
+
+The malformed response was **not** retried: `_should_retry` is consulted only for non-2xx, and the
+SDK treated a body with no completion in it as a success.
+
+### What was changed, and what was not
+
+[ADR-0038](architecture/adr/0038-judge-calls-do-not-retry-invisibly.md). `JUDGE_MAX_RETRIES = 0`
+passed explicitly, so one logical call is at most one request attempt. Three arm outcomes —
+`PASS` / `FAIL` / `ERROR` — each graded from its own verdict, exit 0 only when both are `PASS`, and
+an errored screen says *"could not be screened"* rather than *"not behaving correctly"*, because the
+second is a claim about the judge's opinions and no opinion was obtained. `choices is None` and
+`choices == []` both raise a `ProviderResponseShapeError` whose text this repository authored.
+`_safe_error()` is an allowlist — exception type, integer status, an id matching `[A-Za-z0-9_.:-]{1,64}`,
+and authored text — and **`str(exc)` is never in it**. Per-arm latency, recorded on the failure path
+too. The screen now prints `2 logical judge calls · at most 2 SDK request attempts`, and *"at most"*
+is load-bearing: a call that fails before its request leaves the process made no attempt at all.
+
+**No application-level retry was added**, on the owner's decision. Deciding how to spend quota in the
+same change that discovered we could not count it would repeat the mistake in the other direction.
+
+**Nothing else moved.** No agent, prompt, dataset, threshold or model configuration. `.env` untouched
+— no judge was selected and none was rejected on quality, because no quality measurement was
+obtained. `report_schema_version` stays **3**: `Verdict` is never serialised, only `Check.status` and
+`Check.detail` reach the file, and a test now says so deliberately.
+
+**Reproduced entirely by deterministic stubs.** The defect was found by a provider having a bad
+afternoon; a test that reproduced it that way would run on bad afternoons only ([ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md) §9).
+
+---
+
 ## Stage 9 — the new e-commerce ⬜
 
 The same command Stage 2 used. If it passes, that shop is connected; if it fails, it names the

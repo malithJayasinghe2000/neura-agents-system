@@ -49,16 +49,50 @@ persists the **origin only** and cannot raise on a malformed port. Report schema
 and 2 never checked, so **`judge.trust: "trusted"` in an older file is not evidence of an
 independent judge** and any groundedness figure in one may have been self-judged.
 
-**Next action:** **Choose an independent judge model, by comparison rather than by preference.** It
-must serve no role in the map under test; `make judge-check` is the instrument and it already tests
-both directions. Until one exists there is still no quotable groundedness figure from `cloud-prod`,
-and [A9](open-questions.md) stays parked — the difference is that this is now a measurement task
-with a named blocker rather than a silent hole. Deliberately not decided in ADR-0037: it is a
-compatibility, quality and cost comparison, and E2's warning about free tiers training on
-submissions now bites, because `graded_care_001` is `synthetic: false`.
+**2026-09-12, later the same day — the first judge functioning screen was run, it FAILED, and the
+instrument was measuring itself wrong** ([ADR-0038](architecture/adr/0038-judge-calls-do-not-retry-invisibly.md),
+Findings 34–36). One execution of `--check-judge --role-map cloud-prod` against the configured
+candidate, synthetic inputs only, **exit 1, ~3m 18s**. The candidate is **independent** — it shares
+no normalised name with any `cloud-prod` role — and it is **UNQUALIFIED and must not be re-run
+automatically**. Its first arm errored on a **malformed 2xx with no `choices`**; its second arm
+**answered correctly**, naming both fabrications — **and the screen printed a red cross over it**,
+because the two arms were ANDed. A check that checked, got the right answer, and said red: the house
+failure mode from the other side. Two more came with it. The published diagnosis was
+`'NoneType' object is not subscriptable` — a Python operation, not a fault — travelling through
+`Verdict.reasoning` into the report file, the same `str(exc)` disclosure ADR-0037 §7 closed one field
+away. And **nobody could say how many HTTP requests that screen spent**: `max_retries` was the SDK
+default of 2, so `timeout_s` bounded an attempt rather than a call, and 2 logical calls consumed
+somewhere between 2 and 6 requests against a 50-per-day tier. Now: `JUDGE_MAX_RETRIES = 0` passed
+explicitly; three arm outcomes (`PASS`/`FAIL`/`ERROR`) each graded from its own verdict; `choices`
+`None` and `[]` both named as a provider response-shape error; `_safe_error()` an allowlist that
+never includes `str(exc)`; per-arm latency on the failure path too. **No retry mechanism was added**,
+no judge was selected, no `.env` changed, and `report_schema_version` stays **3** because `Verdict`
+is not serialised.
 
-The `.env` points at Gemini: `CLOUD_MODEL_ROUTER`, `_REASONER` and `_GUARD` are all
-`gemini-3.6-flash` (`gemini-2.5-flash` and `-flash-lite` are **retired for new API keys**). The
+**Next action:** **Choose an independent judge model, by comparison rather than by preference.** It
+must serve no role in the map under test. **The instrument is now trustworthy and the candidate is
+not yet anything** — Step 1 has been run once and failed, Steps 2 (consistency) and 3 (judge-vs-human
+agreement) are unbuilt and unapproved, and **a judge-quality dataset does not exist**: nothing in the
+repository implements evaluation-strategy §3.1's promise that judge-vs-human agreement is tracked and
+a drifting judge retired. Note `make judge-check` passes **no `--role-map`**, so it qualifies against
+`ollama-dev`; a `cloud-prod` answer needs the flag. Until a judge is qualified there is still no
+quotable groundedness figure from `cloud-prod`, and [A9](open-questions.md) stays parked — the
+difference is that this is now a measurement task with a named blocker rather than a silent hole.
+Deliberately not decided in ADR-0037: it is a compatibility, quality and cost comparison, and E2's
+warning about free tiers training on submissions now bites, because `graded_care_001` is
+`synthetic: false`.
+
+**`.env` is one developer's gitignored file and this document should stop describing it as though it
+were project configuration.** It said *"the `.env` points at Gemini — `CLOUD_MODEL_ROUTER`,
+`_REASONER` and `_GUARD` are all `gemini-3.6-flash`"*, which was true on 2026-09-06, was already
+false by 2026-09-12, and is the shape of claim that sends a session looking for a model nobody is
+running. What is stable and belongs here is the *structure*: `cloud-prod` takes every model from
+`CLOUD_MODEL_*`, deliberately hard-coding none ([roles.py](../packages/neura-llm/src/neura_llm/roles.py),
+L1), and `CLOUD_MODEL_EMBEDDER` is unset, so that role raises `RoleNotConfiguredError` and is
+legitimately skipped by the self-judging inspection. To see what a machine is actually pointed at,
+read it there — `uv run neura-eval --check-judge --role-map cloud-prod` prints the models it compared
+against. (Recorded because it bit: `gemini-2.5-flash` and `-flash-lite` are **retired for new API
+keys**, which is why a model is pinned and never `-latest`.) The
 promotion machine and its evidence layer are built
 ([ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md),
 [ADR-0034](architecture/adr/0034-a-promoted-case-carries-the-shop-it-was-graded-on.md),

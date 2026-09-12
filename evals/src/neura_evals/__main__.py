@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ from neura_core import get_logger, load_env
 from neura_evals.config import RoleMapModels, judge_from_env, resolve_judge_trust
 from neura_evals.dataset import Dataset, load_all, load_dataset
 from neura_evals.discovery import DiscoveredAgent, discover_agents
-from neura_evals.judge import Judge, JudgeTrust
+from neura_evals.judge import JUDGE_MAX_RETRIES, Judge, JudgeTrust, Verdict
 from neura_evals.metrics import REPORTED_METRICS
 from neura_evals.persist import default_path, write_report
 from neura_evals.report import print_report
@@ -30,6 +31,57 @@ DEFAULT_ROLE_MAP = "ollama-dev"
 _DEFAULT_OUT = Path("-")
 
 log = get_logger(__name__)
+
+
+class ArmOutcome(StrEnum):
+    """What happened to one arm of the judge screen. **Three states, not two.**
+
+    The same argument as [ADR-0036]'s four case outcomes, one level down: an arm
+    that never got an answer is neither a pass nor a fail, and collapsing it into
+    either states a measurement that was not made.
+
+    ``ERRORED`` is **not** a pass, so the exit code still catches a dead judge.
+    What changes is that it no longer catches the *other* arm with it.
+    """
+
+    PASSED = "PASS"
+    """The judge answered, and answered correctly."""
+
+    FAILED = "FAIL"
+    """The judge answered, and was wrong. The only outcome about the judge."""
+
+    ERRORED = "ERROR"
+    """No usable judgement — timeout, 429, connection failure, 5xx, malformed 2xx."""
+
+
+def _arm(verdict: Verdict, *, expects_grounded: bool) -> ArmOutcome:
+    """Grade one arm from its own verdict, and from nothing else."""
+    if not verdict.available:
+        return ArmOutcome.ERRORED
+    return ArmOutcome.PASSED if verdict.passed == expects_grounded else ArmOutcome.FAILED
+
+
+def _print_arm(console: Any, label: str, outcome: ArmOutcome, verdict: Verdict) -> None:
+    """One line per arm: its own glyph, its own score, its own latency.
+
+    Latency is printed for a failed and an errored arm too. A 121s malformed
+    response and a 0.2s one are different diagnoses, and neither was recorded
+    anywhere before 2026-09-12.
+    """
+    glyph = {
+        ArmOutcome.PASSED: "[green]✔[/]",
+        ArmOutcome.FAILED: "[red]✘[/]",
+        ArmOutcome.ERRORED: "[yellow]⚠[/]",
+    }[outcome]
+    timing = f"{verdict.latency_ms / 1000:.1f}s"
+
+    if outcome is ArmOutcome.ERRORED:
+        # No score is printed. `score=0.0` on an unreachable judge is a default,
+        # not a measurement, and it reads as one.
+        console.print(f"  {glyph} {label}   [yellow]ERROR[/]  {timing:>7}  no judgement returned")
+        console.print(f"        {verdict.reasoning[:300]}")
+        return
+    console.print(f"  {glyph} {label}   {outcome.value:<5}  {timing:>7}  score={verdict.score}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -135,6 +187,8 @@ async def _check_judge(role_map: str) -> int:
       hallucination. Both directions, because a judge that passes everything
       looks identical to a working one until it approves a fabrication. **This
       is what the exit code reports**, because it is what the command is for.
+      Each arm is graded from its own verdict — ``PASS``, ``FAIL`` or ``ERROR``
+      — so one arm's outage cannot rewrite the other's result ([ADR-0038]).
     * **Does it qualify?** A functioning judge that is one of the models under
       test still cannot produce evidence. Printed, never folded into the tick —
       and it is why this takes ``role_map``: before 2026-09-12 this command
@@ -188,34 +242,50 @@ async def _check_judge(role_map: str) -> int:
         reply="Your order arrived yesterday and your neighbour signed for it.", evidence=evidence
     )
 
-    # `available` is checked first, and it is not a formality. An unreachable
-    # judge returns passed=False, which satisfies "rejects a hallucination"
-    # perfectly — so a completely dead judge used to print a green tick next to
-    # the check that matters most. A judge that is down must never look like a
-    # judge that is working.
-    reachable = grounded.available and hallucinated.available
-    ok_true = reachable and grounded.passed
-    ok_false = reachable and not hallucinated.passed
+    # Each arm is judged on its OWN verdict and nothing else ([ADR-0038]).
+    #
+    # `available` was checked first for a good reason — an unreachable judge
+    # returns passed=False, which satisfies "rejects a hallucination" perfectly,
+    # so a dead judge must not print a green tick. But the fix ANDed the two
+    # arms, and on 2026-09-12 that printed `✘ rejects a hallucination` directly
+    # above the two fabricated claims the judge had correctly caught. One arm's
+    # outage rewrote the other arm's correct result.
+    supported = _arm(grounded, expects_grounded=True)
+    fabricated = _arm(hallucinated, expects_grounded=False)
 
-    if not reachable:
-        detail = grounded.reasoning if not grounded.available else hallucinated.reasoning
-        console.print("[red]  ✘ the judge could not be reached at all[/]")
-        console.print(f"    {detail[:300]}\n")
-
-    console.print(
-        f"  {'[green]✔[/]' if ok_true else '[red]✘[/]'} accepts a grounded reply    "
-        f"score={grounded.score}"
-    )
-    console.print(
-        f"  {'[green]✔[/]' if ok_false else '[red]✘[/]'} rejects a hallucination     "
-        f"score={hallucinated.score}"
-    )
-    if hallucinated.unsupported_claims:
+    _print_arm(console, "accepts a grounded reply", supported, grounded)
+    _print_arm(console, "rejects a fabrication   ", fabricated, hallucinated)
+    if fabricated is not ArmOutcome.ERRORED and hallucinated.unsupported_claims:
         for claim in hallucinated.unsupported_claims:
             console.print(f"        caught: {claim!r}")
 
+    # Two logical calls, and — because `JUDGE_MAX_RETRIES` is 0 — at most two
+    # SDK request attempts. "At most" is deliberate: a call that failed before
+    # the request left this process made no attempt at all, and claiming the
+    # provider received something we cannot prove it received is how a quota
+    # estimate becomes fiction ([ADR-0038]).
+    console.print(
+        f"\n  2 logical judge calls · at most 2 SDK request attempts "
+        f"(max_retries={JUDGE_MAX_RETRIES})"
+    )
+
     console.print()
-    if ok_true and ok_false:
+    errored = [
+        name
+        for name, outcome in (("supported", supported), ("fabricated", fabricated))
+        if outcome is ArmOutcome.ERRORED
+    ]
+    if errored:
+        # Distinct from "not behaving correctly", which is a statement about the
+        # judge's opinions. No opinion was obtained here.
+        console.print(
+            f"[red]  Judge could not be screened — {len(errored)} of 2 arms returned no "
+            f"judgement ({', '.join(errored)}).[/]"
+            "\n  This is a provider or configuration failure, not a verdict about the judge.\n"
+        )
+        return 1
+
+    if supported is ArmOutcome.PASSED and fabricated is ArmOutcome.PASSED:
         # Never a bare "Judge is working." when it does not qualify: that reads
         # as approval of the whole arrangement, which is the sentence E11 is
         # about. Functionality decides the exit code; qualification is said out

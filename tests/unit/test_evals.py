@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from neura_evals.dataset import Dataset, EvalCase, Expectation, Intent, load_all
@@ -1554,3 +1555,461 @@ class TestTheTrustLabelIsActuallyRendered:
         report, verdict = await _judged_run(Independent(), required=["groundedness"])
         print_report(report, verdict)
         assert "(trusted)" in capsys.readouterr().out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [ADR-0038] — judge calls do not retry invisibly, and one arm's outage is not
+# the other arm's verdict.
+#
+# Every test here drives a deterministic stub. The defect was found by a live
+# call to a provider that returned a malformed success; reproducing it that way
+# would need a provider having a bad afternoon, which is not a thing a test may
+# depend on ([ADR-0036] §9).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _completion(content: str, *, response_id: str = "resp-1") -> SimpleNamespace:
+    """A well-formed chat completion, shaped as the SDK would construct one."""
+    message = SimpleNamespace(content=content)
+    return SimpleNamespace(id=response_id, choices=[SimpleNamespace(message=message)])
+
+
+def _malformed(choices: object, *, response_id: str = "resp-1") -> SimpleNamespace:
+    """A 2xx the SDK accepted. `construct_type` does not validate, so this is
+    exactly what `choices: null` in a response body becomes."""
+    return SimpleNamespace(id=response_id, choices=choices)
+
+
+class _StubCompletions:
+    def __init__(self, outcome: object) -> None:
+        self._outcome = outcome
+        self.calls = 0
+
+    async def create(self, **_: object) -> object:
+        self.calls += 1
+        if isinstance(self._outcome, Exception):
+            raise self._outcome
+        return self._outcome
+
+
+def _judge_with(outcome: object) -> tuple[object, _StubCompletions]:
+    """A real `Judge` with its transport replaced. The code under test is the
+    real `_ask`; only the socket is fake."""
+    from neura_evals.judge import Judge, JudgeConfig
+
+    judge = Judge(JudgeConfig(base_url="https://example.invalid/v1", api_key="k", model="m"))
+    completions = _StubCompletions(outcome)
+    judge._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))  # type: ignore[assignment]
+    return judge, completions
+
+
+class TestAMalformedSuccessIsNamedAsWhatItIs:
+    """`response.choices[0]` on a body with no completion in it produced
+    `'NoneType' object is not subscriptable` — a Python operation, not a fault —
+    and wrote it into the report as the judge's reasoning."""
+
+    async def test_null_choices_is_a_response_shape_error(self) -> None:
+        judge, _ = _judge_with(_malformed(None))
+
+        verdict = await judge.grounded(reply="anything", evidence="anything")
+
+        assert not verdict.available
+        assert "ProviderResponseShapeError" in verdict.reasoning
+        assert "no choices field" in verdict.reasoning
+        assert "NoneType" not in verdict.reasoning
+        assert "subscriptable" not in verdict.reasoning
+
+    async def test_empty_choices_is_too(self) -> None:
+        """The other half, which was never seen live and would have raised
+        `IndexError` — a different unhelpful message for the same fault."""
+        judge, _ = _judge_with(_malformed([]))
+
+        verdict = await judge.grounded(reply="anything", evidence="anything")
+
+        assert not verdict.available
+        assert "empty choices list" in verdict.reasoning
+        assert "IndexError" not in verdict.reasoning
+
+    async def test_a_malformed_success_is_not_a_verdict(self) -> None:
+        """It is `available=False`, which `score_case` skips. Counting it as a
+        failed groundedness check reports a hallucination that never happened."""
+        judge, _ = _judge_with(_malformed(None))
+
+        verdict = await judge.grounded(reply="anything", evidence="anything")
+
+        assert not verdict.available
+        assert not verdict.passed
+
+
+class TestAPersistedDiagnosticCarriesNothingItShouldNot:
+    """`Verdict.reasoning` is logged AND written to the report by `--out`.
+    ADR-0037 §7 closed this for endpoints; the `str(exc)` path next door was
+    still open."""
+
+    async def test_raw_exception_text_never_reaches_the_reasoning(self) -> None:
+        leak = RuntimeError(
+            "POST https://gateway.invalid/v1/sk-live-SECRET/chat 401 "
+            "{'error': 'bad key', 'prompt': 'EVIDENCE AVAILABLE TO THE AGENT'}"
+        )
+        judge, _ = _judge_with(leak)
+
+        verdict = await judge.grounded(reply="anything", evidence="anything")
+
+        assert "RuntimeError" in verdict.reasoning
+        for forbidden in ("sk-live-SECRET", "gateway.invalid", "bad key", "EVIDENCE AVAILABLE"):
+            assert forbidden not in verdict.reasoning
+
+    async def test_a_safe_status_and_id_are_kept_because_they_are_diagnosable(self) -> None:
+        failure = RuntimeError("anything at all")
+        failure.status_code = 429  # type: ignore[attr-defined]
+        failure.request_id = "req_abc-123"  # type: ignore[attr-defined]
+        judge, _ = _judge_with(failure)
+
+        verdict = await judge.grounded(reply="anything", evidence="anything")
+
+        assert "HTTP 429" in verdict.reasoning
+        assert "req_abc-123" in verdict.reasoning
+        assert "anything at all" not in verdict.reasoning
+
+    async def test_a_foreign_exceptions_safe_detail_is_not_trusted(self) -> None:
+        """**An attribute name is not a provenance claim.**
+
+        `getattr(exc, "safe_detail", ...)` would have trusted any exception that
+        happened to carry that name, and an SDK or a gateway client is free to
+        define one holding whatever it likes. Only `isinstance` establishes that
+        this repository authored the string.
+        """
+
+        class ForeignError(Exception):
+            safe_detail = "key=sk-live-SECRET routed via https://gateway.invalid/v1"
+
+        judge, _ = _judge_with(ForeignError("boom"))
+
+        verdict = await judge.grounded(reply="a", evidence="b")
+
+        assert "ForeignError" in verdict.reasoning
+        for forbidden in ("sk-live-SECRET", "gateway.invalid", "routed via"):
+            assert forbidden not in verdict.reasoning
+
+    async def test_our_own_response_shape_detail_is_still_kept(self) -> None:
+        """The isinstance check must not silence the one message we do author."""
+        judge, _ = _judge_with(_malformed(None))
+
+        assert "no choices field" in (await judge.grounded(reply="a", evidence="b")).reasoning
+
+    async def test_an_unrecognisable_id_is_dropped_rather_than_truncated(self) -> None:
+        """A prefix of an unexpected string is still that string."""
+        failure = RuntimeError("boom")
+        failure.request_id = "https://gateway.invalid/v1/sk-live-SECRET"  # type: ignore[attr-defined]
+        judge, _ = _judge_with(failure)
+
+        verdict = await judge.grounded(reply="anything", evidence="anything")
+
+        assert "sk-live" not in verdict.reasoning
+        assert "gateway" not in verdict.reasoning
+
+    async def test_a_provider_response_id_is_echoed_only_when_it_looks_like_one(self) -> None:
+        judge, _ = _judge_with(_malformed(None, response_id="gen-9aZ.1:2"))
+        assert "gen-9aZ.1:2" in (await judge.grounded(reply="a", evidence="b")).reasoning
+
+        judge, _ = _judge_with(_malformed(None, response_id="id with spaces and /slashes"))
+        reasoning = (await judge.grounded(reply="a", evidence="b")).reasoning
+        assert "slashes" not in reasoning
+        assert "(response ?)" in reasoning
+
+
+class TestJudgeCallsDoNotRetry:
+    """`openai==2.48.0` defaults `max_retries` to 2, so an unset value is up to
+    three attempts per call — and the count reaches no report."""
+
+    def test_the_constant_is_zero(self) -> None:
+        from neura_evals.judge import JUDGE_MAX_RETRIES
+
+        assert JUDGE_MAX_RETRIES == 0
+
+    def test_the_client_is_constructed_with_retries_disabled(self) -> None:
+        """Asserted on the CLIENT, not on the constant, so a future SDK default
+        change cannot silently restore retries."""
+        from neura_evals.judge import Judge, JudgeConfig
+
+        judge = Judge(JudgeConfig(base_url="https://example.invalid/v1", api_key="k", model="m"))
+
+        assert judge._client.max_retries == 0
+
+    # There is deliberately no assertion about `openai._constants`. The SDK
+    # default of 2 that motivated this is recorded in [ADR-0038] and the testing
+    # log; asserting it here would make the suite depend on a private module of
+    # a third party and would break the day that default legitimately changes.
+    # The durable contract is the three behavioural tests around this comment.
+
+    async def test_one_logical_call_is_one_request_attempt(self) -> None:
+        judge, completions = _judge_with(
+            _completion('{"passed": true, "score": 1.0, "reasoning": "ok"}')
+        )
+
+        await judge.grounded(reply="a", evidence="b")
+
+        assert completions.calls == 1
+
+    async def test_a_failure_is_not_attempted_twice(self) -> None:
+        judge, completions = _judge_with(_malformed(None))
+
+        await judge.grounded(reply="a", evidence="b")
+
+        assert completions.calls == 1
+
+
+def _fake_clock(monkeypatch: pytest.MonkeyPatch, *ticks: float) -> None:
+    """A deterministic `perf_counter`, so an elapsed time can be ASSERTED.
+
+    `latency_ms >= 0` would pass against a field hard-coded to zero, which is
+    precisely the bug shape this ADR is about — a number that is present, looks
+    like a measurement, and is not one. No `sleep`: a test that waits is a test
+    that is slow and flaky, and it still could not assert an exact value.
+
+    The last tick repeats rather than raising, so an extra call from anywhere
+    cannot turn a latency assertion into a `StopIteration`.
+    """
+    from neura_evals import judge as judge_module
+
+    state = {"i": 0}
+
+    def fake() -> float:
+        value = ticks[min(state["i"], len(ticks) - 1)]
+        state["i"] += 1
+        return value
+
+    monkeypatch.setattr(judge_module.time, "perf_counter", fake)
+
+
+class TestLatencyIsMeasuredOnBothPaths:
+    """A 121s malformed response is a provider struggling; a 0.2s one is a
+    provider refusing. Neither was recorded anywhere."""
+
+    async def test_a_successful_call_records_the_elapsed_time(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _fake_clock(monkeypatch, 100.0, 100.75)
+        judge, _ = _judge_with(_completion('{"passed": true, "score": 1.0, "reasoning": "ok"}'))
+
+        verdict = await judge.grounded(reply="a", evidence="b")
+
+        assert verdict.available
+        assert verdict.latency_ms == 750
+
+    async def test_a_failed_call_records_the_elapsed_time_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """**The whole point.** The 121s failure of 2026-09-12 was invisible, and
+        a slow failure is a different diagnosis from a fast one."""
+        _fake_clock(monkeypatch, 500.0, 621.0)
+        judge, _ = _judge_with(_malformed(None))
+
+        verdict = await judge.grounded(reply="a", evidence="b")
+
+        assert not verdict.available
+        assert verdict.latency_ms == 121_000
+
+    async def test_latency_is_not_hard_coded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Two different clocks must produce two different numbers."""
+        _fake_clock(monkeypatch, 0.0, 0.2)
+        judge, _ = _judge_with(_malformed([]))
+        fast = (await judge.grounded(reply="a", evidence="b")).latency_ms
+
+        _fake_clock(monkeypatch, 0.0, 9.0)
+        judge, _ = _judge_with(_malformed([]))
+        slow = (await judge.grounded(reply="a", evidence="b")).latency_ms
+
+        assert (fast, slow) == (200, 9000)
+
+
+class _ScriptedJudge:
+    """Two `grounded()` calls, two scripted verdicts, in order."""
+
+    model = "an-independent-judge"
+    endpoint = "https://example.invalid"
+    trust = JudgeTrust.TRUSTED
+
+    def __init__(self, *verdicts: object) -> None:
+        self._verdicts = list(verdicts)
+        self.calls = 0
+
+    async def grounded(self, *, reply: str, evidence: str) -> object:
+        self.calls += 1
+        return self._verdicts.pop(0)
+
+
+def _verdict(
+    *, passed: bool, score: float, available: bool = True, claims: list[str] | None = None
+) -> object:
+    from neura_evals.judge import Verdict
+
+    return Verdict(
+        passed=passed,
+        score=score,
+        reasoning="scripted",
+        unsupported_claims=claims or [],
+        available=available,
+        latency_ms=1234,
+    )
+
+
+def _unavailable() -> object:
+    from neura_evals.judge import Verdict
+
+    return Verdict(
+        passed=False,
+        score=0.0,
+        reasoning="judge unavailable: ProviderResponseShapeError · no choices field",
+        available=False,
+        latency_ms=121_000,
+    )
+
+
+async def _screen(monkeypatch: pytest.MonkeyPatch, judge: _ScriptedJudge) -> int:
+    """Run `--check-judge` against a scripted judge and an offline role map.
+
+    `ollama-dev` resolves entirely from configuration — `model_for()` reads the
+    role map and builds no provider — so this reaches no network and starts no
+    Ollama.
+    """
+    from neura_evals import __main__ as cli
+    from neura_evals.judge import JudgeConfig
+
+    monkeypatch.setattr(
+        cli,
+        "judge_from_env",
+        lambda: JudgeConfig(base_url="https://example.invalid/v1", api_key="k", model=judge.model),
+    )
+    monkeypatch.setattr(cli, "Judge", lambda config: judge)
+    return await cli._check_judge("ollama-dev")
+
+
+class TestEachArmIsGradedOnItsOwnVerdict:
+    """On 2026-09-12 this printed `✘ rejects a hallucination` directly above the
+    two fabricated claims the judge had correctly caught. One arm's outage
+    rewrote the other arm's result ([ADR-0038])."""
+
+    async def test_both_arms_correct_exits_zero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        judge = _ScriptedJudge(
+            _verdict(passed=True, score=1.0),
+            _verdict(passed=False, score=0.0, claims=["order arrived yesterday"]),
+        )
+
+        code = await _screen(monkeypatch, judge)
+        out = capsys.readouterr().out
+
+        assert code == 0
+        assert "PASS" in out
+        assert "Judge is working" in out
+
+    async def test_an_errored_arm_does_not_change_the_other_arms_result(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """**The regression.** Arm 1 gets no answer; arm 2 correctly rejects the
+        fabrication and must be shown doing so."""
+        judge = _ScriptedJudge(
+            _unavailable(),
+            _verdict(passed=False, score=0.0, claims=["order arrived yesterday"]),
+        )
+
+        code = await _screen(monkeypatch, judge)
+        out = capsys.readouterr().out
+
+        assert code == 1
+        assert "ERROR" in out
+        assert "PASS" in out
+        assert "order arrived yesterday" in out
+        assert "could not be screened" in out
+        assert "not behaving correctly" not in out
+
+    async def test_an_errored_arm_prints_no_score(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`score=0.0` on an unreachable judge is a default and reads as a
+        measurement."""
+        judge = _ScriptedJudge(_unavailable(), _verdict(passed=False, score=0.0))
+
+        await _screen(monkeypatch, judge)
+        out = capsys.readouterr().out
+
+        assert "no judgement returned" in out
+        assert "ProviderResponseShapeError" in out
+
+    async def test_a_judge_that_answers_wrongly_is_failed_not_errored(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A judge that approves a fabrication is the failure this command
+        exists to catch, and it is about the judge — unlike an outage."""
+        judge = _ScriptedJudge(
+            _verdict(passed=True, score=1.0),
+            _verdict(passed=True, score=0.9),
+        )
+
+        code = await _screen(monkeypatch, judge)
+        out = capsys.readouterr().out
+
+        assert code == 1
+        assert "FAIL" in out
+        assert "not behaving correctly" in out
+        assert "could not be screened" not in out
+
+    async def test_both_arms_errored_exits_one_and_says_so(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        judge = _ScriptedJudge(_unavailable(), _unavailable())
+
+        code = await _screen(monkeypatch, judge)
+        out = capsys.readouterr().out
+
+        assert code == 1
+        assert "2 of 2 arms" in out
+        assert "Judge is working" not in out
+
+    async def test_latency_is_shown_for_every_arm(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        judge = _ScriptedJudge(_unavailable(), _verdict(passed=False, score=0.0))
+
+        await _screen(monkeypatch, judge)
+        out = capsys.readouterr().out
+
+        assert "121.0s" in out  # the errored arm
+        assert "1.2s" in out  # the arm that answered
+
+    async def test_calls_and_attempts_are_not_presented_as_one_number(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A call that failed before its request left the process made no
+        attempt at all, so "at most" is load-bearing."""
+        judge = _ScriptedJudge(_verdict(passed=True, score=1.0), _verdict(passed=False, score=0.0))
+
+        await _screen(monkeypatch, judge)
+        out = capsys.readouterr().out
+
+        assert "2 logical judge calls" in out
+        assert "at most 2 SDK request attempts" in out
+
+
+class TestTheReportStructureIsUnchanged:
+    """[ADR-0038] adds `Verdict.latency_ms`, which is NOT serialised: only
+    `Check.status` and `Check.detail` reach the file. So the schema does not
+    move, and this test is what says that deliberately."""
+
+    def test_the_schema_version_is_still_three(self) -> None:
+        from neura_evals.persist import REPORT_SCHEMA_VERSION
+
+        assert REPORT_SCHEMA_VERSION == 3
+
+    async def test_a_written_report_carries_no_judge_latency_field(self, tmp_path: Path) -> None:
+        report, verdict = await _judged_run(_SelfJudge(), required=["groundedness"])
+        path = write_report(report, tmp_path / "run.json", verdict)
+
+        payload = json.loads(path.read_text())
+
+        assert payload["report_schema_version"] == 3
+        # Scoped to the checks: `response.latency_ms` is the AGENT's and has
+        # always been written. The judge's is what must not have appeared.
+        assert "latency_ms" not in json.dumps(payload["cases"][0]["checks"])
