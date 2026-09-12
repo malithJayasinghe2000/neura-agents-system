@@ -2021,9 +2021,14 @@ cases 48   is_validation: True    ← and the "every case in this run is synthet
 ## Finding 27 fixed — E9 resolved, and the fix is a taxonomy — 2026-09-06
 
 **[ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).** Everything below was
-reproduced with **deterministic stub providers** at both seams. No model server was stopped, and no
-live eval was run: E9 was *found* by Ollama dying mid-suite, and a regression test that reproduced
-it that way would only run on a bad afternoon.
+reproduced with **deterministic stub providers** at both seams. No model server was stopped: E9 was
+*found* by Ollama dying mid-suite, and a regression test that reproduced it that way would only run
+on a bad afternoon.
+
+**Then it was validated live, and the order matters.** The stub work came first and is what the
+regression suite keeps; **two live `cloud-prod` runs followed on the same day and were accepted by
+the owner.** So *"no live eval was run"* — true while the stubs were being written — stopped being
+true a few hours later, and [the timeline is set out in full below](#the-two-accepted-live-runs).
 
 ### What the report says now, on the same shape of run
 
@@ -2085,6 +2090,36 @@ collect.
 and it was green.** Its own docstring says it was fixed for exactly this reason — the fix had covered
 one of the two non-measurement states. The coverage column's `47/0` (measured 47, ran 0) was the
 visible tip of the same thing, and a test now asserts `measured <= ran` for every metric.
+
+### The two accepted live runs
+
+**`cloud-prod`, `gemini-3.6-flash` on router, reasoner and guard, 2026-09-06.** Both runs passed
+`--no-judge`, so **groundedness was not measured in either** — a deliberate choice, because the judge
+is configured to the same model as the agent and would have been grading its own answer
+([E11](open-questions.md)). Neither run is evidence about whether any reply was truthful.
+
+| | `make eval` flags (guard on) | `eval-guard-off` flags |
+|:--|:--|:--|
+| cases | **48 measured** (39 passed, 9 failed) | **48 measured** (31 passed, 17 failed) |
+| errored / unavailable | **0 / 0** | **0 / 0** |
+| provider errors | **none** | **none** |
+| **injection resistance** | **1.00 ✔** (13 cases) | **1.00 ✔** (13 cases) |
+| escalation recall · intent | 1.00 ✔ · 0.96 ✔ | 1.00 ✔ · 0.96 ✔ |
+| structured repair rate | 0.00 ✔ (48/48) | 0.00 ✔ (48/48) |
+| guard block accuracy | 1.00 | **0.46** — the guard is off, as designed |
+| **tool selection accuracy** | **0.53 ✘** | **0.50 ✘** |
+| **escalation precision** | 1.00 ✔ | **0.70 ✘ — by design with the guard off** |
+| exit code | **0** | **0** |
+| duration | 98.4s | 103.6s |
+
+Both breaches printed in the "Gates not met" panel and are recorded in each report's
+`gate_failures`. **Neither blocked the run**, which is ADR-0036 §3 working rather than a threshold
+being softened. The persisted schema-2 totals sum honestly — 39/9/0/0 and 31/17/0/0, both equal to
+48 — and no case carries `passed: true` with a non-`passed` outcome.
+
+**Read this for what it is.** It confirms the gate machinery on a real provider. It says nothing
+about groundedness, and — [E1](open-questions.md) — nothing about whether the agent is any good on a
+real merchant's traffic.
 
 ### What did not change, deliberately
 

@@ -35,7 +35,24 @@ stopped asserting `intent` or `escalated` would still exit 0. [E11](open-questio
 trust from the model name alone — so a **judged** cloud run would label self-judging `trusted`. The
 accepted validation avoided it with `--no-judge`; nothing is fixed.
 
-**Next action:** **Grade more turns and promote them.** The loop is closed end to end and one real case ships; everything from here is volume, and volume is what [E1](open-questions.md) needs before any score is called validation. Note the `.env` now points at Gemini — `gemini-2.5-flash` and `-flash-lite` are **retired for new API keys** and were replaced with `gemini-3.5-flash` / `gemini-3.5-flash-lite`. The promotion machine and its evidence layer are built ([ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md), [ADR-0034](architecture/adr/0034-a-promoted-case-carries-the-shop-it-was-graded-on.md)); there are currently **zero promoted cases**, on purpose. Then A20/A21 — both sovereign-tier model-selection questions.
+**Next action:** **Resolve [E11](open-questions.md) so cloud groundedness can be measured honestly.**
+On `cloud-prod` the agent and the judge are both `gemini-3.6-flash`, and `judge_from_env()` decides
+trust from the model *name* alone — so a judged cloud run grades the model's own answer and would
+label it `trusted`. Until that is fixed **no groundedness figure from the cloud path may be quoted**,
+and [A9](open-questions.md) stays parked for the same reason. The two accepted live runs of
+2026-09-06 sidestepped it with `--no-judge`, which is why neither measured groundedness.
+
+The `.env` points at Gemini: `CLOUD_MODEL_ROUTER`, `_REASONER` and `_GUARD` are all
+`gemini-3.6-flash` (`gemini-2.5-flash` and `-flash-lite` are **retired for new API keys**). The
+promotion machine and its evidence layer are built
+([ADR-0032](architecture/adr/0032-a-graded-turn-becomes-an-eval-case.md),
+[ADR-0034](architecture/adr/0034-a-promoted-case-carries-the-shop-it-was-graded-on.md),
+[ADR-0035](architecture/adr/0035-captured-evidence-is-merchant-data-not-behaviour.md)), and
+**one promoted case is in the repository**: `graded_care_001` — `synthetic: false`,
+`fixture_mode: replay`, replaying the evidence its own turn captured, promoted from an owner `agree`
+verdict on 2026-09-06. So `is_validation` is `True` and the *"every case in this run is synthetic"*
+banner no longer prints. **That is reproducibility, not validation** — see E1 below. Then A20/A21 —
+both sovereign-tier model-selection questions.
 The widget now runs on a real storefront and a conversation there dies at its second message: CARE's
 router returns confidence 0.00 after any handover, and the ownership gate guarantees a handover on
 the commonest opening question. Both are decisions rather than repairs, and neither has been
@@ -49,13 +66,16 @@ running the suite on a cloud model first returned **1.00 ×3** and cancelled the
 to be made. **E1 has moved twice and is still open.** The loop promised in the UI and in two
 architecture documents is now built end to end — a graded turn becomes an eval case ([ADR-0032],
 2026-09-05), and that case replays the evidence its turn captured ([ADR-0034], 2026-09-06). But
-**there are zero promoted cases right now**: the seven made on 09-06 predate evidence capture, could
-not be reproduced, and were deleted rather than repaired, so the *"every case in this run is
-synthetic"* banner prints again. That is the honest state. **What E1 actually asks is untouched** —
-every turn this machinery can promote is still one the owner typed into his own test shop, which is
-reproducibility rather than validation. **E1 closes with B2, not with a mechanism**, and
-**B2 (no merchant) is still the top risk** — now doubly so: **[C6](open-questions.md) means the loop cannot even be *validated* on the Bagisto harness**, because that shop's own text names a commerce platform and rule 1 refuses every promotion from it. Deployment blockers **K1** (production email) and
-**X2** (deploy target) are unchanged and both external.
+**one promoted case now exists** — `graded_care_001`, replaying its own captured evidence. The seven
+promoted earlier on 09-06 predate evidence capture, could not be reproduced, and were deleted rather
+than repaired. **What E1 actually asks is untouched** — that one case is still a turn the owner typed
+into his own test shop, on one shop, one model, and a question written by the person who built the
+system, which [CLAUDE.md §4](../CLAUDE.md) refuses to call evidence. **E1 closes with B2, not with a
+mechanism**, and **B2 (no merchant) is still the top risk**. C6 no longer compounds it:
+[ADR-0035](architecture/adr/0035-captured-evidence-is-merchant-data-not-behaviour.md) resolved it, so
+the loop *can* be exercised on the Bagisto harness — which buys reproducibility and not the thing E1
+asks for. Deployment blockers **K1** (production email) and **X2** (deploy target) are unchanged and
+both external.
 
 ## Session 2026-09-06 (C6 resolved) — the first real eval case is in the repository, and `is_validation` is True
 
@@ -129,6 +149,12 @@ reproducibility rather than validation. **E1 closes with B2, not with a mechanis
 
 **[Finding 31](TESTING_LOG.md) / [C6](open-questions.md) — rule 1 and ADR-0034 collide.** `check_platform_independence.py` scans `agents/**/*.json`, which is where an artefact lands. The test shop's own T&Cs say *"every purchase made from bagisto"* and **every product URL is `http://bagisto.test/…`** — so **no turn on this shop is promotable**. Promotion refuses, `make arch` is green, and **the decision is the owner's**: the checker's own docstring excludes prose because *"prose cannot contain behaviour"*, and captured evidence is the merchant's data rather than our code — against a mechanical hard gate on the rule AGENTS.md calls the most important in the repository. **A real merchant's text would not trip it**, which makes this a block on *validation*, not on production.
 
+> **⚠ SUPERSEDED 2026-09-06 — C6 is resolved.** [ADR-0035](architecture/adr/0035-captured-evidence-is-merchant-data-not-behaviour.md)
+> ruled that captured evidence is merchant data rather than behaviour, exempted exactly
+> `agents/*/src/*/evals/fixtures/graded/*.json` from the *text* scan, and paid for it with a
+> structural check. **Promotion no longer refuses on platform names.** The paragraph above records
+> why the collision existed, not the current state.
+
 ### ✅ The end-to-end check ran, owner-controlled, and passed
 
 A new shadow turn on the dispatch tenant → **the owner's 👍 in the console** → promotion through the real code → replay:
@@ -142,6 +168,11 @@ A new shadow turn on the dispatch tenant → **the owner's 👍 in the console**
 ```
 
 Evidence captured at schema 3 with `pii_output: false` and the correct `store_id`; the replayed agent answered *"…within 30 days of delivery for a full refund…"* and `verify` reported *"every claim supported"*. **Staged outside any committed state**, because C6 makes the artefact unkeepable — the repository is unchanged.
+
+> **⚠ SUPERSEDED 2026-09-06 — the artefact is in the repository.** Once ADR-0035 resolved C6 the same
+> case was promoted for real: `graded_care_001` and its evidence file
+> `fixtures/graded/42d1b7ff….json` are committed, and `make arch` reports *"1 artefact(s)
+> structurally sound"*.
 
 **The seven historical cases were not reused**, and cannot be: their evidence does not exist.
 
@@ -205,6 +236,12 @@ Evidence captured at schema 3 with `pii_output: false` and the correct `store_id
 They predate capture, their evidence is not recoverable faithfully, and attaching today's shop state to a two-day-old grade would manufacture exactly the false provenance `synthetic: false` exists to prevent. **Removed in git with the reason in the commit message** — ADR-0032 §9's own rule applied to its own output.
 
 **So there are currently zero promoted cases and the "every case is synthetic" banner prints again.** That is the honest state, and it is a step backwards that buys reproducibility. `is_validation` was `True` for one day on cases that could not be re-run.
+
+> **⚠ SUPERSEDED later the same day — there is one promoted case.** After C6 was resolved, a newly
+> graded turn was promoted through the real code: `graded_care_001`, `synthetic: false`,
+> `fixture_mode: replay`. `is_validation` is `True` again, this time on a case that **can** be
+> re-run, and the synthetic banner no longer prints. The count of *deleted* cases above — seven —
+> is unchanged and correct.
 
 **One bug was found by a test rather than by review.** `raw` — a merchant platform's own payload — survived inside every recorded `search_products` result, because stripping ran only at the top level of a `Page` and not over its items. Provenance stripping is now recursive.
 
