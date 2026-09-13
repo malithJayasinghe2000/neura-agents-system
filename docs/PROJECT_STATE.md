@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-12 — **a model can no longer grade its own answer and call the result trusted; E11 resolved by [ADR-0037](architecture/adr/0037-a-model-may-not-grade-its-own-answer.md)**
+**Last updated:** 2026-09-13 — **an independent judge candidate now FUNCTIONS; it is still not qualified, and it is not the judge any `.env` is configured with**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -69,12 +69,38 @@ never includes `str(exc)`; per-arm latency on the failure path too. **No retry m
 no judge was selected, no `.env` changed, and `report_schema_version` stays **3** because `Verdict`
 is not serialised.
 
-**Next action:** **Choose an independent judge model, by comparison rather than by preference.** It
-must serve no role in the map under test. **The instrument is now trustworthy and the candidate is
-not yet anything** — Step 1 has been run once and failed, Steps 2 (consistency) and 3 (judge-vs-human
-agreement) are unbuilt and unapproved, and **a judge-quality dataset does not exist**: nothing in the
-repository implements evaluation-strategy §3.1's promise that judge-vs-human agreement is tracked and
-a drifting judge retired. **`make judge-check ROLE_MAP=cloud-prod`** is how the judge is qualified
+**2026-09-12, later still — a second candidate was screened and it PASSED, and what that buys is
+narrower than it sounds.** `dots-studio/dots-3-note-preview:free`, one execution of
+`--check-judge --role-map cloud-prod`, synthetic inputs only: **exit 0**, **both arms PASS**
+(`score=1.0` / `score=0.0`, both fabrications named), **11.7s and 9.6s**, **no provider or
+response-shape error**, trust **`trusted`** against a role map that was successfully inspected.
+Selected by comparison against the OpenRouter catalogue rather than by preference, on one hard
+pre-filter the Nemotron failure established: `judge.py` sends `response_format={"type":
+"json_object"}` unconditionally, and **the `:free` Nemotron route is the one endpoint of that model
+that does not support the parameter** — a hypothesis consistent with the catalogue and with Finding
+35, never re-tested, and it should not be. **The candidate is FUNCTIONING and NOT QUALIFIED**:
+ADR-0037 §6 separates the two, `make judge-check` answers only the first, and **Step 1 at n=1 is all
+that exists** — Steps 2 (consistency) and 3 (judge-vs-human agreement) are still unbuilt and
+unapproved, and a judge-quality dataset still does not exist. One green run cannot tell a reliable
+route from a lucky one, which is the same caution the failed screen earned from the other side.
+**No groundedness figure may be quoted from `cloud-prod` on the strength of this, and
+[A9](open-questions.md) stays parked.** **Critically: `.env` was not edited.** The screen ran on a
+process-level `EVAL_JUDGE_MODEL` override, which wins because `load_env()` never overrides a real
+environment variable — so **the configured judge on this machine is still the unqualified Nemotron**,
+and a session running `make judge-check` unmodified will screen that one again. Two things found
+while comparing and deliberately **not** fixed: **two of the four `cloud-prod` models in `.env` no
+longer exist on OpenRouter** (`nvidia/nemotron-nano-9b-v2:free` gone entirely, `openai/gpt-oss-20b:free`
+gone as a free route), so qualifying a judge does **not** by itself unblock a judged cloud run; and
+`_looks_weak()` returns `False` for `liquid/lfm-2.5-2.6b:free`, because `-2b` is a marker and `-2.6b`
+is not — the hosted-9B hole config.py documents, one decimal place away.
+
+**Next action:** **Finish Stage 6 — SELL end to end on the Bagisto harness — and decide whether the
+judge candidate is adopted.** The two are independent and neither blocks the other. **On the judge:
+a candidate now functions and nothing more.** Adopting it is an `.env` change nobody has made, and
+*qualifying* it needs Steps 2 (consistency) and 3 (judge-vs-human agreement), which are unbuilt and
+unapproved, plus a judge-quality dataset that does not exist — nothing in the repository implements
+evaluation-strategy §3.1's promise that judge-vs-human agreement is tracked and a drifting judge
+retired. **`make judge-check ROLE_MAP=cloud-prod`** is how the judge is qualified
 against the cloud map — until 2026-09-12 no `make` target passed `--role-map` at all, so
 `judge-check` silently answered for `ollama-dev` and the only route to a cloud answer was to bypass
 `make`. `ROLE_MAP` now reaches `eval`, `eval-one`, `eval-guard-off` and `judge-check`, defaulting to
@@ -88,6 +114,22 @@ difference is that this is now a measurement task with a named blocker rather th
 Deliberately not decided in ADR-0037: it is a compatibility, quality and cost comparison, and E2's
 warning about free tiers training on submissions now bites, because `graded_care_001` is
 `synthetic: false`.
+
+**And on Stage 6, which is the half of this that needs no judge at all.** It is the oldest ◐ in
+[TESTING_LOG.md](TESTING_LOG.md), and the gap is a shape rather than a defect: **the product has
+been exercised a question at a time and never as a conversation.** Every `sell-ask` run on the
+Bagisto harness to date is single-turn, and **SELL has never been driven through the widget on the
+real storefront at all** — in shadow mode or otherwise. The storefront run of 2026-09-02 was CARE
+only, and it is where [A20](open-questions.md) and [A21](open-questions.md) were found, which is the
+argument for doing SELL's the same way rather than by more `sell-ask` calls. **The plan for it is
+written and not run** — [TESTING_LOG.md](TESTING_LOG.md), *"Stage 6 continuation"*, 2026-09-13:
+`ollama-dev` first and explicitly as a **diagnostic** environment, single-turn CARE and SELL, two
+multi-turn conversations, and four shadow-mode checks. It carries five warnings that must travel with
+any result it produces: this is our own Bagisto test shop and **not merchant validation**; a local
+number describes `llama3.2:3b` and `qwen3:8b` and not the product; **shadow mode saves a hidden draft,
+notifies nobody and guarantees no later reply**, so it must not meet a real shopper until a
+human-response path is designed and tested; and **cloud-production quality and portability to a second
+e-commerce system both remain unproven**.
 
 **`.env` is one developer's gitignored file and this document should stop describing it as though it
 were project configuration.** It said *"the `.env` points at Gemini — `CLOUD_MODEL_ROUTER`,

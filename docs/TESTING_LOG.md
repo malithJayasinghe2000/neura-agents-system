@@ -76,7 +76,7 @@ MySQL is on port 3307 while the shop is configured for 3308.
 | 3 | Sync | shop data copied into our Postgres | none | ✅ 2026-08-27 |
 | 4 | Index | that data made searchable | local (embeddings) | ✅ 2026-08-27 |
 | 5 | CARE end to end | a real support conversation | local (heat) | ✅ 2026-08-27 |
-| 6 | SELL end to end | a real recommendation | local (heat) | ◐ tooling built |
+| 6 | SELL end to end | a real recommendation | local (heat) | ◐ tooling built; **plan written 2026-09-13, not yet run** |
 | 7 | Widget | what a shopper actually sees | local | ✅ 2026-08-27 |
 | 8 | Console | what the owner sees, incl. grading a real turn | none | ✅ 33/33 green 2026-08-30; **8 turns graded 2026-09-03**. E1 stays open for B2, not for the mechanism |
 | 9 | New e-commerce | a second shop passes conformance | none | ⬜ |
@@ -915,6 +915,169 @@ the switch rather than silently returning nothing.
 come in?"* now reaches a product rather than the Payment Policy. **One run, seven probes, one
 shop** — the script's own words apply: a measurement, not a benchmark. It is not evidence that
 either embedder is better.
+
+### 📋 Stage 6 continuation — the Bagisto CARE + SELL plan, written 2026-09-13, NOT YET RUN
+
+**Stage 6 stays ◐ — partly complete, and this plan has not run.** The tooling exists and every
+finding above was produced by it; what follows has **not** been executed. It is written down
+*before* running it so that the predictions are on record and can be wrong in public — the same
+reason the fishing-rod and jackets predictions of 2026-08-28 are still in this file after one of
+them was overturned.
+
+#### ⚠️ Read these five sentences before reading the plan
+
+1. **This is internal testing on our own Bagisto test shop. It is not real-merchant validation.**
+   One shop, one owner, questions written by the person who built the system. [CLAUDE.md §4](../CLAUDE.md)
+   refuses to call that evidence and so does this plan. [E1](open-questions.md) closes with
+   [B2](open-questions.md) — a real design partner — and nothing here moves it.
+2. **Results on `ollama-dev` describe the current local models and their known limitations, and
+   nothing else.** [A14](open-questions.md): `plan` chose no tool at all twice in three runs of the
+   same question. [A20](open-questions.md): `llama3.2:3b` returns confidence **0.00** on any message
+   following a handover, 5/5. [A19](open-questions.md): the same router misroutes open-ended advice.
+   All three are recorded as **not reproducing** on a cloud model. A local number is a statement
+   about `llama3.2:3b` and `qwen3:8b`, never about the product.
+3. **Shadow mode saves a hidden draft. It notifies nobody and it guarantees no later reply.**
+   Verified in code: `shadow_turns` is a table the console's Review screen *pulls* from. There is no
+   notification, no email, no queue worker, no SLA — `grep` for one returns nothing. The shopper's
+   sentence is deliberately worded to promise nothing, because nothing would honour a promise.
+4. **Shadow mode must therefore not be pointed at real shoppers until a human-response path is
+   decided and tested.** A real customer asking a real question and receiving *"there is no
+   automated answer available right now"* — with no human ever being told they asked — is a support
+   failure we would have built on purpose. That path is **not designed**; designing it is an ADR,
+   not a task inside this plan.
+5. **Cloud-production quality is unproven, and so is portability to any other e-commerce system.**
+   `cloud-prod` cannot currently run at all (two of its four models no longer exist), and
+   **Stage 9** — a second shop passing conformance — has not been
+   started. Bagisto conforming to our spec is **one** shop conforming to our spec.
+
+#### Environment: `ollama-dev` first, deliberately
+
+Free, unlimited, no quota, and it touches no external provider — so the plan can be run and re-run
+while it is still being shaped. **It is the diagnostic environment, not the quality environment.**
+
+The other two maps, for the record:
+
+| map | state today |
+|:--|:--|
+| `cloud-prod` | **broken** — `CLOUD_MODEL_ROUTER` and `CLOUD_MODEL_GUARD` name models OpenRouter no longer serves |
+| `hybrid` | **works with no `.env` change** — it takes only `REASONER` and `SUMMARIZER` from the cloud map, and both still exist. ROUTER is pinned to `llama3.2:3b` in `roles.py`, so it does **not** escape A20 |
+
+#### Setup — one tenant, indexed, both agents
+
+The likeliest way this plan produces meaningless output is **Finding 2** (above, in this stage): each script
+indexes under its own tenant, so `retrieve` returns nothing and every answer is ungrounded for a
+reason that has nothing to do with either agent.
+
+```bash
+export SHOP=http://bagisto.test/neura/v1
+export TOKEN=$(grep '^NEURA_API_TOKEN=' ~/Developer/bagisto/.env | cut -d= -f2-)
+
+make widget-demo SHOP=$SHOP TOKEN=$TOKEN AGENTS=care,sell     # prints TENANT and a URL
+make rag-check URL=$SHOP TOKEN=$TOKEN KEEP=1 TENANT=<that tenant>
+```
+
+Traps: Bagisto `/health` 200 but products 500 → MySQL on **3307**, not 3308. `neura-api` on **8010**.
+No `data-neura-agent` on the embed — the server chooses per message ([ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md)).
+
+#### §1 — Product recommendations (SELL, single turn)
+
+`make sell-ask Q="…" URL=$SHOP TOKEN=$TOKEN`. Each question has a prediction drawn from a prior
+finding; **the value is in which predictions break.**
+
+| # | Question | Predicted on `ollama-dev` | A break would mean |
+|:--|:--|:--|:--|
+| 1.1 | *do you sell jackets?* | shop search **0** (titles read "Jacket"), index fallback fires, word gate accepts, two real jackets | [ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md)'s fallback stopped working |
+| 1.2 | *do you sell fishing rods?* | shop 0, fallback fires, **word gate rejects**, honest miss, no clothing offered | the regression ADR-0029 was amended to close is back |
+| 1.3 | *I need trousers under 40* | price stripped at the tool boundary → *"I found 4 … none under 40.00 USD. The closest is 44.00 USD."* | [ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md) not reached |
+| 1.4 | *I need a waterproof jacket* | Lightweight Rain Shell. **Watch for the Waxed Cotton Field Jacket being called waterproof** — its text says *"sheds rain"* | this is the exact fabrication `verify` caught locally on 2026-08-29 |
+| 1.5 | *which is warmer, the field jacket or the rain shell?* | likely escalates for want of evidence | — |
+
+**Expect `plan` to choose no tool on some runs.** That is A14, it is the local reasoner, and it is
+not a new defect. Record it; do not chase it.
+
+**Record `promises`, not only the reply.** The open `sell.md` §2.3 question is that a Linen Pinafore
+Frock was *permitted* as a candidate for "jackets" while `compose` sensibly ignored it. **A correct
+answer and a correct permission are different facts.** Note it. Do not fix it here.
+
+#### §2 — Policy questions (CARE, single turn)
+
+| # | Question | Expected |
+|:--|:--|:--|
+| 2.1 | *what is your returns policy?* | **30 days**, **full refund** — the assertion `graded_care_001` already encodes |
+| 2.2 | *how much is delivery?* | quoted from policy. **Watch for a domestic figure answering an international question** — [A9](open-questions.md)(1), selective quotation, which groundedness cannot see |
+| 2.3 | *where is my order?* — widget, public key | **escalates at the ownership gate. This is correct** ([A21](open-questions.md)) and must not be "fixed" |
+| 2.4 | *where is my order?* — `make care-ask CUSTOMER=385 …`, secret key | the real tracking number |
+
+2.3 and 2.4 are one test in two halves: the same question is unanswerable from a browser and
+answerable from a server, by design.
+
+#### §3 — Multi-turn conversations (`ollama-dev`, DIAGNOSTIC ONLY)
+
+**Nothing in this section is evidence about cloud-model quality**, and a result here must never be
+quoted as such. Two of the three behaviours it probes are already recorded as *not reproducing* on a
+cloud model. What it does establish is what a shopper meets on `ollama-dev` — **which is also the
+`sovereign` tier**, a shipping product, not a development convenience.
+
+Run in the real widget on `bagisto.test`. **The thing under test is whether turn N+1 knows about
+turn N** — never once exercised on a real storefront for either agent.
+
+**Conversation A — pronoun resolution and mid-conversation agent switching**
+
+| # | Message | Watching for |
+|:--|:--|:--|
+| A1 | *do you sell jackets?* | dispatched to SELL |
+| A2 | *which of those is cheaper?* | *"those"* resolved from A1 |
+| A3 | *is the cheaper one waterproof?* | *"the cheaper one"* resolved; and the 1.4 fabrication |
+| A4 | *what's your returns policy on it?* | **a switch to CARE mid-conversation** ([ADR-0031](architecture/adr/0031-the-shopper-never-chooses-the-agent.md)) |
+| A5 | *and delivery?* | CARE, context held |
+
+**Conversation B — the A20 probe on a real storefront**
+
+| # | Message | Predicted |
+|:--|:--|:--|
+| B1 | *where is my order?* | escalates — A21, correct |
+| B2 | *what is your returns policy?* | **confidence 0.00 and a second handover**, on a question that answers perfectly in a fresh conversation |
+
+If B2 escalates, A20 is confirmed on a real storefront in a shipping tier. If it answers, A20 is
+narrower than recorded. **Either result is worth having. Neither is a reason to edit `route.md`** —
+tuning a prompt against one weak model is the 2026-07-30 mistake this file already records twice.
+
+#### §4 — What a shopper actually sees in shadow mode
+
+```bash
+make widget-demo SHOP=$SHOP TOKEN=$TOKEN AGENTS=care,sell SHADOW=1
+```
+
+The shopper sees **exactly this and nothing else**:
+
+> *"Thanks — your message has been received. There is no automated answer available for it right
+> now."*
+
+`reply` is empty and the sentence arrives in `fallback_message`, so a client rendering
+`reply or fallback_message` is correct either way ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)).
+**It deliberately does not say a human will follow up**, because — per the warning above — nothing
+would honour that.
+
+| # | Check | Why |
+|:--|:--|:--|
+| 4.1 | Ask 2.1 and 1.1 in shadow. Shopper sees only the withheld sentence — **no product cards, no draft, no citation** | the draft is the thing that must not escape |
+| 4.2 | Console → **Review**: both turns queued with draft, evidence, `verify` verdict, intent, tools, cost, latency | the only route to a non-synthetic case ([E1](open-questions.md)) |
+| 4.3 | **Multi-turn in shadow**: ask 1.1, then *"which of those is cheaper?"* | the draft is **not** written to the transcript, so turn 2 must not behave as though the shopper read turn 1 |
+| 4.4 | **Prediction: A20 cannot fire in shadow mode** — the handover sentence never enters history, so the mechanism is absent | if it fires anyway, A20 is not what we think it is |
+
+4.3 and 4.4 have never been exercised and are the two most likely to produce a finding.
+
+#### What to record, and what not to do
+
+Per turn: the question, which agent the server chose, what `plan` chose, whether the catalogue was
+searched, `promises`, `verify`'s verdict, latency, and the reply. **The findings are the point.**
+
+**Do not**, while running this: edit a prompt to turn a case green; fix `sell.md` §2.3 weak
+relevance; repair the two dead `cloud-prod` model IDs as a side effect; or describe any of it as
+validation. Every one of those is a decision with its own ADR or its own measurement, and none of
+them is a step in a test plan.
+
+---
 
 ## Stage 7 — the widget ✅
 
@@ -2250,6 +2413,122 @@ obtained. `report_schema_version` stays **3**: `Verdict` is never serialised, on
 
 **Reproduced entirely by deterministic stubs.** The defect was found by a provider having a bad
 afternoon; a test that reproduced it that way would run on bad afternoons only ([ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md) §9).
+
+---
+
+## A judge functioning screen PASSES — functioning, not qualified — 2026-09-12
+
+The Step 1 re-run after the Nemotron screen failed, on a candidate chosen by comparison rather than
+by preference. Run **once**, deliberately, and **not** on the judge configured in `.env`.
+
+```bash
+EVAL_JUDGE_MODEL='dots-studio/dots-3-note-preview:free' make judge-check ROLE_MAP=cloud-prod
+```
+
+**The override was process-level and nothing on disk changed.** `load_env()` applies
+`if override or key not in os.environ` — *"real environment variables always win"* — so the shell
+value beat `.env`'s line without touching it. `.env` still sets
+`EVAL_JUDGE_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free`, and **this candidate is therefore not the
+configured judge on this machine.** A session reading this and running `make judge-check` unmodified
+will screen Nemotron again.
+
+**Inputs were synthetic only**, exactly as in the failed screen: three string literals in
+`_check_judge`, one invented order-1001 evidence line and two replies. The command returns before
+`_select_agent()` and `_load_datasets()`, so **`graded_care_001` and its captured evidence reached no
+provider**, and no agent model ran.
+
+| | |
+|:--|:--|
+| candidate | `dots-studio/dots-3-note-preview:free` |
+| endpoint origin | `https://openrouter.ai` |
+| independence | ✅ shares no normalised name with any `cloud-prod` role — `trust trusted` |
+| **supported arm** | ✅ **PASS** — `score=1.0`, **11.7s** |
+| **fabricated arm** | ✅ **PASS** — `score=0.0`, both fabrications named, **9.6s** |
+| provider / response-shape error | **none** |
+| exit code | **0** |
+| HTTP attempts | **2 logical calls · at most 2 attempts** (`JUDGE_MAX_RETRIES=0`) |
+
+`embedder` was skipped on `RoleNotConfiguredError`, which is the one legitimate skip
+([ADR-0037](architecture/adr/0037-a-model-may-not-grade-its-own-answer.md) §1), so inspection
+succeeded and `trusted` is a **checked** result rather than an uninspected default. The models it
+compared against were printed: `google/gemma-4-26b-a4b-it:free`,
+`nvidia/nemotron-3-super-120b-a12b:free`, `nvidia/nemotron-nano-9b-v2:free`, `openai/gpt-oss-20b:free`.
+
+### 🔴 FUNCTIONING, NOT QUALIFIED — and the distinction is the whole point
+
+**This candidate has passed Step 1 at n=1 and nothing else.** ADR-0037 §6 separates *does it
+function* from *does it qualify*, and `make judge-check` answers only the first — the exit code is
+about reachability and correctness, never about fitness to produce evidence.
+
+What is still missing, unchanged by this run:
+
+| | state |
+|:--|:--|
+| Step 1 — functioning | ✅ **passed once**, n=1 |
+| Step 2 — consistency across repeated runs | ⬜ **unbuilt and unapproved** |
+| Step 3 — judge-vs-human agreement ([eval §3.1](architecture/evaluation-strategy.md)) | ⬜ **unbuilt**; nothing in the repository tracks it or retires a drifting judge |
+| a judge-quality dataset | ⬜ **does not exist** |
+
+**One green run cannot tell a reliable route from a lucky one**, which is the same caution the
+failed Nemotron screen earned in the opposite direction — one red run could not tell a broken route
+from a transient one. **No groundedness figure may be quoted from `cloud-prod` on the strength of
+this**, and [A9](open-questions.md) stays parked.
+
+### Why it passed where the previous candidate failed
+
+`judge.py` sends `response_format={"type": "json_object"}` on **every** call, unconditionally. The
+OpenRouter catalogue, read the same day from the public unauthenticated `/api/v1/models` endpoint:
+
+| model | route | `response_format` |
+|:--|:--|:--|
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | Nvidia, **single endpoint** | **not supported** |
+| `nvidia/nemotron-3-ultra-550b-a55b` (paid) | DeepInfra | supported |
+| | BaseTen | **not supported** |
+| `dots-studio/dots-3-note-preview:free` | AtlasCloud | supported (+ `structured_outputs`) |
+
+A 2xx carrying `choices: null` is what a route that swallows an unsupported response-format
+constraint would produce. **This is a hypothesis consistent with the catalogue and with Finding 35,
+not a proven cause** — nothing here re-ran Nemotron to test it, and nothing should. What it does
+establish is that **`response_format` support on the actual route is a hard pre-filter for any
+future candidate**, not a nice-to-have.
+
+Latency is also an order of magnitude better — 11.7s and 9.6s against ~121s and ~76s — and that
+comparison is only meaningful now, because both arms here are known to be single attempts
+([ADR-0038](architecture/adr/0038-judge-calls-do-not-retry-invisibly.md) §1).
+
+### ⚠️ Two things found while comparing candidates, neither of them fixed
+
+**1. Two of the four `cloud-prod` models in `.env` no longer exist on OpenRouter.**
+
+| role | configured | catalogue, 2026-09-12 |
+|:--|:--|:--|
+| ROUTER | `nvidia/nemotron-nano-9b-v2:free` | **gone entirely** |
+| GUARD | `openai/gpt-oss-20b:free` | **`:free` gone**; paid `openai/gpt-oss-20b` exists |
+| REASONER | `nvidia/nemotron-3-super-120b-a12b:free` | present |
+| SUMMARIZER | `google/gemma-4-26b-a4b-it:free` | present |
+
+This does **not** affect `judge-check`, which compares configured *names* and calls none of them.
+It does mean a judged `make eval ROLE_MAP=cloud-prod` would fail on two roles — so **qualifying a
+judge does not by itself unblock a cloud run.** Not changed here; it is a model-configuration
+decision.
+
+**2. A live gap in `_WEAK_MODEL_MARKERS`.** Running the repo's own predicate:
+
+```
+liquid/lfm-2.5-2.6b:free    _looks_weak = False   → would be labelled `trusted`
+```
+
+`-2b` is a marker; `-2.6b` is not. That is precisely the hosted-9B failure
+[config.py](../evals/src/neura_evals/config.py) documents in its own docstring, one decimal point
+away. **Not fixed** — it is a change to trust classification and belongs with its own test, not
+appended to a screening run.
+
+### What was NOT done
+
+No `.env` edit. No repository file changed by the run. No agent model, no Ollama, no dataset, no
+eval. No retry, no second run, no fallback candidate screened. `git status` verified clean
+afterwards. **No judge is selected and none is qualified** — what exists is one candidate that
+functions.
 
 ---
 
