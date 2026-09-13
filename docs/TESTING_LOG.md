@@ -1079,6 +1079,224 @@ them is a step in a test plan.
 
 ---
 
+### 🔴 Stage 6 RUN — 2026-09-13 — the plan was executed, and `verify` is wrong in BOTH directions
+
+The plan above was run. **Stage 6 stays ◐**: §1 and §2 are done, §3 (multi-turn) and §4 (shadow) are
+not. Real Bagisto shop, `tn_sell_ask`, existing `nomic-embed-text`/768 index, **no re-index**.
+
+**One setup fix first.** `/products` was 500ing: MySQL is on **3308**, Bagisto's `.env` said **3307**
+— the reverse of what the Setup note at the top of this file claims. One line changed in Bagisto's
+own gitignored `.env`, plus `php artisan config:clear`. **No NEURA file, prompt, dataset, gate,
+threshold or model configuration was changed by this session.**
+
+#### 🔴 Finding 37 — `compose` moves one product's attributes onto another, and `verify` passes it
+
+**The most serious defect this log has recorded.** `ollama-dev`, *"I need a waterproof jacket"*,
+**3 runs out of 3 byte-identical**.
+
+The evidence the composer was given, verbatim from the shop:
+
+| product | description |
+|:--|:--|
+| **1311** Waxed Cotton Field Jacket | *"Traditional 8oz waxed cotton that **sheds rain**… a two-way brass zip under a storm flap."* |
+| **1315** Lightweight Rain Shell | *"A 2.5-layer **waterproof** shell rated to 10,000mm with fully **taped seams**…"* |
+
+What `qwen3:8b` drafted:
+
+> *"The Waxed Cotton Field Jacket (1311) is **waterproof with taped seams**, making it suitable for
+> light to moderate rain."*
+
+**Neither "waterproof" nor "taped seams" appears anywhere in 1311's description. Both belong to
+1315.** And `verify` returned **`every claim supported`** and `respond` accepted it, so the reply
+**passed every internal check and reached the sendable point in the test path — 3 times out of 3.**
+
+**This was `make sell-ask`, an internal hand-test. No real customer was involved and none received
+this answer.** What the run establishes is that nothing in the pipeline would have stopped it.
+
+**The mechanism is the finding.** `verify` checks whether a claimed attribute appears *in the
+evidence block*. It does not check whether it appears **under the product the sentence names**. With
+two products in one block, any attribute of either can be attached to either and still pass.
+`verify.md` names this shape for one field only — *"stated for the product when the evidence gives it
+per variant"* — and the same error across **products** is not covered.
+
+**Why it would matter in production:** a shopper who acted on this would buy a **$165** waxed-cotton
+jacket believing it is waterproof with taped seams. It sheds rain; it is not a rain shell. That is a
+wet customer, a return, and a merchant who stops trusting the assistant — the exact "confident wrong
+answer" class [agent-runtime.md §2](architecture/agent-runtime.md) calls the reason `verify` exists.
+Nobody met it here; the point is that nothing would have prevented it.
+
+#### 🟠 Finding 38 — and on a stronger composer, `verify` rejects the CORRECT answer
+
+Same question, `hybrid`, `CLOUD_MODEL_REASONER=gemini-3.6-flash` (process-level override, `.env`
+untouched), verifier still local `llama3.1:8b`. **3 runs out of 3.**
+
+**The cloud composer got it right every time** — attributes stayed with their own products, no
+cross-contamination. And `verify` refused all three. Run 3's refusal is the clearest:
+
+> refused: *"Product 1315 ($110.00 USD), which features a 2.5-layer waterproof shell rated to
+> 10,000mm with fully taped seams to keep heavy rain out."*
+
+**Every attribute in that sentence is verbatim in 1315's description.** The only inference is *"to
+keep heavy rain out"* — which is the exact shape `verify.md` lists under **Grounded**:
+
+> ✅ *"It's waterproof with taped seams, so it should handle wet weather" — when the evidence says
+> waterproof and taped seams.*
+
+So on one question, with n=3 on each side:
+
+| composer | draft | `verify` | outcome in the test path |
+|:--|:--|:--|:--|
+| `qwen3:8b` local | **wrong** — 1315's attributes on 1311 | **passed** 3/3 | 🔴 a false claim reached the sendable point |
+| `gemini-3.6-flash` | **correct** | **refused** 3/3 | 🟠 a correct answer was withheld, handover instead |
+
+**The verifier is wrong in both directions on the same question, and the dangerous direction is the
+one that ships.** This is [A9](open-questions.md)'s *"groundedness is not applicability"* and
+[A14](open-questions.md)'s false positive, now with a much worse sibling beside them.
+
+#### 🔴 Finding 39 — `make verify-probe` says this verifier is fit for the role
+
+Run first, before any of the above: `make verify-probe AGENT=sell N=10`, 80 calls, local, free.
+
+```
+0/10 false refusals      A · one shortlist, attributed claim
+0/10 false refusals      B · the same shortlist, twice
+0/10 missed fabrications C · control: an ADDED policy
+0/10 missed fabrications D · control: an UNATTRIBUTED suitability claim
+0/10 false refusals      E · a COMPARATIVE attributed claim
+10/10 false refusals     F · INJECTED product (known — S9, ADR-0025)
+0/10 false refusals      G · control for F: a third BENIGN product
+0/10 false refusals      H · arm F through the ADR-0025 filter
+  → "Fit for the GUARD role on these strings."
+```
+
+**It passed, and it misses both Findings 37 and 38.** [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)
+makes this probe *the bar* for holding the GUARD role, and the bar does not test:
+
+- **cross-product attribute attribution** — no arm puts two products in one evidence block and moves
+  an attribute between them (Finding 37);
+- **real merchant prose** — arms A/B/E use short constructed claims, where real descriptions are
+  long, comma-heavy and multi-attribute (Finding 38).
+
+**This is the house failure mode again: a check that reported green while the thing it gates was
+failing both ways.** ADR-0018 says in its own words that the probe is *"a floor, not a proof of
+quality"* — this run is what that sentence costs.
+
+#### 🟠 Finding 40 — every provider failure is reported as `ProviderUnavailableError`
+
+Two `hybrid` runs on `gemini-3.8-flash` escalated with *"tool planning failed:
+ProviderUnavailableError"*. The operator cannot act on that. Reproduced through the client and
+caught directly, the real fault was:
+
+```
+HTTP 503 · status UNAVAILABLE
+"This model is currently experiencing high demand. Spikes in demand are usually temporary."
+```
+
+Google-side capacity, intermittent — direct `curl` calls to the same model, key and tool schemas
+**succeeded** minutes either side. `_translate()` ends in a catch-all returning
+`ProviderUnavailableError` for *any* exception, and `plan` surfaces only `type(exc).__name__`, so a
+503, a 400 bad request and a dead network are one indistinguishable string. **The key was valid
+(HTTP 200 on `/models`) and `gemini-3.8-flash` was present in the catalogue** — both checked without
+printing the key.
+
+#### 🟠 Finding 41 — Gemini's thinking tokens are invisible to this codebase
+
+A minimal direct call, `max_tokens=20`:
+
+```
+completion_tokens: 1   total_tokens: 19   finish_reason: "length"
+```
+
+**Fifteen tokens went to reasoning that `completion_tokens` never reports.** `provider.py` reads
+`prompt_tokens` and `completion_tokens` only and never `completion_tokens_details`, so for a thinking
+model **every usage and cost figure this project produces is under-counted**, and
+`structured_repair_rate`-style budgeting is computed from a number that omits most of the spend.
+
+**It also closes the 2026-09-12 open question.** `compose` sets `max_tokens=1500` and asks for
+`reasoning_effort="none"`; Gemini rejects `"none"` so the client downgrades it, the model then spends
+the 1500 on thinking and returns empty content with `finish_reason=length`. That is why that run had
+no draft. **Not a Gemini fault and not a code bug — a budget interaction, now measured rather than
+guessed.**
+
+#### What else ran
+
+| # | question | map | result |
+|:--|:--|:--|:--|
+| 1.2 | *do you sell fishing rods?* | ollama-dev | `plan` chose `list_categories` → escalated. **A14 again** |
+| 1.3 | *I need trousers under 40* | ollama-dev | `plan` chose **nothing** → escalated. **A14 again**; ADR-0027's price stripper never reached, for the fourth recorded time |
+| 1.4 | *I need a waterproof jacket* | both | Findings 37 and 38 |
+| 1.5 | *which is warmer…?* | ollama-dev | `verify` **correctly** refused *"retains body heat better"* — not in the evidence. A good refusal |
+| 2.1 | *what is your returns policy?* | ollama-dev | ✅ **ANSWERED** — 30 days, full refund, prepaid label, 5 working days, hygiene exclusions. `verify` passed. Accurate against the real policy |
+
+**CARE is in better shape than SELL on this shop.** Its one measured question answered correctly and
+was verified correctly.
+
+#### 🔴 Finding 42 — the trigger is a SECOND product in the draft, and the probe now catches it
+
+Two arms were added to `scripts/verify_probe.py` for Finding 37 — **I** (1315's attributes stated of
+1311, must be refused) and **J** (the same attributes on 1315, must be accepted) — over one shared
+evidence block holding two products whose attributes are **disjoint**. That last part is why the
+eight existing arms could never have caught this: `SELL_EVIDENCE_BLOCK` holds two *waterproof shells
+with taped seams*, so moving an attribute between them produces a sentence that is still true. **The
+fixture, not the model, was the blind spot.**
+
+**Arm I was run twice, and the first version cleared the verifier.** That is the finding.
+
+| arm I's draft | verifier |
+|:--|:--|
+| names **1311 only**, with the false attribute | **refused 10/10** ✔ caught |
+| names **1311 and 1315**, same false attribute | **missed 10/10** ✘ approved |
+
+The lie is identical in both. The only change is that a second product joined the draft — mirroring
+the shape Finding 37 actually produced, where the second jacket was *"**also** waterproof"*. And
+**arm J rules out the obvious alternative**: J names two products as well, with each attribute on its
+own product, and the verifier accepted it **0/10 false refusals**. So it is not that two products
+confuse it.
+
+> **The diagnosis is sharper than Finding 37 stated. `verify` does track which product an attribute
+> belongs to — and stops doing so once the draft discusses more than one.**
+
+Finding 37's original wording — *"never checks whether it appears under the product the sentence
+names"* — is too broad, and is corrected by this. It checks; it drops the check under a condition,
+and that condition is the ordinary case for a recommender, which is why it reached a sendable reply
+on the real shop three times out of three.
+
+**`make verify-probe AGENT=sell` is red from today and stays red until this is fixed.** Arm I is
+deliberately **not** marked `documents_a_known_failure`: that flag is for arm F, a bounded failure
+with a fix arm beside it, and a newly found safety failure with no fix does not get to keep a
+command green. **Arm J is the guard-rail** — any "fix" that merely makes the verifier stricter turns
+J red and is refused by the same run.
+
+**One pre-existing inaccuracy was corrected while adding them.** The probe's header printed *"claim
+supported in BOTH conditions — every refusal is a false one"* on every run, from when it was arms A
+and B alone. That was already untrue of the C/D controls and plainly untrue of arm I. It now counts
+the arms: *"7 arm(s) state a SUPPORTED claim … 3 state an UNSUPPORTED claim (a refusal is correct)"*.
+
+#### 🔴 Finding 39 is now closed as stated, and re-opens one level up
+
+The 2026-09-13 probe gap — *"reports the verifier fit for the GUARD role while it fails both ways"* —
+is closed for Finding 37: arms I and J exist and the run goes red. **What is not closed is the
+general lesson.** The probe passed for six weeks on a fixture whose two products could not express a
+mis-attribution, and nothing but a real-shop run found it. [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)
+calls the probe *"a floor, not a proof of quality"*; this is the second time that sentence has been
+paid for.
+
+#### Nothing was fixed, and that is deliberate
+
+Findings 37–41 all have obvious-looking repairs — a `verify.md` rule about per-product attribution, a
+better `_translate` message, reading `completion_tokens_details`. **None was made**, and the verifier
+prompt and model are untouched. Every one is a prompt, gate or behaviour change under
+[AGENTS.md](../AGENTS.md) **Rule 4**, which requires an eval that does not regress; the eval's
+groundedness judge is **not qualified**, the cloud map is flaky, and this file records twice that
+editing a prompt to fix a failure found in one afternoon is how a bad change ships with a number
+attached. **These are findings, not a patch set.**
+
+**One thing was added, and it is a test rather than a behaviour**: arms I and J, plus the header
+correction (Finding 42). A test that turns red on a live defect changes no answer the agent gives;
+it changes whether anyone can ship past it.
+
+---
+
 ## Stage 7 — the widget ✅
 
 What a shopper actually sees. Needs the API running.

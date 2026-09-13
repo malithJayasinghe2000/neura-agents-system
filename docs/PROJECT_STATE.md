@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-13 — **an independent judge candidate now FUNCTIONS; it is still not qualified, and it is not the judge any `.env` is configured with**
+**Last updated:** 2026-09-13 (later) — **Stage 6 §1–§2 ran on the Bagisto shop; `verify` is wrong in BOTH directions, and the dangerous half now has a permanent regression test that is RED**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -94,8 +94,57 @@ gone as a free route), so qualifying a judge does **not** by itself unblock a ju
 `_looks_weak()` returns `False` for `liquid/lfm-2.5-2.6b:free`, because `-2b` is a marker and `-2.6b`
 is not — the hosted-9B hole config.py documents, one decimal place away.
 
-**Next action:** **Finish Stage 6 — SELL end to end on the Bagisto harness — and decide whether the
-judge candidate is adopted.** The two are independent and neither blocks the other. **On the judge:
+**2026-09-13, later — Stage 6 §1 and §2 were run on the real Bagisto shop, and the headline is a
+release-grade defect in `verify`.** Five SELL questions and one CARE question, `ollama-dev` first as
+the plan required, plus a cloud composer arm. **Stage 6 stays ◐** — §3 (multi-turn) and §4 (shadow)
+are still not run. **[Finding 37](TESTING_LOG.md) is the serious one**: asked *"I need a waterproof
+jacket"*, `compose` on `qwen3:8b` wrote *"The Waxed Cotton Field Jacket (1311) is **waterproof with
+taped seams**"* — words that appear **nowhere** in 1311's description and belong to **1315**, the Rain
+Shell — and **`verify` returned `every claim supported`, so the reply passed every internal check and
+reached the sendable point in the test path, 3 runs out of 3.** These were `make sell-ask` hand-tests:
+**no real customer was involved and none received the answer.** **The mechanism was sharpened the same day by a matched probe pair** ([Finding 42](TESTING_LOG.md)):
+`verify` *does* track which product an attribute belongs to, and **stops once the draft discusses more
+than one product**. The same false attribute is **refused 10/10** in a draft naming 1311 alone and
+**missed 10/10** in a draft naming 1311 and 1315; the control naming both products correctly is
+accepted 10/10. A second product switches the per-product check off — and that is the ordinary case
+for a recommender. **[Finding 38](TESTING_LOG.md) is its mirror**: the same question with
+`gemini-3.6-flash` composing produced a **correct** draft 3/3 — attributes stayed with their own
+products — and `verify` **refused all three**, once on a sentence whose every attribute is verbatim
+in the evidence and whose only inference is the exact pattern `verify.md` lists under *Grounded*. **So
+the verifier is wrong in both directions on one question, and the dangerous direction is the one that
+ships.** **[Finding 39](TESTING_LOG.md) is why nobody knew**: `make verify-probe AGENT=sell` was run
+first and reported *"Fit for the GUARD role"* — 0/10 false refusals, 0/10 missed fabrications — and it
+misses both, because no arm puts two products in one evidence block and its attributed-claim arms use
+short constructed strings rather than real merchant prose. [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)
+makes that probe **the bar** for holding the GUARD role. Two lesser findings: **every provider failure
+is reported as `ProviderUnavailableError`** — a Gemini **503 "experiencing high demand"** reached the
+operator as a bare class name, because `_translate()` ends in a catch-all ([Finding 40](TESTING_LOG.md));
+and **Gemini's thinking tokens are invisible** — `max_tokens=20` returned `completion_tokens: 1` with
+`total_tokens: 19`, and `provider.py` never reads `completion_tokens_details`, so every usage and cost
+figure for a thinking model is under-counted ([Finding 41](TESTING_LOG.md)). That last one **closes the
+2026-09-12 empty-draft question**: `compose` budgets 1500 tokens, Gemini spends them thinking, and
+returns empty with `finish_reason=length` — a budget interaction, not a fault. **CARE answered its
+returns-policy question correctly and `verify` passed it**, so CARE is in better shape than SELL on
+this shop. **No behaviour was fixed** — the verifier's prompt and model are untouched, and every repair for
+Findings 37–41 is a **Rule 4** change needing an eval that does not regress, with the groundedness
+judge still unqualified. **What was added is a test, not a behaviour**: probe arms **I** and **J** over
+an evidence block whose two products have *disjoint* attributes (the old fixture held two waterproof
+shells with taped seams, so it could not express a mis-attribution at all). Arm I is deliberately not
+flagged as a known failure, so **`make verify-probe AGENT=sell` is RED from today until this is
+fixed**, and arm J refuses any "fix" that merely makes the verifier stricter. One setup change outside this repo: Bagisto's own
+gitignored `.env` had `DB_PORT=3307` while MySQL listens on **3308** (the reverse of what
+TESTING_LOG's Setup note says), fixed with one line plus `php artisan config:clear`.
+
+**Next action:** **Decide what to do about [Finding 37](TESTING_LOG.md) — a fabricated product
+attribute that `verify` passes.** It is the first defect this project has found where a false claim
+about a product a shopper would pay for passes every internal check and reaches the sendable point;
+it was found in internal hand-tests and reached no customer. It reproduces 3/3, and
+its repair is a **Rule 4** change needing a measurement the unqualified judge cannot yet provide.
+The connected decisions: whether `verify.md` gains a per-product attribution rule, whether
+`make verify-probe` gains a cross-product arm (without which [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s
+bar keeps passing a verifier that fails both ways), and whether `GUARD` should be a stronger model
+than `llama3.1:8b` at all. **Then** finish Stage 6 §3 and §4, and decide whether the
+judge candidate is adopted. The two are independent and neither blocks the other. **On the judge:
 a candidate now functions and nothing more.** Adopting it is an `.env` change nobody has made, and
 *qualifying* it needs Steps 2 (consistency) and 3 (judge-vs-human agreement), which are unbuilt and
 unapproved, plus a judge-quality dataset that does not exist — nothing in the repository implements
