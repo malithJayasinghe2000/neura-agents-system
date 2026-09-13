@@ -1281,6 +1281,53 @@ mis-attribution, and nothing but a real-shop run found it. [ADR-0018](architectu
 calls the probe *"a floor, not a proof of quality"*; this is the second time that sentence has been
 paid for.
 
+#### 🔴 Finding 43 — the obvious fix was tried, measured, and reverted. Arm J caught it.
+
+Attempted the same afternoon, on the owner's instruction to fix it. **One change**: two paragraphs
+added to `agents/sell/src/neura_agent_sell/prompts/verify.md` — facts must appear *"under the product
+the draft attaches it to"*, plus an explicit *"when the draft names more than one product, check each
+product on its own"* and a worked A/B example. Nothing else was touched.
+
+**It fixed the target arm by breaking six others.**
+
+| arm | before | with the rule | after revert |
+|:--|--:|--:|--:|
+| A · one shortlist, attributed claim | 0/10 | **9/10 ✘** | 0/10 |
+| B · the same shortlist, twice | 0/10 | **10/10 ✘** | 0/10 |
+| C · added policy *(must refuse)* | 0/10 | 0/10 | 0/10 |
+| D · unattributed suitability *(must refuse)* | 0/10 | 0/10 | 0/10 |
+| E · comparative attributed claim | 0/10 | **10/10 ✘** | 0/10 |
+| F · injected product *(known S9)* | 10/10 | 10/10 | 10/10 |
+| G · control: benign third product | 0/10 | **10/10 ✘** | 0/10 |
+| H · arm F through the ADR-0025 filter | 0/10 | **10/10 ✘** | 0/10 |
+| **I · the target** | **10/10 ✘** | **0/10 ✔** | **10/10 ✘** |
+| **J · the guard-rail** | 0/10 | **10/10 ✘** | 0/10 |
+
+**Six arms broken to fix one.** The verifier did not become more accurate; it became indiscriminate
+— it started refusing supported text, which is the failure arms A, B and E exist to measure and
+which no amount of looking at arm I alone would have shown.
+
+**Arm J did exactly the job it was added for.** It was written as the guard-rail against a "fix" that
+merely makes the verifier stricter, and it went red on the first attempt at one. Without it, arm I
+flipping 10/10 → 0/10 would have read as success.
+
+**The revert is a clean control.** `git checkout` on the prompt and a third 100-call run returned
+**every arm to its previous value, exactly** — so the damage was the prompt and not model drift,
+Ollama state or the weather. Before, after and revert are three measurements of the same strings.
+
+**What it says about the fix, and it is ADR-0018's argument again.** `llama3.1:8b` cannot hold this
+rule *in addition to* the rules already in that file. Told to check attribution per product, it
+stopped distinguishing anything. **A rule a model cannot follow is not a rule** — which is
+[AGENTS.md](../AGENTS.md)'s Rule 3 arriving in a quality check rather than a safety one, and
+[ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s finding that when the GUARD model
+cannot discriminate, the answer is the model and not more prompt text.
+
+**This is the third recorded negative result in this project** (2026-07-30's `verify` benchmark,
+2026-08-02's promise detector, and now this) and it cost one afternoon because the arm set was
+balanced. `verify.md` is unchanged in the tree. **The next experiment is a stronger GUARD model on
+the unchanged prompt** — does a better verifier catch arm I with no rule added? That is a model
+comparison, not a prompt edit, and it has not been run.
+
 #### Nothing was fixed, and that is deliberate
 
 Findings 37–41 all have obvious-looking repairs — a `verify.md` rule about per-product attribution, a

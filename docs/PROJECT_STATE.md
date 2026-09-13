@@ -135,7 +135,24 @@ fixed**, and arm J refuses any "fix" that merely makes the verifier stricter. On
 gitignored `.env` had `DB_PORT=3307` while MySQL listens on **3308** (the reverse of what
 TESTING_LOG's Setup note says), fixed with one line plus `php artisan config:clear`.
 
-**Next action:** **Decide what to do about [Finding 37](TESTING_LOG.md) — a fabricated product
+**2026-09-13, last — the obvious fix was tried, measured and reverted; the guard-rail arm caught it**
+([Finding 43](TESTING_LOG.md)). Two paragraphs added to SELL's `verify.md` — facts must appear *under
+the product the draft attaches them to*, plus a per-product instruction and a worked example — fixed
+the target arm **10/10 → 0/10** and broke **six others**: A 0→9, B 0→10, E 0→10, G 0→10, H 0→10 and
+**J 0→10**. The verifier did not become more accurate, it became indiscriminate. **Arm J was added as
+the guard-rail against exactly this and went red on the first attempt at a fix** — without it, arm I
+flipping would have read as success. `git checkout` on the prompt and a third 100-call run returned
+**every arm to its exact previous value**, so the damage was the prompt and not drift. **`verify.md`
+is unchanged in the tree.** The reading is [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s:
+`llama3.1:8b` cannot hold this rule on top of the ones already there, and when the GUARD model cannot
+discriminate the answer is the model, not more prompt text. **Third recorded negative result**, and it
+cost one afternoon because the arm set is balanced.
+
+**Next action:** **Run the probe against a stronger `GUARD` model on the unchanged prompt** — does a
+better verifier catch arm I with no rule added? [Finding 43](TESTING_LOG.md) has ruled out the prompt
+edit on `llama3.1:8b`, so this is now a model comparison rather than a wording question, and it is the
+cheapest remaining experiment: `make verify-probe AGENT=sell CLOUD=1 MODEL=…`, 100 calls, paced. **The
+underlying decision is still [Finding 37](TESTING_LOG.md) — a fabricated product
 attribute that `verify` passes.** It is the first defect this project has found where a false claim
 about a product a shopper would pay for passes every internal check and reaches the sendable point;
 it was found in internal hand-tests and reached no customer. It reproduces 3/3, and
