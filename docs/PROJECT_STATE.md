@@ -148,8 +148,23 @@ is unchanged in the tree.** The reading is [ADR-0018](architecture/adr/0018-guar
 discriminate the answer is the model, not more prompt text. **Third recorded negative result**, and it
 cost one afternoon because the arm set is balanced.
 
-**Next action:** **Run the probe against a stronger `GUARD` model on the unchanged prompt** — does a
-better verifier catch arm I with no rule added? [Finding 43](TESTING_LOG.md) has ruled out the prompt
+**2026-09-13, close of session — the stronger-model comparison was attempted and measured nothing.**
+`make verify-probe AGENT=sell CLOUD=1 MODEL=gemini-3.6-flash` reached **15 answers out of 100** before
+the free tier refused the rest: **arm A 10/10 grounded, arm B 5/10 grounded, arms C–J zero answers.**
+**Arm I — the entire point — was never asked.** Per [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md)
+a rate-limited run is a provider failure and not a result, and it is recorded here as one. The quota
+is `GenerateRequestsPerDayPerProjectPerModel-FreeTier` — **per project, per day, per model** — so a
+second API key on the same project shares the exhausted bucket and will not help; a different
+*project*, or a different *model*, would. Untouched today and therefore still available:
+`gemini-3.5-flash`, `gemini-3.7-flash`. The one thing the 15 answers suggest, and it is a hint rather
+than a finding: a cloud verifier holds the unchanged prompt on supported claims.
+
+**Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
+constraint, stated 2026-09-13: roughly two months for the project, much still to build, and what is
+needed from these two agents now is *stability* rather than scope. **The single blocking defect is
+[Finding 37](TESTING_LOG.md)**, and the cheapest remaining experiment on it is **the probe against a
+stronger `GUARD` model on the unchanged prompt** — does a better verifier catch arm I with no rule
+added? [Finding 43](TESTING_LOG.md) has ruled out the prompt
 edit on `llama3.1:8b`, so this is now a model comparison rather than a wording question, and it is the
 cheapest remaining experiment: `make verify-probe AGENT=sell CLOUD=1 MODEL=…`, 100 calls, paced. **The
 underlying decision is still [Finding 37](TESTING_LOG.md) — a fabricated product
