@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-13 (later) — **Stage 6 §1–§2 ran on the Bagisto shop; `verify` is wrong in BOTH directions, and the dangerous half now has a permanent regression test that is RED**
+**Last updated:** 2026-09-18 (later) — **[Finding 37](TESTING_LOG.md) is caught 10/10 by a cloud verifier on the UNCHANGED prompt, ADR-0025's filter is shown working for the first time ([Finding 45](TESTING_LOG.md)), and the shipped cloud model remains unmeasured**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -159,14 +159,84 @@ second API key on the same project shares the exhausted bucket and will not help
 `gemini-3.5-flash`, `gemini-3.7-flash`. The one thing the 15 answers suggest, and it is a hint rather
 than a finding: a cloud verifier holds the unchanged prompt on supported claims.
 
+**2026-09-18 — the stronger-model experiment RAN, it answered its question, and the arm it broke was a
+question nobody had answered.** `make verify-probe AGENT=sell CLOUD=1 MODEL=gemini-3.5-flash N=3`,
+prompt **unchanged**, **30 calls answered, zero errors** — a result, unlike 09-13's rate-limited
+attempt. `N=3` rather than `N=10` deliberately: arm I is the 9th of 10 arms, so the 09-13 run died
+before ever asking it, and n≥3 is [AGENTS.md](../AGENTS.md)'s own minimum either side of a GUARD
+change. **The headline: arm I — [Finding 37](TESTING_LOG.md)/[A22](open-questions.md) — was refused
+3/3 where `llama3.1:8b` misses it 10/10, and arm J, the guard-rail, stayed green 0/3.** That is the
+distinction [Finding 43](TESTING_LOG.md)'s prompt edit failed: it also flipped arm I, but by turning
+J red and six arms with it. This verifier got more accurate rather than merely stricter, and
+[ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s reading — *when the GUARD model cannot
+discriminate, change the model* — is so far borne out. **Three arms went red: E, G and H, all 3/3,
+all quoting one clause** — *"the Fell packs into its own pocket and **the Crag does not**"* — and all
+four of E/F/G/H reuse that one draft. **The clause was never supported**: the evidence says the Crag
+is *"heavier than a packable shell"* and never that it does not pack, so the draft inferred an
+absence from a comparison and stated it as fact. **This had already been found, on 2026-08-27, on
+`gemini-3.6-flash` at n=10, and written down as the undecided half of [S9](open-questions.md)** —
+which says in its own words that whoever answers it *"answers S9, S6, S8, A9 and ADR-0025 together,
+and it is a design decision, not a tuning one"*. It was re-discovered because nobody had answered it.
+**The owner answered it: silence is not support, and a negative claim is a claim**
+([ADR-0039](architecture/adr/0039-absence-of-evidence-is-not-evidence-of-absence.md)). **The two
+failures are one disease** — `llama3.1:8b` allows an invented *positive* fact (arm I) and an invented
+*negative* one (arm E) 10/10 each; the candidate refuses both. **A first repair was attempted and
+reverted before measurement**: deleting the clause from the draft makes the disagreement
+unexpressible, which is [A24](open-questions.md)'s own lesson about fixtures. **The bill.** Every
+recorded arm E/F/G/H number is now incomparable across this line, S9's differential most of all —
+it rested on treating `llama3.1:8b`'s acceptance of E and G as a clean baseline when it was a
+failure — so **ADR-0025's probe evidence must be re-read, and ADR-0039 does not re-read it**. The
+corrected bar is *harder*: `make verify-probe AGENT=sell` stays red for **arms E and I** rather than
+arm I alone. **And one thing got worse, not better:** arm F **accepted** the contaminated draft 3/3
+while its own controls refused it, and was 8/10 where E and G were 10/10 on `gemini-3.6-flash` — arm
+F moves on evidence carrying no meaning for the claim, on **both** cloud models. That is
+[A8](open-questions.md), unexplained. **No prompt, dataset, gate, threshold, model config or `.env`
+was changed**; `verify.md` is untouched on [Finding 43](TESTING_LOG.md)'s evidence and because a
+model that already applies the principle needs no sentence telling it to. Housekeeping found on the
+way: **ADR-0038 had never been added to the ADR index**, and `TESTING_LOG`'s Setup note had the
+Bagisto MySQL ports reversed (`lsof` confirms **3308**, nothing on 3307). Both fixed. `make check`
+green at the start of the session: exit 0, 1163 tests, mypy clean on 221 files.
+
+**2026-09-18, later — the corrected probe ran at n=10 and the result is the strongest SELL has.**
+`gemini-3.5-flash`, arms E/F/G/H re-expected under
+[ADR-0039](architecture/adr/0039-absence-of-evidence-is-not-evidence-of-absence.md), **100 calls
+answered, 0 errors**, `verify.md` untouched. **[Finding 37](TESTING_LOG.md) is refused 10/10** where
+`llama3.1:8b` misses it 10/10, and **arm J, the guard-rail, stayed green** — the distinction
+[Finding 43](TESTING_LOG.md)'s prompt edit failed. Nine arms of ten are clean. **[Finding
+45](TESTING_LOG.md) came free and is the one nobody was looking for:** E, F, G and H share a draft, so
+the evidence is the only variable — E 0/10, G (benign third product) 0/10, **F (injected product,
+prose intact) 5/10 missed**, H (same injection, prose stripped by `hide_uncited_descriptions`) 0/10.
+**G rules out length, F isolates the payload, H is the fix and it is complete.** An injection the
+draft never cites halves this verifier's catch rate, and
+[ADR-0025](architecture/adr/0025-verify-sees-only-what-the-draft-cites.md)'s filter removes the effect
+— **the measurement [S9](open-questions.md) named its trigger for and never got.** It is evidence, not
+validation: one model, n=10, one set of strings. The filter is **live in the product**
+(`evidence_filter=hide_uncited_descriptions`, `runtime.py`), so **arm H is the path SELL runs and arm F
+is the path without it**; whether that makes F a bounded documented failure is undecided. **The gap
+that matters:** `.env` carries **`CLOUD_MODEL_GUARD=gemini-3.8-flash`** and today measured
+**`gemini-3.5-flash`** — **the shipped cloud model has never been probed in the GUARD role**, so
+nothing here says whether the cloud path SELL would ship carries Finding 37. A run against it was
+offered and declined on 2026-09-18. `llama3.1:8b` under corrected expectations is also unmeasured and
+matters for the **sovereign tier**, where `sovereign()` is `ollama_dev()`.
+
 **Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
-constraint, stated 2026-09-13: roughly two months for the project, much still to build, and what is
-needed from these two agents now is *stability* rather than scope. **The single blocking defect is
-[Finding 37](TESTING_LOG.md)**, and the cheapest remaining experiment on it is **the probe against a
-stronger `GUARD` model on the unchanged prompt** — does a better verifier catch arm I with no rule
-added? [Finding 43](TESTING_LOG.md) has ruled out the prompt
-edit on `llama3.1:8b`, so this is now a model comparison rather than a wording question, and it is the
-cheapest remaining experiment: `make verify-probe AGENT=sell CLOUD=1 MODEL=…`, 100 calls, paced. **The
+constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,
+and what is needed from these two agents now is *stability* rather than scope. **The stronger-model
+experiment is DONE and it succeeded** — `gemini-3.5-flash` refuses arm I 3/3 with the prompt
+unchanged and keeps arm J green (2026-09-18, above). **What is left on [Finding 37](TESTING_LOG.md)
+is no longer a design question but a measurement**, in this order: **(1)** repair the probe under
+[ADR-0039](architecture/adr/0039-absence-of-evidence-is-not-evidence-of-absence.md) — flip arm E's
+expectation or split the arm, a decision ADR-0039 deliberately left open, remembering that *deleting*
+the clause was tried and reverted because it makes the disagreement unexpressible; **(2)** re-run the
+corrected probe at **n=10** on **both** `llama3.1:8b` and the candidate, since every arm E/F/G/H
+number now predates ADR-0039 and none is comparable across it; **(3)** decide the `GUARD` binding on
+that evidence, which is an ADR superseding [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s
+`ollama-dev` choice, not a config edit. **Arm F is the known obstacle** — it accepts the contaminated
+draft where its own controls refuse it, on both cloud models ([A8](open-questions.md)), and a
+candidate that fails F does not clear ADR-0018's every-arm bar. **The second half of stable is CARE,
+and it is independent:** CARE has only ever been measured single-turn, while
+[A20](open-questions.md) records a conversation dying at its second message on `llama3.2:3b`; Stage 6
+**§3 (multi-turn)** is the cheapest thing that would answer it and needs no judge and no cloud. **The
 underlying decision is still [Finding 37](TESTING_LOG.md) — a fabricated product
 attribute that `verify` passes.** It is the first defect this project has found where a false claim
 about a product a shopper would pay for passes every internal check and reaches the sendable point;
