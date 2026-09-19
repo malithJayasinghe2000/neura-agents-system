@@ -372,52 +372,52 @@ browser**: SELL *"I recommend the Lightweight Rain Shell (Product 1315)…"* and
 most items within 30 days…"*. **The first time SELL has ever answered through the widget.** One turn
 each, not an eval, and **passed on cloud** — which is the only thing it says.
 
-**Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
-constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,
-and what is needed from these two agents now is *stability* rather than scope. **The stronger-model
-experiment is DONE and it succeeded** — `gemini-3.5-flash` refuses arm I 3/3 with the prompt
-unchanged and keeps arm J green (2026-09-18, above). **What is left on [Finding 37](TESTING_LOG.md)
-is no longer a design question but a measurement**, in this order: **(1)** repair the probe under
-[ADR-0039](architecture/adr/0039-absence-of-evidence-is-not-evidence-of-absence.md) — flip arm E's
-expectation or split the arm, a decision ADR-0039 deliberately left open, remembering that *deleting*
-the clause was tried and reverted because it makes the disagreement unexpressible; **(2)** re-run the
-corrected probe at **n=10** on **both** `llama3.1:8b` and the candidate, since every arm E/F/G/H
-number now predates ADR-0039 and none is comparable across it; **(3)** decide the `GUARD` binding on
-that evidence, which is an ADR superseding [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s
-`ollama-dev` choice, not a config edit. **Arm F is the known obstacle** — it accepts the contaminated
-draft where its own controls refuse it, on both cloud models ([A8](open-questions.md)), and a
-candidate that fails F does not clear ADR-0018's every-arm bar. **The second half of stable is CARE,
-and it is independent:** CARE has only ever been measured single-turn, while
-[A20](open-questions.md) records a conversation dying at its second message on `llama3.2:3b`; Stage 6
-**§3 (multi-turn)** is the cheapest thing that would answer it and needs no judge and no cloud. **The
-underlying decision is still [Finding 37](TESTING_LOG.md) — a fabricated product
-attribute that `verify` passes.** It is the first defect this project has found where a false claim
-about a product a shopper would pay for passes every internal check and reaches the sendable point;
-it was found in internal hand-tests and reached no customer. It reproduces 3/3, and
-its repair is a **Rule 4** change needing a measurement the unqualified judge cannot yet provide.
-The connected decisions: whether `verify.md` gains a per-product attribution rule, whether
-`make verify-probe` gains a cross-product arm (without which [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s
-bar keeps passing a verifier that fails both ways), and whether `GUARD` should be a stronger model
-than `llama3.1:8b` at all. **Then** finish Stage 6 §3 and §4, and decide whether the
-judge candidate is adopted. The two are independent and neither blocks the other. **On the judge:
-a candidate now functions and nothing more.** Adopting it is an `.env` change nobody has made, and
-*qualifying* it needs Steps 2 (consistency) and 3 (judge-vs-human agreement), which are unbuilt and
-unapproved, plus a judge-quality dataset that does not exist — nothing in the repository implements
-evaluation-strategy §3.1's promise that judge-vs-human agreement is tracked and a drifting judge
-retired. **`make judge-check ROLE_MAP=cloud-prod`** is how the judge is qualified
-against the cloud map — until 2026-09-12 no `make` target passed `--role-map` at all, so
-`judge-check` silently answered for `ollama-dev` and the only route to a cloud answer was to bypass
-`make`. `ROLE_MAP` now reaches `eval`, `eval-one`, `eval-guard-off` and `judge-check`, defaulting to
-the `ollama-dev` the CLI already used. It is deliberately **not** wired into `eval-compare`, which
-names both maps itself, nor into `router-probe`, whose script defaults to `cloud-prod` — giving
-`ROLE_MAP` a value would have made that target's `$(if $(ROLE_MAP),…)` always true and switched its
-provider silently, which is the `AS` collision in AGENTS.md's gotcha table wearing a different name.
-Until a judge is qualified there is still no
-quotable groundedness figure from `cloud-prod`, and [A9](open-questions.md) stays parked — the
-difference is that this is now a measurement task with a named blocker rather than a silent hole.
-Deliberately not decided in ADR-0037: it is a compatibility, quality and cost comparison, and E2's
-warning about free tiers training on submissions now bites, because `graded_care_001` is
-`synthetic: false`.
+**Next action:** **CARE and SELL now work end to end on the cloud path, and the goal has changed shape.**
+The owner's stated purpose, 2026-09-19: **hand both the shop and the agents to another person to test.**
+So "stable" means *another human can install it and use it without the author*, which is a different bar
+from the one this file tracked all week. **What was achieved 2026-09-18/19** — all of it **on cloud, and
+that qualifier is load-bearing** (see the standing note at the top): [Finding 37](TESTING_LOG.md)'s false
+product claim is caught **10/10** by `gemini-3.5-flash` with `verify.md` untouched;
+[ADR-0039](architecture/adr/0039-absence-of-evidence-is-not-evidence-of-absence.md) decided a
+three-week-old question; [A27](open-questions.md) — SELL recommending **nothing** on a shop that stocked
+exactly what was asked for — is fixed in code and measured 3/3 → 3/3; [Finding 49](TESTING_LOG.md) — a
+shopper shown a Python error in the chat box on **every** cloud turn — is fixed; and **both agents have
+now answered through the real widget in a real browser**, which SELL had never done.
+
+**The next session's work, in the order it matters for a handover:**
+
+**1. The setup guide is the most likely thing to fail now, and it cannot be tested from here.**
+`docs/GETTING_STARTED.md` was written on the machine it describes and three of its claims only held
+there — most seriously it told the reader to pull `qwen3.5:9b` when `roles.py` runs **`qwen3:8b`**, so a
+new machine downloaded 6.6 GB of the wrong model and met a model-not-found error on its first question.
+Fixed 2026-09-19, along with the macOS `make`/Xcode-licence trap and the cloud-embedder note. **Nobody
+but the author has ever installed this project.** The highest-value next input is the tester's list of
+everywhere they got stuck — worth more than anything further that can be found from this machine.
+
+**2. `make verify-probe AGENT=sell` is still RED and should stay red.** Under ADR-0039's corrected
+expectations, measured at n=10 on both sides with 100 calls and 0 errors each: `llama3.1:8b` fails
+**four** arms (E, G, H, I), `gemini-3.5-flash` fails **one** (F). **Neither clears
+[ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s every-arm bar.** Arm F is the open
+question — the two models fail it in opposite directions and
+[Finding 48](TESTING_LOG.md) shows `llama3.1:8b` only passes it by accident, refusing because of the
+injection rather than because of the claim. **Do not make this green by lowering the bar.**
+
+**3. Stage 6 §4 (shadow mode) is still untouched**, and it is the one that must not meet a real shopper
+before a human-response path exists: it saves a hidden draft, notifies nobody and guarantees no reply.
+If the tester is to use shadow mode, that gap is theirs to meet first.
+
+**4. Everything is n=1.** One conversation, one shop, one model, questions written by the people who
+built the system. [B2](open-questions.md) — no merchant on live traffic — is unchanged and is still the
+top risk. **The test shop proves the software works; it cannot prove a shopper is helped.**
+
+**Deliberately NOT to be reopened by the next session**, both owner decisions of 2026-09-19: **which
+cloud model is used** (cloud was tested, that is enough, do not re-litigate `3.5` vs `3.8`), and
+**re-testing on `ollama-dev` anything that already passed on cloud** — a local failure nobody can act on
+this month is a distraction. The owner's stated intent is that **future development moves to local
+models**, at which point every cloud result becomes a claim about a model the product no longer runs.
+**That switch is an ADR when it is made, not a preference**, and the standing note at the top of this
+file and of [TESTING_LOG.md](TESTING_LOG.md) exists so nobody mistakes a cloud green tick for a local one.
+
 
 **And on Stage 6, which is the half of this that needs no judge at all.** It is the oldest ◐ in
 [TESTING_LOG.md](TESTING_LOG.md), and the gap is a shape rather than a defect: **the product has
