@@ -502,6 +502,41 @@ class TestTheRoleMapAnEvalRunsUnderIsExplicit:
     #: Every eval target that runs a model and therefore must name its map.
     MODEL_RUNNING = ("judge-check", "eval", "eval-guard-off", "eval-one")
 
+    #: **Not an eval target, and it cost an hour on 2026-09-19.** The hand-run
+    #: smoke scripts run real models too, and `care-check` **hardcoded**
+    #: `ollama-dev` with no way to override it — so it could never be pointed at
+    #: a cloud model, and nobody noticed because the failure is silent: it runs,
+    #: it answers, and the only clue is a model name printed nowhere. That is
+    #: the same fault this class was written for, one directory away, and the
+    #: class did not cover it because its tuple said "eval target".
+    #:
+    #: `sell-ask` is absent on purpose: it reads `NEURA_ROLE_MAP` itself via
+    #: `_role_map_name()` rather than taking a flag, which is the documented
+    #: difference between an interactive hand-run and a suite.
+    MODEL_RUNNING_SMOKE = ("care-check",)
+
+    def test_every_model_running_smoke_target_names_its_role_map(self) -> None:
+        """A script that runs a model must never pick the map by itself."""
+        missing = [t for t in self.MODEL_RUNNING_SMOKE if "--role-map" not in _make_recipe(t)]
+        assert not missing, (
+            f"{missing} run real models without naming a role map. `care-check` "
+            "hardcoded ollama-dev until 2026-09-19 and could not be pointed at a "
+            "cloud model at all — silently, because nothing printed which map won."
+        )
+
+    def test_a_smoke_target_still_defaults_to_the_local_map(self) -> None:
+        """Unset `ROLE_MAP` must keep a hand-run free and local — these scripts
+        are run casually and by hand, and a default that spends API quota is a
+        bill nobody chose."""
+        for target in self.MODEL_RUNNING_SMOKE:
+            assert "--role-map ollama-dev" in _make_recipe(target), target
+
+    def test_an_explicit_role_map_reaches_a_smoke_target(self) -> None:
+        for target in self.MODEL_RUNNING_SMOKE:
+            recipe = _make_recipe(target, "ROLE_MAP=cloud-prod")
+            assert "--role-map cloud-prod" in recipe, target
+            assert "ollama-dev" not in recipe, target
+
     def test_every_model_running_eval_target_names_its_role_map(self) -> None:
         """A contract over the set, not four copies of one assertion: a target
         added later without a map is the failure this catches."""
