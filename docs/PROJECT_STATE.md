@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-19 (later) — **CARE held as a CONVERSATION for the first time: [A20](open-questions.md) does not reproduce, the "how much is it?" defect was WITHDRAWN as a harness fault the same day, and CARE answers a pronoun follow-up correctly**
+**Last updated:** 2026-09-19 (last) — **both agents have now been held as CONVERSATIONS. CARE passes. SELL resolves pronouns correctly and then recommends NOTHING ([A27](open-questions.md)), because `plan`'s multi-word queries meet a literal AND-search — and a conversation makes it worse each turn**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -268,6 +268,31 @@ failing machine-wide mid-session with *"You have not agreed to the Xcode license
 `sudo xcodebuild -license` is the fix and the scripts were run directly meanwhile. **Also decided by
 the owner 2026-09-19: the model question is closed for now** — testing on a cloud model is enough, and
 which flash model ships is not to be reopened as a blocker.
+
+**2026-09-19, last — Stage 6 §3 for SELL. It had no multi-turn harness at all; `sell-ask` now takes
+several questions and runs them in one thread with the history carried, the way `turns.py` carries it.**
+Three messages, `cloud-prod`, `gemini-3.5-flash`, real Bagisto shop, `tn_sell_ask`, **no re-index**.
+**It could not run at first**: `Retriever.__init__` builds a `Namespace` from `llm.embedding_model`, so
+an unset `CLOUD_MODEL_EMBEDDER` raises **at construction**, before a question is asked and whether or not
+retrieval is used — and `cloud-prod` leaves that role unset on purpose. **`sell-ask` crashed on the cloud
+map**, and every previous "SELL on a cloud model" run was `hybrid`, which is why nobody had hit it. It now
+degrades as it already does without a database. **The conversation itself works**: `route` turned *"is it
+good for heavy rain?"* into *"waterproof jacket good for heavy rain"*, so history reaches it and is used.
+**[Finding 47](TESTING_LOG.md)/[A27](open-questions.md) is the result and it is bad**: all three turns
+returned the fixed `no_match` message while the shop carries **1311** and **1315**, both `active` — the
+two products Finding 37 recommended from this same shop six days earlier. Measured against the shop
+directly: `q=waterproof jacket` → **0**, `q=waterproof` → 2, `q=jacket` → 4. **`plan` chose *"waterproof
+jacket"* and the search is an AND over terms.** **The multi-turn half is the sharp part** — correct
+pronoun resolution produced a *longer* need, so turn 2 searched three terms and matched even less: **a
+conversation degrades as it proceeds**, the opposite of what context should buy. **And it gave up after
+one search, `tool calls used 1/4`**, with budget for three more. **What is right**: nothing was invented,
+`no_match` is a fixed string with no model behind it, and it says *"this is one search, not a statement
+about what the store carries"* — [ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md)
+working. **It failed safe and lost the sale.** **n=1, one model, one shop**; `ollama-dev` found both
+jackets on 2026-09-13, so query formulation differs by model — a fact, not a model recommendation. **And
+[A22](open-questions.md) could not be tested in conversation at all**, because nothing was ever
+recommended. Any fix — broadening, retrying, splitting terms — is a **Rule 4** change and is **not
+decided**.
 
 **Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
 constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,

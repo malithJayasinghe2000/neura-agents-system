@@ -52,7 +52,7 @@ from neura_agent_sell import build_runtime, compile_graph
 from neura_agent_sell.tools import TOOL_SCOPES
 from neura_commerce import AdapterError
 from neura_core import Database, configure_logging, load_env
-from neura_llm import LLMClient, ModelRole
+from neura_llm import LLMClient, ModelRole, RoleNotConfiguredError
 
 GREEN = "\033[32m"
 RED = "\033[31m"
@@ -261,7 +261,12 @@ async def _ask(
     token: str,
     customer: str | None,
     retriever: Retriever | None,
+    history: list[dict[str, str]] | None = None,
 ) -> int:
+    # The SAME list object the caller holds: this appends to it, so a
+    # sequence of questions becomes one conversation rather than N.
+    if history is None:
+        history = []
     llm = LLMClient.from_role_map_name(_role_map_name())
     adapter = GenericAdapter(base_url=url, tenant_id=TENANT, token=token)
 
@@ -313,7 +318,20 @@ async def _ask(
     final: dict[str, Any] = {}
 
     async for event in graph.astream(
-        initial_state(tenant_id=TENANT, conversation_id="cnv_ask", message=question),
+        initial_state(
+            tenant_id=TENANT,
+            conversation_id="cnv_ask",
+            message=question,
+            # **Carried, not inferred.** `initial_state` defaults this to empty
+            # and the graph never reads history from the checkpointer, so a
+            # shared `thread_id` buys LangGraph continuity and gives `route`
+            # nothing to resolve "it" against. `neura-api` loads it and passes
+            # `history=` on every turn; a harness that does not is measuring an
+            # agent the product never runs. That mistake was made in
+            # `care_smoke_test.py` on 2026-09-19 and read as a CARE defect for
+            # several hours (withdrawn A26).
+            history=history,
+        ),
         {"configurable": {CONFIG_KEY: runtime, "thread_id": "cnv_ask"}},
         stream_mode="updates",
     ):
@@ -355,11 +373,14 @@ async def _ask(
         f"/{runtime.budget.max_tool_calls}{spend}{OFF}\n"
     )
 
+    history.append({"role": "shopper", "content": question})
+    history.append({"role": "agent", "content": str(final.get("reply", ""))})
+
     await adapter.aclose()
     return 0
 
 
-async def run(question: str, url: str, token: str, customer: str | None) -> int:
+async def run(questions: list[str], url: str, token: str, customer: str | None) -> int:
     """Open a tenant-scoped session, build the retriever, then ask.
 
     Degrades rather than refuses when the database is down: SELL answers from
@@ -382,16 +403,65 @@ async def run(question: str, url: str, token: str, customer: str | None) -> int:
             f"\n  start it with `make up && make migrate`.{OFF}"
         )
         try:
-            return await _ask(question, url, token, customer, None)
+            return await _conversation(questions, url, token, customer, None)
         finally:
             await database.dispose()
 
     try:
         async with database.tenant_session(TENANT) as session:
-            retriever = Retriever(PostgresVectorStore(session), llm, tenant_id=TENANT)
-            return await _ask(question, url, token, customer, retriever)
+            try:
+                retriever = Retriever(PostgresVectorStore(session), llm, tenant_id=TENANT)
+            except RoleNotConfiguredError as exc:
+                # **Degrade, exactly as the no-database path above degrades.**
+                # `Retriever.__init__` builds a `Namespace` from
+                # `llm.embedding_model`, so an unconfigured `EMBEDDER` raises at
+                # CONSTRUCTION — before any question is asked and whether or not
+                # retrieval would have been used. On `cloud-prod` that is the
+                # normal state: `CLOUD_MODEL_EMBEDDER` is deliberately unset
+                # (roles.py hardcodes no model), so this crashed the whole run.
+                #
+                # Catalogue search is unaffected — `search_products` is a tool
+                # call to the shop, not a vector lookup — which is why running
+                # on is the right answer rather than refusing.
+                #
+                # **Narrow on purpose.** Only `RoleNotConfiguredError` means
+                # "this role is unconfigured"; anything else is a real fault and
+                # still propagates, which is ADR-0037's fail-open lesson.
+                print(
+                    f"\n  {YELLOW}no embedder in this role map — running without retrieval.{OFF}"
+                    f"\n  {DIM}{exc}"
+                    f"\n  catalogue tools still work; indexed text will not be searched.{OFF}"
+                )
+                return await _conversation(questions, url, token, customer, None)
+            return await _conversation(questions, url, token, customer, retriever)
     finally:
         await database.dispose()
+
+
+async def _conversation(
+    questions: list[str],
+    url: str,
+    token: str,
+    customer: str | None,
+    retriever: Retriever | None,
+) -> int:
+    """Every question in ONE thread, with the history carried between them.
+
+    **One question is the degenerate case, not a separate mode.** `sell-ask` was
+    single-turn and SELL had therefore never been driven as a conversation at
+    all — `care_smoke_test.py` gained a multi-turn harness on 2026-09-19 and
+    SELL had none, which is the gap this closes.
+
+    The exit code is the WORST of the turns: a conversation whose third message
+    failed did not succeed, and returning the last turn's code would hide it.
+    """
+    history: list[dict[str, str]] = []
+    worst = 0
+    for position, question in enumerate(questions, start=1):
+        if len(questions) > 1:
+            print(f"\n  {BOLD}── message {position} of {len(questions)} {'─' * 52}{OFF}")
+        worst = max(worst, await _ask(question, url, token, customer, retriever, history))
+    return worst
 
 
 def main() -> None:
@@ -408,7 +478,12 @@ def main() -> None:
         default=None,
         help="Accepted for symmetry with care-ask. SELL reads no customer record.",
     )
-    parser.add_argument("question", help="What the shopper types")
+    parser.add_argument(
+        "question",
+        nargs="+",
+        help="What the shopper types. Give several and they become ONE conversation, "
+        "in one thread, with the history carried between them.",
+    )
     args = parser.parse_args()
 
     if not args.url.startswith(("http://", "https://")):

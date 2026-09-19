@@ -1562,6 +1562,75 @@ harness at all** — `sell-ask` is one question — and §4 (shadow) is untouche
 
 ---
 
+### 🔴 2026-09-19 (later) — Stage 6 §3 for SELL: the conversation works, and it recommends NOTHING
+
+**SELL had no multi-turn harness at all**, so `sell-ask` was given one: it now takes several questions
+as positional arguments and runs them **in one thread with the history carried between them**, the way
+`turns.py` carries it. One question is the degenerate case, not a separate mode. Exit code is the
+**worst** of the turns.
+
+Three messages, `cloud-prod`, `gemini-3.5-flash` on all roles, real Bagisto shop, `tn_sell_ask`,
+**no re-index**.
+
+#### 🟠 It could not run at all first: `cloud-prod` has no embedder
+
+`Retriever.__init__` builds a `Namespace` from `llm.embedding_model`, so an unset `CLOUD_MODEL_EMBEDDER`
+raises `RoleNotConfiguredError` **at construction** — before a question is asked, and whether or not
+retrieval would ever be used. `cloud-prod` leaves that role unset deliberately (roles.py hard-codes no
+model), so **`sell-ask` crashed on the cloud map**. It now degrades exactly as it already does without a
+database, and says so. Catalogue search is unaffected: `search_products` is a tool call to the shop, not
+a vector lookup. **Every previous "SELL on a cloud model" run was `hybrid`, not `cloud-prod`** — which is
+why this had never been hit.
+
+#### ✅ The conversation itself works — the pronoun was resolved
+
+| | shopper | `route` resolved the need to |
+|:--|:--|:--|
+| 1 | *"I need a waterproof jacket"* | `waterproof jacket` |
+| 2 | *"is it good for heavy rain?"* | **`waterproof jacket good for heavy rain`** |
+| 3 | *"how much is it?"* | — |
+
+**Message 2 turned *"it"* into *"waterproof jacket"*.** History reaches `route` and is used. Intent
+`recommend` at confidence 1.00 then 0.90; `guard` clean; no crash, no escalation.
+
+#### 🔴 Finding 47 — every turn answered "I can't find anything", and the shop has exactly what was asked for
+
+All three replies were the fixed `no_match` message. The catalogue **does** carry
+**1311 Waxed Cotton Field Jacket** and **1315 Lightweight Rain Shell**, both `active`, and Finding 37
+recommended both from this same shop six days earlier.
+
+**The cause is query formulation meeting a literal search.** `plan` chose
+`search_products({'query': 'waterproof jacket'})` — a reasonable query — and the shop's search requires
+**every** term to match:
+
+| `q=` | results |
+|:--|--:|
+| `waterproof jacket` | **0** |
+| `waterproof` | 2 — Lightweight Rain Shell, Waterproof Hiking Shoe |
+| `jacket` | 4 — includes Waxed Cotton Field Jacket |
+| `rain` | 4 |
+
+**And the conversation makes it worse, turn by turn.** Message 2's resolved need was longer, so `plan`
+searched `'waterproof jacket heavy rain'` — three terms, **also zero**. Pronoun resolution is working
+*correctly* and feeding a search that punishes every extra word. **A conversation degrades as it
+proceeds**, which is the opposite of what more context should buy.
+
+**It gave up after one search with three-quarters of its budget unspent** — `tool calls used 1/4` on
+every turn. `plan` chose one query, `act` ran it, `shortlist` saw nothing and `no_match` fired. Nothing
+broadened the query or tried again.
+
+**What is right about it, and it matters:** the reply is honest. `no_match` is a fixed string with no
+model behind it, and it says *"This is one search, not a statement about what the store carries"* —
+[ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md) working as designed. **The
+agent did not invent a product.** It failed safe and lost the sale.
+
+**Scope: n=1, one model, one shop, three messages.** The 2026-09-13 `ollama-dev` run *did* find both
+jackets, so query formulation differs by model — recorded as a fact, not as a model recommendation.
+**And a consequence for [A22](open-questions.md): the cross-product fabrication could not be tested in
+conversation at all**, because nothing was ever recommended.
+
+---
+
 ## Stage 7 — the widget ✅
 
 What a shopper actually sees. Needs the API running.
