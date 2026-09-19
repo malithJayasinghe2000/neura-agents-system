@@ -141,7 +141,7 @@ make llm-check
 ```
   role          model               capabilities
   router        llama3.2:3b         json.object, json.schema, streaming, tools.native
-  reasoner      qwen3.5:9b          json.object, json.schema, streaming, tools.native
+  reasoner      qwen3:8b            json.object, json.schema, streaming, tools.native
   guard         llama3.1:8b         json.object, json.schema, streaming, tools.native
   embedder      nomic-embed-text    json.object, json.schema, streaming
   summarizer    llama3.1:8b         json.object, json.schema, streaming, tools.native
@@ -353,7 +353,7 @@ Five jobs exist:
 | Job | What it does | Currently |
 |:--|:--|:--|
 | `ROUTER` | Works out what the customer is asking | `llama3.2:3b` |
-| `REASONER` | Writes the answer, decides which tools to use | `qwen3.5:9b` |
+| `REASONER` | Writes the answer, decides which tools to use | `qwen3:8b` |
 | `GUARD` | Checks the answer is supported by the evidence | `llama3.1:8b` — **not** the 3B, and `make verify-probe` is why ([ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)) |
 | `EMBEDDER` | Turns text into searchable numbers | `nomic-embed-text` |
 | `SUMMARIZER` | Writes handover notes for humans | `llama3.1:8b` |

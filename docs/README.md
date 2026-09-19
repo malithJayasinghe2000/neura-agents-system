@@ -15,6 +15,7 @@ Everything needed to understand what this project is, why it is built this way, 
 | [agents/](agents/README.md) | Which agents are designed (one) and which are not (four). |
 | [WALKTHROUGH.md](WALKTHROUGH.md) | **For the person who owns this project.** Every layer explained bottom to top, the full journey of one question, and the command that proves each feature works. Start here if you need to understand or test the whole system. |
 | [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) | **Written for someone outside this repository** — a merchant's developer connecting their shop. Plain language; the [spec](spec/generic-commerce-interface-v1.md) is the precise contract. |
+| [CONNECTING_THE_SHOP.md](CONNECTING_THE_SHOP.md) | Wiring a shop and NEURA together — the two tokens, in the order they must be done |
 
 ---
 
