@@ -34,7 +34,8 @@ Everything built so far runs with **Ollama only**. There is no connection to any
 | **git** | Version control | `git --version` |
 | **Node.js 20+** | Runs the merchant console only — nothing else here needs it | `node --version` |
 
-All four are already installed on this machine. On a fresh machine:
+**This guide is written for someone setting the project up for the first time**, on their own
+machine — not for the machine it was developed on. Install whichever of the above you do not have:
 
 ```bash
 # uv
@@ -46,27 +47,44 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 > **Note:** `uv` installs to `~/.local/bin`. If `uv --version` says "command not found", either restart your terminal or run `source $HOME/.local/bin/env`.
 
+> **macOS only, and it stops everything.** If any `make` command prints *"You have not agreed to the
+> Xcode and Apple SDKs license"*, `make` itself is blocked until you accept Apple's terms — nothing to
+> do with this project, and it hit this machine on 2026-09-19. One command, then it never returns:
+>
+> ```bash
+> sudo xcodebuild -license accept
+> ```
+>
+> The word `accept` matters: without it you must page through the whole licence and type `agree`.
+
 ### The AI models
 
-Four are needed. They total about 14 GB and are already on this machine:
+Four are needed, totalling roughly 12 GB. This takes a while on a slow connection — start it before
+you read on:
 
 ```bash
 ollama pull llama3.2:3b        # 2.0 GB — fast, for classification
 ollama pull llama3.1:8b        # 4.9 GB — checks answers are true, and writes handovers
-ollama pull qwen3.5:9b         # 6.6 GB — the main thinker
+ollama pull qwen3:8b           # 5.2 GB — the main thinker
 ollama pull nomic-embed-text   # 274 MB — turns text into numbers for search
 
 ollama list                    # confirm all four appear
 ```
 
-**Why three?** Different jobs need different sizes. Classifying "is this about an order?" doesn't need a large model, and a small one answers in a fraction of the time. Only the hard reasoning uses the big model. This is what the code calls **roles** — see [§5](#5-the-one-idea-worth-understanding).
+> **Corrected 2026-09-19.** This said `qwen3.5:9b`, which **is not the model the code runs**.
+> `roles.py` defaults `REASONER` to **`qwen3:8b`**. Both happen to be present on the machine this
+> guide was written on, so the mistake was invisible there — but anyone following these steps exactly
+> downloaded 6.6 GB of the wrong model and never got the right one, and the first real question would
+> have failed with a model-not-found error. **If you already pulled `qwen3.5:9b`, you do not need it.**
+
+**Why four?** Different jobs need different sizes. Classifying "is this about an order?" doesn't need a large model, and a small one answers in a fraction of the time. Only the hard reasoning uses the big model. This is what the code calls **roles** — see [§5](#5-the-one-idea-worth-understanding).
 
 ---
 
 ## 2. Set the project up
 
 ```bash
-cd ~/Developer/neura-agents
+cd /path/to/neura-agents      # wherever you cloned it
 
 uv sync                        # installs everything, ~1 minute the first time
 cp .env.example .env           # your local settings
@@ -463,6 +481,20 @@ If you switch `NEURA_ROLE_MAP` to `hybrid` without setting the `CLOUD_*` variabl
 ```
 
 Your same Gemini key works for those too, if you want to try `hybrid` later.
+
+> **`CLOUD_MODEL_EMBEDDER` is normally left unset, and you should know what that costs.** `roles.py`
+> hard-codes no model for it, so on `cloud-prod` the `EMBEDDER` role is unconfigured and **retrieval is
+> switched off**: the agent answers from live shop lookups only, and indexed policy text is not
+> searched. That is a supported way to run — the API logs `retrieval_unavailable_no_embedder` and
+> carries on.
+>
+> **Until 2026-09-19 it was not supported, it was fatal.** Building the retriever raised on *every
+> turn, before the graph ran*, and a shopper asking a question in the widget was shown
+> `Role map 'cloud-prod' needs configuration for role 'embedder'` in the chat box. It went unseen for
+> weeks because every earlier cloud run used `hybrid`, which *does* configure an embedder
+> ([Finding 49](TESTING_LOG.md)). If you want retrieval on a cloud map you must set the variable **and
+> re-index**, because embeddings from different models are not comparable — see
+> [llm-abstraction §5.2](architecture/llm-abstraction.md).
 
 ---
 
