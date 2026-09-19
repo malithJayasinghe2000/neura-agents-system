@@ -5,6 +5,21 @@
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
 **Last updated:** 2026-09-19 (last) — **both agents held as CONVERSATIONS, and both now work. CARE passes; SELL's "recommends nothing" defect ([A27](open-questions.md)) is FIXED in code, measured 3/3 `no_match` → 3/3 answered with every claim verbatim**
+> ### ⚠️ Read every green result in this file as "passed **on cloud**"
+>
+> **Owner's decision, 2026-09-19:** finish CARE and SELL on a cloud model, and **do not re-test on
+> `ollama-dev` for now** — a local failure nobody can act on this month is a distraction. Correct for
+> the deadline, and it changes what a ✅ means here.
+>
+> **They are not interchangeable, and that is measured** — same code, same prompt, same 100 strings:
+> `gemini-3.5-flash` catches the [Finding 37](TESTING_LOG.md) false product claim **10/10** and
+> `llama3.1:8b` catches it **0/10**. `verify.md` untouched on both sides; only the model differed.
+>
+> **The local path is UNTESTED, not passing.** The owner's stated intent is that future development
+> moves to local models, at which point every cloud result here describes a model the product no longer
+> runs. **Nothing is cancelled; it is postponed** — a recorded trade, not an oversight. **That switch is
+> an ADR when it is made, not a preference.**
+
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -320,6 +335,24 @@ were run directly, and the only failures are the **ten `test_architecture` cases
 `make`**. **One test is owed when `make` works again**: `care-check` is now a model-running target that
 names its role map, and `MODEL_RUNNING` in `test_architecture.py` does not cover it — the contract that
 would have caught the hardcoded `ollama-dev` in the first place.
+
+**2026-09-19, closing — the `GUARD` before/after now exists on both sides at n=10, same corrected bar,
+100 calls and 0 errors each.** `llama3.1:8b` fails **four** arms (E, G, H, I); `gemini-3.5-flash` fails
+**one** (F). On the question the whole exercise was for — [Finding 37](TESTING_LOG.md), arm I — the
+local verifier misses a false product claim **10/10** and the cloud one catches it **10/10**, with
+`verify.md` untouched on both sides. **[Finding 48](TESTING_LOG.md): `llama3.1:8b` passes arm F for the
+wrong reason.** E, F, G and H are one draft; it calls that draft grounded in E, G and H and refuses it
+only in F, the arm carrying the injection — so the refusal is triggered by the hostile text, not by the
+claim. That is [S9](open-questions.md)'s finding seen from the corrected angle, and it is why F's
+`documents_a_known_failure` flag could not survive ADR-0039. **The two models fail F in opposite
+directions** — the local one refuses because of the injection, the cloud one is distracted by it into
+accepting (5/10, a coin flip, where its own controls are 0/10). **Neither holds the arm for a good
+reason and [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s every-arm bar is unmet by
+both, so `make verify-probe AGENT=sell` stays RED.** **Also closed today:** `make` was unblocked
+(`sudo xcodebuild -license accept`) and **`make check` is green — exit 0, 1173 passed, mypy 221 files,
+7 contracts kept, platform independence and graded evidence both ✔**; and the role-map contract was
+widened to cover model-running **smoke** targets, not just eval ones — the gap that let `care-check`
+hardcode `ollama-dev` and cost an hour.
 
 **Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
 constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,
