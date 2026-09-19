@@ -61,6 +61,7 @@ from neura_core.tenancy import (
     resolve_turn_mode,
 )
 from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
+from neura_llm import RoleNotConfiguredError
 
 log = get_logger(__name__)
 
@@ -397,8 +398,37 @@ class TurnService:
         shopper's query is a real cost, and a meter that counted the reasoner
         but not the embedder would under-report the cheap calls that happen on
         every single turn.
+
+        **Returns `None` when the role map configures no embedder, and that is a
+        shopper-facing bug fix rather than tidiness.** `Retriever.__init__`
+        builds a `Namespace` from `llm.embedding_model`, so an unconfigured
+        `EMBEDDER` raised **here, on every turn, before the graph ran** — and
+        `cloud-prod` leaves that role unset deliberately, since `roles.py`
+        hard-codes no model and `CLOUD_MODEL_EMBEDDER` is normally empty. Driven
+        through the real widget in a real browser on 2026-09-19, a shopper
+        asking *"I need a waterproof jacket"* was shown
+        `Role map 'cloud-prod' needs configuration for role 'embedder'` in the
+        chat box.
+
+        **An agent without retrieval still answers** — its tools read the shop
+        live, and `retrieve` already handles an absent retriever — so degrading
+        is right and refusing the turn is not. A tenant *with* an embedder is
+        unaffected.
+
+        **Only `RoleNotConfiguredError` is caught.** Any other failure is a real
+        fault and still propagates: ADR-0037's fail-open lesson, which is that
+        "this is unconfigured" must be one specific exception and never a bare
+        `except`.
         """
-        return Retriever(DatabaseVectorStore(self._db, tenant_id), llm, tenant_id=tenant_id)  # type: ignore[arg-type]
+        try:
+            return Retriever(DatabaseVectorStore(self._db, tenant_id), llm, tenant_id=tenant_id)  # type: ignore[arg-type]
+        except RoleNotConfiguredError as exc:
+            log.warning(
+                "retrieval_unavailable_no_embedder",
+                tenant_id=tenant_id,
+                detail=str(exc),
+            )
+            return None
 
 
 def _delta(outcome: TurnOutcome, metered: MeteredLLM, *, conversation_started: bool) -> UsageDelta:

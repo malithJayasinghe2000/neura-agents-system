@@ -354,6 +354,24 @@ both, so `make verify-probe AGENT=sell` stays RED.** **Also closed today:** `mak
 widened to cover model-running **smoke** targets, not just eval ones — the gap that let `care-check`
 hardcode `ollama-dev` and cost an hour.
 
+**2026-09-19, widget — [Finding 49](TESTING_LOG.md): SELL could not serve one turn on `cloud-prod`, and
+the shopper saw the exception in the chat box.** Found by driving the **real widget in real headless
+Chrome** against the running API and the real shop — the path a tester will use, and the one this file
+recorded as never having been tried for SELL. The reply drawn was
+`Role map 'cloud-prod' needs configuration for role 'embedder'`. **`TurnService._retriever`
+(`apps/neura-api/.../turns.py`) built `Retriever(...)` unconditionally**, and `Retriever.__init__`
+derives a `Namespace` from `llm.embedding_model`, so an unset `EMBEDDER` raised **on every turn, before
+the graph ran** — and `cloud-prod` leaves that role unset deliberately. **Every tenant on the cloud map
+was broken for every message, on both agents and both transports.** Nobody had seen it because every
+previous cloud run went through `hybrid` (which configures an embedder) or through scripts building
+their own runtime; **nothing had ever served a turn through the API on `cloud-prod`.** Fixed by
+degrading rather than refusing — `_retriever` returns `None` and logs
+`retrieval_unavailable_no_embedder`; the agent still answers because its tools read the shop live, and
+only `RoleNotConfiguredError` is caught. **Then both agents passed through the widget in a real
+browser**: SELL *"I recommend the Lightweight Rain Shell (Product 1315)…"* and CARE *"You can return
+most items within 30 days…"*. **The first time SELL has ever answered through the widget.** One turn
+each, not an eval, and **passed on cloud** — which is the only thing it says.
+
 **Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
 constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,
 and what is needed from these two agents now is *stability* rather than scope. **The stronger-model

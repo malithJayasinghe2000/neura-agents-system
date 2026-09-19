@@ -1752,6 +1752,50 @@ question — [Finding 37](#), arm I — the local verifier misses a false produc
 
 ---
 
+### 🔴 2026-09-19 (widget) — Finding 49: SELL could not serve a single turn on `cloud-prod`, and the shopper saw the exception
+
+**Driven through the REAL widget in REAL headless Chrome**, against the running API and the real
+Bagisto shop — the path a tester will actually use, and the one
+[PROJECT_STATE](PROJECT_STATE.md) recorded as *"SELL has never been driven through the widget on the
+real storefront at all"*. First attempt:
+
+```
+✘ the real API, in a real browser
+    drawn as `error`, expected `assistant`
+      [shopper] 'I need a waterproof jacket'
+      [error] "Role map 'cloud-prod' needs configuration for role 'embedder': CLOUD_M"
+```
+
+**A shopper was shown a Python configuration error in the chat box.**
+
+**The same fault as the `sell-ask` crash earlier the same day, but this one is in the product.**
+`TurnService._retriever` (`apps/neura-api/src/neura_api/turns.py`) built `Retriever(...)`
+unconditionally; `Retriever.__init__` derives a `Namespace` from `llm.embedding_model`, so an
+unconfigured `EMBEDDER` raised **on every turn, before the graph ran**. `cloud-prod` leaves that role
+unset deliberately — `roles.py` hard-codes no model and `CLOUD_MODEL_EMBEDDER` is normally empty — so
+**every tenant on the cloud map was broken for every message**, on both agents and both transports.
+
+**Why nobody had seen it.** Every previous cloud run of either agent went through `hybrid` (an
+`ollama-dev` base with cloud overrides), which *does* configure an embedder, or through scripts that
+built their own runtime. Nothing had ever served a turn through the API on `cloud-prod`.
+
+**Fixed by degrading, not refusing**: `_retriever` returns `None` and logs
+`retrieval_unavailable_no_embedder`. An agent without retrieval still answers — its tools read the shop
+live and `retrieve` already handles an absent retriever. Only `RoleNotConfiguredError` is caught; any
+other failure still propagates (ADR-0037's fail-open lesson).
+
+#### ✅ Both agents then passed through the widget, in a real browser, on cloud
+
+| agent | message | reply |
+|:--|:--|:--|
+| **SELL** | *"I need a waterproof jacket"* | *"I recommend the Lightweight Rain Shell (Product 1315), which is curren…"* |
+| **CARE** | *"what is your returns policy?"* | *"You can return most items within 30 days of delivery for a full refund…"* |
+
+**This is the first time SELL has ever answered through the widget.** One turn each, not an eval —
+and **passed on cloud**, which is the only thing it says.
+
+---
+
 ## Stage 7 — the widget ✅
 
 What a shopper actually sees. Needs the API running.
