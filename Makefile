@@ -190,8 +190,9 @@ router-probe:  ## A11: can this model hold the ROUTER role? [MODEL=… ROLE_MAP=
 	uv run python scripts/router_probe.py \
 	  $(if $(_role_map_set),--role-map $(ROLE_MAP),) $(if $(MODEL),--model $(MODEL),)
 
-care-check:  ## Hold real conversations with CARE against a REAL shop: make care-check URL=... TOKEN=...
-	uv run python scripts/care_smoke_test.py --url $(URL) --token $(TOKEN)
+care-check:  ## Hold real conversations with CARE against a REAL shop: make care-check URL=... TOKEN=... [ROLE_MAP=cloud-prod]
+	uv run python scripts/care_smoke_test.py --url $(URL) --token $(TOKEN) \
+	  --role-map $(ROLE_MAP)
 
 # CUSTOMER, not AS. `AS` is a BUILT-IN make variable — the assembler, defaulting
 # to `as` — so `$(if $(AS),...)` is always true and every run would silently

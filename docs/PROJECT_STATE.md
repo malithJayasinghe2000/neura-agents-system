@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-18 (later) — **[Finding 37](TESTING_LOG.md) is caught 10/10 by a cloud verifier on the UNCHANGED prompt, ADR-0025's filter is shown working for the first time ([Finding 45](TESTING_LOG.md)), and the shipped cloud model remains unmeasured**
+**Last updated:** 2026-09-19 — **CARE was held as a CONVERSATION for the first time: [A20](open-questions.md) does not reproduce on the cloud path, and a new defect ([A26](open-questions.md)) is that CARE escalates rather than answer "how much is it?"**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -218,6 +218,32 @@ that matters:** `.env` carries **`CLOUD_MODEL_GUARD=gemini-3.8-flash`** and toda
 nothing here says whether the cloud path SELL would ship carries Finding 37. A run against it was
 offered and declined on 2026-09-18. `llama3.1:8b` under corrected expectations is also unmeasured and
 matters for the **sovereign tier**, where `sovereign()` is `ollama_dev()`.
+
+**2026-09-19 — Stage 6 §3 ran for CARE, on the cloud path, and it is the first time this repository
+has ever sent a shopper's second message.** `make care-check ROLE_MAP=cloud-prod`,
+`gemini-3.5-flash` on all three roles, real Bagisto shop, real customer. **Exit 0; five single-turn
+cases all passed**, including both security ones — an anonymous shopper naming *"order 1"* refused and
+handed over, *"cancel my most recent order"* escalated without claiming to have done it.
+**Two pre-existing tooling faults had to be fixed first and both were invisible for the same reason:**
+`care_smoke_test.py` **hard-coded `ollama-dev`** with no `--role-map`, so it could never have been
+pointed at a cloud model (the hole closed for the eval targets on 2026-09-12, still open in
+`agent_smoke_test.py` and `rag_ask.py`), and it **never called `load_env()`** — [Finding
+8](TESTING_LOG.md), fixed everywhere else on 2026-08-29 — which only shows up on a cloud run because
+`ollama-dev` needs nothing from `.env`. **[A20](open-questions.md) DOES NOT REPRODUCE**: after the
+handover, message 2 was answered in full and grounded. It had been invisible **by construction** —
+every entry in `TURNS` got its own `cnv_smoke_<index>` thread, so the suite was five one-message chats
+despite the file's docstring; a `Conversation` type now reuses one `thread_id`. **Cloud only, one
+model, one shop, one pair of messages** — the local path is unmeasured and that is the **sovereign
+tier**. **[Finding 46](TESTING_LOG.md)/[A26](open-questions.md) is the new defect and it is a shopper
+experience one:** told *"the Waterproof Hiking Shoe … 132.00 USD"*, the next message *"how much is
+it?"* was **escalated to a human**. Routing was correct (`intent: product_qa`), so the subject was
+lost after `route` — AGENTS.md's own pronoun gotcha, **hypothesised and not verified**, no trace
+captured. It fails safe, and *"how much is it?"* is still among the commonest things a shopper types.
+**The suite printed "held every conversation without a caught failure" over that reply**, because the
+turn was written with a note and no assertion — the house failure mode inside the file added to catch
+one, corrected the same day with `expect_escalation=False`, so **`make care-check` is red until A26 is
+fixed**. **Stage 6 stays ◐**: §3 is done for **CARE on cloud only**, SELL has **no multi-turn harness
+at all**, and §4 is untouched.
 
 **Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
 constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,

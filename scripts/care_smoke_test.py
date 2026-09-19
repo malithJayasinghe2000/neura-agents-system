@@ -40,7 +40,7 @@ from neura_agent_core.graph import CONFIG_KEY, initial_state
 from neura_agent_core.graph.checkpointer import PostgresCheckpointer
 from neura_agent_core.tools import SessionIdentity
 from neura_commerce import SyncQuery
-from neura_core import Database, configure_logging
+from neura_core import Database, configure_logging, load_env
 from neura_domain import CustomerRef
 from neura_llm import LLMClient, ModelRole
 
@@ -113,6 +113,85 @@ TURNS: tuple[Turn, ...] = (
 )
 
 
+@dataclass(slots=True)
+class Conversation:
+    """Several turns in ONE thread — the thing `TURNS` above cannot express.
+
+    **Every entry in `TURNS` gets `cnv_smoke_<index>`, a thread of its own**, so
+    that suite is five one-message chats and not a conversation, despite this
+    file's own docstring. [A20](../docs/open-questions.md) — found on a real
+    storefront on 2026-09-02, where a conversation died at its *second* message
+    after a handover — is invisible to it **by construction**, because nothing
+    there ever sends a second message.
+
+    Added 2026-09-19. These reuse one `thread_id`, so the checkpointer carries
+    the history forward exactly as it does for a shopper in the widget.
+    """
+
+    label: str
+    thread: str
+    turns: tuple[Turn, ...]
+    note: str = ""
+
+
+CONVERSATIONS: tuple[Conversation, ...] = (
+    Conversation(
+        label="A20 — does the conversation survive a handover?",
+        thread="cnv_smoke_multi_handover",
+        note=(
+            "The router was measured returning confidence 0.00 after any handover, and the "
+            "ownership gate forces a handover on the commonest opening question. So message 2 "
+            "is the one that matters: it must still be answered."
+        ),
+        turns=(
+            Turn(
+                label="1 · anonymous shopper names an order — forces the handover",
+                message="where is my order 1?",
+                authenticated=False,
+                expect_escalation=True,
+            ),
+            Turn(
+                label="2 · an ordinary question, AFTER the handover",
+                message="what's your returns policy?",
+                authenticated=False,
+                expect_escalation=False,
+                must_not_say=("14 days", "60 days"),
+                note="A20 reproduces if this escalates, or comes back empty.",
+            ),
+        ),
+    ),
+    Conversation(
+        label='CONTEXT — does the second message know what "it" is?',
+        thread="cnv_smoke_multi_pronoun",
+        note=(
+            "`route` must write a RESOLVED `search_query`. A node reading `message` instead "
+            "asks the catalogue about a subject that is not there — AGENTS.md's gotcha table."
+        ),
+        turns=(
+            Turn(
+                label="1 · a need, not a product name",
+                message="I need something waterproof for hiking. What have you got?",
+                authenticated=False,
+            ),
+            Turn(
+                label="2 · a pronoun only the first message explains",
+                message="how much is it?",
+                authenticated=False,
+                # **Added after the first run, which this arm let through.** It
+                # was written with a `note` and no assertion, so the turn
+                # escalated, the suite printed "held every conversation without
+                # a caught failure", and the defect was visible only to someone
+                # reading the replies. A check that reports green while the
+                # thing it gates fails is this repository's house failure mode
+                # and it does not get to happen in a file added to catch one.
+                expect_escalation=False,
+                note='Must answer about the product just named, not ask what "it" means.',
+            ),
+        ),
+    ),
+)
+
+
 def tick(ok: bool) -> str:
     return f"{GREEN}✔{OFF}" if ok else f"{RED}✘{OFF}"
 
@@ -130,12 +209,19 @@ async def _pick_customer(adapter: GenericAdapter) -> str | None:
     return None
 
 
-async def run(url: str, token: str) -> int:
-    llm = LLMClient.from_role_map_name("ollama-dev")
+async def run(url: str, token: str, role_map: str) -> int:
+    # **`role_map` is a parameter as of 2026-09-19, and it was hardcoded to
+    # `ollama-dev` before.** That is the hole PROJECT_STATE records being closed
+    # for the eval targets on 2026-09-12: a script that names one map itself
+    # answers for that map whatever the caller meant, and the only route to a
+    # cloud answer was to not use `make`. The default is unchanged, so a bare
+    # `make care-check` runs exactly what it ran yesterday.
+    llm = LLMClient.from_role_map_name(role_map)
     adapter = GenericAdapter(base_url=url, tenant_id=TENANT, token=token)
     database = Database.from_settings()
 
-    print(f"\n  router    {llm.model_for(ModelRole.ROUTER)}")
+    print(f"\n  role map  {role_map}")
+    print(f"  router    {llm.model_for(ModelRole.ROUTER)}")
     print(f"  reasoner  {llm.model_for(ModelRole.REASONER)}")
     print(f"  guard     {llm.model_for(ModelRole.GUARD)}")
 
@@ -190,11 +276,51 @@ async def run(url: str, token: str) -> int:
         ok = ok and passed
         print()
 
+    # ── The same agent, but as a CONVERSATION. ──────────────────────────────
+    # One thread per conversation rather than one per message, which is the
+    # only difference that matters and the reason A20 could not be seen above.
+    for conversation in CONVERSATIONS:
+        print(f"  {conversation.label}")
+        print(f"    {DIM}{conversation.note}{OFF}")
+        for position, turn in enumerate(conversation.turns, start=1):
+            print(f'    {DIM}[{position}] shopper: "{turn.message}"{OFF}')
+            identity = SessionIdentity(
+                customer_external_id=customer_id if turn.authenticated else None
+            )
+            async with database.tenant_session(TENANT) as session:
+                runtime = build_runtime(
+                    tenant_id=TENANT,
+                    conversation_id=conversation.thread,
+                    adapter=adapter,
+                    llm=llm,
+                    capabilities=health.capabilities,
+                    scopes=TOOL_SCOPES,
+                    identity=identity,
+                )
+                final = await graph.ainvoke(
+                    initial_state(
+                        tenant_id=TENANT,
+                        conversation_id=conversation.thread,
+                        message=turn.message,
+                    ),
+                    {"configurable": {CONFIG_KEY: runtime, "thread_id": conversation.thread}},
+                )
+            # An empty reply on a turn that did not escalate is A20's signature
+            # and no existing assertion names it: `must_not_say` cannot catch a
+            # string that is not there, and ADR-0020 makes silence a bug.
+            if not str(final.get("reply", "")).strip() and not final.get("escalated"):
+                print(f"    {tick(False)} the reply was EMPTY and the turn did not escalate")
+                ok = False
+            ok = _report(turn, final) and ok
+        print()
+
     # Nothing is left behind. A smoke script that accumulates conversation state
     # makes the next run's "resumed from checkpoint" mean something different.
     async with database.tenant_session(TENANT) as session:
         for index in range(len(TURNS)):
             await PostgresCheckpointer(session, TENANT).adelete_thread(f"cnv_smoke_{index}")
+        for conversation in CONVERSATIONS:
+            await PostgresCheckpointer(session, TENANT).adelete_thread(conversation.thread)
     await database.dispose()
     await adapter.aclose()
 
@@ -251,10 +377,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run NEURA-CARE against a real shop.")
     parser.add_argument("--url", required=True, help="The shop's Generic Interface base URL")
     parser.add_argument("--token", required=True, help="The shop's API token")
+    parser.add_argument(
+        "--role-map",
+        default="ollama-dev",
+        help="ollama-dev (free, local) or cloud-prod (spends API quota)",
+    )
     args = parser.parse_args()
 
+    # **Finding 8, still live here on 2026-09-19.** The hand-test scripts were
+    # found ignoring `.env` on 2026-08-29 and all but three were fixed; this was
+    # one of the three. It went unnoticed because `ollama-dev` needs nothing from
+    # `.env` — `OLLAMA_BASE_URL` defaults to localhost — so the omission is
+    # invisible until the first cloud run, which then fails claiming
+    # `CLOUD_LLM_BASE_URL not set` while it sits in `.env` two directories up.
+    # `load_env()` never overrides a real environment variable, so a per-process
+    # `CLOUD_MODEL_*` override still wins.
+    load_env()
     configure_logging(level="ERROR", json_output=False)
-    sys.exit(asyncio.run(run(args.url, args.token)))
+    sys.exit(asyncio.run(run(args.url, args.token, args.role_map)))
 
 
 if __name__ == "__main__":

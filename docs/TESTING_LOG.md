@@ -1486,6 +1486,68 @@ unmeasured, and matters for the **sovereign tier**, where `sovereign()` is `olla
 
 ---
 
+### ◐ 2026-09-19 — Stage 6 §3: CARE held as a CONVERSATION for the first time, on the cloud path
+
+`make care-check URL=… TOKEN=… ROLE_MAP=cloud-prod`, `gemini-3.5-flash` on router, reasoner and
+guard, real Bagisto shop, real customer (385, four orders). **Exit 0.**
+
+**Two tooling faults had to be fixed before this could run at all, and both are pre-existing:**
+
+1. **`care_smoke_test.py` hard-coded `ollama-dev`** and had no `--role-map`. It could *never* have
+   been pointed at a cloud model. This is the hole PROJECT_STATE records being closed for the eval
+   targets on 2026-09-12, still open in three scripts (`care_smoke_test`, `agent_smoke_test`,
+   `rag_ask`). `care-check` now takes `ROLE_MAP`, defaulting to `ollama-dev` — a bare run is
+   unchanged.
+2. **It never called `load_env()`** — [Finding 8](#), found 2026-08-29 and fixed in every other
+   script. Invisible until today because `ollama-dev` needs nothing from `.env`; the first cloud run
+   died with `CLOUD_LLM_BASE_URL not set` while it sat in `.env`.
+
+**The five single-turn cases all passed**, and the two security ones are the notable half: an
+anonymous shopper naming *"order 1"* was refused and handed over, and *"cancel my most recent order"*
+escalated without claiming to have done it. The returns policy was quoted accurately.
+
+#### 🟢 [A20](open-questions.md) does not reproduce — the conversation survived the handover
+
+**This is the first time this repository has sent a shopper's second message.** Every entry in
+`TURNS` gets `cnv_smoke_<index>`, a thread of its own, so the suite was **five one-message chats**
+despite the file's own docstring, and A20 was invisible to it *by construction*. A `Conversation`
+type now reuses one `thread_id`.
+
+| | message | result |
+|:--|:--|:--|
+| 1 | *"where is my order 1?"* (anonymous) | handover ✔ — the ownership gate, correct |
+| 2 | *"what's your returns policy?"* | **answered in full**, grounded, not escalated ✔ |
+
+**Narrow, and it must stay narrow:** one model, one shop, one pair of messages, **cloud only**. A20
+was found on `llama3.2:3b` and nothing here measures that path — which is the **sovereign tier**.
+
+#### 🔴 Finding 46 — CARE escalates rather than answer "how much is it?"
+
+| | message | reply |
+|:--|:--|:--|
+| 1 | *"I need something waterproof for hiking. What have you got?"* | *"We have the Waterproof Hiking Shoe available to buy for **132.00 USD**. It is currently in stock and ready to order."* |
+| 2 | *"how much is it?"* | *"I'm passing you to a colleague."* — `tools: ['escalate_to_human']` |
+
+**It stated the price, then could not answer a question about it.** Routing was **correct**
+(`intent: product_qa`), so this is not a misroute — something after `route` lost the subject.
+[AGENTS.md](../AGENTS.md)'s own gotcha table predicts it: *"the query still contains a pronoun…
+anything reading `message` instead is asking about a subject that is not there"*, i.e. the catalogue
+was searched for the literal word *"it"*. **Hypothesis, not verified** — the trace was not captured.
+
+**It fails safe** — nobody is misled — but *"how much is it?"* is among the commonest things a
+shopper types, and an agent that summons a human for it is neither cheap nor usable. Recorded as
+[A26](open-questions.md).
+
+**And the check said green over it.** The turn was written with a `note` and **no assertion**, so the
+suite printed *"CARE held every conversation without a caught failure"* directly beneath that reply.
+**The house failure mode, inside the file added to catch one.** Corrected the same day:
+`expect_escalation=False`, so `make care-check` is **red until A26 is fixed**.
+
+**Stage 6 stays ◐.** §3 is now done for **CARE on the cloud path only**. SELL has **no multi-turn
+harness at all** — `sell-ask` is one question — and §4 (shadow) is untouched.
+
+---
+
 ## Stage 7 — the widget ✅
 
 What a shopper actually sees. Needs the API running.
