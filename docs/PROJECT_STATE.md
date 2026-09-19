@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-19 (last) — **both agents have now been held as CONVERSATIONS. CARE passes. SELL resolves pronouns correctly and then recommends NOTHING ([A27](open-questions.md)), because `plan`'s multi-word queries meet a literal AND-search — and a conversation makes it worse each turn**
+**Last updated:** 2026-09-19 (last) — **both agents held as CONVERSATIONS, and both now work. CARE passes; SELL's "recommends nothing" defect ([A27](open-questions.md)) is FIXED in code, measured 3/3 `no_match` → 3/3 answered with every claim verbatim**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -293,6 +293,33 @@ jackets on 2026-09-13, so query formulation differs by model — a fact, not a m
 [A22](open-questions.md) could not be tested in conversation at all**, because nothing was ever
 recommended. Any fix — broadening, retrying, splitting terms — is a **Rule 4** change and is **not
 decided**.
+
+**2026-09-19, closing — [A27](open-questions.md) is fixed in code and measured either side.** The owner
+chose **option A of three**: when the whole phrase finds nothing, search the terms singly. Not a prompt
+edit ([Finding 43](TESTING_LOG.md) measured what those do here) and not a change to the merchant's shop
+— **`_broadened()` in SELL's own `search_products`**, inside the tool call `plan` had already spent. It
+fires only after both existing paths fail: the merchant's search, then `_from_the_index`
+([ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md)), which returns
+`""` whenever there is no retriever — **the normal state on `cloud-prod`**, where `CLOUD_MODEL_EMBEDDER`
+is unset. At most three extra lookups, stopping at the first hit. **Longest term first, and that is the
+safety property rather than a nicety**: `waterproof` before `jacket`, because `jacket` returns four
+products of which one is waterproof — the exact shortlist shape [A22](open-questions.md) fabricates
+from — while `waterproof` returns two that genuinely have the attribute. **1311, the waxed jacket that
+only "sheds rain", never entered the shortlist.** The recovered evidence carries a banner — *"THESE
+PRODUCTS MATCHED ONLY THAT ONE WORD, NOT THE WHOLE REQUEST"* — because that text is what `compose`
+writes from and `verify` checks against. **Before/after on the same three messages, model and shop:
+3/3 `no_match` → 3/3 answered**, every claim checked word-by-word against the shop's own descriptions
+and every one verbatim, and **turn 2 named two products with every attribute on its owner** — the A22
+condition, not reproduced. Turn 3 searched `'Lightweight Rain Shell'`, so the conversation carried the
+product forward by name. **Seven unit tests**, including that a withdrawn product is still not
+recommended. **No prompt, dataset, gate, threshold, model config or `.env` changed.** **Scope**: n=1
+live conversation, one model, one shop; the unit tests are deterministic and the live run is not.
+**`make` was unavailable all session** (*"You have not agreed to the Xcode license agreements"* —
+`sudo xcodebuild -license`), so `make check` could not be run: `ruff`, `mypy` (221 files) and `pytest`
+were run directly, and the only failures are the **ten `test_architecture` cases that shell out to
+`make`**. **One test is owed when `make` works again**: `care-check` is now a model-running target that
+names its role map, and `MODEL_RUNNING` in `test_architecture.py` does not cover it — the contract that
+would have caught the hardcoded `ollama-dev` in the first place.
 
 **Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
 constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,

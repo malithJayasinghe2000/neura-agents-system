@@ -41,6 +41,16 @@ log = get_logger(__name__)
 #: ceiling on how much of a small model's context one lookup can consume.
 MAX_RESULTS = 5
 
+#: How many single-term retries a broadened search may spend. **Three, because
+#: each one is a live HTTP call to the merchant's shop** and the point is to
+#: recover a shortlist, not to enumerate the catalogue. `plan` is already
+#: budgeted at four tool calls; this stays inside one of them.
+MAX_BROADENED_TERMS = 3
+
+#: The shortest word worth searching for on its own. Two-letter tokens match
+#: everything and nothing usefully.
+MIN_TERM_LENGTH = 3
+
 #: Variants checkable in one call. Bounded because the argument comes from a
 #: model — or, over MCP, from *someone else's* model — and an unbounded list is
 #: a way to turn one request into an expensive query against a merchant's store.
@@ -143,6 +153,16 @@ async def search_products(query: str, ctx: ToolContext) -> str:
         if recovered := await _from_the_index(text, ctx):
             return recovered
 
+        # Second fallback, and it exists because the first one needs an index.
+        # `_from_the_index` returns "" when `ctx.retriever is None`, which is
+        # the *normal* state on `cloud-prod`: that map leaves
+        # `CLOUD_MODEL_EMBEDDER` unset, so there is no namespace to search.
+        # Measured 2026-09-19 (A27): every turn of SELL's first multi-turn run
+        # said "I can't find anything" against a shop carrying exactly what was
+        # asked for.
+        if broadened := await _broadened(text, ctx):
+            return broadened
+
         # Said precisely. "No candidates" is not "this store sells nothing like
         # that" — one is about this query, the other is a claim about the whole
         # catalogue, and only `shortlist` may make the second one (sell.md §2.3).
@@ -159,6 +179,78 @@ async def search_products(query: str, ctx: ToolContext) -> str:
     )
     _remember(ctx, sellable)
     return "\n\n".join(candidate(product) for product in sellable)
+
+
+def _terms(text: str) -> list[str]:
+    """The searchable words of a query, most specific first.
+
+    **Longest first, and that ordering is the safety property rather than a
+    nicety.** For *"waterproof jacket"* it tries `waterproof` before `jacket`,
+    so the shortlist fills with products that genuinely have the distinguishing
+    attribute instead of four jackets of which one is waterproof. That second
+    set is precisely the shape [A22](../../../../docs/open-questions.md)
+    fabricates from — a shortlist where the attribute belongs to one product and
+    the composer attaches it to another.
+    """
+    seen: dict[str, None] = {}
+    for raw in text.split():
+        if len(term := raw.strip(".,;:!?'\"()[]").lower()) >= MIN_TERM_LENGTH:
+            seen.setdefault(term, None)
+    return sorted(seen, key=len, reverse=True)
+
+
+async def _broadened(text: str, ctx: ToolContext) -> str:
+    """Search again for one word at a time when the whole phrase matched nothing.
+
+    **The merchant's search is an AND over terms**, measured against the test
+    shop on 2026-09-19: `waterproof jacket` returns **0**, `waterproof` returns
+    2 and `jacket` returns 4, while the catalogue plainly carries both a rain
+    shell and a waxed jacket. `_from_the_index` already documents the same fault
+    from the stemming side; this is the half that survives without an index.
+
+    **It makes the conversation matter.** `route` resolves *"is it good for
+    heavy rain?"* into *"waterproof jacket good for heavy rain"* — correctly —
+    and every resolved word made the AND stricter, so a longer conversation
+    matched less. Searching terms singly removes that penalty.
+
+    **The banner is not decoration.** These products matched *one word*, not the
+    request, so the composer is told so in the evidence it will be verified
+    against. Without it a shortlist recovered this way reads exactly like one
+    that satisfied the whole need.
+
+    Returns "" when there is nothing to broaden — a single-term query, or no
+    term that finds anything — and the caller then says what it always said.
+    """
+    terms = [term for term in _terms(text) if term != text.strip().lower()]
+    if len(terms) < 2:
+        return ""
+
+    for term in terms[:MAX_BROADENED_TERMS]:
+        page = await ctx.adapter.search_products(ProductQuery(text=term, limit=MAX_RESULTS))
+        sellable = [
+            product
+            for product in list(page.items)[:MAX_RESULTS]
+            if product.status is ProductStatus.ACTIVE
+        ]
+        if not sellable:
+            continue
+
+        log.info(
+            "sell_search_broadened",
+            tenant_id=ctx.tenant_id,
+            asked=text,
+            searched=term,
+            results=len(sellable),
+        )
+        _remember(ctx, sellable)
+        return (
+            f"The catalogue returned nothing for {text!r}, so it was searched again for "
+            f"{term!r} on its own. THESE PRODUCTS MATCHED ONLY THAT ONE WORD, NOT THE WHOLE "
+            f"REQUEST — check each against what the shopper actually asked for, and say so "
+            f"if one only partly fits.\n\n"
+        ) + "\n\n".join(candidate(product) for product in sellable)
+
+    return ""
 
 
 async def _from_the_index(text: str, ctx: ToolContext) -> str:

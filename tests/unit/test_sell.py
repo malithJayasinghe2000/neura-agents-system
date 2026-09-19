@@ -1678,7 +1678,150 @@ class TestAConstraintMissIsNotAnEmptyStore:
 
         await search_products.fn("waterproof hiking jacket", _ctx(adapter=_RecordingAdapter()))
 
-        assert seen == ["waterproof hiking jacket"]
+        # **The FIRST query is what this test is about**, and it is unchanged:
+        # stripping is not rewriting. It asserted the whole list until
+        # 2026-09-19, which was stricter than its own name — a phrase that finds
+        # nothing is now searched again one term at a time (`_broadened`, A27),
+        # so more queries legitimately follow. Those are covered below.
+        assert seen[0] == "waterproof hiking jacket"
+
+
+class TestAPhraseThatFindsNothingIsSearchedOneTermAtATime:
+    """`_broadened` — open question A27, measured 2026-09-19.
+
+    The merchant's search is an AND over terms: on the test shop
+    `waterproof jacket` returns 0 while `waterproof` returns 2 and `jacket`
+    returns 4, and SELL answered "I can't find anything" three turns running
+    against a catalogue holding exactly what was asked for.
+    """
+
+    async def test_it_does_not_fire_when_the_phrase_found_something(self) -> None:
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        seen: list[str] = []
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                seen.append(query.text)
+                return SimpleNamespace(items=[_product(external_id="1315")])
+
+        await search_products.fn("waterproof jacket", _ctx(adapter=_Adapter()))
+
+        assert seen == ["waterproof jacket"], "a successful search must not be retried"
+
+    async def test_a_single_term_query_is_not_broadened(self) -> None:
+        """There is nothing to broaden, and a second identical call is waste."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        seen: list[str] = []
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                seen.append(query.text)
+                return SimpleNamespace(items=[])
+
+        await search_products.fn("jacket", _ctx(adapter=_Adapter()))
+
+        assert seen == ["jacket"]
+
+    async def test_the_longest_term_is_tried_first(self) -> None:
+        """**The ordering is the safety property.** Trying `jacket` first fills
+        the shortlist with four jackets of which one is waterproof — the exact
+        shape A22 fabricates from. `waterproof` first fills it with products
+        that actually have the attribute."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        seen: list[str] = []
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                seen.append(query.text)
+                return SimpleNamespace(items=[])
+
+        await search_products.fn("waterproof jacket", _ctx(adapter=_Adapter()))
+
+        assert seen == ["waterproof jacket", "waterproof", "jacket"]
+
+    async def test_it_stops_at_the_first_term_that_finds_anything(self) -> None:
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        seen: list[str] = []
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                seen.append(query.text)
+                hit = query.text == "waterproof"
+                return SimpleNamespace(items=[_product(external_id="1315")] if hit else [])
+
+        out = await search_products.fn("waterproof jacket", _ctx(adapter=_Adapter()))
+
+        assert seen == ["waterproof jacket", "waterproof"], "it must not keep searching"
+        assert "1315" in out
+
+    async def test_the_reply_says_the_products_matched_only_one_word(self) -> None:
+        """**The banner is a safety property, not decoration.** This text becomes
+        evidence the composer writes from and `verify` checks against; without it
+        a recovered shortlist reads exactly like one that satisfied the whole
+        request."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                hit = query.text == "waterproof"
+                return SimpleNamespace(items=[_product(external_id="1315")] if hit else [])
+
+        out = await search_products.fn("waterproof jacket", _ctx(adapter=_Adapter()))
+
+        assert "ONLY THAT ONE WORD" in out
+        assert "'waterproof'" in out and "'waterproof jacket'" in out
+
+    async def test_a_withdrawn_product_is_still_not_recommended(self) -> None:
+        """Broadening must not become a way past the sellable filter."""
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                hit = query.text == "waterproof"
+                return SimpleNamespace(
+                    items=[_product(external_id="1315", status=ProductStatus.ARCHIVED)]
+                    if hit
+                    else []
+                )
+
+        out = await search_products.fn("waterproof jacket", _ctx(adapter=_Adapter()))
+
+        assert "1315" not in out
+        assert "no available products" in out
+
+    async def test_it_spends_at_most_three_extra_searches(self) -> None:
+        from types import SimpleNamespace
+
+        from neura_agent_sell.tools.catalogue import search_products
+
+        seen: list[str] = []
+
+        class _Adapter:
+            async def search_products(self, query: Any) -> Any:
+                seen.append(query.text)
+                return SimpleNamespace(items=[])
+
+        await search_products.fn(
+            "lightweight waterproof breathable hooded jacket", _ctx(adapter=_Adapter())
+        )
+
+        assert len(seen) == 4, "the original, plus at most MAX_BROADENED_TERMS"
 
     def test_shortlist_reports_the_ceiling_that_excluded_everything(self) -> None:
         from neura_agent_sell.nodes.shortlist import _constraint_miss

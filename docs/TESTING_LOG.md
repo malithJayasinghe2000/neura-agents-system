@@ -1631,6 +1631,54 @@ conversation at all**, because nothing was ever recommended.
 
 ---
 
+### ✅ 2026-09-19 (last) — [A27](open-questions.md) fixed in code, and the before/after is three turns either side
+
+**Option A of three, chosen by the owner**: when the whole phrase finds nothing, search the terms
+singly. Not a prompt change ([Finding 43](#) measured what those do to this stack) and not a change to
+the merchant's shop — **code, in SELL's own `search_products`**, inside the tool call `plan` had
+already spent.
+
+`_broadened()` fires **only** after both existing paths fail: the merchant's search, then
+`_from_the_index` (ADR-0029), which returns `""` whenever there is no retriever — the normal state on
+`cloud-prod`, where `CLOUD_MODEL_EMBEDDER` is unset. At most **three** extra lookups, stopping at the
+first term that finds anything.
+
+**Longest term first, and that ordering is the safety property.** For *"waterproof jacket"* it searches
+`waterproof` before `jacket`. `jacket` returns four products of which one is waterproof — **the exact
+shortlist shape [A22](open-questions.md) fabricates from**. `waterproof` returns two that genuinely
+have the attribute. **1311, the waxed jacket that only "sheds rain", never entered the shortlist**, so
+the mis-attribution had nothing to work with.
+
+**The evidence carries a banner**, because this text is what `compose` writes from and `verify` checks
+against: *"THESE PRODUCTS MATCHED ONLY THAT ONE WORD, NOT THE WHOLE REQUEST."* Without it a recovered
+shortlist reads exactly like one that satisfied the request.
+
+#### The measurement — same three messages, same model, same shop
+
+| | shopper | before | after |
+|:--|:--|:--|:--|
+| 1 | *"I need a waterproof jacket"* | `no_match` | **1315 Lightweight Rain Shell, 110.00 USD** |
+| 2 | *"is it good for heavy rain?"* | `no_match` | **1315 and 1332, each with its own attributes** |
+| 3 | *"how much is it?"* | `no_match` | **1315, 110.00 USD** |
+
+**Every claim checked against the shop's own text and every one is verbatim**: *"2.5-layer waterproof
+shell rated to 10,000mm"*, *"fully taped seams"*, *"storm hood"*, *"around the size of a paperback"*,
+and for 1332 *"waterproof breathable membrane bonded to a … upper"*. **Turn 2 named two products and
+kept every attribute with its owner** — the A22 condition, not reproduced.
+
+Turn 3 searched `'Lightweight Rain Shell'`: the conversation carried the product forward by name.
+
+**Seven unit tests** cover it: it does not fire on a successful search, a single-term query is not
+broadened, longest-first ordering, it stops at the first hit, the banner is present, **a withdrawn
+product is still not recommended**, and at most three extra searches.
+
+**Scope, and it is the usual one.** n=1 conversation, one model, one shop; the unit tests are
+deterministic and the live run is not. `make` was unavailable all session (Xcode licence), so
+`make check` could not be run — `ruff`, `mypy` (221 files) and `pytest` were run directly and the only
+failures are the ten `test_architecture` cases that shell out to `make`.
+
+---
+
 ## Stage 7 — the widget ✅
 
 What a shopper actually sees. Needs the API running.
