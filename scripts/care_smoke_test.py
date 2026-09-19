@@ -282,6 +282,16 @@ async def run(url: str, token: str, role_map: str) -> int:
     for conversation in CONVERSATIONS:
         print(f"  {conversation.label}")
         print(f"    {DIM}{conversation.note}{OFF}")
+        # **The history is carried by hand, exactly as `neura-api` carries it.**
+        # `initial_state` defaults `history` to empty and the graph never reads
+        # the checkpointer for it, so a thread_id alone buys continuity for
+        # LangGraph and *nothing* for `route` — which is the one node that has to
+        # resolve "it" into a product. `turns.py` loads it from
+        # `conversations.history(...)` and passes `history=` on every turn;
+        # omitting it here made CARE look broken on 2026-09-19 when the harness
+        # was what was broken. Roles are `shopper`/`agent` because that is what
+        # `Role` stores and what `route._render` prints back to the model.
+        history: list[dict[str, str]] = []
         for position, turn in enumerate(conversation.turns, start=1):
             print(f'    {DIM}[{position}] shopper: "{turn.message}"{OFF}')
             identity = SessionIdentity(
@@ -302,6 +312,7 @@ async def run(url: str, token: str, role_map: str) -> int:
                         tenant_id=TENANT,
                         conversation_id=conversation.thread,
                         message=turn.message,
+                        history=list(history),
                     ),
                     {"configurable": {CONFIG_KEY: runtime, "thread_id": conversation.thread}},
                 )
@@ -312,6 +323,8 @@ async def run(url: str, token: str, role_map: str) -> int:
                 print(f"    {tick(False)} the reply was EMPTY and the turn did not escalate")
                 ok = False
             ok = _report(turn, final) and ok
+            history.append({"role": "shopper", "content": turn.message})
+            history.append({"role": "agent", "content": str(final.get("reply", ""))})
         print()
 
     # Nothing is left behind. A smoke script that accumulates conversation state

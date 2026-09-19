@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-19 — **CARE was held as a CONVERSATION for the first time: [A20](open-questions.md) does not reproduce on the cloud path, and a new defect ([A26](open-questions.md)) is that CARE escalates rather than answer "how much is it?"**
+**Last updated:** 2026-09-19 (later) — **CARE held as a CONVERSATION for the first time: [A20](open-questions.md) does not reproduce, the "how much is it?" defect was WITHDRAWN as a harness fault the same day, and CARE answers a pronoun follow-up correctly**
 **Current phase:** Phase 1 — milestones 1.1–1.16 complete, plus sync persistence, the scheduler, **NEURA-SELL**, and the console
 **Newest first — 2026-09-06, the second change of the day: an eval run that measured nothing now fails.**
 [E9](open-questions.md) is resolved by [ADR-0036](architecture/adr/0036-a-run-that-measured-nothing-fails.md).
@@ -244,6 +244,30 @@ turn was written with a note and no assertion — the house failure mode inside 
 one, corrected the same day with `expect_escalation=False`, so **`make care-check` is red until A26 is
 fixed**. **Stage 6 stays ◐**: §3 is done for **CARE on cloud only**, SELL has **no multi-turn harness
 at all**, and §4 is untouched.
+
+**2026-09-19, later — [A26](open-questions.md) is WITHDRAWN hours after it was raised. CARE was never
+broken; the harness was.** The multi-turn loop added earlier that day reused one `thread_id` and
+passed **no `history`**. `initial_state()` defaults it to empty and **the graph never reads history
+from the checkpointer**, so a shared thread buys LangGraph continuity and gives `route` — the one node
+whose job is resolving *"it"* into a product — nothing to resolve against. `neura-api` loads it via
+`conversations.history(...)` and passes `history=` on every turn (`turns.py`); the script did not.
+**Re-run carrying history the way the API carries it, CARE answers correctly**: *"The Waterproof
+Hiking Shoe is 132.00 USD. It is currently available to buy."* — `intent: product_qa`,
+`tools: ['search_products']`, grounded, not escalated, and the `expect_escalation=False` assertion
+added to catch the "defect" now passes. **`make care-check` is green.** **The escalation was arguably
+correct**: asked to resolve a pronoun against nothing, `route` declined rather than guessed. **The
+lesson is the expensive half and it is recorded rather than tidied away.** AGENTS.md's own pronoun
+gotcha was cited as the diagnosis, fitted the symptom exactly, and was the **wrong cause** — *a
+plausible mechanism from the project's own documentation is more dangerous than an unexplained
+failure, because it ends enquiry*. It was written into three files before anything was verified, and
+**one captured trace would have settled it in a line**. **The durable fix is in the harness**: a
+multi-turn script must carry `history` exactly as `turns.py` does or it measures an agent the product
+never runs. **[A20](open-questions.md)'s result is unaffected and is now stronger** — it was re-run
+with history carried and message 2 was still answered in full. **One environment note:** `make` began
+failing machine-wide mid-session with *"You have not agreed to the Xcode license agreements"*;
+`sudo xcodebuild -license` is the fix and the scripts were run directly meanwhile. **Also decided by
+the owner 2026-09-19: the model question is closed for now** — testing on a cloud model is enough, and
+which flash model ships is not to be reopened as a blocker.
 
 **Next action:** **Get CARE and SELL to a stable version — not a feature-complete one.** The owner's
 constraint, stated 2026-09-13 and unchanged: roughly two months for the project, much still to build,

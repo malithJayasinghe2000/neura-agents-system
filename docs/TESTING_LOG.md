@@ -1521,7 +1521,7 @@ type now reuses one `thread_id`.
 **Narrow, and it must stay narrow:** one model, one shop, one pair of messages, **cloud only**. A20
 was found on `llama3.2:3b` and nothing here measures that path — which is the **sovereign tier**.
 
-#### 🔴 Finding 46 — CARE escalates rather than answer "how much is it?"
+#### ⚪️ Finding 46 — WITHDRAWN the same day: the harness never gave CARE the previous turn
 
 | | message | reply |
 |:--|:--|:--|
@@ -1534,14 +1534,28 @@ was found on `llama3.2:3b` and nothing here measures that path — which is the 
 anything reading `message` instead is asking about a subject that is not there"*, i.e. the catalogue
 was searched for the literal word *"it"*. **Hypothesis, not verified** — the trace was not captured.
 
-**It fails safe** — nobody is misled — but *"how much is it?"* is among the commonest things a
-shopper types, and an agent that summons a human for it is neither cheap nor usable. Recorded as
-[A26](open-questions.md).
+> **⚪️ WITHDRAWN 2026-09-19, hours after it was written. CARE was never broken; the harness was.**
+>
+> `initial_state()` defaults `history` to empty and **the graph never reads history from the
+> checkpointer**, so a shared `thread_id` gives LangGraph continuity and gives `route` — the one node
+> that has to resolve *"it"* — nothing at all. `neura-api` loads history and passes `history=` on
+> every turn ([`turns.py`](../apps/neura-api/src/neura_api/turns.py)); the new `Conversation` loop
+> did not. **Re-run carrying history the way the API does, the reply is correct:** *"The Waterproof
+> Hiking Shoe is 132.00 USD. It is currently available to buy."* — grounded, not escalated.
+>
+> **The escalation was arguably the right answer.** Asked to resolve a pronoun against nothing,
+> `route` declined instead of guessing.
+>
+> **The diagnosis above is left standing on purpose, because it is the lesson.** AGENTS.md's pronoun
+> gotcha fitted the symptom exactly and was the wrong cause. **A plausible mechanism from the
+> project's own documentation is more dangerous than an unexplained failure, not less** — it ends
+> enquiry. Nothing was verified before it was written into three files, and **one captured trace
+> would have settled it in a line**. Recorded as [A26](open-questions.md), withdrawn.
 
-**And the check said green over it.** The turn was written with a `note` and **no assertion**, so the
-suite printed *"CARE held every conversation without a caught failure"* directly beneath that reply.
-**The house failure mode, inside the file added to catch one.** Corrected the same day:
-`expect_escalation=False`, so `make care-check` is **red until A26 is fixed**.
+**And the check said green over it**, because the turn was written with a `note` and **no
+assertion** — the house failure mode inside the file added to catch one. `expect_escalation=False`
+was added, and it is what proved the withdrawal: with history carried, that assertion now **passes**.
+`make care-check` is green.
 
 **Stage 6 stays ◐.** §3 is now done for **CARE on the cloud path only**. SELL has **no multi-turn
 harness at all** — `sell-ask` is one question — and §4 (shadow) is untouched.
