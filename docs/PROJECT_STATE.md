@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-24 (last) — **term selection no longer spends every search on the longest words: one is reserved for the title and one for the description, measured across all 29 real products (18 → 19 with a suggestion), and measuring it disproved this file's own account of why the misses happen — the Leather Loafer and the Cashmere Jumper are category and catalogue-size limits, not word limits. `make check` 1229, `make test-widget` 51, `make pairs-check` 8/8 stub + 1/1 live. Previously, 2026-09-24: the paired suggestion now renders in the assistant panel and may open itself once per tab, off by default ([ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md)) — the shop's whole integration is one attribute on a tag that already existed. Previously, 2026-09-21: ADR-0040's paired suggestion was BUILT and RUN AGAINST THE REAL SHOP — SELL's fourth surface, no model in it. `make check` exit 0 (1227 passed), `make test-widget` 38/38. The live run found a real defect (ranking by word length, not distinctiveness), it is fixed and measured instead, and §4's example reproduces: rain shell → hiking shoe. 17 of 28 real products produce a suggestion. `make pairs-check` drives it in real headless Chrome, 8/8 stub and live cross-origin against the real shop; no shopper has seen it. Previously, 2026-09-20: the open question raised that day is DECIDED — MIND is parked until a design partner asks for it, and [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) was accepted. The handover was to go first; the owner then deferred it, so the build went first instead**
+**Last updated:** 2026-09-25 (last) — **FIVE ADRs accepted today (0042–0046) and NOTHING BUILT. [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) adds a sixth SELL surface — one merchant-facing screen of sold-out products people wanted — and **only its stage 1 (view counts, no identity) is approved**; stage 2 needs a *volunteered-data* category ADR-0042 does not have, stage 3 needs A21's identity token. SELL is now six surfaces, two of them merchant-facing. [ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) lets a model compute a pairing **lazily, on first use, in the background** — never while a shopper waits, cached per product and not per person, with the word path as the day-one fallback; it amends ADR-0040 §5, so that ADR's title is no longer literally true and **Rule 4 now reaches the pairing surface**. Previously: **[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md) is ACCEPTED and reverses this morning's own sentence: a shopper MAY be observed, but only for a shop that switches it on and only through events the shop's server sends — off means the data never exists, and scoring is a points table, not a model. It amends ADR-0042 §1 rather than superseding it. Still nothing built anywhere. Previously: **two ADRs written and ACCEPTED, and NOTHING BUILT — accepted is not scheduled. [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md) makes a merchant-facing recovery list SELL's fifth surface — **checkout**, not cart, because an abandoned cart usually belongs to nobody — export-only, nothing sent, on the unused `CART_READ` capability. CLAUDE.md is edited: five surfaces, four built, and a row that says ask before starting the fifth. Sending to a shopper and tracking one are both still excluded. Previously: **[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md) is PROPOSED and nothing was built: we may hold what a merchant already holds, and may never watch a shopper — held versus observed is the line, and it leaves lead scoring blocked on purpose. Writing it found that three `RETENTION_*` settings have sat in `.env` for weeks with no code reading any of them. Previously, 2026-09-24: **term selection no longer spends every search on the longest words: one is reserved for the title and one for the description, measured across all 29 real products (18 → 19 with a suggestion), and measuring it disproved this file's own account of why the misses happen — the Leather Loafer and the Cashmere Jumper are category and catalogue-size limits, not word limits. `make check` 1229, `make test-widget` 51, `make pairs-check` 8/8 stub + 1/1 live. Previously, 2026-09-24: the paired suggestion now renders in the assistant panel and may open itself once per tab, off by default ([ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md)) — the shop's whole integration is one attribute on a tag that already existed. Previously, 2026-09-21: ADR-0040's paired suggestion was BUILT and RUN AGAINST THE REAL SHOP — SELL's fourth surface, no model in it. `make check` exit 0 (1227 passed), `make test-widget` 38/38. The live run found a real defect (ranking by word length, not distinctiveness), it is fixed and measured instead, and §4's example reproduces: rain shell → hiking shoe. 17 of 28 real products produce a suggestion. `make pairs-check` drives it in real headless Chrome, 8/8 stub and live cross-origin against the real shop; no shopper has seen it. Previously, 2026-09-20: the open question raised that day is DECIDED — MIND is parked until a design partner asks for it, and [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) was accepted. The handover was to go first; the owner then deferred it, so the build went first instead**
 > ### ⚠️ Read every green result in this file as "passed **on cloud**"
 >
 > **Owner's decision, 2026-09-19:** finish CARE and SELL on a cloud model, and **do not re-test on
@@ -670,6 +670,222 @@ from the other side. **A bigger gain would have to come from changing what §4 e
 decided rule and needs an ADR, not a patch.** Still true, and unchanged by this: no shopper has ever
 seen this surface, and *"19 of 29"* says nothing about whether one is helped.
 
+
+**2026-09-25 — a posture was decided and written, and nothing was built.**
+[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md)
+is **ACCEPTED — owner decision, 2026-09-25, and not built**: NEURA may store personal data the merchant's own store already holds about a person the
+merchant already has a relationship with, and **may not create new knowledge about a shopper by watching
+one.** The line is **held versus observed**, not personal versus anonymous — an email, an order, a
+checkout someone began and left are on the permitted side; page views, clicks, dwell time and session
+following are not, and building them needs a tracking script, [A21](open-questions.md)'s undesigned
+identity mechanism and a consent surface of our own.
+
+**Why a separate ADR at all.** Three blueprint capabilities — cart recovery, churn and proactive
+outreach, revenue forecasting — are blocked by nothing but this one unmade decision, and arguing it
+inside four feature ADRs would produce four slightly different answers. **It deliberately does not
+unblock the fourth**: predictive lead scoring needs the observed column and stays blocked.
+
+**Four things it strengthens rather than weakens**: [§148](business/blueprint-v2.md)'s ban on individual
+pricing (*"we have the data now"* is the argument §148 rejects), [ADR-0040 §3](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)'s
+ban on ranking by behaviour, [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)'s read-only rule,
+and a bar on any feature holding personal data without its own ADR.
+
+**One finding came out of writing it, and it is the house failure shape again.**
+`RETENTION_CONVERSATIONS_DAYS`, `RETENTION_AUDIT_LOG_DAYS` and `RETENTION_TRACES_DAYS` have been in
+`.env` for weeks and **no code reads any of them** — a retention control that has never executed, the
+same shape as a run that measured nothing and a widget check that had been dead four days. §3 requires
+the first feature under this ADR to make them real or say in its own ADR that it has not.
+
+**Accepted by the owner the same day it was written, and accepted is not implemented.** **No personal
+data is stored, `ORDER` and `CUSTOMER` sync stay off, and no table exists.** What acceptance changes is
+that the argument is settled: the next feature that needs shopper data cites this file instead of
+re-deriving it. The feature it exists for — abandoned-checkout recovery, merchant-facing, export-only —
+is [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md),
+written and accepted the same day.
+
+**2026-09-25, later — the feature ADR-0042 exists for is written, and it is still not built.**
+[ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md)
+is **ACCEPTED — owner decision, 2026-09-25, and not built**: a merchant-facing recovery list is **SELL's fifth surface** — the checkouts with a
+contactable owner that never became an order, shown to the merchant, exported by the merchant, acted on
+by the merchant. **We send nothing to anyone.**
+
+**It reopens [CLAUDE.md](../CLAUDE.md)'s cart-recovery exclusion, and the reopening is narrow.** The
+excluded version needed identity, behavioural events, a scheduler, an outbound channel and a write. This
+one needs none of them: nobody is watched, the merchant already knows the person, the merchant picks the
+moment, the merchant sends. **[CLAUDE.md](../CLAUDE.md) was edited the same day**: SELL now reads *five
+surfaces, four built*, the cart-recovery exclusion is replaced by a row that fixes the scope and says
+**do not start it — ask first**, and two new rows keep the harder exclusions visible on their own
+(**sending anything to a shopper** and **tracking one** are both still closed).
+
+**The design decision worth keeping is `checkout`, not `cart`.** Verified against the test shop's own
+schema: `cart.customer_id`, `cart.customer_email` and `cart.is_guest` are all nullable and Bagisto sets
+`is_guest = 1` for anyone not signed in. **An abandoned cart usually belongs to nobody** — sign-in
+happens at checkout, and an abandoned cart is one that never got there. Naming the stage solves the
+identity problem instead of filtering around it, and the spec sentence is generic — *"a cart with a
+contactable owner that has not become an order"* — so no platform's vocabulary enters our code. On
+Bagisto the difference is one non-null field, so the choice costs nothing.
+
+**`Capability.CART_READ` is what this uses**, and it has existed in `neura_domain.enums` unused since
+the capability set was written. The interface gains an **optional** endpoint, not a mandatory tenth one:
+declared → the screen exists; not declared → it does not.
+
+**Explicitly deferred, and both were the owner's own points.** Recording *what a shopper removed* from a
+cart needs the cart kept over time — a bigger footprint and a different privacy argument — so v1 stores
+the **latest state only**. `CUSTOMER` sync is not needed; `ORDER` sync **is**, and is still off.
+
+**Three parameters, all guesses and labelled so**: abandoned after **1 hour** (borrowed from common
+industry practice, not measured here), retention in days set at build time, list ordered by value. And
+**a sixth console screen**, which breaks [console.md §2](console.md)'s *"the discipline is five"* — named
+in the ADR as a decision rather than left to be noticed later.
+
+**The honest bound.** Nobody knows how many of a real shop's checkouts carry a contact; it depends on the
+merchant's own storefront capturing an email early. **This is the first feature in the product that is
+worthless until it has run for weeks** — every surface so far works on day one for any shop. So the
+sequencing is deliberate: **decided now, built when there is traffic**, and the falsification test is in
+the ADR — *if merchants do not export the list, delete the screen.*
+
+**Two things the next session must not assume.** **Accepted is not scheduled** — both ADRs say
+*Accepted, not built*, and CLAUDE.md's new row says to ask before starting the fifth surface, because
+the whole argument for it was *decide now, build when a merchant exists*. And **nothing about the data
+has changed yet**: no table, no rows, no personal data, `ORDER` sync still off, and the `RETENTION_*`
+settings still read by no code.
+
+**[AGENTS.md](../AGENTS.md) was stale in four places and is now corrected**, which matters because it is
+third in CLAUDE.md's reading order and a fresh session believes it. It called SELL *"DESIGNED, not
+built… 3 surfaces"* — it had been built for weeks; it called the widget *"THE ONLY JAVASCRIPT IN THIS
+REPOSITORY — one file"* when `pairs.js` made it two on 2026-09-21, so a session reading it would have
+thought a second file was forbidden; its *"add an agent"* recipe still listed cart recovery as excluded;
+and **`make pairs-check` was missing from the command list entirely** — a gate nobody reading that file
+would know to run, which is how a check quietly stops being run at all.
+
+**2026-09-25, last — a sentence accepted this morning is reversed this evening, on purpose, and still
+nothing is built.**
+[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md) is
+**Proposed**: a shopper may be observed — page views, searches, cart actions — **only for a tenant whose
+shop has switched it on, and only through events the shop's own server sends.** It **amends**
+[ADR-0042 §1](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md),
+which named predictive lead scoring as the capability its held/observed line blocked. **0042 is amended,
+not superseded** — a tenant that has not switched this on is governed by it unchanged.
+
+**Why the reversal is not a mistake being corrected.** Lead scoring *is* shopper watching; there is no
+version of *"who is browsing and who is about to buy"* that does not record what a person did, and the
+blueprint's own example request — `{"session_data": {"pages_viewed": […], "time_on_site": 340}}` — is the
+forbidden payload, written three months before the rule existed. The owner weighed the trade and took it.
+
+**The three design decisions worth keeping.** **(1) The shop's server sends; no script of ours runs in a
+shopper's browser** — the bridge's `EntityChanged` listener and `DeliverWebhook` job are that pattern
+already built, an ad blocker cannot silently bias the data, and one generic event shape keeps
+[Rule 1](../AGENTS.md) intact. **(2) The switch governs SENDING, not saving.** `NEURA_OBSERVE_ENABLED=false`
+in the shop's own config, like `NEURA_PAIRS_AUTO_OPEN`: off means the data **never exists**, not that we
+received it and threw it away — *"a filter at our end is not a switch"*. **(3) Scoring is a points table,
+not a model**, because there are no labelled sessions to train on, because rules are what the industry
+actually ships, and because a merchant can be told why a visitor scored 65.
+
+**A dashboard toggle is the better product and is deliberately not v1** — recorded in §3 in full so it is
+not re-derived: the obstacle is that if the authority lives with us the shop keeps sending, and the fix
+needs the bridge to learn its own state from us, a mechanism that exists in **neither** repository today.
+
+**What can and cannot be proved here.** Phase 1 — events in, stored, deleted on schedule — is provable by
+the owner browsing their own storefront: the pipe works or it does not. **Phase 3 is not**: a score of 65
+meaning *"about to buy"* needs many real people, some of whom bought and some of whom did not, and the
+person acting out the sessions already knows the answer. Scope is recorded in the ADR as such.
+
+**What it costs, stated plainly.** *"We never watch your shoppers"* becomes *"we watch only if your shop
+turns it on"* — honest, and weaker, and it was the clearest difference between this product and the
+tracking companies it competes with. **Watching can start later; it cannot be undone.** Four uses stay
+forbidden and this ADR strengthens them: individual pricing ([§148](business/blueprint-v2.md)), ranking
+products by behaviour ([ADR-0040 §3](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)),
+writes and shopper-bound messages ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)), and automated
+decisions with legal effect.
+
+**ACCEPTED by the owner the same day, and accepted is not built.** No event has been stored, the switch
+does not exist, and the points in §6 are borrowed illustrations measured against nothing.
+**[CLAUDE.md](../CLAUDE.md) was edited with it**: the *"track a shopper"* row now says **allowed, on these
+conditions** and lists them, a new row keeps **pricing, behavioural ranking and automated decisions
+excluded** so nobody reads observation as permission to act on it, and §5 records that
+*"we never watch your shoppers"* **is no longer true and must not be repeated** — the accurate sentence is
+*"we watch only if your shop turns it on."*
+
+**2026-09-25, also — a model is allowed back into the pairing surface, off the request path.**
+[ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md)
+is **ACCEPTED — owner decision, 2026-09-25, and not built.** It **amends
+[ADR-0040 §5](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)**:
+*"no model runs in it"* becomes **"no model runs between a shopper and an answer."** §3's behavioural
+ban, §4's category rule and empty-is-a-result, and §6's parameters are untouched.
+
+**Why, and the measurement is this file's own.** The 2026-09-24 term fix moved coverage 18 → 19 of 29 and
+showed the remaining misses are not word-selection failures: `1330` Leather Loafer finds a boot and
+correctly drops it as same-category, `1320` Cashmere Jumper matches only itself. **Word matching finds
+products described alike; a pairing needs products that go together.** A model knows a loafer goes with
+socks, needs no history, and works on a shop's first day.
+
+**Two alternatives were considered and rejected in writing.** *Purchase history* is the industry standard
+and is unavailable — no `ORDER` rows, §3 bans behavioural ranking, and a new shop has zero orders.
+*Embeddings* are available (pgvector, an embedder) and are the **wrong relation**: a rain shell's nearest
+neighbour is another rain shell, which §4 then excludes. A third — the merchant setting pairs by hand —
+was rejected by the owner for the right reason: it moves work onto the person the product should save.
+
+**The shape is the owner's, and it is cheaper than the one proposed to them.** Not precomputed at sync:
+**computed lazily on first use and cached.** A 10,000-product catalogue where 200 products ever reach a
+cart costs **200 calls, not 10,000**, and the cache warms in popularity order with no ranking logic
+anywhere. The first request for a product answers from the existing word path — never a regression — and
+queues the computation; **every shopper after that, forever, gets the better answer.** The cache is keyed
+by product, not by person: nothing about a shopper is stored, so this needs no consent and does not touch
+[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md).
+
+**Two costs recorded rather than discovered later.** **(1) [Rule 4](../AGENTS.md) reaches this surface.**
+`test_sell_pairing.py` says its cases are tests and not evals *because there is no model that can
+regress*; that ends here, and the eval — injection resistance at 1.00 included — is most of the work, not
+the prompt. **(2) A risk this surface has never carried:** ADR-0040's safety argument was that there is no
+model to persuade, and the input is merchant catalogue text, which the glossary classifies as
+**untrusted**. Bounded structurally: the model returns *kinds*, never product names, so only the store can
+name a product; it has no tools; **nothing it produces reaches a shopper as words** — `heading_for` still
+builds every visible sentence; and it runs in the background. **Worst case is a bad suggestion, not a
+fabricated claim.**
+
+**The falsification test is a number that already exists:** the word path gives **19 of 29**. If the model
+path does not beat that by enough to justify the eval suite behind it, **delete it and keep the words** —
+they cost nothing, cannot be injected, and need no eval.
+
+**2026-09-25, and last — a sixth SELL surface, and only a third of it is approved to build.**
+[ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md)
+is **ACCEPTED — owner decision, and nothing built.** One merchant-facing screen: sold-out or unfindable
+products, ranked by how many people wanted them, with the contactable ones named underneath.
+**We store the interest, we show it, we contact nobody.**
+
+**Why it is SELL's, since the rule makes it arguable.**
+[ADR-0033](architecture/adr/0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) says
+CARE answers what the store *has* and SELL helps the shopper *choose* — so *"is it in stock?"* reads like
+CARE. **It is SELL's because of where it fires**: on SELL's own
+[ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md) dead end, the honest-miss
+path already in its graph, where SELL tried to help someone choose and could not. Same purpose as
+[ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md):
+**recovering a sale, not answering a question.**
+
+**Three inputs, three permissions, and that is the whole structure — they are three features sharing one
+screen.** **Stage 1, APPROVED:** page views of sold-out products — a count, **no identity**, riding on
+[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)'s event
+stream plus a filter and a screen. *"The sold-out Cashmere Jumper was viewed 47 times this week"* is
+useful alone, needs no consent and has nothing to delete on request — **the cheapest thing designed
+today. Stage 2, BLOCKED:** a shopper typing an email into the chat is **volunteered** data, and
+[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md)
+names only *held* and *observed*. **That third category is a one-line amendment and a prerequisite, not a
+footnote. Stage 3, BLOCKED:** identifying a logged-in viewer needs [A21](open-questions.md)'s short-lived
+signed token — which A21 itself calls *"the one place where inventing something plausible would be
+worst"*, an ADR **and** a security review. **Recorded in the ADR precisely so nobody smuggles 2 or 3 in
+as "while we're here".**
+
+**Two refusals written into it.** A shopper is never told *"12 people are looking at this"* — manufactured
+urgency, the same class of claim as "customers also bought". And the counts never reorder what a shopper
+is offered; they are merchant-facing only.
+
+**One accepted abuse:** somebody can type another person's address. Mitigated by the merchant's message
+saying *"you asked us about X"* with an unsubscribe — a controller obligation for the agreement, not a
+thing our code can fix.
+
+**Consequences worth seeing plainly.** SELL now has **six surfaces, two of them merchant-facing** — the
+agent has grown an admin side. The console is **two screens over** [console.md §2](console.md)'s *"the
+discipline is five"*, broken twice in one day, both times deliberately and both times written down.
 
 **Next action:** **CARE and SELL now work end to end on the cloud path, and the goal has changed shape.**
 The owner's stated purpose, 2026-09-19: **hand both the shop and the agents to another person to test.**
