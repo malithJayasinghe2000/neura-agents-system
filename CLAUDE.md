@@ -28,7 +28,7 @@ Concretely:
 | If asked to… | Correct response |
 |:--|:--|
 | Build NEURA-MIND / GROW / GUARD | **These are not designed.** See [`docs/agents/README.md`](docs/agents/README.md). Say so and propose a design session first. |
-| Build NEURA-SELL | **Designed 2026-08-26** — [`docs/agents/sell.md`](docs/agents/sell.md), [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md). It may be built, but **only within the scope that design fixes**: read-only, two intents, five tools, three surfaces. Checkout and cart recovery are excluded and are not re-openable. |
+| Build NEURA-SELL | **Designed 2026-08-26** — [`docs/agents/sell.md`](docs/agents/sell.md), [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md). It may be built, but **only within the scope that design fixes**: read-only, two intents, five tools, and — since [ADR-0040](docs/architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md), accepted 2026-09-20 and built 2026-09-21 — **four surfaces**. Checkout and cart recovery are still excluded and are still not re-openable: the fourth surface is a *paired suggestion*, which needs no identity, no timing and no write. |
 | Add a write/refund/cancel tool | Blocked by [ADR-0010](docs/architecture/adr/0010-read-only-mvp-tools.md). Requires the approval queue, which does not exist. |
 | Pick a cloud LLM provider | Deliberately undecided ([ADR-0006](docs/architecture/adr/0006-llm-model-roles.md)). Decided by eval results at swap time, not in advance. |
 | Add a native Shopify/Woo adapter | Phase 2 ([ADR-0009](docs/architecture/adr/0009-generic-commerce-interface.md)). Tier 2 comes first, on purpose. |
@@ -66,7 +66,7 @@ Nothing has been built or measured. Every figure below is illustrative or a targ
 - **Ollama is for development and for the sovereign product tier.** It is not a placeholder to be ripped out. Production uses a cloud API; both paths ship.
 - **Python is pinned to 3.12**, though 3.14 is installed on this machine. Deliberate — library wheel availability.
 - **The MVP agent is read-only.** It cannot change anything in a store. That is a feature — and **so is agent #2**: SELL's whole designed scope stays inside [ADR-0010](docs/architecture/adr/0010-read-only-mvp-tools.md).
-- **SELL is one product with three surfaces, and only one of them is an agent.** Recommendation has a graph; the MCP server and the product feed have no nodes, no prompts and no LLM call of ours in them. The safety argument on those two is the policy engine and tenant isolation, never "a persuaded model achieves nothing".
+- **SELL is one product with four surfaces, and only one of them is an agent.** Recommendation has a graph; the MCP server, the product feed and — since [ADR-0040](docs/architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) — the paired suggestion have no nodes, no prompts and no LLM call of ours in them. The safety argument on **those three** is the policy engine and tenant isolation, never "a persuaded model achieves nothing". The fourth also never ranks by behaviour: there is no purchase history in this system, so "customers also bought" is not a feature we lack but a claim we cannot make.
 - **One deployable process**, not microservices ([ADR-0002](docs/architecture/adr/0002-modular-monolith.md)) — the earlier plan said otherwise and was changed.
 - **There is no design partner and no real merchant yet.** The top project risk.
 

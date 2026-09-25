@@ -55,10 +55,13 @@ packages/                   LIBRARIES — shared, no product identity
 
 agents/                     PRODUCTS — one folder per sellable agent
   care/                     ✅ designed and built
-  sell/                     ✅ DESIGNED, not built — docs/agents/sell.md +
+  sell/                     ✅ designed and built — docs/agents/sell.md +
                             ADR-0023. Read-only, 2 intents, 5 tools, and
-                            3 surfaces of which only one has a graph.
-                            Scaffold within that scope, not beyond it
+                            5 surfaces of which only one has a graph.
+                            FOUR are built; the fifth — the merchant-facing
+                            recovery list (ADR-0043) — is accepted, NOT built
+                            and NOT scheduled. Ask before starting it.
+                            Build within that scope, not beyond it
   mind/ grow/ guard/        ⬜ NOT DESIGNED — see docs/agents/README.md
 
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
@@ -67,8 +70,11 @@ apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
   jobs/                     the worker loop and its handlers. Finds work through
                             neura_due_tenants() — the ONE read in this system
                             that crosses a tenant boundary (ADR-0022)
-  widget/                   the embeddable chat element. THE ONLY JAVASCRIPT
-                            IN THIS REPOSITORY — one file, no build step, no
+  widget/                   the embeddable chat element, plus pairs.js for the
+                            paired suggestion (ADR-0040) — a separate asset on
+                            purpose, so a merchant who wants suggestions and no
+                            chat box ships no chat box. THE ONLY JAVASCRIPT IN
+                            THIS REPOSITORY — two files, no build step, no
                             package.json anywhere (ADR-0019). A test fails if
                             one appears
 
@@ -92,6 +98,14 @@ make test           # unit + the widget's JS logic
 make test-widget    # `node --test` — Node ships the runner, so no npm and no install
 make widget-check   # drive the REAL widget in REAL headless Chrome. No models, no cost —
                     # the browser half is not reachable from pytest or from node --test
+make pairs-check    # the same, for the paired suggestion (ADR-0040). Stub mode needs NO
+                    # database, shop or model, because the surface has none. 8 scenarios,
+                    # three of them hostile: markup in a product title, a javascript: link,
+                    # a data: image
+make pairs-check LIVE=1 URL=… SHOP=… TOKEN=…   # …and the half a stub cannot reach: the
+                    # page is on a DIFFERENT ORIGIN from the API, as a merchant's page
+                    # always is, so the per-key CORS decision and the key's origin lock
+                    # are exercised for real
 make console-check EMAIL=…   # ALL FIVE console screens in REAL headless Chrome: sign in
                              # through a real link, read the evidence, grade a withheld turn,
                              # open a transcript, and check no credential or invented number
@@ -214,7 +228,7 @@ The policy engine, capability filtering, audit logging and budget accounting com
 
 ### Add an agent
 
-> **First check [`docs/agents/README.md`](docs/agents/README.md).** CARE and SELL are designed; MIND, GROW and GUARD are not. If the agent has no design document, stop and propose a design session — do not invent one. If it *has* one, build inside it: SELL's excluded scope (checkout, cart recovery, behavioural ranking) is excluded by [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) and reopening it is a superseding ADR, not a pull request.
+> **First check [`docs/agents/README.md`](docs/agents/README.md).** CARE and SELL are designed; MIND, GROW and GUARD are not. If the agent has no design document, stop and propose a design session — do not invent one. If it *has* one, build inside it: SELL's excluded scope is excluded by [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md), and reopening any of it is an ADR, not a pull request. **Checkout writes and behavioural ranking are still excluded. Cart recovery was reopened on 2026-09-25 — narrowly — by [ADR-0043](docs/architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md)**, which is what "a superseding ADR, not a pull request" looks like when it happens: merchant-facing, export-only, nothing sent to a shopper, nobody watched.
 
 Once designed, create `agents/<name>/` with the standard five parts:
 

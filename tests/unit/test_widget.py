@@ -165,10 +165,62 @@ class TestWidgetHosting:
         assert headers["x-content-type-options"] == "nosniff"
         assert "max-age=300" in headers["cache-control"]
 
+    def test_the_pairing_block_is_served_the_same_way(self, client: TestClient) -> None:
+        """ADR-0040's client half, hosted exactly as the widget is.
+
+        **A separate asset rather than more of `widget.js`**: a merchant who
+        wants suggestions on a cart page and no chat box must not be made to
+        ship a chat widget, and a shopper on that page must not download one.
+        """
+        response = client.get("/v1/widget/pairs.js")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/javascript")
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert "neura-pairs" in response.text
+
+    def test_the_two_assets_are_genuinely_separate(self, client: TestClient) -> None:
+        """A chat box must not arrive with a suggestion block."""
+        assert "neura-chat" not in client.get("/v1/widget/pairs.js").text
+
+    def test_the_pairing_block_never_claims_behaviour(self, client: TestClient) -> None:
+        """ADR-0040 §3 rules these out by name, and the shipped file is the
+        artefact — there is no build step between this and a shopper's screen,
+        so the published bytes are the right thing to assert against.
+
+        Checked outside comments, because this file argues at length about
+        exactly the phrases it must never render.
+        """
+        import re
+
+        source = client.get("/v1/widget/pairs.js").text
+        code = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+        code = re.sub(r"^\s*//.*$", "", code, flags=re.MULTILINE)
+
+        for claim in ("bought together", "customers also", "trending", "popular"):
+            assert claim not in code.lower()
+
     def test_the_snippet_names_the_key_and_the_hosted_url(self, client: TestClient) -> None:
         body = client.get("/v1/widget/snippet?key=fn_pk_test_abc").json()
         assert "fn_pk_test_abc" in body["snippet"]
         assert body["widget_url"].endswith("/v1/widget/widget.js")
+
+    def test_the_snippet_offers_both_surfaces_separately(self, client: TestClient) -> None:
+        """A merchant who wants suggestions and no chat box must be able to see
+        that these are two pastes, rather than learning it from support."""
+        body = client.get("/v1/widget/snippet?key=fn_pk_test_abc").json()
+        assert body["pairs_url"].endswith("/v1/widget/pairs.js")
+        assert "neura-pairs" in body["pairs_snippet"]
+        assert "fn_pk_test_abc" in body["pairs_snippet"]
+        assert "neura-pairs" not in body["snippet"]
+
+    def test_the_pairing_snippet_asks_for_product_ids_and_not_a_cart(
+        self, client: TestClient
+    ) -> None:
+        """ADR-0040 §2. The attribute is named for what it holds; a snippet
+        saying `data-cart` would make the tenth endpoint feel natural."""
+        snippet = client.get("/v1/widget/snippet?key=fn_pk_test_abc").json()["pairs_snippet"]
+        assert "data-products" in snippet
+        assert "cart" not in snippet.lower()
 
     def test_the_demo_page_strips_anything_but_a_key(self, client: TestClient) -> None:
         """The key lands in an attribute value on a page whose job is to load a

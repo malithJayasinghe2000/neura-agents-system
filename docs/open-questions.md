@@ -135,7 +135,7 @@ Every unresolved question from across the documentation, consolidated. Scattered
 |:--|:--|:--|:--|
 | X1 🟠 | **Initialise git?** Not a repository yet. Should happen before the first line of code. | Everything | — |
 | X2 🟠 | **Deployment target.** Railway was the earlier plan but has no GPU path. Production inference is a cloud API, so the API/worker host is a separate open choice. | Phase 1.17 | [roadmap](roadmap.md) |
-| X3 🟡 | **Which agent is second?** SELL (agent-readiness) or MIND (analytics). **To be decided by what a design partner asks for, not by us.** | Phase 3 | [agents/](agents/README.md) |
+| X3 🟡 | **Which agent is second?** SELL (agent-readiness) or MIND (analytics). **To be decided by what a design partner asks for, not by us.** **— 2026-09-20: MIND is PARKED by owner decision, and this question is the reason it was parked rather than designed.** A MIND design session was on the table and was declined for now: holding it would have answered X3 in the absence of the one input X3 defers to. **The trigger is restated rather than changed — the session happens when a design partner asks for it**, not on a quiet week. The scope such a session would start from is already recorded (threshold-based anomaly alerts, [blueprint-v2 §5.3](business/blueprint-v2.md) v1, inside §148's segment / inventory / time granularity) and **no design was invented**. Still blocked on **B2**. | Phase 3 | [agents/](agents/README.md), [PROJECT_STATE](PROJECT_STATE.md) |
 
 ---
 

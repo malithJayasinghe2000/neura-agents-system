@@ -101,6 +101,12 @@ MANIFEST = AgentManifest(
             "sell:catalogue:read",
             "sell:escalate",
             "sell:mcp:connect",
+            # ADR-0040's fourth surface. Separate from `sell:catalogue:read`
+            # for the same reason `sell:mcp:connect` is: this key is served to
+            # every browser that loads a merchant's cart page, and a key that
+            # can ask "what goes with these two products" must not thereby be
+            # able to read the catalogue directly.
+            "sell:suggest:read",
             # Turning publication on, rotating the token, and turning it off.
             # Separate from `sell:catalogue:read` on purpose: reading a
             # catalogue and *publishing* one are different powers, and the

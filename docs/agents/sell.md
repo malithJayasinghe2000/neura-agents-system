@@ -1,9 +1,10 @@
 # NEURA-SELL — Technical Design
 
-**Status:** **Built** — designed 2026-08-26, built the same day, all three surfaces · **Design date:** 2026-08-26 · **Decision:** [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)
+**Status:** **Built** — designed 2026-08-26, built the same day, all three surfaces · **a fourth surface was added 2026-09-21** by [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) · **Design date:** 2026-08-26 · **Decision:** [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)
 
 > `agents/sell/` holds the graph (`graph.py`, seven nodes in `nodes/`), the five tools, the MCP
-> server (`mcp/`), the product feed (`feed/`) and the golden datasets (`evals/`). What is **not**
+> server (`mcp/`), the product feed (`feed/`), the paired suggestion (`pairing/`) and the golden
+> datasets (`evals/`). What is **not**
 > settled is quality: the release gate is unmet at escalation precision **0.43** — see §9 and
 > [**A14**](../open-questions.md).
 
@@ -38,10 +39,13 @@ This is the structural fact that shapes every other section, so it is stated fir
 | 1 | **Recommendation** | a shopper, in the widget | ✅ | yes | the graph in §2 |
 | 2 | **MCP server** | *someone else's* AI agent | ❌ | **no** | the policy engine, §6 |
 | 3 | **Product feed** | crawlers, answer engines | ❌ | no | the renderer, §7 |
+| 4 | **Paired suggestion** | a page in the merchant's own theme | ❌ | **no** | `sell:suggest:read`, [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) |
 
-Only surface 1 is an *Agent* as [the glossary](../glossary.md) defines one. Surfaces 2 and 3 have no nodes, no prompts and no LLM call of ours anywhere in them. The manifest and the entitlement gate all three, which is what makes them one sellable product — but calling three surfaces "a graph" would be the kind of tidy fiction this repository exists to avoid. [`README.md`](README.md) already draws the same distinction for GUARD, whose MVP portion is platform infrastructure rather than an agent.
+Only surface 1 is an *Agent* as [the glossary](../glossary.md) defines one. Surfaces 2, 3 and 4 have no nodes, no prompts and no LLM call of ours anywhere in them. The manifest and the entitlement gate all of them, which is what makes them one sellable product — but calling four surfaces "a graph" would be the kind of tidy fiction this repository exists to avoid.
 
-**This relocates the safety argument for surfaces 2 and 3.** CARE's argument is *a persuaded model achieves nothing, because no tool that changes a store was ever registered*. For MCP and the feed there is no model of ours to persuade — the argument is entirely read-only tools, the policy engine, and tenant isolation. What replaces prompt injection as the characteristic risk is its mirror image, and §6.4 names it.
+> **Row 4 was added on 2026-09-21, three weeks after this section was written**, by [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) — which is why it is a separate ADR and a separate row rather than an edit to the argument above. It selects complementary products from the catalogue's own words, and it is the one surface that is shown to a shopper without a shopper having asked for anything, so §3 of that ADR fixes the words on screen: **the heading names the product it pairs with, and never claims anything about behaviour.** There is no purchase history in this system. [`README.md`](README.md) already draws the same distinction for GUARD, whose MVP portion is platform infrastructure rather than an agent.
+
+**This relocates the safety argument for surfaces 2, 3 and 4.** CARE's argument is *a persuaded model achieves nothing, because no tool that changes a store was ever registered*. For MCP, the feed and the paired suggestion there is no model of ours to persuade — the argument is entirely read-only tools, the policy engine, and tenant isolation. What replaces prompt injection as the characteristic risk is its mirror image, and §6.4 names it.
 
 ### 1.2 Two intents
 

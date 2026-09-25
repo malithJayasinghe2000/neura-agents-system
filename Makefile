@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration test-widget widget-check widget-check-live widget-demo tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
+        test-integration test-widget widget-check widget-check-live widget-demo pairs-check tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
@@ -114,6 +114,20 @@ widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no c
 widget-check-live:
 	uv run python scripts/widget_check.py --live --url $(or $(URL),http://localhost:8000) \
 	  --shop-url $(SHOP) --shop-token $(TOKEN) $(if $(SHADOW),--shadow,)
+
+# ADR-0040's block, in the same browser and for the same reason. Stub mode needs
+# nothing at all — no database, no shop, no models — because the surface has no
+# model in it to need one.
+#   make pairs-check
+#   make pairs-check LIVE=1 URL=http://localhost:8010 \
+#        SHOP=http://bagisto.test/neura/v1 TOKEN=... [PRODUCTS=1315]
+# Live mode serves the harness from its OWN port and locks the key to it, so the
+# block's fetch crosses origins exactly as a merchant's cart page does — which is
+# the half stub mode structurally cannot reach.
+pairs-check:  ## Drive the REAL suggestion block in REAL headless Chrome. No models, no cost.
+	uv run python scripts/pairs_check.py $(if $(LIVE),--live,) \
+	  $(if $(URL),--url $(URL),) $(if $(SHOP),--shop-url $(SHOP),) \
+	  $(if $(TOKEN),--shop-token $(TOKEN),) $(if $(PRODUCTS),--products $(PRODUCTS),)
 
 # Set a tenant up and hand you a URL to open in your OWN browser. A headless
 # pass proves the widget works; it does not show anybody what it looks like.

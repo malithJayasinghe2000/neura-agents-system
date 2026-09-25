@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-19 (last) — **both agents held as CONVERSATIONS, and both now work. CARE passes; SELL's "recommends nothing" defect ([A27](open-questions.md)) is FIXED in code, measured 3/3 `no_match` → 3/3 answered with every claim verbatim**
+**Last updated:** 2026-09-24 (last) — **term selection no longer spends every search on the longest words: one is reserved for the title and one for the description, measured across all 29 real products (18 → 19 with a suggestion), and measuring it disproved this file's own account of why the misses happen — the Leather Loafer and the Cashmere Jumper are category and catalogue-size limits, not word limits. `make check` 1229, `make test-widget` 51, `make pairs-check` 8/8 stub + 1/1 live. Previously, 2026-09-24: the paired suggestion now renders in the assistant panel and may open itself once per tab, off by default ([ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md)) — the shop's whole integration is one attribute on a tag that already existed. Previously, 2026-09-21: ADR-0040's paired suggestion was BUILT and RUN AGAINST THE REAL SHOP — SELL's fourth surface, no model in it. `make check` exit 0 (1227 passed), `make test-widget` 38/38. The live run found a real defect (ranking by word length, not distinctiveness), it is fixed and measured instead, and §4's example reproduces: rain shell → hiking shoe. 17 of 28 real products produce a suggestion. `make pairs-check` drives it in real headless Chrome, 8/8 stub and live cross-origin against the real shop; no shopper has seen it. Previously, 2026-09-20: the open question raised that day is DECIDED — MIND is parked until a design partner asks for it, and [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) was accepted. The handover was to go first; the owner then deferred it, so the build went first instead**
 > ### ⚠️ Read every green result in this file as "passed **on cloud**"
 >
 > **Owner's decision, 2026-09-19:** finish CARE and SELL on a cloud model, and **do not re-test on
@@ -372,6 +372,305 @@ browser**: SELL *"I recommend the Lightweight Rain Shell (Product 1315)…"* and
 most items within 30 days…"*. **The first time SELL has ever answered through the widget.** One turn
 each, not an eval, and **passed on cloud** — which is the only thing it says.
 
+**2026-09-20 — a design conversation, no code. Two things came out of it and neither is built.**
+
+**The trigger:** the owner compared what exists against the
+[v1 blueprint](archive/FiveNeurals_AI_Agents_Blueprint_v1.md) and judged the product thin — *"only a
+chat bot, no marketing point"*. Measured against that document's 13 capabilities across SELL and CARE:
+**2 built** (Sales Conversation AI, Smart Escalation), **3 partial** (cross-sell, Knowledge Evolution,
+omnichannel-as-chat-only), **8 absent**. Verified in code, not estimated — there is no sentiment,
+translation, voice or channel code anywhere.
+
+**The 8 absent ones fail for exactly three reasons**, and the grouping is the useful part: **(1) the
+agent cannot write** — dynamic pricing, cart recovery, proactive outreach all need `WRITE`, which
+[ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) puts in Phase 2 behind an **approval queue
+that does not exist**; **(2) the data is not collected** — lead scoring, revenue forecasting, churn;
+**(3) simply unbuilt, nothing blocking** — multi-language, sentiment, an email channel.
+
+**Outcome 1 —
+[ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) is
+written and is PROPOSED, not accepted.** A paired suggestion on the cart page: the page hands NEURA
+product ids and gets back at most two complementary products. **A fourth SELL surface with no model in
+it**, alongside the MCP server and the feed. Decided in conversation and recorded there: the shop
+hands over ids rather than NEURA asking about carts (**there is no cart in the nine endpoints, and
+every platform exposes one differently — asking would break Rule 1**); selection is by the product's
+own words and **never by behaviour**, because there is no purchase history and *"customers also
+bought"* would be a false claim to a shopper; the **same category is excluded**, measured — `waterproof`
+returns a rain shell and a shoe, `jacket` returns four tops; **nothing is shown rather than something
+poor**; the heading **names the cart item it pairs with**, so the claim is attributable and
+refusable. The two parameters — most-expensive item, two suggestions — are **guesses and labelled as
+such**. **Nothing is built and the ADR is uncommitted.**
+
+**Outcome 2 — the pricing feature is MIND's, not SELL's, and the owner found that himself.** The
+discussion started as "dynamic pricing" and arrived at merchant-facing advice in the console —
+*"40 in stock, nothing sold in 90 days"*. **That is a threshold alert to a shop owner, not anything a
+shopper sees**, and [blueprint-v2 §5.3](business/blueprint-v2.md) lists exactly that under **MIND v1**.
+Two things already settle parts of it: §148 **removed individual willingness-to-pay pricing** on EU
+Omnibus / GDPR Art. 22 grounds and rules that *"any future pricing work stays at segment / inventory /
+time granularity, never individual"* — so **the version discussed is the permitted one**; and
+[agents/README.md](agents/README.md) says MIND has **no technical design at all** and that a request to
+build it must be answered with a design session, not an invented design. Signals available today
+without new data, checked against the canonical models: per-product sales (`OrderLine` carries
+`product_external_id`, `quantity`, `unit_price`; `Order` carries `placed_at`), stock levels, actual
+price paid versus list, and **a product's price against its own category — which needs no sales history
+at all**. Competitor pricing was raised and is out: it means scraping, it is fragile and legally grey,
+and blueprint-v2 puts it under **MIND's *Vision* tier**, not v1.
+
+**THE OPEN QUESTION, and it is the owner's:** **(A)** hold a design session for MIND, or **(B)** park
+MIND, accept or reject ADR-0040, and get the cart suggestion in front of the tester. **Nothing was
+decided in that conversation; it was decided later the same day — see the entry below.** The relevant
+constraint is the roadmap's own: MIND is **Phase 3**, after a first paying
+design partner, and [B2](open-questions.md) — no merchant on live traffic — is still the top risk and
+outranks both.
+
+**2026-09-20, later — the open question above is DECIDED, and the decision SPLIT option B rather than
+taking it whole.** **MIND is parked**, and the trigger is [X3](open-questions.md)'s own condition rather
+than a quiet week: the design session happens **when a design partner asks for it**. Holding it now
+would have answered X3 — *"to be decided by what a design partner asks for, not by us"* — in the absence
+of the single input it was deferred for, and [roadmap.md](roadmap.md) puts MIND in **Phase 3, after a
+first paying partner**. Nothing from the MIND discussion is lost and **no design was invented for it**:
+the permitted scope (**threshold-based anomaly alerts**, [blueprint-v2 §5.3](business/blueprint-v2.md)
+v1, inside §148's segment / inventory / time granularity) and the signals available today are recorded
+in the entry above, which is where a future design session starts.
+
+**[ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) is ACCEPTED** — owner decision, 2026-09-20 — **and still not built.** Its status was
+flipped from Proposed, and the row was added to [the ADR index](architecture/adr/README.md), which had
+never carried it.
+
+**What was split, and why that is not pedantry.** Option B as posed bundled *decide the ADR* with
+*build it and hand both to the tester* — which spends the handover to buy a feature. **The tester's list
+of everywhere they got stuck is the highest-value input this project can obtain, it cannot be produced
+on this machine, and it is the only work here blocked on another person's calendar.** So: **hand over
+now with what already works, and build the cart suggestion inside the wait.** The tester meets a fourth
+surface on their second pass rather than their first, which also keeps a failed install easy to
+diagnose. **Acceptance decided the design, not the schedule** — recorded in the ADR itself, so the
+sequencing is not later re-read as a change of mind.
+
+**Unchanged by this, deliberately:** `make verify-probe AGENT=sell` **stays RED** and must not be made
+green by lowering the bar; Stage 6 §4 shadow mode stays untouched until a human-response path exists;
+and [B2](open-questions.md) still outranks everything on the list below. **Nothing was built today and
+nothing was measured** — this entry records two decisions and three edited documents.
+
+**2026-09-21 — ADR-0040's paired suggestion is BUILT: SELL's fourth surface, and the third with no
+model in it.** The owner deferred the tester handover, which removed the only reason the 09-20 decision
+held this back, so it was built first instead. `make check` **exit 0 — 1220 passed**, mypy 224 files,
+**7 contracts kept**, platform independence ✔; `make test-widget` **38 pass, 0 fail**.
+
+**What exists.** `POST /v1/sell/suggestions` takes product ids and returns at most two complementary
+products; `agents/sell/src/neura_agent_sell/pairing/` holds the logic, split so that `select.py` is
+**pure** — every rule about what a shopper may be shown is testable without a store, an adapter or a
+network — and `orchestrate.py` holds everything that touches the shop. `pairs.js` is the client half,
+a `<neura-pairs>` custom element served from `/v1/widget/pairs.js` beside the chat widget, **a separate
+asset on purpose**: a merchant who wants suggestions and no chat box must not have to ship a chat
+widget, and a shopper on that page must not download one. `GET /v1/widget/snippet` now returns both
+pastes. **No tenth endpoint was added** — the shop hands over ids and is never asked about a cart, which
+is what keeps [Rule 1](../AGENTS.md) intact.
+
+**The decisions that are code rather than prose, since that is the part that rots:** the heading is
+built **server-side** in `select.heading_for` and used verbatim by the client, so ADR-0040 §3's ban on
+"often bought together" / "customers also bought" / "trending" is enforced rather than remembered — a
+page cannot substitute a claim about behaviour over our products. The anchor's own category is excluded
+from its own suggestions, and **an uncategorised product returns nothing rather than something**:
+without categories §4's rule cannot be applied, and applying no rule is how the measured four-jackets
+result gets shipped. Term selection is **longest word first**, which removes the need for a stopword
+list — a third tuned parameter, and a worse one. `sell:suggest:read` is its own scope, not
+`sell:catalogue:read`: the key sits on a public cart page, and a key that can ask "what goes with these"
+must not thereby be able to read the catalogue.
+
+**Every ordinary disappointment is an empty 200, never an error** — unknown ids, a store that cannot
+search, a shop that times out, nothing complementary in the catalogue. That is ADR-0040 §4, and it is
+also [Finding 49](TESTING_LOG.md) from the other side: a shopper on a cart page has already decided to
+buy, and a stack trace there is the most expensive place in the product to put one.
+
+**47 tests, and what they are not.** 44 in `tests/unit/test_sell_pairing.py` plus 3 widget-hosting
+tests, and 16 more in `tests/widget/pairs.test.js`. **These are tests, not evals, for the reason
+`test_sell.py` already records and [E8](open-questions.md) already registers** — there is no model on
+this surface, so there is nothing that can regress in the way an eval exists to catch, and calling them
+an eval would inflate the suite with cases that can only ever pass deterministically. Rule 4 is
+untouched in substance: no prompt, graph node, tool or model config was edited, and `make eval-fast`
+is unchanged.
+
+**2026-09-21, later — it was run against the REAL shop, and the real shop found a defect the fixture
+store could not.** Live against Bagisto on `http://bagisto.test/neura/v1`, 29 products, a provisioned
+tenant and a public `sell:suggest:read` key — **no model of any kind was run, because this surface has
+none.**
+
+**The defect: term selection was ranked by word length, and length is not distinctiveness.** For the
+Lightweight Rain Shell the longest words are `lightweight` (11), `waterproof` (10) and `paperback` (9 —
+from *"around the size of a paperback"*). `lightweight` matched trousers and a frock, filled both
+places, and an early stop meant **`waterproof` was never searched** — so the pairing ADR-0040 §4 names
+as its measured example, the rain shell and the hiking shoe, was exactly the one the code could not
+produce. It passed every fixture test because the fixture descriptions are terse and technical; **real
+merchant copy carries marketing adjectives, care instructions and similes, and any of them can be
+long.**
+
+**Fixed by measuring instead of assuming.** Each term is already searched on its own, so the size of
+each answer is a free measure of how common that word is in *this* catalogue: `waterproof` returned 2
+products, `lightweight` returned 3, and the shoe now outranks the frock. **It ranks terms, never
+products** — a per-product score is the first step towards ranking by something other than the
+merchant's own words, and what waits at the end of that road is behaviour. The early stop is gone,
+because which term wins cannot be known before every count is in; the search ceiling is unchanged at
+three. Live result after the fix: **`1315` → `1332 Waterproof Hiking Shoe`**, which is ADR-0040 §4
+reproduced against a real store.
+
+**Coverage on the real catalogue: 17 of 28 products produce a suggestion.** The other eleven correctly
+show **nothing** — every one traced to a designed path in the logs: the anchor's own category held all
+the matches, or the term matched only the anchor itself, or (`1310` Merino Crew Knit, `1327` Canvas
+Court Sneaker) **the merchant filed the product under no category at all**, where §4's rule cannot be
+applied and the surface refuses rather than guesses.
+
+**And a finding worth keeping, because it is about the merchant's data rather than our code.** Several
+pairings put trousers beside trousers — `1303` Chinos → `1317` High-Rise Tailored Trousers. §4 worked
+exactly as written: it excluded the anchor's own category, and **the shop files `1317` under category
+33, "Tops".** The rule is precisely as good as the merchant's categorisation, which extends ADR-0040's
+stated bound — *"quality is bounded by how well merchants write product descriptions"* — to how well
+they file them. **This was not fixed, and must not be fixed quietly**: changing what §4 excludes is a
+change to a decided rule and needs an ADR, not a patch. The failure mode it produces is still the one
+the ADR chose: **visible and ignorable, never invisible and believed.**
+
+**2026-09-21, last — it now runs in a REAL browser, and `make pairs-check` is the gate.**
+`scripts/pairs_check.py` drives the real `pairs.js` in real headless Chrome over the DevTools
+Protocol, reusing `widget_check.py`'s driver rather than writing a second one. **Stub mode needs
+nothing at all** — no database, no shop, no models, because the surface has no model in it to need
+one — and **8 of 8 scenarios pass**: a block renders in a real Shadow root; the heading is the
+server's words verbatim; no suggestions renders **nothing at all**, not an empty box; products with
+no heading render nothing (§3); **a product title that IS markup renders as literal text** —
+`<img src=x onerror=…>` produced **0 `img` elements, 0 `script` elements and an unchanged
+`document.title`**; and a `javascript:` link and a `data:` image never reach an attribute.
+
+**Live mode proves the half a stub structurally cannot: the page is on a different origin from the
+API**, which a merchant's cart page always is. The harness is served from its own port and the key is
+origin-locked to it, so the fetch crosses origins for real and exercises the per-key CORS decision
+(`middleware/cors.py`) and the key's origin lock together. **Passed against the running API and the
+real shop: `1315` → heading *"Goes well with your Lightweight Rain Shell"*, cards Waterproof Hiking
+Shoe and Linen Drawstring Trousers.**
+
+**One thing that check caught about itself, and it is the reason to write the detail down.** The stub
+routed scenarios by splitting the key on its last underscore, and every scenario name contains one —
+so the three hostile cases were silently served the *ordinary* script. **Three safety checks read
+green while never having run.** It is the same shape as every entry in this file about a control
+nobody executed, arriving inside the tool built to execute controls. Fixed by splitting on the whole
+prefix, and the comment in `pairs_check.py` says why.
+
+**What has NOT happened.** **No shopper has ever seen it.** The two
+parameters — most-expensive item, two suggestions — remain **guesses that ADR-0040 labels as guesses**,
+and the ADR's falsification test stands: if the suggestion is taken so rarely that it is noise,
+**delete the surface rather than add a model to it**. *"17 of 28"* is a property of one catalogue and
+of this mechanism; **it says nothing about whether a shopper is helped.**
+
+**Also found, and it is not mine:** `make test-integration` **fails 40 tests on `main`** — identical
+failures with and without this work, verified by stashing it. The stub `_Response` in
+`tests/integration/test_api_postgres.py` lacks `structured_repairs`, which the serving path reads.
+**`make check` does not run `test-integration`**, which is why every green `make check` in this file
+sat on top of it. Not fixed here; recorded so it is not rediscovered.
+
+**2026-09-24 — the suggestion moved into the panel we own, and the reason was the owner's, not a
+developer's.** [ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md) amends ADR-0040's *delivery* and its *pop-up exclusion*; the fourth
+surface itself — endpoint, selection, category rule, heading, empty-is-a-result — is untouched.
+
+**The question that caused it: what does this cost the next platform?** The cart-page block needed a
+template, a placement and **theme styling** on the shop's side, repeated per platform and per theme.
+That is not a Rule 1 breach — no platform name entered our code and the check stays green — but it
+erodes the claim Rule 1 protects. The shop's whole integration is now **one attribute on the
+`<script>` tag that was already there**: `data-neura-products="1315,1320"`. No new template, no
+element, no styling. **And the second objection was the deciding one** — a block is seen, a panel is
+opened, and *"if the user does not open it, the user does not see it."*
+
+**So the panel may open itself, and every condition on it is a restriction:** off by default
+(`NEURA_PAIRS_AUTO_OPEN=false`), only when there is a suggestion, **once per tab** — returning to the
+cart does not reopen it — and a switch in the shop's `.env` rather than a deploy, because **nobody has
+measured whether this helps or hurts.** ADR-0040 excluded a pop-up that needed a behavioural event, a
+session and [A21](open-questions.md); this needs none of those — a page loads, and **no agent speaks**.
+It renders as a `note`, never as an assistant bubble, because no assistant wrote it.
+
+**Verified in a real browser on the real shop.** Cart holding `1315`: the panel opened by itself
+showing *"Goes well with your Lightweight Rain Shell"* with the Waterproof Hiking Shoe and Linen
+Drawstring Trousers, **with the Art. 50 disclosure above it** — inherited from the panel rather than
+solved again. **Second visit: the panel stayed shut and the cards were still inside it.** The
+cart-page block is kept and **switched off** (`NEURA_PAIRS_INLINE_BLOCK=false`); both on shows the same
+products twice. `make check` **1227 passed**, `make test-widget` **51 pass**, `make pairs-check` 8/8,
+`make widget-check` green.
+
+**2026-09-24, later — three things were reverted on purpose, and each revert is a decision worth
+keeping.**
+
+**The cart-page block was removed from the Bagisto bridge.** Once the panel version worked, the
+standalone template was dead code in somebody else's repository. `pairs.js` is still published and
+still gated by `make pairs-check`; **no bridge mounts it.** ADR-0041 §5 is corrected to say so.
+
+**A mini-cart drawer hook was built and then reverted, at the owner's call.** `window.neura.showPairs(ids)`
+plus a bridge route and a click listener — all working except the last step — and the owner stopped it
+with the right reason: **a drawer is not common to every platform, and wiring one means shop-side work
+in both repositories for something not every shop has.** The reverted work found two things worth
+keeping anyway: **Bagisto's own `/api/checkout/cart` returns no product id** (only the cart *line* id),
+so any page wanting to ask "what goes with these" has nothing to send without a bridge route of its
+own; and `NeuraBridgeServiceProvider.php` is back to **byte-for-byte untouched**.
+
+**The console's "check your pairings" screen was proposed and NOT built.** The owner asked for the
+merchant-facing half — a list the shop owner reviews and exports — and then stopped it. **The shape it
+was heading towards is recorded here so it is not re-derived:** a fifth console screen over the
+**synced** catalogue rather than the live shop (checking 10,000 products live is 40,000 requests at the
+merchant's server), reusing `pairing/select.py` unchanged because it is pure. The customer-facing
+variant — *"these people bought X, suggest Y, export with emails"* — is **orders, never carts**: there
+is no cart in the nine endpoints, cart recovery is excluded by [CLAUDE.md](../CLAUDE.md), and
+`CUSTOMER`/`ORDER` are syncable but **not currently synced** (only `product`, `category`, `policy` have
+rows). It also makes us a processor for real people's names and emails, which is an agreement before it
+is any code.
+
+**One operational fix, recorded because it will bite again.** The tester's shop key lacked
+`sell:suggest:read`, and swapping `NEURA_WIDGET_KEY` in the shop's `.env` **did not take** — Herd's PHP
+workers serve a cached `.env`, and `config:clear`, `view:clear` and `herd restart` all failed to shift
+it. The fix was to **add the scope to the existing key** in `api_keys` and restore the original `.env`.
+**Prefer widening a key over swapping one** on a Herd-served shop.
+
+**Term selection picked the *longest* words, and real merchant copy puts care instructions and
+marketing adjectives there.** Measured on the real shop: the Leather Loafer searched `stitched`,
+`polished`, `flexible` and found **nothing**, while `leather` — one letter shorter — finds a boot. The
+Cashmere Jumper searched `mongolian`, `detergent` and found nothing. **— FIXED 2026-09-24, later; and
+the fix showed the diagnosis in this paragraph was wrong about why the misses happen. See the entry
+below.**
+
+**2026-09-24, last — the longest-word defect is FIXED, and measuring it disproved the reason this file
+gave for the misses.** No ADR: ADR-0040 never specified how terms are chosen, so this changes an
+implementation note in `select.py` and nothing that was decided.
+
+**The rule now: one search is reserved for the title, one for the description, and the third goes to
+the longest word left.** A title is written to identify a product; a description is written to sell it.
+The title slot is what the Leather Loafer never had — it now searches `leather` rather than three care
+instructions. The description keeps a slot of its own because a rule that simply preferred the title
+would have spent all three of the Lightweight Rain Shell's searches on `lightweight`, `shell` and
+`rain`, **losing `waterproof` and with it the Hiking Shoe that ADR-0040 §4 measures**. No stopword
+list, no material list, no tuned parameter: three searches still, `MAX_TERMS` unchanged.
+
+**Measured end to end against the real shop, every one of the 29 products, before and after.**
+`make check` **exit 0 — 1229 passed** (1227 + 2), `make test-widget` **51**, `make pairs-check` **8/8**
+stub and **1/1 live cross-origin**, `1315` → Waterproof Hiking Shoe unchanged.
+
+**Coverage: 18 of 29 → 19 of 29.** Honest accounting of that one net product: **`1311` Waxed Cotton
+Field Jacket** and **`1329` Everyday Running Trainer** gained a suggestion (`corduroy` → `cotton`,
+`engineered` → `everyday`); **`1328` Suede Desert Boot** lost its only one and **`1309` Oxford
+Button-Down Shirt** dropped from two to one, both because the title word displaced `unlined` — a
+construction adjective the shirt and the boot happened to share, which had paired them by luck in
+exactly the way ADR-0040 §4 says `waterproof` did.
+
+**And the part worth keeping, because this file was wrong about it:** the two products named above as
+the headline misses **are still misses, and neither is a word-selection failure.**
+
+* **`1330` Leather Loafer.** `leather` is now searched and **does** find `1326` Leather Chelsea Boot.
+  The boot is then correctly dropped: both products sit in **category 36**, and §4 excludes the
+  anchor's own category. **Nothing is the right answer** — a shopper buying a loafer does not want
+  another leather shoe. The previous entry's *"would have found two boots"* was true of the search and
+  not of the result.
+* **`1320` Cashmere Crew Jumper.** `cashmere` is now searched and matches **one** product: itself. In a
+  29-product catalogue there is no second cashmere item to pair with.
+
+**So the ceiling on this surface is not the word rule.** It is the size of the catalogue and how the
+merchant files things — the same bound as the 2026-09-21 trousers-beside-trousers finding, arriving
+from the other side. **A bigger gain would have to come from changing what §4 excludes, which is a
+decided rule and needs an ADR, not a patch.** Still true, and unchanged by this: no shopper has ever
+seen this surface, and *"19 of 29"* says nothing about whether one is helped.
+
+
 **Next action:** **CARE and SELL now work end to end on the cloud path, and the goal has changed shape.**
 The owner's stated purpose, 2026-09-19: **hand both the shop and the agents to another person to test.**
 So "stable" means *another human can install it and use it without the author*, which is a different bar
@@ -394,7 +693,16 @@ Fixed 2026-09-19, along with the macOS `make`/Xcode-licence trap and the cloud-e
 but the author has ever installed this project.** The highest-value next input is the tester's list of
 everywhere they got stuck — worth more than anything further that can be found from this machine.
 
-**2. `make verify-probe AGENT=sell` is still RED and should stay red.** Under ADR-0039's corrected
+**2. Build ADR-0040's cart suggestion — inside the wait, not ahead of the handover.** Accepted
+2026-09-20 and **nothing exists yet**. It reuses `search_products` and `GET /categories`, adds **no
+tenth endpoint** and runs **no model of ours**, so the surface is deterministic and testable without a
+provider — and Rule 4 still applies to it: **nothing merges without an eval**, a no-model surface
+included. The two parameters it fixes — most-expensive cart item, two suggestions — are **guesses the
+ADR labels as guesses**; do not repeat them as tuned. **— 2026-09-21: BUILT.** The owner deferred the
+handover, which removed the only reason to hold this back, so it was built first instead. See the entry
+above; this item is done and the sequencing note it carried no longer applies.
+
+**3. `make verify-probe AGENT=sell` is still RED and should stay red.** Under ADR-0039's corrected
 expectations, measured at n=10 on both sides with 100 calls and 0 errors each: `llama3.1:8b` fails
 **four** arms (E, G, H, I), `gemini-3.5-flash` fails **one** (F). **Neither clears
 [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s every-arm bar.** Arm F is the open
@@ -402,11 +710,11 @@ question — the two models fail it in opposite directions and
 [Finding 48](TESTING_LOG.md) shows `llama3.1:8b` only passes it by accident, refusing because of the
 injection rather than because of the claim. **Do not make this green by lowering the bar.**
 
-**3. Stage 6 §4 (shadow mode) is still untouched**, and it is the one that must not meet a real shopper
+**4. Stage 6 §4 (shadow mode) is still untouched**, and it is the one that must not meet a real shopper
 before a human-response path exists: it saves a hidden draft, notifies nobody and guarantees no reply.
 If the tester is to use shadow mode, that gap is theirs to meet first.
 
-**4. Everything is n=1.** One conversation, one shop, one model, questions written by the people who
+**5. Everything is n=1.** One conversation, one shop, one model, questions written by the people who
 built the system. [B2](open-questions.md) — no merchant on live traffic — is unchanged and is still the
 top risk. **The test shop proves the software works; it cannot prove a shopper is helped.**
 
@@ -2238,7 +2546,7 @@ Remaining: **shadow mode producing *graded* conversations** — every part excep
 | A durable job queue, and **one** function that reads a single column across tenants | [ADR-0022](architecture/adr/0022-scheduling-under-rls.md) |
 | Agent #2 is SELL, read-only; every protocol is an **output format**, never a source | [ADR-0023](architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) |
 
-Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · **NEURA-SELL is agent #2, read-only, scoped to two intents and three surfaces** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
+Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · **NEURA-SELL is agent #2, read-only, scoped to two intents and — since [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md), 2026-09-21 — four surfaces** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
 
 ---
 

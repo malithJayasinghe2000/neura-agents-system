@@ -7,6 +7,7 @@ rather than pasted into a merchant's theme or pushed to a CDN, so that a fix
 reaches every merchant on the next cache expiry instead of on the next re-paste.
 
     GET /v1/widget/widget.js     the element itself
+    GET /v1/widget/pairs.js      ADR-0040's paired-suggestion block
     GET /v1/widget/snippet       the two lines a merchant pastes
     GET /v1/widget/demo          a local harness, non-production only
 
@@ -23,7 +24,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
 
-from neura_api.widget import DEMO_HTML, WIDGET_JS
+from neura_api.widget import DEMO_HTML, PAIRS_JS, WIDGET_JS
 from neura_core import NotFoundError, get_settings
 
 router = APIRouter(prefix="/widget", tags=["widget"])
@@ -35,6 +36,17 @@ CACHE_CONTROL = "public, max-age=300"
 SNIPPET = """<!-- NEURA chat -->
 <script src="{base}/v1/widget/widget.js" async
         data-neura-key="{key}"></script>
+"""
+
+#: ADR-0040's block, and it takes one thing the chat widget does not: the ids of
+#: the products the page is displaying. The merchant's template fills them in —
+#: we are never told what they are for, and the attribute is named for what it
+#: holds rather than for a cart, because every platform has a cart and every one
+#: of them exposes it differently.
+PAIRS_SNIPPET = """<!-- NEURA paired suggestions -->
+<script src="{base}/v1/widget/pairs.js" async></script>
+<neura-pairs data-neura-key="{key}"
+             data-products="PRODUCT_IDS_HERE"></neura-pairs>
 """
 
 
@@ -57,6 +69,31 @@ async def widget_js() -> Response:
     )
 
 
+@router.get(
+    "/pairs.js",
+    summary="The paired-suggestion block (ADR-0040)",
+    response_class=Response,
+    responses={200: {"content": {"application/javascript": {}}}},
+)
+async def pairs_js() -> Response:
+    """A second public asset, served exactly as the first.
+
+    **A separate file rather than more of `widget.js`**, and the reason is
+    ADR-0040 §1: this is a different surface with a different consumer. A
+    merchant who wants suggestions on a cart page and no chat box should not be
+    made to ship a chat widget, and a shopper on that page should not download
+    one.
+    """
+    return Response(
+        content=PAIRS_JS,
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": CACHE_CONTROL,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/snippet", summary="The embed snippet for one public key")
 async def snippet(
     key: Annotated[str, Query(description="The tenant's fn_pk_ key", max_length=128)] = "",
@@ -72,9 +109,16 @@ async def snippet(
     """
     settings = get_settings()
     origin = (base or settings.public_base_url).rstrip("/")
+    shown_key = key or "fn_pk_live_…"
     return {
-        "snippet": SNIPPET.format(base=origin, key=key or "fn_pk_live_…"),
+        "snippet": SNIPPET.format(base=origin, key=shown_key),
         "widget_url": f"{origin}/v1/widget/widget.js",
+        # Both surfaces, because a merchant who wants one and not the other
+        # should be able to see that they are separate pastes rather than
+        # discovering it from a support thread. Additive: the two original
+        # fields keep their names and their meaning.
+        "pairs_snippet": PAIRS_SNIPPET.format(base=origin, key=shown_key),
+        "pairs_url": f"{origin}/v1/widget/pairs.js",
     }
 
 
