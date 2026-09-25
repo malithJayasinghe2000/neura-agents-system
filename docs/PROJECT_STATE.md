@@ -887,7 +887,36 @@ thing our code can fix.
 agent has grown an admin side. The console is **two screens over** [console.md §2](console.md)'s *"the
 discipline is five"*, broken twice in one day, both times deliberately and both times written down.
 
-**Next action:** **CARE and SELL now work end to end on the cloud path, and the goal has changed shape.**
+**NEXT ACTION — START HERE: build [ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md), the lazy model pairing.**
+**It is the only accepted-and-unbuilt decision whose result can be measured on this machine**, which is
+why it goes first: five ADRs were accepted 2026-09-25 and the other four all wait on a real merchant or
+real traffic. This one has a **baseline to beat — 19 of 29 real products produce a suggestion** — and
+`scripts/` plus the running Bagisto shop can prove it in an afternoon.
+
+**The whole scope is in the ADR; do not widen it.** Six pieces: a prompt asking *what kinds of product go
+with this*; a cache table and migration; execution through the **existing** job queue
+([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)); the wiring in `pairing/orchestrate.py`
+(cache hit → use it, miss → answer from the word path **now** and queue the computation); **eval cases,
+which are the largest part and not optional**; and the before/after measurement against 19 of 29.
+
+**Four things that are not negotiable, all of them in the ADR:** the model returns **kinds**, never
+product names, and only `search_products` may turn a kind into an id; **no model call on the request
+path**, not even for the first shopper; `select.heading_for` still writes every visible word; and
+**Rule 4 applies** — injection resistance stays at 1.00, because the input is merchant catalogue text and
+the "no model to persuade" argument is gone. **If the model path does not beat 19 of 29 by enough to
+justify the eval suite, delete it and keep the words** (§9).
+
+**Then, in order:** ADR-0044 phase 1 (collect events, prove the pipe, nothing shown) → ADR-0046 stage 1
+(the sold-out screen, once events flow) → an ADR for **upsell**, which ADR-0040 §4's category exclusion
+blocks and which therefore needs one → [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md)
+last, because it shows an empty screen until a real shop is running.
+
+**Still true and still outranking all of it: [B2](open-questions.md) — there is no merchant and no live
+traffic**, and the tester handover below remains the highest-value input this project can obtain.
+
+---
+
+**The standing context below is from 2026-09-19 and is still accurate.** **CARE and SELL now work end to end on the cloud path, and the goal has changed shape.**
 The owner's stated purpose, 2026-09-19: **hand both the shop and the agents to another person to test.**
 So "stable" means *another human can install it and use it without the author*, which is a different bar
 from the one this file tracked all week. **What was achieved 2026-09-18/19** — all of it **on cloud, and
