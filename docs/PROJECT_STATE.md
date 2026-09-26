@@ -1203,10 +1203,45 @@ better. That is the measurement §9 should have asked for, and it is still not t
 `min_score` of 0.3 it reached 36 of 38 by suggesting **cargo trousers for a wool wash**, and at **0.65** it
 reaches 29 of 38 and pairs a boot with shoe trees and polish. **0.65 shipped.**
 
-**What is left, and it is a person's job rather than a build:** the hand-graded pass over the 38 blocks,
-**words against model at 0.65**, by someone willing to say which suggestion is better. Every number taken
-today measures how many blocks *rendered*, and three separate measurements have now shown that is not the
-axis these two paths differ on.
+**THE HAND-GRADED PASS IS DONE — owner, 2026-09-26 — and it is the first judgement of this surface that was
+not a count.** All 38 blocks were read side by side, words against model at 0.65. **Verdict: 7 better, 2
+worse, the rest unchanged, and the owner's word was "all good".**
+
+| better (7) | words gave | the model gives |
+|:--|:--|:--|
+| Leather Loafer | belt + silk tie | **shoe trees + shoe polish** |
+| Leather Chelsea Boot | belt + polish | **shoe polish + shoe trees** |
+| Waterproof Hiking Shoe | spray + rain shell | **walking socks + spray** |
+| Tapered Wool Trousers | more trousers | **clothes brush** |
+| Waxed Cotton Jacket | chinos + trousers | **clothes brush** |
+| Long Sleeve Jersey Frock | chinos + jogger | **tights** |
+| Linen Pinafore Frock | tee + vest | **tights** |
+
+**The pattern, which is the finding:** the word path suggests *more clothes*; the model suggests *the thing
+you buy with the clothes*. Two rows are worse and both in the same way — the Dark Wash Jeans and the Cotton
+Poplin Shirt Dress drop from two suggestions to one.
+
+**Two rows the owner queried, and the honest answers differ:**
+
+* **Wool Trousers → clothes brush is right.** The trousers say *"dry clean only"*; brushing wool between
+  cleans is real garment care.
+* **Waxed Jacket → clothes brush is weak.** That jacket's own text says *"do not wash — sponge clean and
+  re-wax once a year"*, and the model's **first** kind was `wax dressing`, which is correct and which the
+  shop does not stock. The brush is a second-best reached because the shelf is empty.
+
+**And one warning sign that came out of the same read: the Horsehair Clothes Brush is suggested for four
+different products.** One product becoming the default answer is the signature of a lookup latching onto a
+general theme — here *garment care* — rather than the specific kind asked for. Nothing is broken by it and
+no rule caps it today; **capping how often one product may be suggested would be a new decision and an
+ADR**, not a patch.
+
+**The owner's own generalisation question, answered and recorded because it is the right question:** does
+this work for a shop that is not this one? **The two halves that generalise are the two that matter** — the
+model's world knowledge is not clothing-specific (a laptop pairs with a bag, a guitar with strings), and
+semantic lookup is a general technique. **A larger catalogue should do better, not worse**, because this
+shop's failures were overwhelmingly *"the complement is not for sale"*. **The part that does NOT generalise
+is `0.65`** — it is a property of `nomic-embed-text` measured on 38 clothing products, and it must be
+re-checked per shop and per embedder rather than assumed.
 
 **Then, in the order it already had:** ADR-0044 phase 1 (collect events, prove the pipe, nothing shown) →
 ADR-0046 stage 1 (the sold-out screen, once events flow) → an ADR for **upsell**, which ADR-0040 §4's
