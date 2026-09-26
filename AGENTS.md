@@ -57,11 +57,16 @@ agents/                     PRODUCTS — one folder per sellable agent
   care/                     ✅ designed and built
   sell/                     ✅ designed and built — docs/agents/sell.md +
                             ADR-0023. Read-only, 2 intents, 5 tools, and
-                            5 surfaces of which only one has a graph.
-                            FOUR are built; the fifth — the merchant-facing
-                            recovery list (ADR-0043) — is accepted, NOT built
-                            and NOT scheduled. Ask before starting it.
-                            Build within that scope, not beyond it
+                            6 surfaces of which only one has a graph.
+                            FOUR are built; the other two — the merchant-facing
+                            recovery list (ADR-0043) and the sold-out demand
+                            list (ADR-0046) — are accepted, NOT built and NOT
+                            scheduled. Ask before starting either.
+                            Build within that scope, not beyond it.
+                            ONE of the four now has a model in it (ADR-0045):
+                            the paired suggestion computes what KINDS go with
+                            a product, in the background, on the job queue.
+                            Nothing runs between a shopper and an answer
   mind/ grow/ guard/        ⬜ NOT DESIGNED — see docs/agents/README.md
 
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
@@ -71,7 +76,7 @@ apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
                             neura_due_tenants() — the ONE read in this system
                             that crosses a tenant boundary (ADR-0022)
   widget/                   the embeddable chat element, plus pairs.js for the
-                            paired suggestion (ADR-0040) — a separate asset on
+                            paired suggestion (ADR-0040/0045) — a separate asset on
                             purpose, so a merchant who wants suggestions and no
                             chat box ships no chat box. THE ONLY JAVASCRIPT IN
                             THIS REPOSITORY — two files, no build step, no
@@ -99,9 +104,16 @@ make test-widget    # `node --test` — Node ships the runner, so no npm and no 
 make widget-check   # drive the REAL widget in REAL headless Chrome. No models, no cost —
                     # the browser half is not reachable from pytest or from node --test
 make pairs-check    # the same, for the paired suggestion (ADR-0040). Stub mode needs NO
-                    # database, shop or model, because the surface has none. 8 scenarios,
-                    # three of them hostile: markup in a product title, a javascript: link,
-                    # a data: image
+                    # database, shop or model — the surface HAS a model since ADR-0045, but
+                    # it runs in a worker and never on this path, so the browser half still
+                    # costs nothing. 8 scenarios, three of them hostile: markup in a product
+                    # title, a javascript: link, a data: image
+make pairs-coverage URL=… TOKEN=… [MODEL=1 ROLE_MAP=…]   # ADR-0045 §9's falsification
+                    # test: how many of a real shop's products produce a suggestion, on the
+                    # word path and on the model path. A MEASUREMENT, not a check — it exits
+                    # 0 whatever it finds, because "the model path is worse" is a result that
+                    # ADR plans for. The words arm costs nothing; the model arm is one call
+                    # per product and stores nothing
 make pairs-check LIVE=1 URL=… SHOP=… TOKEN=…   # …and the half a stub cannot reach: the
                     # page is on a DIFFERENT ORIGIN from the API, as a merchant's page
                     # always is, so the per-key CORS decision and the key's origin lock
@@ -251,6 +263,15 @@ rather than imported by name:
 [project.entry-points."neura.agent_runners"]
 <name> = "neura_agent_<name>.serving:build_runner"  # a request becomes a turn
 ```
+
+**Two more exist and SELL is the only agent that needs either**, both added for
+a surface that is not a conversation: `neura.agent_routes` for an agent's own
+HTTP endpoints (ADR-0024 §8) and `neura.job_handlers` for background work on
+ADR-0022's queue ([ADR-0045](docs/architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md)).
+The second is keyed by **job kind** rather than by agent key, because that is
+what `JobRunner.register` dispatches on — and a kind claimed by two agents is
+refused, since which handler ran would otherwise depend on entry-point
+iteration order.
 
 **Three groups, all discovered rather than imported by name, for one reason.**
 `neura-api` must not learn that an agent called "care" exists, or adding agent #2

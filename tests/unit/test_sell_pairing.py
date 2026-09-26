@@ -51,8 +51,54 @@ def store(tenant: str = TENANT) -> Any:
     return load_store(tenant)
 
 
-async def pairing_for(ids: list[str], *, capabilities: frozenset[Capability] = ALL) -> Pairing:
-    return await suggest(ids, adapter=store(), capabilities=capabilities, tenant_id=TENANT)
+async def pairing_for(
+    ids: list[str],
+    *,
+    capabilities: frozenset[Capability] = ALL,
+    cache: Any = None,
+    adapter: Any = None,
+) -> Pairing:
+    return await suggest(
+        ids,
+        adapter=adapter if adapter is not None else store(),
+        capabilities=capabilities,
+        tenant_id=TENANT,
+        cache=cache,
+    )
+
+
+#: Stored under any fingerprint. Most tests do not care which text produced a
+#: pairing; the two that do say so.
+ANY_TEXT = "*"
+
+
+class FakeCache:
+    """A :class:`PairingCache` in a dict.
+
+    Enough to drive every branch of ``orchestrate._stored`` with no database, no
+    job queue and no model — which is the same reason ``select.py`` is pure and
+    the same reason ``suggest(cache=None)`` still works.
+    """
+
+    def __init__(self) -> None:
+        self.rows: dict[str, tuple[str, list[str]]] = {}
+        self.queued: list[str] = []
+        self.fail_on_get = False
+
+    def store(self, product_id: str, ids: list[str], *, source_hash: str = ANY_TEXT) -> None:
+        self.rows[product_id] = (source_hash, ids)
+
+    async def get(self, product_id: str, *, source_hash: str) -> list[str] | None:
+        if self.fail_on_get:
+            raise RuntimeError("the database is down")
+        row = self.rows.get(product_id)
+        if row is None:
+            return None
+        stored_hash, ids = row
+        return ids if stored_hash in (ANY_TEXT, source_hash) else None
+
+    async def queue(self, product_id: str, *, source_hash: str) -> None:
+        self.queued.append(product_id)
 
 
 def product(
@@ -509,37 +555,89 @@ class TestTheBudget:
         assert searches == expected
 
 
-class TestTheSurfaceHasNoModelInIt:
-    """§5 — asserted structurally, not by reading the code."""
+class TestNoModelRunsWhileAShopperWaits:
+    """ADR-0045 §1, asserted structurally rather than by reading the code.
 
-    def test_nothing_in_the_package_imports_an_llm(self) -> None:
-        """The property that makes this surface un-injectable is that there is
-        no model to persuade. A future edit that adds one should fail here
-        rather than in a shopper's cart.
+    **This class used to be called `TestTheSurfaceHasNoModelInIt` and it used to
+    check something stronger**, because until ADR-0045 something stronger was
+    true: no module in the package imported `neura_llm` at all. That ADR
+    deliberately ends it — a model may now compute a pairing — and the honest
+    replacement is not a weaker version of the old check but a different one.
 
-        Parsed rather than grepped: these modules *discuss* prompts and models
-        at length, and a substring check would be satisfied by a comment
-        promising not to do the thing.
+    The property that remains, and the one a shopper depends on, is about
+    *which* modules may: `orchestrate.py` answers a request, `select.py` decides
+    what may be shown, and **neither may reach a model on any path**. `kinds.py`
+    and `compute.py` run in a worker where nobody is waiting, and they may.
+
+    Parsed rather than grepped: every one of these modules *discusses* prompts
+    and models at length, and a substring check would be satisfied by a comment
+    promising not to do the thing.
+    """
+
+    #: The request path. A model call from either of these is a cart page whose
+    #: speed depends on a provider.
+    ON_THE_REQUEST_PATH = ("orchestrate.py", "select.py", "cache.py", "schema.py")
+
+    def _imports_of(self, name: str) -> set[str]:
+        import ast
+        import pathlib
+
+        path = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "agents/sell/src/neura_agent_sell/pairing"
+            / name
+        )
+        assert path.exists(), f"{name} moved; this check is now measuring nothing"
+
+        imported: set[str] = set()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+        return imported
+
+    @pytest.mark.parametrize("module", ON_THE_REQUEST_PATH)
+    def test_the_request_path_reaches_no_model(self, module: str) -> None:
+        """A future edit that puts one there should fail here rather than in a
+        shopper's cart."""
+        imported = self._imports_of(module)
+        assert not any(name.startswith("neura_llm") for name in imported)
+        assert not any("prompt" in name for name in imported)
+        assert not any(name.endswith("pairing.kinds") for name in imported)
+
+    def test_the_background_half_is_where_the_model_lives(self) -> None:
+        """The other side of the same rule, asserted so it cannot quietly move.
+
+        If `kinds.py` stopped importing a model, this surface would have gone
+        back to words without anybody deciding to — and the eval suite ADR-0045
+        §6 drags behind it would be grading nothing.
+        """
+        assert any(name.startswith("neura_llm") for name in self._imports_of("kinds.py"))
+
+    def test_orchestrate_never_imports_the_computation(self) -> None:
+        """`compute.py` makes a model call, so the module that answers a request
+        must not be able to reach it even by accident.
+
+        `orchestrate` does import `compute` for one constant — `MAX_STORED_IDS`
+        — which is why this asserts on the *call* rather than on the import: a
+        bound is not a behaviour.
         """
         import ast
         import pathlib
 
-        package = pathlib.Path(__file__).resolve().parents[2] / (
-            "agents/sell/src/neura_agent_sell/pairing"
-        )
-        modules = sorted(package.glob("*.py"))
-        assert modules, "the pairing package moved; this check is now measuring nothing"
+        source = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "agents/sell/src/neura_agent_sell/pairing/orchestrate.py"
+        ).read_text(encoding="utf-8")
 
-        imported: set[str] = set()
-        for path in modules:
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, ast.Import):
-                    imported.update(alias.name for alias in node.names)
-                elif isinstance(node, ast.ImportFrom) and node.module:
-                    imported.add(node.module)
-
-        assert not any(name.startswith("neura_llm") for name in imported)
-        assert not any("prompt" in name for name in imported)
+        called = {
+            node.func.attr
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        assert "compute" not in called
+        assert "kinds_for" not in called
 
 
 class TestTheEndpoint:
@@ -598,20 +696,60 @@ class TestTheEndpoint:
         )
 
     @pytest.fixture
-    def shop(self, client: Any) -> Any:
-        """A connected store, without a database behind it."""
+    def shop(self, client: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """A connected store and a cache, without a database behind either.
+
+        The cache is replaced at `routes._pairing_cache`, which is the seam that
+        exists for this. Everything else is real: the real route, the real scope
+        check, the real orchestration, the real `select` rules — so what these
+        tests measure is the endpoint and not a re-implementation of it.
+        """
+        from neura_agent_sell import routes as sell_routes
 
         class Connection:
             def __init__(self) -> None:
                 self.adapter = store()
                 self.capabilities = ALL
+                # Resolved by `StoreDirectory.connect`, and what a pairing is
+                # keyed by.
+                self.store_id = "st_pairing"
 
         class Directory:
             async def connect(self, tenant_id: str, *, store_id: str | None = None) -> Any:
                 return Connection()
 
+        cache = FakeCache()
+        monkeypatch.setattr(
+            sell_routes, "_pairing_cache", lambda tenant_id, store_id: cache, raising=True
+        )
+
         client.app.state.stores = Directory()
+        client.pairing_cache = cache
         return client
+
+    def test_a_miss_queues_a_computation_and_still_answers(self, shop: Any) -> None:
+        """ADR-0045 §2 end to end, over HTTP.
+
+        The two halves that matter are in one request: the shopper gets the word
+        path's answer **now**, and a computation exists for the next one. A
+        version of this that queued and returned nothing would satisfy the ADR's
+        letter and break its first sentence.
+        """
+        response = shop.post("/v1/sell/suggestions", json={"product_ids": [RAIN_SHELL]})
+
+        assert response.status_code == 200
+        assert response.json()["suggestions"], "the first shopper must not be punished"
+        assert shop.pairing_cache.queued == [RAIN_SHELL]
+
+    def test_a_stored_pairing_is_what_the_page_gets(self, shop: Any) -> None:
+        """And the word path is not consulted at all — the boot is not a product
+        any of the Rain Shell's own words would have found."""
+        shop.pairing_cache.store(RAIN_SHELL, [BOOT])
+
+        body = shop.post("/v1/sell/suggestions", json={"product_ids": [RAIN_SHELL]}).json()
+
+        assert [card["id"] for card in body["suggestions"]] == [BOOT]
+        assert shop.pairing_cache.queued == []
 
     def test_the_route_is_mounted_without_the_api_naming_sell(self, client: Any) -> None:
         """Through the `neura.agent_routes` entry point, like the feed and MCP.
@@ -680,3 +818,480 @@ class TestTheEndpoint:
         )
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "INVALID_REQUEST"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADR-0045 — a pairing may be computed by a model, but never while a shopper
+# waits.
+#
+# **Still tests, and now only half the story.** Everything below is
+# deterministic: what a stored pairing is used for, what is stripped out of a
+# model's answer before it becomes a search, and which of the merchant's own
+# products may be written down. None of it asks a model anything.
+#
+# The half that *is* a model — whether the pairing prompt returns kinds rather
+# than products, and whether a hostile product description can move what a
+# shopper sees — is an eval, because it can regress in the way only an eval
+# catches. It lives in `agents/sell/.../evals/datasets/pairing.yaml`, and
+# ADR-0045 §6 is why: Rule 4 now reaches this surface, and `E8`'s "these are
+# tests, not evals" reasoning stops applying the moment a model chooses
+# anything.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class StubLLM:
+    """A model that returns what the test says, and records what it was asked."""
+
+    def __init__(self, kinds: list[str] | None = None, *, raises: bool = False) -> None:
+        self._kinds = kinds or []
+        self._raises = raises
+        self.requests: list[Any] = []
+
+    async def chat_structured(self, role: Any, request: Any, schema_type: Any) -> Any:
+        self.requests.append(request)
+        if self._raises:
+            raise RuntimeError("the provider is unreachable")
+
+        class Result:
+            value = schema_type(kinds=self._kinds)
+            attempts = 1
+
+        return Result()
+
+
+class TestTheStoredPairing:
+    """ADR-0045 §2 — which of the two paths answers, and what each costs."""
+
+    async def test_a_stored_pairing_is_used_and_nothing_is_searched(self) -> None:
+        """The whole point: a cache hit spends no search on the merchant's shop.
+
+        The Moor Walking Boot is the assertion that this is a *different* answer
+        rather than the same one arriving differently — the Rain Shell's own
+        words do find it today, so the test also counts the searches.
+        """
+        searched: list[str] = []
+        real = store()
+
+        class Counting:
+            async def get_product(self, product_id: str) -> Any:
+                return await real.get_product(product_id)
+
+            async def search_products(self, query: Any) -> Any:
+                searched.append(query.text)
+                return await real.search_products(query)
+
+        cache = FakeCache()
+        cache.store(RAIN_SHELL, [BOOT])
+
+        pairing = await pairing_for([RAIN_SHELL], cache=cache, adapter=Counting())
+
+        assert [card["id"] for card in pairing.suggestions] == [BOOT]
+        assert searched == []
+        assert cache.queued == []
+
+    async def test_a_miss_answers_from_words_and_queues_exactly_one(self) -> None:
+        """*"The first shopper is never punished"* — §2, and the queue is the
+        only thing that makes that sentence affordable."""
+        cache = FakeCache()
+
+        pairing = await pairing_for([RAIN_SHELL], cache=cache)
+
+        assert not pairing.is_empty
+        assert cache.queued == [RAIN_SHELL]
+
+    async def test_a_pairing_computed_from_older_text_is_not_used(self) -> None:
+        """§5 — *"a stale pairing is a wrong suggestion with a long life"*.
+
+        The merchant rewrote the description; the fingerprint no longer matches;
+        the stored ids are ignored and a recomputation is queued. What the
+        shopper gets meanwhile is the word path, which is reading the text that
+        actually exists.
+        """
+        cache = FakeCache()
+        cache.store(RAIN_SHELL, [BOOT], source_hash="a fingerprint of some older words")
+
+        pairing = await pairing_for([RAIN_SHELL], cache=cache)
+
+        assert [card["id"] for card in pairing.suggestions] != [BOOT]
+        assert cache.queued == [RAIN_SHELL]
+
+    async def test_the_fingerprint_it_stores_under_is_the_live_one(self) -> None:
+        """The other direction of the same rule: a matching hash *is* used."""
+        from neura_agent_sell.pairing.cache import source_hash
+
+        anchor = await store().get_product(RAIN_SHELL)
+        cache = FakeCache()
+        cache.store(RAIN_SHELL, [BOOT], source_hash=source_hash(anchor))
+
+        pairing = await pairing_for([RAIN_SHELL], cache=cache)
+
+        assert [card["id"] for card in pairing.suggestions] == [BOOT]
+        assert cache.queued == []
+
+    async def test_a_stored_product_that_sold_out_is_skipped_not_shown(self) -> None:
+        """§4 — *"the cache holds a pairing, never an availability"*.
+
+        Stock is read live, here, on this request. A surface that trusted the
+        row would recommend a product the shopper cannot buy, which is the
+        failure `is_pairable` rule 3 exists for, arriving a month late.
+        """
+        real = store()
+        sold_out = BOOT
+
+        class Withdrawn:
+            async def get_product(self, product_id: str) -> Any:
+                found = await real.get_product(product_id)
+                if found is not None and product_id == sold_out:
+                    return found.model_copy(update={"status": ProductStatus.ARCHIVED})
+                return found
+
+            async def search_products(self, query: Any) -> Any:
+                return await real.search_products(query)
+
+        cache = FakeCache()
+        # The spare is why `MAX_STORED_IDS` is larger than `MAX_SUGGESTIONS`.
+        cache.store(RAIN_SHELL, [sold_out, SOCKS])
+
+        pairing = await pairing_for([RAIN_SHELL], cache=cache, adapter=Withdrawn())
+
+        assert [card["id"] for card in pairing.suggestions] == [SOCKS]
+
+    async def test_a_stored_pairing_with_nothing_left_falls_back_to_words(self) -> None:
+        """Every spare gone is still not an empty block — the word path is
+        underneath, and ADR-0045's "reversible" claim is this line."""
+        real = store()
+
+        class AllGone:
+            async def get_product(self, product_id: str) -> Any:
+                if product_id == "p_vanished":
+                    return None
+                return await real.get_product(product_id)
+
+            async def search_products(self, query: Any) -> Any:
+                return await real.search_products(query)
+
+        cache = FakeCache()
+        cache.store(RAIN_SHELL, ["p_vanished"])
+
+        pairing = await pairing_for([RAIN_SHELL], cache=cache, adapter=AllGone())
+
+        assert not pairing.is_empty
+
+    async def test_a_stored_empty_pairing_is_respected_and_not_requeued(self) -> None:
+        """A model ran, found nothing complementary, and that was written down.
+
+        Re-queueing it would mean every cart page paid for the same model call
+        to reach the same empty answer — which is the cost `cache.put` stores an
+        empty result to avoid. The word path still runs, because empty here is
+        *the model's* empty and not the surface's.
+        """
+        cache = FakeCache()
+        cache.store(RAIN_SHELL, [])
+
+        await pairing_for([RAIN_SHELL], cache=cache)
+
+        assert cache.queued == []
+
+    async def test_a_cache_that_raises_costs_a_shopper_nothing(self) -> None:
+        """A database outage must not reach a cart page. ADR-0040 §4's
+        *empty is a result* protects the block; this protects the whole page."""
+        cache = FakeCache()
+        cache.fail_on_get = True
+
+        pairing = await pairing_for([RAIN_SHELL], cache=cache)
+
+        assert not pairing.is_empty
+
+    async def test_without_a_cache_the_surface_is_what_it_was(self) -> None:
+        """ADR-0045 §9's falsification test only exists because both still run.
+
+        `make pairs-check`'s stub mode, every other test in this file, and a
+        deployment that has not migrated all take this path.
+        """
+        with_none = await pairing_for([RAIN_SHELL], cache=None)
+        assert not with_none.is_empty
+
+
+class TestTheKindsAModelMayReturn:
+    """ADR-0045 §3 and §7 — what is done to a model's answer before it is
+    trusted with anything, and it is done in code rather than asked for in the
+    prompt (AGENTS.md rule 3)."""
+
+    def test_markup_and_punctuation_never_reach_a_search(self) -> None:
+        from neura_agent_sell.pairing.kinds import clean_kinds
+
+        assert clean_kinds(["<script>alert(1)</script>"]) == ["script alert script"]
+        assert clean_kinds(["javascript:void(0)"]) == ["javascript void"]
+        assert clean_kinds(["  Wool   Socks  "]) == ["wool socks"]
+
+    def test_a_kind_is_bounded_in_words_and_in_number(self) -> None:
+        """The prompt asks for one to three of each. This is the bound that
+        holds when the prompt is ignored, which is the only kind worth having."""
+        from neura_agent_sell.pairing import kinds as kinds_module
+
+        long_kind = kinds_module.clean_kinds(["one two three four five six"])
+        assert long_kind == ["one two three"]
+
+        many = kinds_module.clean_kinds(["socks", "polish", "laces", "spray", "insoles"])
+        assert len(many) == kinds_module.MAX_KINDS
+
+    def test_duplicates_go_and_the_model_s_order_stays(self) -> None:
+        """Unlike the word path, nothing here measures rarity — the order *is*
+        the model's ranking, and it is the only one this path has."""
+        from neura_agent_sell.pairing.kinds import clean_kinds
+
+        assert clean_kinds(["shoe polish", "Shoe Polish", "wool socks"]) == [
+            "shoe polish",
+            "wool socks",
+        ]
+
+    def test_nothing_survives_a_kind_with_no_words_in_it(self) -> None:
+        from neura_agent_sell.pairing.kinds import clean_kinds
+
+        assert clean_kinds(["", "   ", "!!!", "2000"]) == []
+
+    def test_the_product_text_is_delimited_and_bounded(self) -> None:
+        """Same tagging as `route.md`'s untrusted message and the same reason:
+        the boundary between material and instruction is invisible to a model
+        unless it is visible in the text."""
+        from neura_agent_sell.pairing import kinds as kinds_module
+
+        rendered = kinds_module.render(product("p_long", title="A jacket", description="x" * 9000))
+
+        assert rendered.startswith("<untrusted_product_text>")
+        assert rendered.endswith("</untrusted_product_text>")
+        assert len(rendered) < kinds_module.MAX_TEXT_CHARS + 100
+
+    async def test_the_model_is_offered_no_tools(self) -> None:
+        """§7 point 2, asserted rather than asserted *about*. It reads one
+        product's text and returns a short list; there is nothing for a
+        persuaded model to invoke."""
+        from neura_agent_sell.pairing.kinds import kinds_for
+
+        llm = StubLLM(["wool socks"])
+        await kinds_for(product("p_x", title="Boot"), llm=llm, prompt="a prompt")
+
+        assert llm.requests[0].tools in (None, [])
+
+    async def test_a_provider_that_is_down_is_reported_and_not_swallowed(self) -> None:
+        """**An outage and an honest empty are not the same answer.**
+
+        Both produce no kinds, and collapsing them into an empty list would
+        write *"this product pairs with nothing"* into the cache on the strength
+        of a dead server — permanently, because the row would go on matching the
+        live fingerprint for ever. That is `E6`'s shape arriving in a table
+        instead of a report, and it is why this returns a result object rather
+        than a list.
+        """
+        from neura_agent_sell.pairing.kinds import kinds_for
+
+        answer = await kinds_for(product("p_x"), llm=StubLLM(raises=True), prompt="p")
+
+        assert answer.kinds == []
+        assert not answer.reachable
+        # A type name, never the exception's text: a provider's message can
+        # carry a URL or a key fragment, and this string is logged and stored.
+        assert answer.error == "RuntimeError"
+
+    async def test_an_honest_empty_is_reachable(self) -> None:
+        """The other side of the same distinction. A model that read a product
+        and found nothing to pair with it is a **result**, and ADR-0040 §4 has
+        always said so."""
+        from neura_agent_sell.pairing.kinds import kinds_for
+
+        answer = await kinds_for(product("p_x"), llm=StubLLM([]), prompt="p")
+
+        assert answer.kinds == []
+        assert answer.reachable
+
+
+class TestComputingAPairing:
+    """ADR-0045 §3 — *"only ids that come back from that search are ever
+    stored"*. This is the sentence that bounds an indirect injection to a bad
+    suggestion, and it is the one worth several tests."""
+
+    async def test_a_model_cannot_name_a_product_into_existence(self) -> None:
+        """A hallucinated *"Dry Bag Pro 2000"* becomes a **search**, and only
+        what the merchant's own catalogue hands back may be stored.
+
+        **Note what this does not claim, because writing it the other way was
+        wrong.** The first version of this test asserted that an invented name
+        *finds nothing*. It does not: a keyword search matches on any shared
+        word, so `Dry Bag Pro 2000` can perfectly well return a real product
+        that happens to contain "pro". That outcome is a **bad suggestion** —
+        which is exactly the worst case ADR-0045 §7 says this surface carries,
+        and says is an eval case rather than a security incident.
+
+        What is structural, and is what this asserts, is that nothing the model
+        invented is ever in the result. The id came from the shop.
+        """
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        result = await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            llm=StubLLM(["Dry Bag Pro 2000"]),
+            prompt="a prompt",
+        )
+
+        assert set(result.suggested_ids) <= result.returned_ids
+        assert not any("dry bag" in product_id.lower() for product_id in result.suggested_ids)
+
+    async def test_every_stored_id_came_back_from_the_merchant_s_own_search(self) -> None:
+        """The invariant stated as an assertion rather than as a comment."""
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        result = await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            llm=StubLLM(["socks", "boot"]),
+            prompt="a prompt",
+        )
+
+        assert result.suggested_ids
+        assert set(result.suggested_ids) <= result.returned_ids
+
+    async def test_the_anchor_s_own_category_is_excluded_here_too(self) -> None:
+        """§4 — applied to the model's candidates exactly as to the word path's.
+
+        `jacket` finds the other outer layers, all of which sit in the Rain
+        Shell's own category, and none of them may be stored.
+        """
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        result = await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            # `hardshell` is the one word in this catalogue that only an outer
+            # layer has. `jacket` would not do: it appears in the *injected*
+            # product's description, and matching it there is a finding of its
+            # own rather than a test of this rule.
+            llm=StubLLM(["hardshell"]),
+            prompt="a prompt",
+        )
+
+        assert result.suggested_ids == []
+
+    async def test_it_stores_spares_beyond_what_a_shopper_sees(self) -> None:
+        """`MAX_STORED_IDS` is larger than `MAX_SUGGESTIONS` so that one product
+        selling out does not empty the block until the next computation."""
+        from neura_agent_sell.pairing.compute import MAX_STORED_IDS
+
+        assert MAX_STORED_IDS > select.MAX_SUGGESTIONS
+
+    async def test_one_failed_search_does_not_lose_the_others(self) -> None:
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        class Flaky:
+            async def search_products(self, query: Any) -> Any:
+                if query.text == "socks":
+                    raise RuntimeError("the shop returned a 500")
+                return await real.search_products(query)
+
+        result = await compute(
+            anchor,
+            adapter=Flaky(),
+            tenant_id=TENANT,
+            llm=StubLLM(["socks", "boot"]),
+            prompt="a prompt",
+        )
+
+        assert result.suggested_ids
+
+    async def test_an_outage_is_not_a_result_and_must_not_be_stored(self) -> None:
+        """`measured` is what the job handler branches on. A computation that
+        never reached a model raises and writes nothing, so the queue's backoff
+        retries it — rather than caching an outage until somebody edits the
+        product's description."""
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        result = await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            llm=StubLLM(raises=True),
+            prompt="a prompt",
+        )
+
+        assert not result.measured
+        assert result.provider_error == "RuntimeError"
+        assert result.is_empty
+
+    async def test_a_model_that_says_nothing_costs_no_search(self) -> None:
+        from neura_agent_sell.pairing.compute import compute
+
+        searched: list[str] = []
+        real = store()
+
+        class Counting:
+            async def search_products(self, query: Any) -> Any:
+                searched.append(query.text)
+                return await real.search_products(query)
+
+        anchor = await real.get_product(RAIN_SHELL)
+        result = await compute(
+            anchor, adapter=Counting(), tenant_id=TENANT, llm=StubLLM([]), prompt="a prompt"
+        )
+
+        assert result.is_empty
+        assert searched == []
+
+
+class TestWhatInvalidatesAStoredPairing:
+    """ADR-0045 §5 — the fingerprint is of the text the model read, and of
+    nothing else."""
+
+    def test_editing_the_title_or_the_description_changes_it(self) -> None:
+        from neura_agent_sell.pairing.cache import source_hash
+
+        base = product("p_1", title="Walking Boot", description="Leather, waterproof.")
+        assert source_hash(base) != source_hash(base.model_copy(update={"title": "Cycling Shoe"}))
+        assert source_hash(base) != source_hash(
+            base.model_copy(update={"description": "Canvas, breathable."})
+        )
+
+    def test_a_price_change_does_not(self) -> None:
+        """A pairing does not depend on a price, and recomputing every product
+        whose price moved would spend model calls on nothing."""
+        from neura_agent_sell.pairing.cache import source_hash
+
+        base = product("p_1", title="Walking Boot", price="165.00")
+        assert source_hash(base) == source_hash(base.model_copy(update={"price_range_min": None}))
+
+    def test_the_same_words_split_differently_are_not_the_same_product(self) -> None:
+        """The NUL separator. Without one, a title ending where a description
+        begins collides with the same words divided elsewhere — and a collision
+        here means a pairing that is never invalidated."""
+        from neura_agent_sell.pairing.cache import source_hash
+
+        left = product("p_1", title="Wool", description="Socks")
+        right = product("p_1", title="Wool Socks", description="")
+        assert source_hash(left) != source_hash(right)
+
+    def test_one_live_computation_per_product_however_many_pages_missed(self) -> None:
+        """§2 — *"no request triggers more than one computation"*. Twenty cart
+        pages in a minute find the same empty cache; the dedupe key is what
+        makes that one model call rather than twenty."""
+        from neura_agent_sell.pairing.cache import dedupe_key_for
+
+        assert dedupe_key_for("st_1", "1315") == dedupe_key_for("st_1", "1315")
+        assert dedupe_key_for("st_1", "1315") != dedupe_key_for("st_2", "1315")
+        assert len(dedupe_key_for("st_1", "x" * 400)) <= 128

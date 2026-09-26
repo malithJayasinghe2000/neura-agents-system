@@ -12,8 +12,8 @@ dependencies = [
     "neura-evals",
 ]
 
-# Discovery, the same three groups CARE registers plus one this agent is the
-# first to need. All four are resolved by entry point rather than imported by
+# Discovery, the same three groups CARE registers plus two this agent is the
+# first to need. All five are resolved by entry point rather than imported by
 # name, so `neura-api` never learns that an agent called "sell" exists
 # (AGENTS.md, "Add an agent").
 [project.entry-points."neura.agents"]
@@ -39,6 +39,13 @@ sell = "neura_agent_sell.serving:build_runner"
 # mounting it would mean `from neura_agent_sell import ...` inside the API.
 [project.entry-points."neura.agent_routes"]
 sell = "neura_agent_sell.routes:build_routes"
+
+# The fifth group (ADR-0045), and SELL is the first agent to need it. A pairing
+# is computed in the background on ADR-0022's queue, and the queue must not
+# import the things it runs. Without this group, registering the handler would
+# mean `from neura_agent_sell.jobs import ...` inside `neura-api`.
+[project.entry-points."neura.job_handlers"]
+sell = "neura_agent_sell.jobs:build_handlers"
 
 [build-system]
 requires = ["hatchling"]

@@ -5,10 +5,29 @@ shopper may be shown lives in ``select.py``. The split is so that the rules can
 be tested without a store, and so that the number of live HTTP calls this
 surface makes is visible in one file.
 
+**No model runs between a shopper and an answer.** That is
+[ADR-0045](../../../../../docs/architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md)
+§1, amending ADR-0040 §5's flat *"no model runs in it"*, and it is the one rule
+in this file that may not be relaxed for a special case — not for the first
+shopper, not once, not behind a timeout. A model call on this path would be a
+cart page whose speed depends on a provider, and the ADR's cost argument dies
+with it.
+
+**Two paths in, and the second is not a degraded version of the first:**
+
+===============  ==========================================================
+stored pairing   a model computed it in the background, minutes or weeks
+                 ago. Its **ids** are used; its availability is not — stock
+                 and status are read live, here, on every request
+no stored one    the word path answers **now**, exactly as it did before
+                 ADR-0045, and a computation is queued for next time
+===============  ==========================================================
+
 **The budget, because a cart page loads for every visitor:** at most
-``MAX_INPUT_IDS`` product lookups (concurrent) and at most ``MAX_TERMS``
-searches. No model call, ever — that is ADR-0040 §5, and it is a cost decision
-as much as a safety one.
+``MAX_INPUT_IDS`` product lookups for what the page named, then *either* up to
+``MAX_STORED_IDS`` more lookups (a cache hit, no search at all) *or* up to
+``MAX_TERMS`` searches (a miss). A miss also writes one job row. No model call,
+ever, on this path.
 
 The searches do **not** stop early, and that ceiling is the price of the fix on
 2026-09-21: which search term produced the best pairing cannot be known until
@@ -22,7 +41,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from neura_agent_sell.pairing import select
+from neura_agent_sell.pairing import compute, select
+from neura_agent_sell.pairing.cache import PairingCache, source_hash
 from neura_agent_sell.tools.card import product_card
 from neura_commerce import ProductQuery
 from neura_core import get_logger
@@ -55,6 +75,7 @@ async def suggest(
     adapter: Any,
     capabilities: frozenset[Capability],
     tenant_id: str,
+    cache: PairingCache | None = None,
 ) -> Pairing:
     """Products that go with the ones a page named.
 
@@ -68,6 +89,14 @@ async def suggest(
     developer's problem on a shopper's cart page, which is exactly
     [Finding 49](../../../../../docs/TESTING_LOG.md), and it would do so on a
     page where the shopper has already decided to buy.
+
+    **``cache`` is optional and its absence is not a degraded mode.** Without
+    one this is byte-for-byte the surface of 2026-09-24: the word path, no
+    database, no queue, no model anywhere in the system. That is what
+    `make pairs-check`'s stub mode runs, what every existing test runs, and what
+    a deployment that has not migrated runs — and ADR-0045's own falsification
+    test (§9) is the comparison between the two, which only exists because both
+    still work.
     """
     wanted = _clean_ids(product_ids)
     if not wanted:
@@ -101,7 +130,16 @@ async def suggest(
         return Pairing()
 
     excluded = frozenset(wanted)
-    chosen = await _search(anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id)
+    chosen = await _stored(
+        anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id, cache=cache
+    )
+
+    if not chosen:
+        # Either there is no cache, or nothing was stored, or everything stored
+        # has since sold out. All three answer the same way and all three are
+        # ordinary: **the word path answers now**, and the computation queued
+        # above lands before the next shopper.
+        chosen = await _search(anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id)
 
     if not chosen:
         log.info(
@@ -182,6 +220,90 @@ async def _load(ids: list[str], *, adapter: Any, tenant_id: str) -> list[Product
             found.append(result)
 
     return found
+
+
+async def _stored(
+    anchor: Product,
+    *,
+    adapter: Any,
+    excluded_ids: frozenset[str],
+    tenant_id: str,
+    cache: PairingCache | None,
+) -> list[Product]:
+    """The pairing a model computed earlier, if there is a usable one.
+
+    Returns ``[]`` for a miss, a stale row, a cache that raised, or a stored
+    pairing every product of which has since become unbuyable — and **queues a
+    computation** for the first two. The caller then answers from the word path,
+    which is the whole of ADR-0045 §2's *"the first shopper is never punished"*.
+
+    **The stored half is ids and nothing else.** Every product is fetched live
+    and re-checked by ``select.is_pairable``, so a product that sold out
+    yesterday is not suggested today and a product withdrawn last month is not
+    suggested at all — ADR-0045 §4, and the reason the row holds no price, no
+    title and no stock level to go stale.
+
+    **Nothing in here may raise.** A database that is down must cost a shopper
+    the *model's* answer and not the block; the word path runs either way.
+    """
+    if cache is None:
+        return []
+
+    fingerprint = source_hash(anchor)
+
+    try:
+        stored_ids = await cache.get(anchor.external_id, source_hash=fingerprint)
+    except Exception as exc:
+        log.warning(
+            "pairing_cache_read_failed",
+            tenant_id=tenant_id,
+            anchor_id=anchor.external_id,
+            error=type(exc).__name__,
+        )
+        return []
+
+    if stored_ids is None:
+        try:
+            await cache.queue(anchor.external_id, source_hash=fingerprint)
+        except Exception as exc:
+            # A queue that refused is a pairing this shop does not get yet. It
+            # is not a reason to fail the page, and it is not a reason to fall
+            # back to computing one here — there is no "here" that is allowed
+            # to run a model.
+            log.warning(
+                "pairing_queue_failed",
+                tenant_id=tenant_id,
+                anchor_id=anchor.external_id,
+                error=type(exc).__name__,
+            )
+        return []
+
+    if not stored_ids:
+        # A stored **empty** pairing: the model ran, its kinds matched nothing
+        # complementary, and that was written down. Deliberately not re-queued —
+        # recomputing it on every cart page is the cost `cache.put`'s docstring
+        # explains storing an empty result to avoid.
+        return []
+
+    live = await _load(stored_ids[: compute.MAX_STORED_IDS], adapter=adapter, tenant_id=tenant_id)
+    by_id = {str(product.external_id): product for product in live}
+    # Stored order, not lookup-completion order: `_load` gathers concurrently
+    # and the order things come back in is not a ranking.
+    chosen = select.choose(
+        [by_id[product_id] for product_id in stored_ids if product_id in by_id],
+        anchor,
+        excluded_ids=excluded_ids,
+    )
+
+    log.info(
+        "pairing_from_cache",
+        tenant_id=tenant_id,
+        anchor_id=anchor.external_id,
+        stored=len(stored_ids),
+        still_live=len(live),
+        shown=len(chosen),
+    )
+    return chosen
 
 
 async def _search(

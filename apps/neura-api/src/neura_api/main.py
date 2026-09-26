@@ -31,7 +31,12 @@ from neura_api.jobs import (
 from neura_api.middleware.cors import TenantCorsMiddleware
 from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.ratelimit import RateLimiter
-from neura_api.registry import discover_agent_routes, discover_agents, discover_runners
+from neura_api.registry import (
+    discover_agent_routes,
+    discover_agents,
+    discover_job_handlers,
+    discover_runners,
+)
 from neura_api.routes import agent as agent_routes
 from neura_api.routes import (
     console,
@@ -106,12 +111,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.idempotency = Idempotency(database)
     app.state.stores = StoreDirectory(database)
     app.state.drainer = WebhookDrainer(database)
-    app.state.jobs = _job_runner(database, app.state.stores, app.state.drainer)
     # One client, shared. The dispatcher ([ADR-0031]) calls a model *before* any
     # turn exists, so it cannot borrow the per-turn `MeteredLLM` the turn
     # service wraps around this — and building a second client would open a
     # second HTTP connection pool per process for one extra call per message.
+    #
+    # Built before the job runner, which is new: a background handler may need a
+    # model too ([ADR-0045]), and a second client for the worker would double
+    # the connection pools to save moving one line.
     app.state.llm = _llm()
+    app.state.jobs = _job_runner(database, app.state.stores, app.state.drainer, app.state.llm)
     app.state.turns = TurnService(database, app.state.llm, app.state.stores)
 
     # Agents are mounted here rather than in `create_app`, because discovery is
@@ -145,7 +154,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("api_stopped")
 
 
-def _job_runner(database: Database, stores: StoreDirectory, drainer: WebhookDrainer) -> JobRunner:
+def _job_runner(
+    database: Database, stores: StoreDirectory, drainer: WebhookDrainer, llm: Any
+) -> JobRunner:
     """The worker loop, with its handlers attached.
 
     Handlers are registered here rather than discovered, because the queue must
@@ -165,6 +176,14 @@ def _job_runner(database: Database, stores: StoreDirectory, drainer: WebhookDrai
     runner = JobRunner(database)
     runner.register(SYNC_STORE, SyncStoreHandler(stores))
     runner.register(WEBHOOK_DRAIN, WebhookDrainHandler(drainer))
+
+    # ...plus whatever the installed agents own. Discovered rather than named
+    # here, for the reason the other four seams are ([ADR-0045]): background
+    # work belongs to the agent that needs it, and this file must not learn
+    # which agents exist in order to run theirs.
+    for kind, handler in discover_job_handlers(db=database, stores=stores, llm=llm).items():
+        runner.register(kind, handler)
+
     return runner
 
 

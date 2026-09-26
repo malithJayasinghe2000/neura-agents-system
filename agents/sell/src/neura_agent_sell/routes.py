@@ -44,6 +44,7 @@ from neura_agent_sell.feed import build, canonical, jsonld, publishable
 from neura_agent_sell.feed import tokens as feed_tokens
 from neura_agent_sell.feed.schema import sell_feeds
 from neura_agent_sell.mcp import protocol as mcp_protocol
+from neura_agent_sell.pairing.cache import DatabasePairingCache
 from neura_api.ratelimit import enforce, subjects_for
 from neura_commerce.identity import EntityType
 from neura_commerce.sync import DatabaseEntityStore
@@ -207,13 +208,19 @@ def build_routes(agent_key: str) -> APIRouter:
 
     @router.post("/suggestions", summary="Products that go with the ones a page names")
     async def suggestions(request: Request, body: SuggestionRequest) -> dict[str, Any]:
-        """What goes with these products ([ADR-0040]).
+        """What goes with these products ([ADR-0040], amended by [ADR-0045]).
 
-        **The fourth surface, and the third with no model in it.** A page sends
-        product ids; ordinary code reads the merchant's own product text, drops
-        the anchor's own category and returns at most two products. Nothing is
-        generated, so nothing here can fabricate a product or be
-        prompt-injected.
+        **The fourth surface, and no model runs on this request.** A page sends
+        product ids; ordinary code reads a stored pairing if a background job
+        has computed one, falls back to the merchant's own product text if not,
+        drops the anchor's own category, and returns at most two products.
+
+        **A model may have chosen what to search for, and never what to say.**
+        ADR-0045 §1 replaced ADR-0040 §5's *"no model runs in it"* with *"no
+        model runs between a shopper and an answer"* — so this handler makes no
+        model call on any path, including the first request for a product
+        nobody has ever paired. That one answers from words and queues the
+        computation for next time.
 
         **We are never told these ids came from a cart, and must not be.** The
         Generic Commerce Interface has nine endpoints and none of them is a
@@ -243,6 +250,10 @@ def build_routes(agent_key: str) -> APIRouter:
                 adapter=connection.adapter,
                 capabilities=connection.capabilities,
                 tenant_id=caller.tenant_id,
+                # The resolved store id, never `body.store_id`: a pairing keyed
+                # by an absent id would be a different row from the same
+                # tenant's pairing keyed by the id they later start sending.
+                cache=_pairing_cache(caller.tenant_id, connection.store_id),
             )
         finally:
             # Same reason as MCP: the adapter holds an HTTP client, and a cart
@@ -470,6 +481,24 @@ async def _mcp_caller(request: Request, agent_key: str) -> Any:
     require_scopes(caller, "sell:mcp:connect")
     require_agent(caller, agent_key)
     return caller
+
+
+def _pairing_cache(tenant_id: str, store_id: str) -> DatabasePairingCache:
+    """Where a request reaches its stored pairings ([ADR-0045]).
+
+    A function rather than an expression inline, for one reason worth stating:
+    it is the seam a test replaces. `tests/unit/test_sell_pairing.py` drives the
+    real route, the real scope check and the real orchestration against a cache
+    it can see into, and does it **without a database** — which is what keeps
+    the endpoint's tests unit tests rather than a suite that skips when Postgres
+    is absent.
+
+    **The resolved `store_id`, never the body's.** `StoreDirectory.connect`
+    fills in a tenant's only store when a page names none, and keying a pairing
+    by an absent id would file the same shop's pairings under two keys — one
+    written by pages that name the store and one by pages that do not.
+    """
+    return DatabasePairingCache(get_database(), tenant_id=tenant_id, store_id=store_id)
 
 
 async def _suggest_caller(request: Request, agent_key: str) -> Any:

@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration test-widget widget-check widget-check-live widget-demo pairs-check tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
+        test-integration test-widget widget-check widget-check-live widget-demo pairs-check pairs-coverage tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
@@ -128,6 +128,18 @@ pairs-check:  ## Drive the REAL suggestion block in REAL headless Chrome. No mod
 	uv run python scripts/pairs_check.py $(if $(LIVE),--live,) \
 	  $(if $(URL),--url $(URL),) $(if $(SHOP),--shop-url $(SHOP),) \
 	  $(if $(TOKEN),--shop-token $(TOKEN),) $(if $(PRODUCTS),--products $(PRODUCTS),)
+
+# ADR-0045 §9's falsification test, and the only one of these that is a
+# MEASUREMENT rather than a check: it exits 0 whatever it finds, because "the
+# model path is worse" is a result that ADR plans for and acts on.
+#   make pairs-coverage URL=http://bagisto.test/neura/v1 TOKEN=...
+#   make pairs-coverage URL=... TOKEN=... MODEL=1 ROLE_MAP=cloud-prod
+# The words arm costs nothing. The model arm costs one call per product, and
+# stores nothing — the pairings live in memory for the length of the run, so a
+# second run measures the catalogue rather than the first run.
+pairs-coverage:  ## How many real products produce a suggestion: words vs model [MODEL=1 ROLE_MAP=...]
+	uv run python scripts/pairs_coverage.py --url $(URL) --token $(TOKEN) \
+	  $(if $(MODEL),--model,) $(if $(ROLE_MAP),--role-map $(ROLE_MAP),)
 
 # Set a tenant up and hand you a URL to open in your OWN browser. A headless
 # pass proves the widget works; it does not show anybody what it looks like.

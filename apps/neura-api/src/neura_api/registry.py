@@ -22,6 +22,7 @@ log = get_logger(__name__)
 
 _GROUP = "neura.agents"
 _ROUTES_GROUP = "neura.agent_routes"
+_JOB_HANDLERS_GROUP = "neura.job_handlers"
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,51 @@ def discover_agent_routes() -> dict[str, Any]:
             log.error("agent_routes_failed", entry_point=ep.name, error=str(exc))
 
     log.info("agent_routes_discovered", agents=sorted(found))
+    return found
+
+
+def discover_job_handlers(**context: Any) -> dict[str, Any]:
+    """Load every agent-supplied job handler, keyed by **job kind**.
+
+    The fifth discovery seam of the same shape ([ADR-0045]), and the reason it
+    exists is ADR-0022's: *the queue must not import the things it runs*. A
+    handler registered by name here would make `_job_runner` the one file that
+    has to change every time an agent needs background work — and it would put
+    an agent's name in the deployable, which is what the other four seams exist
+    to prevent.
+
+    Keyed by job kind rather than by agent key, because that is what
+    ``JobRunner.register`` dispatches on and an agent may own more than one
+    kind. **A kind claimed twice is refused**: two handlers for one string would
+    make which one runs depend on entry-point iteration order, and the job would
+    silently do one agent's work under another's name.
+
+    ``context`` is forwarded to each factory — the store directory and the model
+    client today. A broken factory is logged and skipped rather than fatal,
+    exactly as a broken runner is: one agent's background work must not stop the
+    worker loop for every other agent in the deployment.
+    """
+    found: dict[str, Any] = {}
+    owners: dict[str, str] = {}
+
+    for ep in entry_points(group=_JOB_HANDLERS_GROUP):
+        try:
+            for kind, handler in ep.load()(**context).items():
+                if kind in found:
+                    log.error(
+                        "job_handler_kind_claimed_twice",
+                        kind=kind,
+                        entry_point=ep.name,
+                        claimed_by=owners[kind],
+                        detail="refused; which handler ran would depend on discovery order",
+                    )
+                    continue
+                found[kind] = handler
+                owners[kind] = ep.name
+        except Exception as exc:
+            log.error("job_handlers_failed", entry_point=ep.name, error=str(exc))
+
+    log.info("job_handlers_discovered", kinds=sorted(found))
     return found
 
 

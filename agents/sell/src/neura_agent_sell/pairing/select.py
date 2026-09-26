@@ -1,8 +1,15 @@
-"""Choosing what goes with a product — ordinary code, and no model in it.
+"""Choosing what goes with a product — ordinary code, and no model in *this file*.
 
 [ADR-0040](../../../../../docs/architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)
-is the whole specification. The short version, because the constraints here are
-easy to erode one convenience at a time:
+is the specification, **amended in one place by
+[ADR-0045](../../../../../docs/architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md)**:
+a model may now compute a pairing, once, in the background, and the result is
+stored. So the surface as a whole is no longer model-free and nobody should
+quote it as such — but every rule below is still ordinary code, still pure, and
+is applied to a model's candidates exactly as to a word search's.
+
+The short version, because the constraints here are easy to erode one
+convenience at a time:
 
 * **A page hands over product ids.** It is never said where they came from, and
   nothing in this module may assume a cart. They could be a wishlist or a list
@@ -11,9 +18,11 @@ easy to erode one convenience at a time:
   and **never by behaviour**. There is no purchase history in this system, so
   "customers also bought" would not be a ranking we lack; it would be a claim
   we cannot make.
-* **Nothing is generated.** No prose, no sentence, no model call. The surface
-  returns product ids and display fields, which is why it cannot fabricate a
-  product and cannot be prompt-injected.
+* **Nothing a shopper reads is generated.** No prose and no sentence: the
+  surface returns product ids, display fields the merchant wrote, and
+  :func:`heading_for`'s server-built line. A model may name *kinds* to search
+  for (ADR-0045 §3) and may never name a product, so this surface still cannot
+  put a product on a page that the merchant's own catalogue did not return.
 * **Empty is a good answer.** Showing nothing costs a shopper nothing; showing
   something silly costs the merchant's trust in the whole product.
 
@@ -156,24 +165,29 @@ def pairing_terms(product: Product) -> list[str]:
     return sorted(chosen, key=len, reverse=True)[:MAX_TERMS]
 
 
-def is_pairable(candidate: Product, anchor: Product, *, excluded_ids: frozenset[str]) -> bool:
-    """May this product be shown beside the anchor?
-
-    Five refusals, each with a reason that is not "it looked wrong":
+def is_complementary(candidate: Product, anchor: Product, *, excluded_ids: frozenset[str]) -> bool:
+    """Does this product *go with* the anchor? Four refusals, none of them about
+    whether it happens to be in stock this morning.
 
     1. **Already on the page.** Suggesting what the shopper has already chosen
        is the clearest possible signal that nothing here understands them.
     2. **The anchor itself**, which is the same failure wearing a different hat.
-    3. **Not buyable.** ``search_products`` drops withdrawn products because
-       "a shortlist is a set of recommendations: putting an unbuyable product on
-       one is recommending it". A suggestion block is a shortlist of two.
-    4. **No category on either side.** Rule 5 cannot be applied without
+    3. **No category on either side.** Rule 4 cannot be applied without
        categories, and applying no rule would silently return the four-jackets
        result ADR-0040 §4 measured. Unknown is treated as unsafe.
-    5. **The anchor's own category.** A shopper with a jacket in the cart does
+    4. **The anchor's own category.** A shopper with a jacket in the cart does
        not want four more jackets. Word matching finds *similar* products; a
        pairing needs *complementary* ones, and this is the only line that knows
        the difference.
+
+    **Split out of :func:`is_pairable` for [ADR-0045](../../../../../docs/architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md)
+    §4**, which needs exactly this half and not the other: *"the cache holds a
+    pairing, never an availability."* These four rules answer a question about
+    two products that stays answered — a loafer went with socks yesterday and
+    goes with socks today — so they are the rules a stored pairing may be
+    computed under. :func:`is_buyable` is the half that must be asked again on
+    every request, and storing its answer would mean a product that sold out on
+    Monday is still hidden in October.
     """
     if not candidate.external_id or candidate.external_id in excluded_ids:
         return False
@@ -181,13 +195,34 @@ def is_pairable(candidate: Product, anchor: Product, *, excluded_ids: frozenset[
     if candidate.external_id == anchor.external_id:
         return False
 
-    if candidate.status is not ProductStatus.ACTIVE or not _in_stock(candidate):
-        return False
-
     if not candidate.category_ids or not anchor.category_ids:
         return False
 
     return not set(candidate.category_ids) & set(anchor.category_ids)
+
+
+def is_buyable(candidate: Product) -> bool:
+    """Can a shopper actually buy this today?
+
+    ``search_products`` drops withdrawn products because "a shortlist is a set
+    of recommendations: putting an unbuyable product on one is recommending it".
+    A suggestion block is a shortlist of two.
+
+    **The one rule that expires.** It is asked live on every request — of the
+    word path's fresh search results and of a stored pairing's ids alike — and
+    its answer is never written down (ADR-0045 §4).
+    """
+    return candidate.status is ProductStatus.ACTIVE and _in_stock(candidate)
+
+
+def is_pairable(candidate: Product, anchor: Product, *, excluded_ids: frozenset[str]) -> bool:
+    """May this product be shown beside the anchor, right now?
+
+    The five refusals of ADR-0040 §4, unchanged in behaviour and now stated in
+    two halves: does it go with the anchor at all
+    (:func:`is_complementary`), and can it be bought (:func:`is_buyable`).
+    """
+    return is_complementary(candidate, anchor, excluded_ids=excluded_ids) and is_buyable(candidate)
 
 
 def rank_by_rarity(found: list[tuple[str, list[Product]]]) -> list[Product]:
@@ -272,6 +307,8 @@ __all__ = [
     "anchor_of",
     "choose",
     "heading_for",
+    "is_buyable",
+    "is_complementary",
     "is_pairable",
     "pairing_terms",
     "rank_by_rarity",

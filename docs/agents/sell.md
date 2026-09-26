@@ -1,6 +1,6 @@
 # NEURA-SELL — Technical Design
 
-**Status:** **Built** — designed 2026-08-26, built the same day, all three surfaces · **a fourth surface was added 2026-09-21** by [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) · **Design date:** 2026-08-26 · **Decision:** [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)
+**Status:** **Built** — designed 2026-08-26, built the same day, all three surfaces · **a fourth surface was added 2026-09-21** by [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md), **and a model was put into it on 2026-09-26** by [ADR-0045](../architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) — in the background only · **Design date:** 2026-08-26 · **Decision:** [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md)
 
 > `agents/sell/` holds the graph (`graph.py`, seven nodes in `nodes/`), the five tools, the MCP
 > server (`mcp/`), the product feed (`feed/`), the paired suggestion (`pairing/`) and the golden
@@ -39,13 +39,17 @@ This is the structural fact that shapes every other section, so it is stated fir
 | 1 | **Recommendation** | a shopper, in the widget | ✅ | yes | the graph in §2 |
 | 2 | **MCP server** | *someone else's* AI agent | ❌ | **no** | the policy engine, §6 |
 | 3 | **Product feed** | crawlers, answer engines | ❌ | no | the renderer, §7 |
-| 4 | **Paired suggestion** | a page in the merchant's own theme | ❌ | **no** | `sell:suggest:read`, [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) |
+| 4 | **Paired suggestion** | a page in the merchant's own theme | ❌ | **yes — but never on the request path** | `sell:suggest:read`, [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) + [ADR-0045](../architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) |
 
-Only surface 1 is an *Agent* as [the glossary](../glossary.md) defines one. Surfaces 2, 3 and 4 have no nodes, no prompts and no LLM call of ours anywhere in them. The manifest and the entitlement gate all of them, which is what makes them one sellable product — but calling four surfaces "a graph" would be the kind of tidy fiction this repository exists to avoid.
+Only surface 1 is an *Agent* as [the glossary](../glossary.md) defines one. Surfaces 2 and 3 have no nodes, no prompts and no LLM call of ours anywhere in them. The manifest and the entitlement gate all of them, which is what makes them one sellable product — but calling four surfaces "a graph" would be the kind of tidy fiction this repository exists to avoid.
+
+> **Row 4's answer changed on 2026-09-26 and this paragraph used to include it.** [ADR-0045](../architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) was built that day: a model computes what *kinds* of product go with one, **in the background, on the job queue, never between a shopper and an answer**. It has a prompt and an LLM call of ours; it still has no graph and no node. **So "no model in it" is no longer true of this surface and must not be quoted** — including from the title of ADR-0040, which that ADR's own Consequences section predicted would stop being literally true.
 
 > **Row 4 was added on 2026-09-21, three weeks after this section was written**, by [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) — which is why it is a separate ADR and a separate row rather than an edit to the argument above. It selects complementary products from the catalogue's own words, and it is the one surface that is shown to a shopper without a shopper having asked for anything, so §3 of that ADR fixes the words on screen: **the heading names the product it pairs with, and never claims anything about behaviour.** There is no purchase history in this system. [`README.md`](README.md) already draws the same distinction for GUARD, whose MVP portion is platform infrastructure rather than an agent.
 
-**This relocates the safety argument for surfaces 2, 3 and 4.** CARE's argument is *a persuaded model achieves nothing, because no tool that changes a store was ever registered*. For MCP, the feed and the paired suggestion there is no model of ours to persuade — the argument is entirely read-only tools, the policy engine, and tenant isolation. What replaces prompt injection as the characteristic risk is its mirror image, and §6.4 names it.
+**This relocates the safety argument for surfaces 2 and 3.** CARE's argument is *a persuaded model achieves nothing, because no tool that changes a store was ever registered*. For MCP and the feed there is no model of ours to persuade — the argument is entirely read-only tools, the policy engine, and tenant isolation. What replaces prompt injection as the characteristic risk is its mirror image, and §6.4 names it.
+
+**Surface 4 left that group on 2026-09-26 and its argument is now its own.** There *is* a model to persuade, and the input — merchant catalogue text — is the mirror-image risk §6.4 names, arriving at a surface that used to be immune to it. What bounds it is structural rather than a prompt, and all four parts are code: the model returns **kinds, never products**, so only the merchant's own search can name one; it has **no tools**; **nothing it writes reaches a shopper as words** (`select.heading_for` builds every visible sentence); and it runs **in the background**, so a hostile input delays nothing anybody is waiting for. The worst case is a **bad suggestion** — an eval case, not an incident — and [Rule 4](../../AGENTS.md) reaches this surface now that it can regress.
 
 ### 1.2 Two intents
 
@@ -514,7 +518,7 @@ Added to [`open-questions.md`](../open-questions.md). None of them may be silent
 |:--|:--|
 | **A12** 🟡 | Catalogue tools are duplicated between CARE and SELL. Copy now and extract at the third agent, or extract into `neura-agent-core` with parameterised scopes now? |
 | **A13** 🟠 | No cross-agent handoff. A merchant with CARE and SELL has shoppers escalated at the boundary between them. |
-| **E8** 🟠 | What satisfies Rule 4 for a surface with no model in it (MCP, feed)? |
+| **E8** 🟠 | What satisfies Rule 4 for a surface with no model in it (MCP, feed)? **Narrowed 2026-09-26**: the paired suggestion left this question when [ADR-0045](../architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) put a model in it, and it now has an ordinary eval dataset. MCP and the feed still do not, and the question is unanswered for them. |
 | **P9** 🟡 | MCP protocol-revision pinning and deprecation policy — needed before the first external agent connects, not after. |
 | ~~**S7**~~ ✅ | **Resolved 2026-08-26** — [ADR-0024](../architecture/adr/0024-the-feed-is-opt-in-and-addressed-by-a-rotatable-secret.md). Opt-in, off by default, hashed rotatable token in the path, its own table. |
 | **S8** 🟠 | Outbound indirect injection: flag and surface is decided; **withholding is not**. |

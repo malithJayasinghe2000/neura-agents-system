@@ -32,6 +32,7 @@ from neura_agent_core.evidence import ReplayAdapter, ReplayRetriever, read_artef
 from neura_agent_core.graph import CONFIG_KEY, initial_state, total_cost, total_tokens
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity
+from neura_agent_sell.evals import pairing as pairing_case
 from neura_agent_sell.evals.store import ALL_CAPABILITIES, FIXTURE_DIR, load_store
 from neura_agent_sell.graph import compile_graph
 from neura_agent_sell.runtime import build_runtime
@@ -61,7 +62,23 @@ class SellTarget:
         return f"sell@{getattr(self._llm, 'role_map_name', 'unknown')}"
 
     async def run(self, case: EvalCase) -> AgentResponse:
-        """One case, start to finish, through the real graph."""
+        """One case, start to finish, through the real graph — or, for a pairing
+        case, through the real pairing path.
+
+        **The branch is on a tag the case declares**, never on a filename or on
+        an intent, for `FixtureMode`'s stated reason: a reviewer must be able to
+        read which path a case takes in the case itself.
+
+        Two surfaces in one target rather than two targets, because a target is
+        discovered per *agent* and these are both SELL. The recommendation
+        graph and the paired suggestion share an agent, a fixture catalogue and
+        a release gate; what they do not share is a graph, and
+        [ADR-0040 §1](../../../../../docs/architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)
+        said so before either had a model in it.
+        """
+        if pairing_case.is_pairing_case(case):
+            return await pairing_case.run_case(case, llm=self._llm, tenant_id=self._tenant_id)
+
         store, capabilities, retriever = _store_for(case, self._tenant_id)
         audit = InMemoryAuditLog()
 

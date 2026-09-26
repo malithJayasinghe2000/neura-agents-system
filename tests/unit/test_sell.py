@@ -122,6 +122,32 @@ class TestDiscovery:
 
         assert "sell" in discover_agent_routes()
 
+    def test_sell_supplies_its_own_background_work(self) -> None:
+        """The fifth seam ([ADR-0045]): a pairing is computed on ADR-0022's
+        queue, and `_job_runner` registers the handler without naming SELL.
+
+        Keyed by **job kind**, because that is what `JobRunner.register`
+        dispatches on — and `discover_job_handlers` refuses a kind claimed
+        twice, since which handler ran would otherwise depend on entry-point
+        iteration order.
+        """
+        from neura_agent_sell.pairing.cache import PAIRING_COMPUTE
+        from neura_api.registry import discover_job_handlers
+
+        handlers = discover_job_handlers(db=None, stores=None, llm=None)
+        assert PAIRING_COMPUTE in handlers
+
+    def test_a_handler_factory_that_raises_does_not_stop_the_worker(self) -> None:
+        """One agent's background work must not deny the loop to every other
+        agent — the same forgiveness a broken runner and a broken router get,
+        and for the same reason."""
+        from neura_api.registry import discover_job_handlers
+
+        # `build_handlers` takes what it needs by keyword and ignores the rest.
+        # Calling it with nothing at all is the closest thing to a broken
+        # deployment this can reach without monkeypatching entry points.
+        assert isinstance(discover_job_handlers(), dict)
+
 
 @pytest.mark.parametrize("forbidden", ["bagisto", "shopify", "woocommerce", "magento"])
 def test_sell_names_no_commerce_platform(forbidden: str) -> None:

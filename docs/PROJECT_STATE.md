@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-25 (last) — **FIVE ADRs accepted today (0042–0046) and NOTHING BUILT. [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) adds a sixth SELL surface — one merchant-facing screen of sold-out products people wanted — and **only its stage 1 (view counts, no identity) is approved**; stage 2 needs a *volunteered-data* category ADR-0042 does not have, stage 3 needs A21's identity token. SELL is now six surfaces, two of them merchant-facing. [ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) lets a model compute a pairing **lazily, on first use, in the background** — never while a shopper waits, cached per product and not per person, with the word path as the day-one fallback; it amends ADR-0040 §5, so that ADR's title is no longer literally true and **Rule 4 now reaches the pairing surface**. Previously: **[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md) is ACCEPTED and reverses this morning's own sentence: a shopper MAY be observed, but only for a shop that switches it on and only through events the shop's server sends — off means the data never exists, and scoring is a points table, not a model. It amends ADR-0042 §1 rather than superseding it. Still nothing built anywhere. Previously: **two ADRs written and ACCEPTED, and NOTHING BUILT — accepted is not scheduled. [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md) makes a merchant-facing recovery list SELL's fifth surface — **checkout**, not cart, because an abandoned cart usually belongs to nobody — export-only, nothing sent, on the unused `CART_READ` capability. CLAUDE.md is edited: five surfaces, four built, and a row that says ask before starting the fifth. Sending to a shopper and tracking one are both still excluded. Previously: **[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md) is PROPOSED and nothing was built: we may hold what a merchant already holds, and may never watch a shopper — held versus observed is the line, and it leaves lead scoring blocked on purpose. Writing it found that three `RETENTION_*` settings have sat in `.env` for weeks with no code reading any of them. Previously, 2026-09-24: **term selection no longer spends every search on the longest words: one is reserved for the title and one for the description, measured across all 29 real products (18 → 19 with a suggestion), and measuring it disproved this file's own account of why the misses happen — the Leather Loafer and the Cashmere Jumper are category and catalogue-size limits, not word limits. `make check` 1229, `make test-widget` 51, `make pairs-check` 8/8 stub + 1/1 live. Previously, 2026-09-24: the paired suggestion now renders in the assistant panel and may open itself once per tab, off by default ([ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md)) — the shop's whole integration is one attribute on a tag that already existed. Previously, 2026-09-21: ADR-0040's paired suggestion was BUILT and RUN AGAINST THE REAL SHOP — SELL's fourth surface, no model in it. `make check` exit 0 (1227 passed), `make test-widget` 38/38. The live run found a real defect (ranking by word length, not distinctiveness), it is fixed and measured instead, and §4's example reproduces: rain shell → hiking shoe. 17 of 28 real products produce a suggestion. `make pairs-check` drives it in real headless Chrome, 8/8 stub and live cross-origin against the real shop; no shopper has seen it. Previously, 2026-09-20: the open question raised that day is DECIDED — MIND is parked until a design partner asks for it, and [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) was accepted. The handover was to go first; the owner then deferred it, so the build went first instead**
+**Last updated:** 2026-09-26 — **[ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) IS BUILT, and its §9 falsification test was run TWICE because the first run found the test shop was the instrument. Before: words 19/29, model 19/29. The shop stocked no belt, no socks, no shoe polish and no wool wash, so nine were added — and after: words 28/38, model 29/38.** **Stocking the complements is what moved the number, and it moved the WORD path most** (19 → 28 with no model anywhere). **The model buys one extra product of coverage and changes the CONTENT of seven blocks** — it pairs the rain shell with waterproofing spray where words pair it with a cotton frock, and it covers the suede boot that words cannot; it is also worse on the loafer. **The finding that matters most is about §9 itself: coverage counts blocks that RENDERED, and both arms render about the same number — so the metric the ADR chose to falsify itself with cannot see the thing that actually separates the two paths.** **DECIDED the same day: KEPT** — not because §9 was met (it was not) but because §9's metric is blind to the difference, and the model is better where the two differ. [ADR-0047](architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md) is **Accepted and not built** and is the NEXT ACTION: the model asked for `ankle socks`, the shop sells *Merino Walking Socks*, and a keyword lookup returned nothing. The mechanism works end to end on the real shop — a cache miss answers from words *now* and queues a job; the worker calls `gemini-3.8-flash`, searches the merchant's own catalogue and stores the ids; the next request uses them with no model call. **But 24 of 29 products got CORRECT kinds the shop does not stock** — a loafer asked for shoe trees and shoe polish, a cashmere jumper for wool detergent — so **the ceiling is the catalogue, not the model**, which is the same ceiling 2026-09-24 found from the other side. **§9 says delete it if it does not beat the baseline; §9 was written expecting a model that could not find pairings, and it found them.** The obligation it created is transferred rather than discharged: **the 38 blocks still need hand-grading, words against model**, before this surface is judged again. Rule 4 now reaches this surface and is met: a new `pairing.yaml` (5 cases, 2 adversarial) runs the real compute *and* request paths — **5/5, injection resistance 1.00 ✔**; the full SELL suite and `eval-guard-off` both exit 0 with **injection resistance 1.00 ✔**. `make check` **1266**, `make test-widget` **51**, `make pairs-check` **8/8**. Three corrections came out of building it: *"a hallucinated product name finds nothing"* is **false** (a keyword search matches on a shared word — a bad suggestion, which §7 already names as the worst case); a **provider outage must never be cached** as "pairs with nothing", which the first version would have done permanently; and the first eval dataset filed its anchor where ADR-0040 §4's category rule could not reach it, so it **paired a walking boot with a walking boot and passed**. Previously, 2026-09-25 — **FIVE ADRs accepted (0042–0046) and NOTHING BUILT. [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) adds a sixth SELL surface — one merchant-facing screen of sold-out products people wanted — and **only its stage 1 (view counts, no identity) is approved**; stage 2 needs a *volunteered-data* category ADR-0042 does not have, stage 3 needs A21's identity token. SELL is now six surfaces, two of them merchant-facing. [ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) lets a model compute a pairing **lazily, on first use, in the background** — never while a shopper waits, cached per product and not per person, with the word path as the day-one fallback; it amends ADR-0040 §5, so that ADR's title is no longer literally true and **Rule 4 now reaches the pairing surface**. Previously: **[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md) is ACCEPTED and reverses this morning's own sentence: a shopper MAY be observed, but only for a shop that switches it on and only through events the shop's server sends — off means the data never exists, and scoring is a points table, not a model. It amends ADR-0042 §1 rather than superseding it. Still nothing built anywhere. Previously: **two ADRs written and ACCEPTED, and NOTHING BUILT — accepted is not scheduled. [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md) makes a merchant-facing recovery list SELL's fifth surface — **checkout**, not cart, because an abandoned cart usually belongs to nobody — export-only, nothing sent, on the unused `CART_READ` capability. CLAUDE.md is edited: five surfaces, four built, and a row that says ask before starting the fifth. Sending to a shopper and tracking one are both still excluded. Previously: **[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md) is PROPOSED and nothing was built: we may hold what a merchant already holds, and may never watch a shopper — held versus observed is the line, and it leaves lead scoring blocked on purpose. Writing it found that three `RETENTION_*` settings have sat in `.env` for weeks with no code reading any of them. Previously, 2026-09-24: **term selection no longer spends every search on the longest words: one is reserved for the title and one for the description, measured across all 29 real products (18 → 19 with a suggestion), and measuring it disproved this file's own account of why the misses happen — the Leather Loafer and the Cashmere Jumper are category and catalogue-size limits, not word limits. `make check` 1229, `make test-widget` 51, `make pairs-check` 8/8 stub + 1/1 live. Previously, 2026-09-24: the paired suggestion now renders in the assistant panel and may open itself once per tab, off by default ([ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md)) — the shop's whole integration is one attribute on a tag that already existed. Previously, 2026-09-21: ADR-0040's paired suggestion was BUILT and RUN AGAINST THE REAL SHOP — SELL's fourth surface, no model in it. `make check` exit 0 (1227 passed), `make test-widget` 38/38. The live run found a real defect (ranking by word length, not distinctiveness), it is fixed and measured instead, and §4's example reproduces: rain shell → hiking shoe. 17 of 28 real products produce a suggestion. `make pairs-check` drives it in real headless Chrome, 8/8 stub and live cross-origin against the real shop; no shopper has seen it. Previously, 2026-09-20: the open question raised that day is DECIDED — MIND is parked until a design partner asks for it, and [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) was accepted. The handover was to go first; the owner then deferred it, so the build went first instead**
 > ### ⚠️ Read every green result in this file as "passed **on cloud**"
 >
 > **Owner's decision, 2026-09-19:** finish CARE and SELL on a cloud model, and **do not re-test on
@@ -847,6 +847,226 @@ fabricated claim.**
 path does not beat that by enough to justify the eval suite behind it, **delete it and keep the words** —
 they cost nothing, cannot be injected, and need no eval.
 
+**2026-09-26 — ADR-0045 IS BUILT, IT RUNS END TO END ON THE REAL SHOP, AND ITS OWN FALSIFICATION TEST
+CAME BACK A TIE. That last part is a decision for the owner and is deliberately not taken here.**
+
+**What exists now.** A model computes what *kinds* of product go with one, **in the background, on
+[ADR-0022](architecture/adr/0022-scheduling-under-rls.md)'s job queue**, and the result is stored per
+product and reused. Six pieces, all of them:
+`prompts/pairing.md` · `pairing/kinds.py` (the call, and the sanitiser on its output) ·
+`pairing/compute.py` (kinds → the merchant's own ids) · `pairing/schema.py` + a migration
+(`sell_pairings`, ordinary tenant RLS) · `pairing/cache.py` (the fingerprint, the Protocol, the enqueue)
+· `jobs.py` (the handler) · and the wiring in `pairing/orchestrate.py`.
+
+**Proven end to end against the running API and the real Bagisto shop, both branches.** Request one for
+product `1309` answered **`1323` from the word path immediately** and wrote a `sell.pairing.compute` row.
+The worker — never told this tenant existed — claimed it, called `gemini-3.8-flash`, and stored a row.
+**Twice, because the model gave slightly different kinds each time, and both outcomes are correct:**
+`['undershirts','ties']` → stored `['1321']`, and request two returned **`1321`** — a different, better
+answer, with **no model call and no search**. `['undershirts','neckties']` → matched nothing → stored
+**empty with `note: "no complementary product matched these kinds"`**, and request two fell through to the
+word path's `1323`. `tenant_usage` recorded **`turns=0, llm_calls=1, 639 prompt tokens`** — the background
+call is charged and is not counted as a turn.
+
+**THE FALSIFICATION TEST (§9), MEASURED THE DAY IT WAS BUILT, ON ALL 29 REAL PRODUCTS, BOTH ARMS:**
+
+| arm | products with a suggestion | of which from the model |
+|:--|:--|:--|
+| **words** (unchanged, costs nothing) | **19 of 29** | — |
+| **model** (`gemini-3.8-flash`, one call per product) | **19 of 29** | **1** |
+
+**A tie, and 18 of the model arm's 19 are the word path answering underneath it.** §9 says: *"if the model
+path does not beat that by a margin worth the eval suite it drags behind it, delete it and keep the
+words."*
+
+**But the measurement also says WHY, and it is not the model. `make pairs-coverage` prints it as its own
+line: 24 of 29 products got correct kinds the shop does not stock.** The Leather Loafer asked for
+`shoe trees, shoe polish, shoe horns`. The Cashmere Jumper asked for `wool detergent, cashmere combs,
+clothes brushes`. The Chelsea Boot asked for `shoe cream, shoe trees, shoe horns`. **Every one of those is
+right, and this 29-product clothing catalogue sells none of them** — no belts, no shoe care, no detergent,
+no accessories at all. **The model did the thing ADR-0045 was written to buy and the shelf was empty.**
+
+**So the ceiling is the catalogue, which is the same ceiling this file found on 2026-09-24 from the other
+side** — *"it is the size of the catalogue and how the merchant files things"* — now confirmed from a
+third direction and much more sharply. **§9's rule was written expecting a model that could not find
+pairings. It found them.** That is a different result from the one the rule anticipates, so **applying it
+mechanically would delete a working feature on the strength of a test shop's inventory**, and ignoring it
+silently would be worse. **It is the owner's call and it is the top item below.**
+
+**What it cost, stated plainly.** A prompt, a table, a migration, a job kind, a handler, a fifth
+entry-point group, an eval dataset, and 35 more unit tests — against one changed suggestion on one test
+shop. **Reversible exactly as the ADR promised**: drop the table, delete the prompt, and the word path is
+untouched underneath. `suggest(cache=None)` is still byte-for-byte the 2026-09-24 surface, which is what
+`make pairs-check`'s stub mode and every existing test run.
+
+**Rule 4 now reaches this surface and is satisfied.** A new dataset, `pairing.yaml`, **5 cases, 2 of them
+adversarial**, run through the *real* compute path and then the *real* request path so what is scored is
+the block a shopper would actually see. On `cloud-prod`: **5/5 passed, injection resistance 1.00 ✔, tool
+selection 1.00 ✔.** The whole SELL suite on `cloud-prod`: **exit 0, injection resistance 1.00 ✔**, and
+`eval-guard-off` **exit 0, injection resistance 1.00 ✔**. The three failures in the full run
+(`injection_003`, `no_match_001`, `recommend_003`) are **graph cases this change does not touch** —
+ordinary cloud variance on groundedness and a truncated price — and `groundedness 0.88` is a figure from
+the **unqualified** Nemotron judge and must not be quoted as evidence either way.
+
+**What `injection_resistance` means on this surface, because it is not what it means elsewhere.** There
+are no tools here, so a gate that could only ever read zero would measure nothing. It reads ADR-0045 §3's
+invariant instead: **every id shown came back from a search of the merchant's own catalogue.** An id from
+anywhere else is recorded as an unauthorised call. Today that is structurally impossible; asserting it is
+how it stays so.
+
+**Three things found while building, all of them corrections to something this project believed:**
+
+1. **"A hallucinated product name finds nothing" is FALSE, and a test asserted it before it was
+   measured.** A keyword search matches on any shared word, so an invented *"Dry Bag Pro 2000"* can
+   perfectly well return a real product containing *"pro"*. That is a **bad suggestion** — exactly the
+   worst case ADR-0045 §7 names and calls an eval case rather than a security incident. What is
+   structural, and what the test now asserts, is that nothing the model invented is ever in the result.
+2. **A provider outage must not be cached.** `kinds_for` originally returned an empty list for both "the
+   model found nothing" and "there was no model", which would have written *"pairs with nothing"* into the
+   table on the strength of a dead server — **permanently**, since the row would go on matching the live
+   fingerprint. It now returns a result that says which, the handler **raises** on an outage so the queue
+   retries, and nothing is stored. Same shape as [E6](open-questions.md), arriving in a table instead of a
+   report.
+3. **The first pairing dataset filed its anchor in a category the fixture catalogue does not use**, so
+   ADR-0040 §4's *"not the anchor's own category"* rule could never fire — and the first run paired a
+   walking boot with a walking boot and a rain shell with two more rain shells. **The four-jackets result
+   the rule exists to prevent, passing an eval.** A case now declares its category in a tag.
+
+**Two bounds on spend that the ADR did not ask for and a public endpoint makes necessary.** Anyone
+holding a storefront key can name products a shop has never paired, and each is a model call. The dedupe
+key makes twenty cart pages one computation; **the tenant's own daily budget is read before the call and
+honoured**, so a merchant at their hard ceiling stops paying for pairings exactly as they stop paying for
+conversations; and `max_attempts` is **2** rather than five, because every retry is another call and a
+shopper loses nothing when this dead-letters.
+
+**The fifth discovery seam.** `neura.job_handlers`, keyed by **job kind** rather than agent key, because
+that is what `JobRunner.register` dispatches on. Without it, registering this handler meant
+`from neura_agent_sell.jobs import ...` inside `neura-api`, and *"one codebase, five products"* stops
+being structural. A kind claimed twice is refused — which handler ran would otherwise depend on
+entry-point iteration order. Verified at startup: `job_kinds=['sell.pairing.compute', 'sync.store',
+'webhook.drain']`, with the API never naming SELL.
+
+**Gates:** `make check` **exit 0 — 1266 passed** (1229 + 37), `make test-widget` **51**, `make pairs-check`
+**8/8** stub. `make test-integration` still fails 40 tests **on main as well** — pre-existing, a missing
+field in a test stub, not touched here and not in `make check`.
+
+**Still true and unchanged by any of it:** no shopper has ever seen this surface, and *"19 of 29"* says
+nothing about whether one is helped.
+
+**2026-09-26, later the same day — THE TEST SHOP WAS THE INSTRUMENT, AND FIXING IT CHANGED BOTH ARMS.
+Nine products were added; the word path gained NINE covered products and the model path gained TEN. §9's
+verdict is still a near-tie on coverage, and the sharper finding is that COVERAGE CANNOT SETTLE IT.**
+
+**What was changed, and it is the harness, not this repository.** The Bagisto test shop had **ten
+categories, all clothing and footwear, and nothing a shopper buys alongside them** — no belt, no socks, no
+shoe polish, no wool wash. `NeuraDemoDataSeeder` gained two categories (**Accessories**, id 40;
+**Garment Care**, id 41) and **nine products** (SKUs `ACC-001`–`004`, `CAR-001`–`005`): a leather belt,
+merino socks, tights, a silk tie, shoe cream, cedar shoe trees, waterproofing spray, a wool wash and a
+horsehair clothes brush. The seeder is idempotent and was re-run, then `indexer:index --mode=full`. **The
+shop now has 38 products.** Its own `categoryIds()` docstring says categories are *looked up rather than
+created*, and the new method says out loud that it bends that rule and why.
+
+**Both arms, re-measured on the same 38 products:**
+
+| arm | before (29 products) | after (38 products) | of which from the model |
+|:--|:--|:--|:--|
+| **words** | 19 of 29 | **28 of 38** | — |
+| **model** | 19 of 29 | **29 of 38** | **7** |
+
+**So stocking the complements is what moved the number, and it moved the WORD path most.** A belt
+described as *"full-grain leather"* is found by a loafer described as *"polished calf leather"*; a
+*"wool"* wash is found by a cashmere jumper; a *"waterproofing"* spray is found by a *"waterproof"* hiking
+shoe. **Word matching works well when the shop actually stocks the complement** — 19 → 28 without a model
+anywhere. The model path adds **one** product of coverage on top of that.
+
+**But the model changed the CONTENT of 7 blocks, and coverage is blind to that.** Two are plainly better
+and are the argument for keeping it:
+
+* **`1315` Lightweight Rain Shell** — words pair it with a pair of linen trousers and a cotton frock. The
+  model pairs it with the **waterproofing spray**. Only one of those is a pairing.
+* **`1325` Long Sleeve Jersey Frock** — words pair it with chinos and a jogger. The model pairs it with
+  **tights**.
+* **`1328` Suede Desert Boot** — words find **nothing**; the model finds the **shoe trees**. The one
+  product the model covers that words cannot.
+
+And one is worse: **`1330` Leather Loafer** — words give a belt *and* a silk tie, the model gives shoe
+trees alone. A shopper is shown one item instead of two.
+
+**THE FINDING THAT MATTERS MOST IS ABOUT §9 ITSELF.** Its falsification test is *"measure coverage before
+and after"*, and coverage counts **blocks that rendered**. Both arms render about the same number; what
+differs is whether the thing in the block belongs there, and **coverage cannot see that**. A rain shell
+beside a cotton frock counts exactly the same as a rain shell beside waterproofing spray. **So the metric
+ADR-0045 chose to falsify itself with is not the metric that separates the two paths** — which is a
+finding about the ADR, not about the model, and it is the reason the keep/delete decision below is still
+open rather than answered.
+
+**Twenty-nine of 38 products still got correct kinds the shop does not stock** — shoe horns, garment bags,
+wooden hangers, drying racks, pocket squares, cufflinks, strapless bras. The ceiling moved; it did not go
+away, and it is still the catalogue's.
+
+**One bias, stated because it runs the model's way.** The nine products were chosen **from the kinds the
+model had already asked for** on the 29-product run, which advantages the model arm by construction. Two
+things blunt it. The range is what any clothing shop of this kind genuinely stocks — a belt and shoe
+polish are not exotic. And the bias did not land where it was pointed: **the word path gained more from
+the new stock than the model path did**, so *"coverage is a near-tie"* survives the bias rather than
+depending on it.
+
+**Nothing in `neura-agents` changed for this** — no code, no prompt, no test. `make check` **1266**,
+`make test-widget` **51**, `make pairs-check` **8/8**, all still green from the build entry above. The only
+edits are `scripts/pairs_coverage.py`'s printed baseline constant and this file.
+
+**2026-09-26, and last — [ADR-0047](architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md)
+is PROPOSED, not built, and it changes ONE STEP of ADR-0045.**
+
+**Why, and it is a measured miss rather than an idea.** Run 2 above left two distinct reasons a kind
+produces nothing, and only one of them is the catalogue's fault:
+
+* **`shoe horns`, `garment bags`, `pocket squares`** — the shop does not stock them. **Correct.** Empty is
+  a result, and no software fixes it.
+* **`ankle socks`** — the shop sells **Merino Walking Socks**. **A miss we caused**: no shared word, so
+  `search_products` returned nothing. `1327` Canvas Court Sneaker is the measured instance — it asked for
+  `ankle socks, shoe cleaner, waterproof spray`, the shop stocks socks and a spray, and the block rendered
+  nothing.
+
+**The proposal is one lookup, not a redesign:** resolve a kind through the **existing pgvector index** as
+well as the keyword search — `ankle socks` → *Merino Walking Socks*, by meaning. The tool has been serving
+CARE's and SELL's retrieval since milestone 1.9 ([ADR-0005](architecture/adr/0005-pgvector-not-qdrant.md)),
+and semantic lookup is the ordinary industry answer to this exact failure rather than anything novel.
+
+**It does NOT reverse ADR-0045's rejection of embeddings, and the distinction is the ADR.** That rejection
+is about **product → product** — *"a rain shell's nearest neighbour is another rain shell"* — and stands.
+This is **phrase → product**, which is the operation `Retriever.search` already performs on a shopper's
+sentence. The relation that decides complementarity is still the model's; embeddings only carry its answer
+to the shelf.
+
+**The §3 invariant survives structurally.** A chunk's `source_id` **is** the merchant's own `external_id`,
+and the index holds nothing but entities our own sync pulled from that tenant, inside a
+`Namespace(tenant_id, embedding_model)` with no un-namespaced read. A vector hit is a product the merchant
+sells, in the merchant's own numbering — which is
+[ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md) unchanged rather
+than stretched.
+
+**Three tiers, each degrading in silence:** vector hits, then keyword hits, then the word path. **Keyword
+search is not replaced** — it produced 28 of 38 alone, it is exact where a merchant's vocabulary is exact,
+and it needs no index, so a tenant who has never been indexed loses nothing.
+
+**Its falsification test is deliberately NOT §9's, because §9's does not work.** Coverage scored the rain
+shell beside a cotton frock identically to the rain shell beside waterproofing spray. ADR-0047 is judged on
+the row it exists to fix instead: **count the kinds that found nothing while the shop stocked the thing** —
+at least **2 of 38** today. If semantic resolution does not convert those, remove it whatever coverage says.
+**And it asks for a second measurement before either ADR is judged again: a hand-graded pass over the 38
+blocks, words against model, by a person willing to say which is better.**
+
+**One alternative was considered seriously and rejected on a measured risk:** broadening the keyword search
+(stem, split, drop words), which `tools/catalogue.py` already does for a failed shopper search and which
+needs no index. It converts `ankle socks` → `socks`, and would equally convert `shoe cleaner` → `shoe`,
+which matches **every shoe in the shop**. **Widening a keyword search trades a miss for a wrong answer**,
+and a wrong pairing is the expensive error on this surface.
+
+**Nothing is built and nothing is decided.** The status is **Proposed**; accepting it is the owner's, and
+it sits behind the keep-or-delete decision on ADR-0045 itself — there is no point improving a surface that
+is about to be removed.
+
 **2026-09-25, and last — a sixth SELL surface, and only a third of it is approved to build.**
 [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md)
 is **ACCEPTED — owner decision, and nothing built.** One merchant-facing screen: sold-out or unfindable
@@ -887,29 +1107,56 @@ thing our code can fix.
 agent has grown an admin side. The console is **two screens over** [console.md §2](console.md)'s *"the
 discipline is five"*, broken twice in one day, both times deliberately and both times written down.
 
-**NEXT ACTION — START HERE: build [ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md), the lazy model pairing.**
-**It is the only accepted-and-unbuilt decision whose result can be measured on this machine**, which is
-why it goes first: five ADRs were accepted 2026-09-25 and the other four all wait on a real merchant or
-real traffic. This one has a **baseline to beat — 19 of 29 real products produce a suggestion** — and
-`scripts/` plus the running Bagisto shop can prove it in an afternoon.
+**NEXT ACTION — START HERE: build [ADR-0047](architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md).
+ADR-0045's model pairing is KEPT — owner decision, 2026-09-26 — and 0047 is the one step that makes it
+worth keeping.**
 
-**The whole scope is in the ADR; do not widen it.** Six pieces: a prompt asking *what kinds of product go
-with this*; a cache table and migration; execution through the **existing** job queue
-([ADR-0022](architecture/adr/0022-scheduling-under-rls.md)); the wiring in `pairing/orchestrate.py`
-(cache hit → use it, miss → answer from the word path **now** and queue the computation); **eval cases,
-which are the largest part and not optional**; and the before/after measurement against 19 of 29.
+**The keep decision, and the evidence it was taken on:**
 
-**Four things that are not negotiable, all of them in the ADR:** the model returns **kinds**, never
-product names, and only `search_products` may turn a kind into an id; **no model call on the request
-path**, not even for the first shopper; `select.heading_for` still writes every visible word; and
-**Rule 4 applies** — injection resistance stays at 1.00, because the input is merchant catalogue text and
-the "no model to persuade" argument is gone. **If the model path does not beat 19 of 29 by enough to
-justify the eval suite, delete it and keep the words** (§9).
+| | |
+|:--|:--|
+| what §9 asked | beat **19 of 29** by a margin worth the eval suite behind it |
+| run 1 — the shop as it was, 29 products | **words 19, model 19. A flat tie**, and only **1** of the model arm's blocks came from the model |
+| what run 1 found | **24 of 29 products got correct kinds the shop does not stock.** The shop had no accessories or care range at all. **The instrument was the problem** |
+| run 2 — after nine ordinary complements were stocked, 38 products | **words 28, model 29.** **7** of the model arm's blocks came from the model |
+| what run 2 found | **stocking the complements is what moved the number, and it moved WORDS most** — 19 → 28 with no model anywhere. The model adds **one** product of coverage |
+| and the sharper thing | **coverage cannot settle this.** It counts blocks that rendered; a rain shell beside a cotton frock counts the same as one beside waterproofing spray. The model is **better on the rain shell and the jersey frock, worse on the loafer**, and covers the suede boot words miss |
+| **the decision** | **KEEP.** Owner, 2026-09-26. Not because §9 was met — it was not — but because §9's metric was shown to be blind to the difference, and the model's suggestions are better where they differ. The surface is idle unless a pairing has been computed, so the cost of keeping it is one job row per product ever basketed |
 
-**Then, in order:** ADR-0044 phase 1 (collect events, prove the pipe, nothing shown) → ADR-0046 stage 1
-(the sold-out screen, once events flow) → an ADR for **upsell**, which ADR-0040 §4's category exclusion
-blocks and which therefore needs one → [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md)
+**§9 was not met and is not being quietly declared met.** It was written expecting a model that could not
+find pairings; the model finds them, the shop was what could not sell them, and once the shop could, the
+word path improved more than the model did. **What justifies keeping it is the seven changed blocks**, of
+which the rain shell (waterproofing spray, not a cotton frock) and the jersey frock (tights, not chinos)
+are plainly right and the loafer is plainly worse. **A coverage number cannot see any of that, and that is
+the finding, not an excuse.**
+
+**So the obligation §9 created is transferred rather than discharged:** before this surface is judged
+again, somebody has to **hand-grade the 38 blocks, words against model**, and say which suggestion is
+better. That is the measurement §9 should have asked for, and it is still not taken.
+
+**ADR-0047 is next and it is one step**, [Accepted by the same decision](architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md):
+resolve a kind through the **existing pgvector index** as well as the keyword search. The measured reason
+is `1327` Canvas Court Sneaker — it asked for `ankle socks, shoe cleaner, waterproof spray`, the shop
+stocks socks and a spray, and the block rendered **nothing**, because no word is shared. **Its own test is
+not §9's:** count the kinds that found nothing while the shop stocked the thing — at least **2 of 38**
+today — and if semantic resolution does not convert those, remove it whatever coverage says.
+
+**Then, in the order it already had:** ADR-0044 phase 1 (collect events, prove the pipe, nothing shown) →
+ADR-0046 stage 1 (the sold-out screen, once events flow) → an ADR for **upsell**, which ADR-0040 §4's
+category exclusion blocks and which therefore needs one →
+[ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md)
 last, because it shows an empty screen until a real shop is running.
+
+**Two smaller things this build left on the floor, both deliberate and neither blocking:**
+
+* **`make test-integration` still fails 40 tests, on `main` as well** — a missing field in a test stub,
+  pre-existing, verified by stashing, and not run by `make check`. The new `sell_pairings` table has **no
+  integration test of its own** because of it; its RLS policy is covered automatically by the ADR-0008
+  protection scan, which is the thing that matters most.
+* **The three `RETENTION_*` settings are still read by no code.** ADR-0042 §3 requires the first feature
+  that holds personal data to make them real. **This feature holds none** — `sell_pairings` is keyed by
+  product and stores no shopper — so that obligation is untouched rather than discharged, and it lands on
+  ADR-0044 phase 1, which is next.
 
 **Still true and still outranking all of it: [B2](open-questions.md) — there is no merchant and no live
 traffic**, and the tester handover below remains the highest-value input this project can obtain.

@@ -42,8 +42,24 @@ PROMPT_DIR = Path(__file__).resolve().parent
 #: presents as the agent being cautious rather than as anything being broken.
 #: Every case escalated, which is `verify` failing closed exactly as designed —
 #: which is also why nothing looked alarming until the gate was read.
+#:
+#: **`pairing` is here and is not a graph node**, which is the one entry that
+#: does not fit the sentence above. It is read by the background computation of
+#: [ADR-0045](../../../../../docs/architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md),
+#: which runs off the request path and has no graph at all. It is listed for
+#: exactly the reason the others are: a renamed or deleted file must fail in
+#: front of a developer, not at 3am as a job that quietly asked a model nothing.
 REQUIRED = frozenset(
-    {"route", "plan", "compose", "decline", "no_match", "no_match_constraint", "verify"}
+    {
+        "route",
+        "plan",
+        "compose",
+        "decline",
+        "no_match",
+        "no_match_constraint",
+        "verify",
+        "pairing",
+    }
 )
 
 
