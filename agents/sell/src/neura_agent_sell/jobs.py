@@ -12,6 +12,12 @@ exists so that no shopper ever waits for one: a cart page that missed the cache
 wrote a job row and answered from the word path, and this runs minutes later
 against a product nobody is currently looking at.
 
+**It reads the tenant's own embedding index as well as their search box**
+([ADR-0047](../../../../docs/architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md)),
+because a kind the merchant stocks under a different word — `ankle socks` against
+*Merino Walking Socks* — is invisible to a keyword match. Both are lookups of the
+merchant's own data; neither can return an id their catalogue does not hold.
+
 **Three bounds on what it may spend, because a public endpoint queues it.**
 Anyone holding a storefront key can name products this shop has never paired,
 and each of those is a model call:
@@ -114,6 +120,7 @@ class PairingComputeHandler:
                 tenant_id=context.tenant_id,
                 llm=metered,
                 prompt=load_prompts()[PROMPT_NAME],
+                retriever=_retriever(context.db, context.tenant_id, metered),
             )
 
             if not result.measured:
@@ -151,6 +158,33 @@ class PairingComputeHandler:
             f"{product_id}: {len(result.kinds)} kind(s) searched, "
             f"{len(result.suggested_ids)} stored"
         )
+
+
+def _retriever(db: Any, tenant_id: str, llm: Any) -> Any:
+    """Semantic resolution over this tenant's own indexed catalogue — [ADR-0047].
+
+    `DatabaseVectorStore` rather than `PostgresVectorStore` for the reason that
+    class exists: it takes a short transaction per call instead of holding a
+    pooled connection across a model call.
+
+    **Built, never required.** A tenant whose catalogue has never been indexed has
+    an empty namespace, the search returns nothing, and the keyword hits stand
+    alone — ADR-0047 §4's tiers. Returning `None` on any construction failure is
+    the same rule one level up: this must not be able to fail a computation that
+    the word path would have answered anyway.
+    """
+    try:
+        from neura_agent_core.rag import DatabaseVectorStore, Retriever
+
+        # The same suppression `turns.py` carries at its own Retriever, and the
+        # same reason: `DatabaseVectorStore` implements every method retrieval
+        # uses but not `drop_namespace`, which is a destructive operation that
+        # has no business on a serving path anyway.
+        store = DatabaseVectorStore(db, tenant_id)
+        return Retriever(store, llm, tenant_id=tenant_id)  # type: ignore[arg-type]
+    except Exception as exc:
+        log.warning("pairing_retriever_unavailable", tenant_id=tenant_id, error=type(exc).__name__)
+        return None
 
 
 async def _budget(db: Any, tenant_id: str) -> tuple[Admission, BudgetLimits]:

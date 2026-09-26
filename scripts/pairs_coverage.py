@@ -11,6 +11,14 @@ code:**
 
     make pairs-coverage URL=http://bagisto.test/neura/v1 TOKEN=...
     make pairs-coverage URL=... TOKEN=... MODEL=1 ROLE_MAP=cloud-prod
+    make pairs-coverage URL=... TOKEN=... MODEL=1 MEANING=1 TENANT=tn_ragsmoke
+
+**`MEANING=1` adds [ADR-0047](../docs/architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md)'s
+second lookup** and needs the shop already indexed under `TENANT` — index it with
+`make rag-check URL=… TOKEN=… KEEP=1 TENANT=…` first. Without an index the
+namespace is empty, the search returns nothing, and this arm equals the plain
+`MODEL=1` arm: the tiers degrading quietly, which is the design and not a bug to
+be surprised by.
 
 **Two arms, and the first one costs nothing.** `--words` runs today's surface
 unchanged: no cache, no model, no database. `--model` computes each product's
@@ -157,6 +165,8 @@ async def _one(
     capabilities: Any,
     llm: Any,
     use_model: bool,
+    retriever: Any = None,
+    min_kind_score: float = compute.MIN_KIND_SCORE,
 ) -> Outcome:
     outcome = Outcome(product_id=str(product.external_id), title=product.title)
     cache = None
@@ -168,6 +178,8 @@ async def _one(
             tenant_id=TENANT,
             llm=llm,
             prompt=load_prompts()["pairing"],
+            retriever=retriever,
+            min_kind_score=min_kind_score,
         )
         if not computed.measured:
             # Said out loud and counted separately. A provider outage that was
@@ -190,7 +202,15 @@ async def _one(
     return outcome
 
 
-async def run(url: str, token: str, *, use_model: bool, role_map: str) -> int:
+async def run(
+    url: str,
+    token: str,
+    *,
+    use_model: bool,
+    role_map: str,
+    meaning_for: str = "",
+    min_kind_score: float = compute.MIN_KIND_SCORE,
+) -> int:
     load_env()
     adapter = GenericAdapter(base_url=url, tenant_id=TENANT, token=token)
 
@@ -202,6 +222,13 @@ async def run(url: str, token: str, *, use_model: bool, role_map: str) -> int:
         print(f"\n  {DIM}reasoner {llm.model_for(ModelRole.REASONER)} · role map {role_map}{OFF}")
     else:
         print(f"\n  {DIM}no model — the word path, exactly as it shipped{OFF}")
+
+    retriever = _retriever(meaning_for, llm) if (use_model and meaning_for) else None
+    if retriever is not None:
+        print(
+            f"  {DIM}+ meaning, over the index of {meaning_for} at min_score "
+            f"{min_kind_score} (ADR-0047). An empty namespace finds nothing{OFF}"
+        )
 
     try:
         health = await adapter.health()
@@ -223,6 +250,8 @@ async def run(url: str, token: str, *, use_model: bool, role_map: str) -> int:
                 capabilities=health.capabilities,
                 llm=llm,
                 use_model=use_model,
+                retriever=retriever,
+                min_kind_score=min_kind_score,
             )
             for product in products
         ]
@@ -276,6 +305,21 @@ def _report(outcomes: list[Outcome], *, use_model: bool) -> None:
     )
 
 
+def _retriever(tenant_id: str, llm: Any) -> Any:
+    """ADR-0047's second lookup, over a tenant that has already been indexed.
+
+    **A different tenant from this script's own on purpose.** The vectors belong
+    to whoever ran `make rag-check`, and this measurement borrows that index
+    rather than building one — indexing 38 products here would make a coverage
+    run also a reindex, and the two failures would be indistinguishable.
+    """
+    from neura_agent_core.rag import DatabaseVectorStore, Retriever
+    from neura_core import Database
+
+    store = DatabaseVectorStore(Database.from_settings(), tenant_id)
+    return Retriever(store, llm, tenant_id=tenant_id)  # type: ignore[arg-type]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pairing coverage on a real shop.")
     parser.add_argument("--url", required=True, help="The shop's Generic Interface base URL")
@@ -290,10 +334,34 @@ def main() -> None:
         default=os.getenv("NEURA_ROLE_MAP", "ollama-dev"),
         help="Which role map the reasoner comes from. Only read with --model.",
     )
+    parser.add_argument(
+        "--meaning-for",
+        default="",
+        metavar="TENANT",
+        help=(
+            "Also resolve each kind through this tenant's embedding index "
+            "(ADR-0047). Index it first with `make rag-check … KEEP=1 TENANT=…`."
+        ),
+    )
+    parser.add_argument(
+        "--min-kind-score",
+        type=float,
+        default=compute.MIN_KIND_SCORE,
+        help="How close a chunk must be before a kind names it (ADR-0047 §7).",
+    )
     args = parser.parse_args()
 
     raise SystemExit(
-        asyncio.run(run(args.url, args.token, use_model=args.model, role_map=args.role_map))
+        asyncio.run(
+            run(
+                args.url,
+                args.token,
+                use_model=args.model,
+                role_map=args.role_map,
+                meaning_for=args.meaning_for,
+                min_kind_score=args.min_kind_score,
+            )
+        )
     )
 
 

@@ -1295,3 +1295,261 @@ class TestWhatInvalidatesAStoredPairing:
         assert dedupe_key_for("st_1", "1315") == dedupe_key_for("st_1", "1315")
         assert dedupe_key_for("st_1", "1315") != dedupe_key_for("st_2", "1315")
         assert len(dedupe_key_for("st_1", "x" * 400)) <= 128
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADR-0047 — a kind is resolved by meaning, not by a shared word.
+#
+# One step of ADR-0045 §3 changes: a kind goes to the embedding index as well as
+# to the merchant's search box. **Deterministic, and tested with a stub index
+# rather than a real embedder** — what changed is a lookup, not a model
+# behaviour, so there is nothing here an eval could catch that a test cannot.
+#
+# The measured miss it exists for: the model asked a real shop for `ankle socks`,
+# the shop sells *Merino Walking Socks*, no word is shared, and the block
+# rendered nothing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class StubRetriever:
+    """An embedding index in a dict, keyed by the phrase asked of it.
+
+    Returns chunks the way `Retriever.search` does — `source_id` is the
+    merchant's own `external_id`, which is the fact ADR-0047 §2 rests on.
+    """
+
+    def __init__(self, hits: dict[str, list[str]] | None = None, *, raises: bool = False) -> None:
+        self._hits = hits or {}
+        self._raises = raises
+        self.queries: list[str] = []
+        self.source_types: list[Any] = []
+
+    async def search(
+        self, query: str, *, limit: int = 5, source_types: Any = None, **_: Any
+    ) -> Any:
+        self.queries.append(query)
+        self.source_types.append(source_types)
+        if self._raises:
+            raise RuntimeError("the embedder is unreachable")
+
+        class Chunk:
+            def __init__(self, source_id: str) -> None:
+                self.source_id = source_id
+
+        class Result:
+            chunks = [Chunk(product_id) for product_id in self._hits.get(query, [])][:limit]
+
+        return Result()
+
+
+class TestAKindIsResolvedByMeaning:
+    """ADR-0047 — what the second lookup adds, and what it may not do."""
+
+    async def test_a_kind_the_shop_stocks_under_another_word_is_found(self) -> None:
+        """**The whole ADR, in one assertion.**
+
+        `hosiery` shares no word with *Merino Walking Socks*. The keyword lookup
+        returns nothing; the index returns the socks; the block renders.
+        """
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        class NoKeywordMatch:
+            async def search_products(self, query: Any) -> Any:
+                from neura_commerce import Page
+
+                return Page(items=[])
+
+            async def get_product(self, product_id: str) -> Any:
+                return await real.get_product(product_id)
+
+        result = await compute(
+            anchor,
+            adapter=NoKeywordMatch(),
+            tenant_id=TENANT,
+            llm=StubLLM(["hosiery"]),
+            prompt="a prompt",
+            retriever=StubRetriever({"hosiery": [SOCKS]}),
+        )
+
+        assert result.suggested_ids == [SOCKS]
+        assert SOCKS in result.returned_ids
+
+    async def test_without_a_retriever_nothing_changes(self) -> None:
+        """ADR-0047 §4 — a shop that was never indexed loses nothing, which is
+        what lets this ship without a reindex."""
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        with_none = await compute(
+            anchor, adapter=real, tenant_id=TENANT, llm=StubLLM(["socks"]), prompt="p"
+        )
+        with_empty = await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            llm=StubLLM(["socks"]),
+            prompt="p",
+            retriever=StubRetriever({}),
+        )
+
+        assert with_none.suggested_ids == with_empty.suggested_ids
+
+    async def test_an_unreachable_embedder_costs_the_tier_and_nothing_else(self) -> None:
+        """The keyword hits for that kind have already been gathered, and the
+        word path is underneath both. A provider outage must not empty a block
+        the shop could have filled."""
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        result = await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            llm=StubLLM(["socks"]),
+            prompt="p",
+            retriever=StubRetriever(raises=True),
+        )
+
+        assert result.suggested_ids
+
+    async def test_the_index_may_name_a_candidate_and_never_describe_one(self) -> None:
+        """ADR-0029, and it is why a vector hit costs a live product lookup.
+
+        The chunk carries an id *and* a slice of text. Only the id is used: the
+        category and the status that decide what a shopper sees are read from the
+        shop. A pairing built from indexed text would be a pairing built on a
+        catalogue that may be hours stale.
+        """
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+        fetched: list[str] = []
+
+        class Watching:
+            async def search_products(self, query: Any) -> Any:
+                from neura_commerce import Page
+
+                return Page(items=[])
+
+            async def get_product(self, product_id: str) -> Any:
+                fetched.append(product_id)
+                return await real.get_product(product_id)
+
+        await compute(
+            anchor,
+            adapter=Watching(),
+            tenant_id=TENANT,
+            llm=StubLLM(["hosiery"]),
+            prompt="p",
+            retriever=StubRetriever({"hosiery": [SOCKS]}),
+        )
+
+        assert fetched == [SOCKS]
+
+    async def test_it_asks_the_index_for_products_and_nothing_else(self) -> None:
+        """A policy page or a category chunk is not a product and must never
+        become a suggestion."""
+        from neura_agent_sell.pairing.compute import compute
+        from neura_commerce import EntityType
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+        retriever = StubRetriever({"socks": [SOCKS]})
+
+        await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            llm=StubLLM(["socks"]),
+            prompt="p",
+            retriever=retriever,
+        )
+
+        assert retriever.source_types == [[EntityType.PRODUCT]]
+
+    async def test_an_id_the_index_returns_is_still_subject_to_every_rule(self) -> None:
+        """§5 — the anchor's own category is excluded for a vector hit exactly as
+        for a keyword hit. The index is a lookup, not a bypass."""
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        class NoKeywordMatch:
+            async def search_products(self, query: Any) -> Any:
+                from neura_commerce import Page
+
+                return Page(items=[])
+
+            async def get_product(self, product_id: str) -> Any:
+                return await real.get_product(product_id)
+
+        # `p_jacket_1` sits in `c_outer`, the anchor's own category.
+        result = await compute(
+            anchor,
+            adapter=NoKeywordMatch(),
+            tenant_id=TENANT,
+            llm=StubLLM(["outerwear"]),
+            prompt="p",
+            retriever=StubRetriever({"outerwear": ["p_jacket_1"]}),
+        )
+
+        assert result.suggested_ids == []
+
+    async def test_the_keyword_hit_comes_first(self) -> None:
+        """§7's ordering, and it is a guess the ADR labels as one: where a
+        merchant's own vocabulary is exact, the exact match is likelier to be
+        what they meant."""
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+
+        result = await compute(
+            anchor,
+            adapter=real,
+            tenant_id=TENANT,
+            llm=StubLLM(["socks"]),
+            prompt="p",
+            # The index offers the boot; the search box already finds the socks.
+            retriever=StubRetriever({"socks": [BOOT]}),
+        )
+
+        assert result.suggested_ids[0] == SOCKS
+
+    async def test_a_duplicate_costs_no_second_lookup(self) -> None:
+        """The index and the search box agreeing is the common case, and a
+        product fetched twice is a live HTTP call spent to reach an answer
+        already held."""
+        from neura_agent_sell.pairing.compute import compute
+
+        real = store()
+        anchor = await real.get_product(RAIN_SHELL)
+        fetched: list[str] = []
+
+        class Watching:
+            async def search_products(self, query: Any) -> Any:
+                return await real.search_products(query)
+
+            async def get_product(self, product_id: str) -> Any:
+                fetched.append(product_id)
+                return await real.get_product(product_id)
+
+        await compute(
+            anchor,
+            adapter=Watching(),
+            tenant_id=TENANT,
+            llm=StubLLM(["socks"]),
+            prompt="p",
+            retriever=StubRetriever({"socks": [SOCKS]}),
+        )
+
+        assert fetched == []

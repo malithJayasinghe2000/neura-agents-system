@@ -134,12 +134,17 @@ pairs-check:  ## Drive the REAL suggestion block in REAL headless Chrome. No mod
 # model path is worse" is a result that ADR plans for and acts on.
 #   make pairs-coverage URL=http://bagisto.test/neura/v1 TOKEN=...
 #   make pairs-coverage URL=... TOKEN=... MODEL=1 ROLE_MAP=cloud-prod
+#   make pairs-coverage URL=... TOKEN=... MODEL=1 MEANING=1 TENANT=tn_ragsmoke
+# MEANING=1 adds ADR-0047's second lookup and needs the shop indexed under
+# TENANT first: make rag-check URL=... TOKEN=... KEEP=1 TENANT=tn_ragsmoke
 # The words arm costs nothing. The model arm costs one call per product, and
 # stores nothing — the pairings live in memory for the length of the run, so a
 # second run measures the catalogue rather than the first run.
 pairs-coverage:  ## How many real products produce a suggestion: words vs model [MODEL=1 ROLE_MAP=...]
 	uv run python scripts/pairs_coverage.py --url $(URL) --token $(TOKEN) \
-	  $(if $(MODEL),--model,) $(if $(ROLE_MAP),--role-map $(ROLE_MAP),)
+	  $(if $(MODEL),--model,) $(if $(ROLE_MAP),--role-map $(ROLE_MAP),) \
+	  $(if $(MEANING),--meaning-for $(or $(TENANT),tn_ragsmoke),) \
+	  $(if $(MINSCORE),--min-kind-score $(MINSCORE),)
 
 # Set a tenant up and hand you a URL to open in your OWN browser. A headless
 # pass proves the widget works; it does not show anybody what it looks like.
