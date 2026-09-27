@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27** — `make console-check` — 33 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, and a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — **built 2026-09-27** — `make console-check` — 39 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -27,6 +27,7 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
 | 4 | **Shop** | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4** |
 | 5 | **Usage** | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
+| — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name) |
 | 6 | Security | `audit_log` | v1.1 — closes **S5** |
 | 7 | Settings & keys | `api_keys` | v1.1 |
 | 8 | Approvals | — | **blocked** by [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) |

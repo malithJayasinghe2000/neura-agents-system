@@ -58,12 +58,14 @@ agents/                     PRODUCTS — one folder per sellable agent
   sell/                     ✅ designed and built — docs/agents/sell.md +
                             ADR-0023. Read-only, 2 intents, 5 tools, and
                             6 surfaces of which only one has a graph.
-                            FOUR are built; the other two — the merchant-facing
-                            recovery list (ADR-0043) and the sold-out demand
-                            list (ADR-0046) — are accepted, NOT built and NOT
-                            scheduled. Ask before starting either.
+                            FIVE are built. The fifth, since 2026-09-27, is
+                            the sold-out demand list's STAGE 1 (ADR-0046) —
+                            a console screen, not code in this folder, because
+                            neura-api may not learn an agent's name. The
+                            recovery list (ADR-0043) is accepted, NOT built
+                            and NOT scheduled. Ask before starting it.
                             Build within that scope, not beyond it.
-                            ONE of the four now has a model in it (ADR-0045):
+                            ONE of them has a model in it (ADR-0045):
                             the paired suggestion computes what KINDS go with
                             a product, in the background, on the job queue.
                             Nothing runs between a shopper and an answer
@@ -118,10 +120,10 @@ make pairs-check LIVE=1 URL=… SHOP=… TOKEN=…   # …and the half a stub ca
                     # page is on a DIFFERENT ORIGIN from the API, as a merchant's page
                     # always is, so the per-key CORS decision and the key's origin lock
                     # are exercised for real
-make console-check EMAIL=…   # ALL FIVE console screens in REAL headless Chrome: sign in
+make console-check EMAIL=…   # ALL SIX console screens in REAL headless Chrome: sign in
                              # through a real link, read the evidence, grade a withheld turn,
                              # open a transcript, and check no credential or invented number
-                             # reaches a page. 33 checks. No models, no cost — __Host-,
+                             # reaches a page. 39 checks. No models, no cost — __Host-,
                              # HttpOnly and "did the screen actually render it" are browser
                              # facts and nothing else can assert them (docs/console.md §6).
                              # It seeds its own rows and removes exactly those
