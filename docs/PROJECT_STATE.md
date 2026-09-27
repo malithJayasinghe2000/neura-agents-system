@@ -1171,7 +1171,13 @@ thing our code can fix.
 agent has grown an admin side. The console is **two screens over** [console.md §2](console.md)'s *"the
 discipline is five"*, broken twice in one day, both times deliberately and both times written down.
 
-**NEXT ACTION — START HERE: put what is built in front of a real person. Not more code.** The feature plan this
+**OWNER, 2026-09-27, end of session: the next session ENHANCES THE CONSOLE (dashboard).** The owner will describe
+what to change; **do not start building before they do**, and design anything new with them first.
+[ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md) (the recovery
+list) is **PARKED by the owner** — it could be built now against fake checkouts, and the owner chose not to yet. The
+open decision about a **recurring catalogue sync** (below) is still open.
+
+**NEXT ACTION after that: put what is built in front of a real person. Not more code.** The feature plan this
 file carried is done except [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md),
 which shows an empty screen until a real shop has run for weeks. **[B2](open-questions.md) — no merchant, no live
 traffic — is now the only thing between this project and a measurement**: the sold-out list, the owner's
