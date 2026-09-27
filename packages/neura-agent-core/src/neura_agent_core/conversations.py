@@ -42,6 +42,8 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    delete,
+    exists,
     func,
     select,
     update,
@@ -51,6 +53,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
 from neura_core import metadata, new_id
 from neura_core.ids import MESSAGE
 
@@ -491,6 +494,57 @@ class ConversationRepository:
             )
         )
         return message_id
+
+    async def delete_older_than(self, tenant_id: str, cutoff: datetime) -> int:
+        """Delete every conversation untouched since ``cutoff``. Returns how many.
+
+        ``RETENTION_CONVERSATIONS_DAYS`` made real (ADR-0042 §3). **Untouched**,
+        not *started*: ``updated_at`` moves on every turn, so a conversation a
+        shopper came back to last week is not deleted for having begun in June.
+
+        **The fan-out is the point** (security-model.md §6.2). The messages, and
+        the agent's checkpointed working state — the same two tables
+        ``adelete_thread`` clears, keyed by the conversation id as ``thread_id``
+        — go in the same transaction as the row. A sweep that deleted the
+        transcript and left the working state would have deleted nothing a
+        forensic reader could not reassemble.
+
+        **Deliberately left behind:** ``shadow_turns``, the graded review queue
+        (``by_ids`` renders a deleted question as *"no longer in the
+        transcript"* for exactly this case), and ``audit_log``, which the app
+        role cannot delete from at all (ADR-0048 §5).
+        """
+        expired = (
+            select(conversations.c.id)
+            .where(conversations.c.tenant_id == tenant_id)
+            .where(conversations.c.updated_at < cutoff)
+        ).scalar_subquery()
+
+        await self._session.execute(
+            delete(conversation_messages)
+            .where(conversation_messages.c.tenant_id == tenant_id)
+            .where(conversation_messages.c.conversation_id.in_(expired))
+        )
+        for table in (agent_checkpoint_writes, agent_checkpoints):
+            await self._session.execute(
+                delete(table)
+                .where(table.c.tenant_id == tenant_id)
+                .where(table.c.thread_id.in_(expired))
+            )
+        result = await self._session.execute(
+            delete(conversations)
+            .where(conversations.c.tenant_id == tenant_id)
+            .where(conversations.c.updated_at < cutoff)
+        )
+        return int(cast("CursorResult[Any]", result).rowcount or 0)
+
+    async def any_for(self, tenant_id: str) -> bool:
+        """Is any conversation left for a future sweep to expire?"""
+        return bool(
+            await self._session.scalar(
+                select(exists().where(conversations.c.tenant_id == tenant_id))
+            )
+        )
 
     async def _next_sequence(self, tenant_id: str, conversation_id: str) -> int:
         current = await self._session.scalar(

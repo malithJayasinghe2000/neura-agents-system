@@ -56,6 +56,13 @@ tenants = Table(
     Column("status", String(32), nullable=False, server_default="active"),
     Column("enabled_agents", JSONB, nullable=False, server_default="[]"),
     Column("config", JSONB, nullable=False, server_default="{}"),
+    #: When a data-processing agreement with this merchant was recorded, and
+    #: ``NULL`` if none has been. ADR-0042 §2: *"no tenant stores personal data
+    #: until a data-processing agreement is in place — it is a row in the tenant
+    #: record, not a handshake."* A typed column rather than a key in ``config``
+    #: because it is **enforced** (ADR-0013): an ``observe:write`` key cannot be
+    #: issued without it, and the event route refuses without it.
+    Column("dpa_signed_at", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )

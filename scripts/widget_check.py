@@ -668,12 +668,16 @@ async def deprovision(tenant_id: str) -> None:
     from neura_core.idempotency import idempotency_keys
     from neura_core.identity.schema import memberships
     from neura_core.jobs.schema import job_queue
+    from neura_core.observation.schema import observed_events
     from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
     from neura_core.webhooks.schema import webhook_deliveries, webhook_endpoints
 
     db = Database.from_settings()
     async with db.tenant_session(tenant_id) as session:
         for table in (
+            # A shopper's events first: a dropped tenant must not leave the one
+            # table that holds observed personal data behind (ADR-0044 §7).
+            observed_events,
             shadow_turns,
             sell_feeds,
             conversation_messages,

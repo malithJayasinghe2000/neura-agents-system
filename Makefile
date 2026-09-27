@@ -9,6 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
+        tenant-dpa retention-sweep \
         api-check verify-probe router-probe console console-check
 
 help:  ## Show this help
@@ -441,6 +442,19 @@ key-new:  ## Issue a key: make key-new TENANT=tn_... SCOPES=care:chat:write [NAM
 
 key-revoke:  ## Revoke a key: make key-revoke TENANT=tn_... KEY=key_...
 	uv run python scripts/tenant_admin.py revoke-key --tenant-id $(TENANT) --key-id $(KEY)
+
+# ADR-0042 §2: no tenant stores personal data until a data-processing agreement
+# is recorded — a row, not a handshake. An `observe:write` key cannot be issued
+# without one. WITHDRAW=1 clears it AND deletes the tenant's observed events in
+# the same transaction, because the reason to hold them has ended.
+tenant-dpa:  ## Record a data-processing agreement: make tenant-dpa TENANT=tn_... [WITHDRAW=1]
+	uv run python scripts/tenant_admin.py dpa --tenant-id $(TENANT) $(if $(WITHDRAW),--withdraw,)
+
+# The retention pass the worker runs daily (ADR-0042 §3), run now. Deletes
+# observed events past RETENTION_OBSERVED_EVENTS_DAYS and conversations untouched
+# for RETENTION_CONVERSATIONS_DAYS, then books the next pass if anything is left.
+retention-sweep:  ## Delete what has expired, now: make retention-sweep TENANT=tn_...
+	uv run python scripts/tenant_admin.py sweep --tenant-id $(TENANT)
 
 revision:  ## New migration: make revision M="add tenants"
 	uv run alembic revision --autogenerate -m "$(M)"

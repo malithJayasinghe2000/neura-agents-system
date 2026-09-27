@@ -45,6 +45,7 @@ from neura_agent_core.shadow import ShadowRepository, ShadowTurn
 from neura_agent_core.shadow_evidence import ShadowEvidenceRepository
 from neura_agent_core.tools import SessionIdentity
 from neura_api.audit import TenantAuditLog
+from neura_api.jobs.retention import enqueue_sweep
 from neura_api.jobs.webhooks import enqueue_drain
 from neura_api.metering import MeteredLLM
 from neura_api.stores import StoreDirectory
@@ -175,6 +176,10 @@ class TurnService:
                 channel=turn.channel,
                 locale=turn.locale,
             )
+            if started:
+                # A new transcript is something to expire, so it books the
+                # sweep that will — in this transaction, or not at all.
+                await enqueue_sweep(session, tenant_id)
             history = (
                 []
                 if started

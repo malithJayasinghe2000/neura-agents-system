@@ -22,9 +22,11 @@ from fastapi import FastAPI
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
 from neura_api.jobs import (
+    RETENTION_SWEEP,
     SYNC_STORE,
     WEBHOOK_DRAIN,
     JobRunner,
+    RetentionSweepHandler,
     SyncStoreHandler,
     WebhookDrainHandler,
 )
@@ -46,6 +48,7 @@ from neura_api.routes import (
     console_usage,
     dispatch,
     health,
+    observe,
     stores,
     webhooks,
     widget,
@@ -176,6 +179,9 @@ def _job_runner(
     runner = JobRunner(database)
     runner.register(SYNC_STORE, SyncStoreHandler(stores))
     runner.register(WEBHOOK_DRAIN, WebhookDrainHandler(drainer))
+    # The deletions ADR-0042 §3 requires to *run*. Registered here, not by an
+    # agent: conversations and observed events belong to no one agent.
+    runner.register(RETENTION_SWEEP, RetentionSweepHandler(get_settings()))
 
     # ...plus whatever the installed agents own. Discovered rather than named
     # here, for the reason the other four seams are ([ADR-0045]): background
@@ -280,6 +286,9 @@ def create_app() -> FastAPI:
     app.include_router(widget.router, prefix="/v1")
     app.include_router(stores.router, prefix="/v1")
     app.include_router(webhooks.router, prefix="/v1")
+    # ADR-0044 phase 1. Mounted for every deployment; what gates it is the key's
+    # scope and the tenant's agreement, never whether this line is here.
+    app.include_router(observe.router, prefix="/v1")
 
     return app
 

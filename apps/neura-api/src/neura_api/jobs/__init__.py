@@ -5,6 +5,13 @@ across tenants. This package owns the process that calls them, and knows what a
 job actually *does*.
 """
 
+from neura_api.jobs.retention import (
+    RETENTION_SWEEP,
+    RetentionSweepHandler,
+    SweepResult,
+    enqueue_sweep,
+    sweep,
+)
 from neura_api.jobs.runner import (
     CLAIM_LIMIT,
     POLL_INTERVAL_S,
@@ -28,15 +35,20 @@ from neura_api.jobs.webhooks import (
 __all__ = [
     "CLAIM_LIMIT",
     "POLL_INTERVAL_S",
+    "RETENTION_SWEEP",
     "SYNC_STORE",
     "WEBHOOK_DRAIN",
     "Handler",
     "JobContext",
     "JobRunner",
+    "RetentionSweepHandler",
+    "SweepResult",
     "SyncJobFailedError",
     "SyncStoreHandler",
     "UnknownJobKindError",
     "WebhookDrainHandler",
     "enqueue_drain",
+    "enqueue_sweep",
     "enqueue_sync",
+    "sweep",
 ]

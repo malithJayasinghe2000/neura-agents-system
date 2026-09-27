@@ -26,6 +26,7 @@ from neura_core.config import get_settings
 from neura_core.crypto import decrypt, encrypt, generate_key, unwrap_dek, wrap_dek
 from neura_core.errors import ConfigurationError, NotFoundError
 from neura_core.ids import API_KEY, STORE, TENANT, new_id
+from neura_core.observation.models import OBSERVE_WRITE
 from neura_core.tenancy import keys
 from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
 from neura_core.tenancy.models import ApiKey, Tenant, TenantConfig, TenantStatus
@@ -111,6 +112,22 @@ class TenantRepository:
         )
         return await self.require(tenant_id)
 
+    async def set_dpa_signed_at(self, tenant_id: str, signed_at: datetime | None) -> Tenant:
+        """Record a data-processing agreement, or ``None`` to withdraw it.
+
+        **Withdrawing does not delete anything by itself.** Whoever withdraws
+        must also remove what the agreement permitted — ``tenant_admin.py dpa
+        --withdraw`` does both in one transaction — and the retention sweep
+        deletes every observed event of a tenant with no agreement, so a path
+        that forgets is corrected within a day rather than never.
+        """
+        await self._session.execute(
+            update(tenants)
+            .where(tenants.c.tenant_id == tenant_id)
+            .values(dpa_signed_at=signed_at, updated_at=func.now())
+        )
+        return await self.require(tenant_id)
+
 
 class ApiKeyRepository:
     """Issuing, listing, revoking and — the interesting one — finding a key."""
@@ -146,6 +163,9 @@ class ApiKeyRepository:
                 "origin — it is served to browsers and is not a secret.",
             )
 
+        if OBSERVE_WRITE in scopes:
+            await self._check_observer(tenant_id, kind)
+
         env = environment or _environment_for_deployment()
         issued = keys.generate(kind, env)
         record_id = new_id(API_KEY)
@@ -171,6 +191,32 @@ class ApiKeyRepository:
                 "scoped to a different tenant than the key."
             )
         return stored, issued
+
+    async def _check_observer(self, tenant_id: str, kind: ApiKeyKind) -> None:
+        """Two refusals at issue time, where each is a typo rather than an incident.
+
+        **A browser key may never send events** (ADR-0044 §2): *"no script of
+        ours runs in a shopper's browser"*, and an ``fn_pk_`` key is served to
+        browsers by design. **And no key may send them for a tenant without a
+        data-processing agreement** (ADR-0042 §2), so a shop that has none has no
+        credential to send with — the events never leave it.
+
+        The route checks both again: an agreement can be withdrawn after a key
+        was issued.
+        """
+        if kind is not ApiKeyKind.SECRET:
+            raise ConfigurationError(
+                f"`{OBSERVE_WRITE}` may be held only by a secret (fn_sk_) key — events "
+                "come from the shop's server, never from a shopper's browser (ADR-0044 §2).",
+            )
+        signed_at = await self._session.scalar(
+            select(tenants.c.dpa_signed_at).where(tenants.c.tenant_id == tenant_id)
+        )
+        if signed_at is None:
+            raise ConfigurationError(
+                f"`{OBSERVE_WRITE}` needs a data-processing agreement on record for this "
+                "tenant (ADR-0042 §2). Record one with `make tenant-dpa TENANT=...` first.",
+            )
 
     async def get(self, key_id: str) -> ApiKey | None:
         row = (await self._session.execute(select(api_keys).where(api_keys.c.id == key_id))).first()
@@ -378,6 +424,7 @@ def _tenant_from_row(row: Any) -> Tenant:
         status=TenantStatus(row.status),
         enabled_agents=frozenset(row.enabled_agents or ()),
         config=TenantConfig.model_validate(row.config or {}),
+        dpa_signed_at=row.dpa_signed_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

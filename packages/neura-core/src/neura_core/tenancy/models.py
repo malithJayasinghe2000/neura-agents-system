@@ -123,12 +123,24 @@ class Tenant(BaseModel):
     #: disabled, not shown locked: absent.
     enabled_agents: frozenset[str] = frozenset()
     config: TenantConfig = TenantConfig()
+    #: When a data-processing agreement was recorded; ``None`` means none
+    #: exists (ADR-0042 §2).
+    dpa_signed_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     @property
     def is_servable(self) -> bool:
         return self.status is TenantStatus.ACTIVE
+
+    @property
+    def may_hold_personal_data(self) -> bool:
+        """ADR-0042 §2's precondition: an agreement is recorded.
+
+        Necessary, never sufficient — a feature that stores personal data still
+        needs its own ADR and its own switch.
+        """
+        return self.dpa_signed_at is not None
 
     def may_use(self, agent_key: str) -> bool:
         """Has this tenant bought this agent?

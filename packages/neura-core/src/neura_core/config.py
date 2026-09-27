@@ -122,6 +122,25 @@ class Settings(BaseSettings):
     #: eventually, a context window that truncates the part that mattered.
     conversation_history_turns: int = Field(default=6, ge=0, alias="CONVERSATION_HISTORY_TURNS")
 
+    # ── Retention (days) — enforced by `neura_api.jobs.retention` ────────────
+    #: A conversation untouched for this long is deleted — transcript, messages
+    #: and the agent's saved working state together (security-model.md §6.2).
+    #: Read by code since 2026-09-26; it sat in `.env` unread for weeks before
+    #: that (ADR-0042 §3).
+    retention_conversations_days: int = Field(
+        default=90, ge=1, alias="RETENTION_CONVERSATIONS_DAYS"
+    )
+    #: How long an observed event is held (ADR-0044 §7). **Seven**, because the
+    #: longest window anything designed reads is a week — ADR-0046's sold-out
+    #: count and ADR-0044 §6's "third visit in a week" — and a page view older
+    #: than every use for it is, in §7's words, pure liability.
+    retention_observed_events_days: int = Field(
+        default=7, ge=1, alias="RETENTION_OBSERVED_EVENTS_DAYS"
+    )
+    # RETENTION_AUDIT_LOG_DAYS and RETENTION_TRACES_DAYS are deliberately NOT
+    # fields. Neither is enforced (ADR-0048 §5), and a field nothing acts on is
+    # the failure ADR-0042 §3 warned about — a setting that appears to work.
+
     # ── Observability ────────────────────────────────────────────────────────
     otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
     otel_endpoint: str | None = Field(default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT")
