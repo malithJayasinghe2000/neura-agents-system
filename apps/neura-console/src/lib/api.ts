@@ -39,8 +39,8 @@ export type Me = {
   memberships: Membership[];
 };
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}/v1/console${path}`, {
+async function call<T>(path: string, init?: RequestInit, prefix = "/v1/console"): Promise<T> {
+  const response = await fetch(`${BASE}${prefix}${path}`, {
     ...init,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -108,4 +108,40 @@ export function gradeTurn(
     method: "POST",
     body: JSON.stringify({ verdict, note }),
   });
+}
+
+// ── Suggestions (ADR-0050) ───────────────────────────────────────────────────
+// Served by SELL's own routes, under its prefix, so the API that mounts them
+// never learns an agent's name. Same cookie, same membership check.
+
+const SELL = "/v1/sell/console";
+
+export type PickedProduct = { product_id: string; title: string | null };
+
+export function chooseSuggestions(
+  tenantId: string,
+  productId: string,
+  productIds: string[],
+): Promise<unknown> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/suggestions/${encodeURIComponent(productId)}`,
+    { method: "PUT", body: JSON.stringify({ product_ids: productIds }) },
+    SELL,
+  );
+}
+
+export function resetSuggestions(tenantId: string, productId: string): Promise<unknown> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/suggestions/${encodeURIComponent(productId)}`,
+    { method: "DELETE" },
+    SELL,
+  );
+}
+
+export function findProducts(tenantId: string, query: string): Promise<PickedProduct[]> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/suggestions/catalogue?q=${encodeURIComponent(query)}`,
+    undefined,
+    SELL,
+  );
 }

@@ -10,7 +10,8 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-export type ShopScreen = "conversations" | "review" | "shops" | "usage" | "sold-out";
+export type ShopScreen =
+  "conversations" | "review" | "shops" | "usage" | "sold-out" | "suggestions";
 
 const SCREENS: { key: ShopScreen; label: string; built: boolean }[] = [
   { key: "conversations", label: "Conversations", built: true },
@@ -19,6 +20,8 @@ const SCREENS: { key: ShopScreen; label: string; built: boolean }[] = [
   { key: "usage", label: "Usage", built: true },
   // ADR-0046 stage 1 — views of products that were sold out when viewed.
   { key: "sold-out", label: "Sold out", built: true },
+  // ADR-0050 — the owner chooses what is suggested with each product.
+  { key: "suggestions", label: "Suggestions", built: true },
 ];
 
 export function ShopNav({ tenantId, current }: { tenantId: string; current: ShopScreen }) {

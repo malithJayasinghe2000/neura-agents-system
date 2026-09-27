@@ -15,6 +15,9 @@ of ADR-0024:
 
     POST /suggestions                    a storefront page, `sell:suggest:read`
 
+    GET/PUT/DELETE /console/shops/…      the shop owner, signed in to the console
+                                         (ADR-0050) — see ``console.py``
+
     POST   /feed                         merchant, `sell:feed:manage`
     GET    /feed                         merchant, `sell:feed:manage`
     POST   /feed/{id}/rotate             merchant, `sell:feed:manage`
@@ -39,12 +42,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import CursorResult
 
+from neura_agent_sell import console as owner_console
 from neura_agent_sell import pairing as pairing_surface
 from neura_agent_sell.feed import build, canonical, jsonld, publishable
 from neura_agent_sell.feed import tokens as feed_tokens
 from neura_agent_sell.feed.schema import sell_feeds
 from neura_agent_sell.mcp import protocol as mcp_protocol
 from neura_agent_sell.pairing.cache import DatabasePairingCache
+from neura_agent_sell.pairing.choices import DatabaseOwnerChoices
 from neura_api.ratelimit import enforce, subjects_for
 from neura_commerce.identity import EntityType
 from neura_commerce.sync import DatabaseEntityStore
@@ -254,6 +259,9 @@ def build_routes(agent_key: str) -> APIRouter:
                 # by an absent id would be a different row from the same
                 # tenant's pairing keyed by the id they later start sending.
                 cache=_pairing_cache(caller.tenant_id, connection.store_id),
+                # Asked first, and when the owner has chosen it is the whole
+                # answer (ADR-0050).
+                choices=_owner_choices(caller.tenant_id, connection.store_id),
             )
         finally:
             # Same reason as MCP: the adapter holds an HTTP client, and a cart
@@ -444,6 +452,8 @@ def build_routes(agent_key: str) -> APIRouter:
             ),
         }
 
+    # ── The owner's side of suggestions ([ADR-0050]) ─────────────────────────
+    owner_console.register(router, agent_key)
     return router
 
 
@@ -499,6 +509,17 @@ def _pairing_cache(tenant_id: str, store_id: str) -> DatabasePairingCache:
     written by pages that name the store and one by pages that do not.
     """
     return DatabasePairingCache(get_database(), tenant_id=tenant_id, store_id=store_id)
+
+
+def _owner_choices(tenant_id: str, store_id: str) -> DatabaseOwnerChoices:
+    """Where a request reaches the owner's choices ([ADR-0050]).
+
+    A seam for the same reason as :func:`_pairing_cache`: the endpoint's tests
+    replace it and run without a database. Keyed by the **resolved** store id,
+    like the cache, so a page that names its store and one that does not reach
+    the same choice.
+    """
+    return DatabaseOwnerChoices(get_database(), tenant_id=tenant_id, store_id=store_id)
 
 
 async def _suggest_caller(request: Request, agent_key: str) -> Any:

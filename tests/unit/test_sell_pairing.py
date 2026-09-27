@@ -57,6 +57,7 @@ async def pairing_for(
     capabilities: frozenset[Capability] = ALL,
     cache: Any = None,
     adapter: Any = None,
+    choices: Any = None,
 ) -> Pairing:
     return await suggest(
         ids,
@@ -64,6 +65,7 @@ async def pairing_for(
         capabilities=capabilities,
         tenant_id=TENANT,
         cache=cache,
+        choices=choices,
     )
 
 
@@ -99,6 +101,20 @@ class FakeCache:
 
     async def queue(self, product_id: str, *, source_hash: str) -> None:
         self.queued.append(product_id)
+
+
+class FakeChoices:
+    """The owner's choices (ADR-0050) in a dict. ``None`` in the dict is never
+    stored: a missing key is automatic, and ``[]`` means *show nothing*."""
+
+    def __init__(self, **chosen: list[str]) -> None:
+        self.chosen = chosen
+        self.fail = False
+
+    async def get(self, product_id: str) -> list[str] | None:
+        if self.fail:
+            raise RuntimeError("the database is down")
+        return self.chosen.get(product_id)
 
 
 def product(
@@ -640,6 +656,102 @@ class TestNoModelRunsWhileAShopperWaits:
         assert "kinds_for" not in called
 
 
+class TestTheOwnersChoiceWins:
+    """ADR-0050 — the shop owner chose, and nothing automatic overrides it."""
+
+    @pytest.mark.asyncio
+    async def test_the_owners_list_replaces_both_automatic_paths(self) -> None:
+        """A stored model pairing exists and the word path would find the boot;
+        the owner chose the socks, and the socks are what the page gets."""
+        cache = FakeCache()
+        cache.store(RAIN_SHELL, [BOOT])
+
+        pairing = await pairing_for(
+            [RAIN_SHELL], cache=cache, choices=FakeChoices(**{RAIN_SHELL: [SOCKS]})
+        )
+
+        assert [card["id"] for card in pairing.suggestions] == [SOCKS]
+        assert cache.queued == [], "an owner's choice needs no computation"
+
+    @pytest.mark.asyncio
+    async def test_the_same_category_is_allowed_because_that_is_upsell(self) -> None:
+        """A jacket beside a jacket: a mistake automatically, the owner's call here."""
+        pairing = await pairing_for(
+            [RAIN_SHELL], choices=FakeChoices(**{RAIN_SHELL: ["p_jacket_3"]})
+        )
+        assert [card["id"] for card in pairing.suggestions] == ["p_jacket_3"]
+
+    @pytest.mark.asyncio
+    async def test_its_heading_says_recommended_not_goes_well_with(self) -> None:
+        pairing = await pairing_for(
+            [RAIN_SHELL], choices=FakeChoices(**{RAIN_SHELL: ["p_jacket_3"]})
+        )
+        assert pairing.heading == "Recommended with your Crag Lightweight Rain Shell"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_choice_shows_nothing_and_searches_nothing(self) -> None:
+        cache = FakeCache()
+        pairing = await pairing_for(
+            [RAIN_SHELL], cache=cache, choices=FakeChoices(**{RAIN_SHELL: []})
+        )
+        assert pairing.is_empty and pairing.heading == ""
+        assert cache.queued == []
+
+    @pytest.mark.asyncio
+    async def test_the_owners_order_is_kept_and_two_are_shown(self) -> None:
+        pairing = await pairing_for(
+            [RAIN_SHELL],
+            choices=FakeChoices(**{RAIN_SHELL: [SOCKS, "p_jacket_3", "p_jacket_1"]}),
+        )
+        assert [card["id"] for card in pairing.suggestions] == [SOCKS, "p_jacket_3"]
+
+    @pytest.mark.asyncio
+    async def test_what_is_on_the_page_is_still_never_suggested(self) -> None:
+        pairing = await pairing_for(
+            [RAIN_SHELL, SOCKS], choices=FakeChoices(**{RAIN_SHELL: [SOCKS, BOOT]})
+        )
+        assert [card["id"] for card in pairing.suggestions] == [BOOT]
+
+    @pytest.mark.asyncio
+    async def test_an_unbuyable_choice_is_skipped_and_never_replaced_automatically(
+        self,
+    ) -> None:
+        """The draft jacket cannot be bought and an unknown id finds nothing. The
+        block is empty — the automatic path would bring back what the owner
+        removed."""
+        pairing = await pairing_for(
+            [RAIN_SHELL], choices=FakeChoices(**{RAIN_SHELL: ["p_draft", "p_gone"]})
+        )
+        assert pairing.is_empty
+
+    @pytest.mark.asyncio
+    async def test_a_choice_that_cannot_be_read_shows_nothing(self) -> None:
+        choices = FakeChoices()
+        choices.fail = True
+        assert (await pairing_for([RAIN_SHELL], choices=choices)).is_empty
+
+    @pytest.mark.asyncio
+    async def test_no_choice_is_automatic_and_unchanged(self) -> None:
+        pairing = await pairing_for([RAIN_SHELL], choices=FakeChoices())
+        assert BOOT in {card["id"] for card in pairing.suggestions}
+        assert pairing.heading.startswith("Goes well with your")
+
+    @pytest.mark.asyncio
+    async def test_a_product_without_a_category_can_still_carry_a_choice(self) -> None:
+        """The category rule does not bind the owner, so neither does the
+        category check that ends the automatic path early."""
+
+        class Store:
+            async def get_product(self, product_id: str) -> Product | None:
+                return {
+                    "a": product("a", title="Plain Tee", categories=[], price="20.00"),
+                    "b": product("b", title="Better Tee", categories=[], price="35.00"),
+                }.get(product_id)
+
+        pairing = await pairing_for(["a"], adapter=Store(), choices=FakeChoices(a=["b"]))
+        assert [card["id"] for card in pairing.suggestions] == ["b"]
+
+
 class TestTheEndpoint:
     """The gate, which is where ADR-0040 puts the safety argument.
 
@@ -722,9 +834,14 @@ class TestTheEndpoint:
         monkeypatch.setattr(
             sell_routes, "_pairing_cache", lambda tenant_id, store_id: cache, raising=True
         )
+        choices = FakeChoices()
+        monkeypatch.setattr(
+            sell_routes, "_owner_choices", lambda tenant_id, store_id: choices, raising=True
+        )
 
         client.app.state.stores = Directory()
         client.pairing_cache = cache
+        client.owner_choices = choices
         return client
 
     def test_a_miss_queues_a_computation_and_still_answers(self, shop: Any) -> None:
@@ -750,6 +867,15 @@ class TestTheEndpoint:
 
         assert [card["id"] for card in body["suggestions"]] == [BOOT]
         assert shop.pairing_cache.queued == []
+
+    def test_the_owners_choice_reaches_the_page(self, shop: Any) -> None:
+        """ADR-0050 over HTTP: the route passes the owner's choices in."""
+        shop.owner_choices.chosen[RAIN_SHELL] = ["p_jacket_3"]
+
+        body = shop.post("/v1/sell/suggestions", json={"product_ids": [RAIN_SHELL]}).json()
+
+        assert [card["id"] for card in body["suggestions"]] == ["p_jacket_3"]
+        assert body["heading"].startswith("Recommended with your")
 
     def test_the_route_is_mounted_without_the_api_naming_sell(self, client: Any) -> None:
         """Through the `neura.agent_routes` entry point, like the feed and MCP.

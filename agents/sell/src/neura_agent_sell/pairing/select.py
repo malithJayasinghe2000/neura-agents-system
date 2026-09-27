@@ -58,6 +58,11 @@ CANDIDATES_PER_TERM = 5
 #: discredits the good one beside it. Change it against evidence, not taste.
 MAX_SUGGESTIONS = 2
 
+#: How many products an owner may choose for one product (ADR-0050 §2). More
+#: than :data:`MAX_SUGGESTIONS` on purpose: the spares stand in when a chosen
+#: product sells out, in the owner's own order.
+MAX_CHOSEN = 4
+
 #: The shortest word worth searching for. Longer than ``tools/catalogue.py``'s
 #: three, because this splits a *product description* rather than a shopper's
 #: query: descriptions are full of short connectives no shopper would type.
@@ -275,6 +280,38 @@ def choose(
     return chosen
 
 
+def choose_owned(candidates: list[Product], *, excluded_ids: frozenset[str]) -> list[Product]:
+    """The owner's choice (ADR-0050), in the owner's order, up to two.
+
+    **Two of ADR-0040 §4's rules still apply and one does not.** A chosen
+    product must be buyable *now* — checked live, as for every suggestion — and
+    must not already be on the page. **The category rule does not bind the
+    owner**: a better jumper beside a jumper is an upsell the owner asked for,
+    where the same pair chosen automatically would be a mistake.
+    """
+    chosen: list[Product] = []
+    taken: set[str] = set()
+
+    for candidate in candidates:
+        if len(chosen) == MAX_SUGGESTIONS:
+            break
+        product_id = str(candidate.external_id)
+        if product_id in excluded_ids or product_id in taken or not is_buyable(candidate):
+            continue
+        taken.add(product_id)
+        chosen.append(candidate)
+
+    return chosen
+
+
+def heading_for_owner_choice(anchor: Product) -> str:
+    """ADR-0050 §5. An owner may choose an *alternative*, and a cashmere jumper
+    does not "go well with" a cotton one. "Recommended" is true because the
+    shop recommended it — and it is still none of ADR-0040 §3's forbidden claims
+    about what other shoppers did."""
+    return f"Recommended with your {anchor.title}"
+
+
 def heading_for(anchor: Product) -> str:
     """What the block says, and it is part of the decision rather than styling.
 
@@ -300,13 +337,16 @@ def _in_stock(product: Product) -> bool:
 
 __all__ = [
     "CANDIDATES_PER_TERM",
+    "MAX_CHOSEN",
     "MAX_INPUT_IDS",
     "MAX_SUGGESTIONS",
     "MAX_TERMS",
     "MIN_TERM_LENGTH",
     "anchor_of",
     "choose",
+    "choose_owned",
     "heading_for",
+    "heading_for_owner_choice",
     "is_buyable",
     "is_complementary",
     "is_pairable",

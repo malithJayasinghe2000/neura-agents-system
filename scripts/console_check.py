@@ -43,11 +43,12 @@ import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import httpx
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from widget_check import Chrome, find_chrome
 
 from neura_agent_core.conversations import (
@@ -115,6 +116,7 @@ async def main() -> int:
     db = Database.from_settings()
     failures: list[str] = []
     seeded: dict[str, str] = {}
+    seeded_choice: dict[str, str] = {}
 
     try:
         async with db.identity_session() as session:
@@ -194,6 +196,17 @@ async def main() -> int:
                 print(f"\n  {BOLD}sold out — demand, counted, never who{OFF}")
                 await _check_sold_out(browser, console, seeded, failures)
 
+            # Screen 7 needs a shop with SELL, which the first membership may not
+            # have. Found rather than assumed, and skipped — not passed — when
+            # this person holds no such shop.
+            sell_shop = await _seed_choice(db, held) if held else None
+            if sell_shop:
+                seeded_choice = sell_shop
+                print(f"\n  {BOLD}suggestions — the owner's choice wins{OFF}")
+                await _check_suggestions(browser, console, sell_shop, failures)
+            else:
+                print(f"  {DIM}no shop with SELL — the Suggestions checks are skipped{OFF}")
+
             # 6. The link is single use. Reloading it must not sign anyone in again.
             await browser.goto(minted.url)
             await asyncio.sleep(3)
@@ -208,6 +221,8 @@ async def main() -> int:
     finally:
         if seeded:
             await _unseed_shop(db, seeded)
+        if seeded_choice:
+            await _unseed_choice(db, seeded_choice)
         await db.dispose()
 
     print()
@@ -262,6 +277,12 @@ SEEDED_IN_STOCK_TITLE = "Console-check In-stock Jumper"
 SEEDED_SOLD_OUT_ID = "console-check-sold-out"
 SEEDED_IN_STOCK_ID = "console-check-in-stock"
 SEEDED_SESSIONS = ("consolechecksessionAAAAAAAAAAAAAAAA", "consolechecksessionBBBBBBBBBBBBBBBB")
+
+#: Screen 7's seeded products (ADR-0050). Two, so the owner's choice of one
+#: for the other can be seen on the page. Filed under this check's own
+#: platform string and fingerprint, so cleanup finds exactly these rows.
+SEEDED_CHOICE_ANCHOR = ("console-check-anchor", "Console-check Plain Tee")
+SEEDED_CHOICE_PICK = ("console-check-pick", "Console-check Better Tee")
 
 #: The agent this check bills its seeded usage to.
 #:
@@ -528,6 +549,81 @@ async def _check_sold_out(
         "back in stock" in page,
         failures,
     )
+
+
+async def _check_suggestions(
+    browser: Chrome, console: str, made: dict[str, str], failures: list[str]
+) -> None:
+    """Screen 7 — ADR-0050, against the rendered page."""
+    await browser.goto(f"{console}/console/{made['tenant']}/suggestions?q=Console-check")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+
+    _check("the suggestions screen renders", "Suggestions" in page, failures)
+    _check(
+        "the owner's choice is shown as theirs",
+        "Your choice" in page and SEEDED_CHOICE_PICK[1] in page,
+        failures,
+    )
+    _check(
+        "it says the choice is the same for every shopper",
+        "Same for every shopper" in page,
+        failures,
+    )
+    _check("no API key reached the suggestions screen", "fn_sk_" not in page, failures)
+
+
+async def _seed_choice(db: Database, held: list[Any]) -> dict[str, str] | None:
+    """Two synced products and one owner choice, in the first held shop with SELL."""
+    from neura_agent_sell.pairing.choices import DatabaseOwnerChoices
+    from neura_core.tenancy import TenantRepository
+
+    for membership in held:
+        tenant_id = membership.tenant_id
+        async with db.tenant_session(tenant_id) as session:
+            tenant = await TenantRepository(session).get(tenant_id)
+            store_id = await session.scalar(
+                select(tenant_stores.c.id)
+                .where(tenant_stores.c.tenant_id == tenant_id)
+                .order_by(tenant_stores.c.created_at)
+                .limit(1)
+            )
+        if tenant is None or not tenant.may_use("sell") or store_id is None:
+            continue
+
+        async with db.tenant_session(tenant_id) as session:
+            for product_id, title in (SEEDED_CHOICE_ANCHOR, SEEDED_CHOICE_PICK):
+                await session.execute(
+                    synced_entities.insert().values(
+                        tenant_id=tenant_id,
+                        platform=SEEDED_PLATFORM,
+                        entity_type="product",
+                        external_id=product_id,
+                        neura_id=ids.new_id(ids.NEURA_ENTITY),
+                        fingerprint="console-check",
+                        document={"title": title},
+                    )
+                )
+        await DatabaseOwnerChoices(db, tenant_id=tenant_id, store_id=str(store_id)).choose(
+            SEEDED_CHOICE_ANCHOR[0], [SEEDED_CHOICE_PICK[0]], chosen_by="console-check"
+        )
+        return {"tenant": tenant_id, "store": str(store_id)}
+    return None
+
+
+async def _unseed_choice(db: Database, made: dict[str, str]) -> None:
+    """Exactly the rows above: one choice by its product id, two products by platform."""
+    from neura_agent_sell.pairing.choices import DatabaseOwnerChoices
+
+    await DatabaseOwnerChoices(db, tenant_id=made["tenant"], store_id=made["store"]).reset(
+        SEEDED_CHOICE_ANCHOR[0]
+    )
+    async with db.tenant_session(made["tenant"]) as session:
+        await session.execute(
+            delete(synced_entities)
+            .where(synced_entities.c.tenant_id == made["tenant"])
+            .where(synced_entities.c.platform == SEEDED_PLATFORM)
+        )
 
 
 async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:

@@ -85,4 +85,31 @@ sell_pairings = Table(
     Index("ix_sell_pairings_tenant_store_product", "tenant_id", "store_id", "product_id"),
 )
 
-__all__ = ["SELL_PAIRINGS", "sell_pairings"]
+SELL_PAIRING_CHOICES = "sell_pairing_choices"
+
+#: What the shop owner chose to suggest with a product — [ADR-0050].
+#:
+#: **A separate table, not a column on ``sell_pairings``**, because the two have
+#: opposite lifecycles. A computed pairing is replaced whenever it is recomputed
+#: and ignored the moment the product's text changes; an owner's choice must
+#: survive both, because *"the owner's choice always wins"* would be false the
+#: first time a recomputation overwrote it.
+#:
+#: **An empty ``chosen_ids`` is a decision, not a missing value**: *show nothing
+#: for this product*. No row at all is what "automatic" means.
+sell_pairing_choices = Table(
+    SELL_PAIRING_CHOICES,
+    metadata,
+    Column("tenant_id", String(64), primary_key=True),
+    Column("store_id", String(64), primary_key=True),
+    Column("product_id", String(128), primary_key=True),
+    #: The merchant's own product ids, in the order they chose. At most
+    #: ``select.MAX_CHOSEN``; the first two buyable ones are shown.
+    Column("chosen_ids", JSONB, nullable=False, server_default="[]"),
+    #: The console user who chose, so *"why was I shown this?"* has a person as
+    #: its answer.
+    Column("chosen_by", String(64), nullable=False),
+    Column("chosen_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+__all__ = ["SELL_PAIRINGS", "SELL_PAIRING_CHOICES", "sell_pairing_choices", "sell_pairings"]

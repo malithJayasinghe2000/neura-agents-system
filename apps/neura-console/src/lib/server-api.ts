@@ -53,12 +53,14 @@ export type ServerResult<T> =
  * screens, and a `try`/`catch` around a throw tends to collapse them into one
  * apologetic blank.
  */
-export async function fromApi<T>(path: string): Promise<ServerResult<T>> {
+export async function fromApi<T>(path: string, prefix = "/v1/console"): Promise<ServerResult<T>> {
   const jar = await cookies();
   const session = jar.get(SESSION_COOKIE);
   if (!session) return { ok: false, status: 401, message: "Not signed in." };
 
-  const response = await fetch(`${API_BASE}/v1/console${path}`, {
+  // `prefix` is `/v1/console` for every screen the API serves itself, and an
+  // agent's own prefix for a screen an agent serves (ADR-0050's Suggestions).
+  const response = await fetch(`${API_BASE}${prefix}${path}`, {
     headers: { Cookie: `${session.name}=${session.value}` },
     // Never cached. This is one person's view of one merchant's data, and a
     // cache key that missed either of those would serve it to the wrong reader.

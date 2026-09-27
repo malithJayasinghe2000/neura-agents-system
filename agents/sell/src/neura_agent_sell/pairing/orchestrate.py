@@ -43,6 +43,7 @@ from typing import Any
 
 from neura_agent_sell.pairing import compute, select
 from neura_agent_sell.pairing.cache import PairingCache, source_hash
+from neura_agent_sell.pairing.choices import OwnerChoices
 from neura_agent_sell.tools.card import product_card
 from neura_commerce import ProductQuery
 from neura_core import get_logger
@@ -76,6 +77,7 @@ async def suggest(
     capabilities: frozenset[Capability],
     tenant_id: str,
     cache: PairingCache | None = None,
+    choices: OwnerChoices | None = None,
 ) -> Pairing:
     """Products that go with the ones a page named.
 
@@ -117,6 +119,24 @@ async def suggest(
     if anchor is None:  # pragma: no cover — _load returning [] is handled above
         return Pairing()
 
+    excluded = frozenset(wanted)
+
+    # **The owner's choice is asked first, and when there is one it is the
+    # whole answer** (ADR-0050): no stored model pairing and no word search can
+    # bring back a product the owner removed. Before the category check below,
+    # because the category rule does not bind an owner.
+    owned = await _owner_choice(
+        anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id, choices=choices
+    )
+    if owned is not None:
+        return _pairing(
+            owned,
+            anchor,
+            heading=select.heading_for_owner_choice(anchor),
+            tenant_id=tenant_id,
+            source="owner",
+        )
+
     if not anchor.category_ids:
         # Rule 5 of `is_pairable` would refuse everything anyway. Logged
         # separately because this is a *merchant data* problem with a fix —
@@ -129,7 +149,6 @@ async def suggest(
         )
         return Pairing()
 
-    excluded = frozenset(wanted)
     chosen = await _stored(
         anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id, cache=cache
     )
@@ -141,11 +160,21 @@ async def suggest(
         # above lands before the next shopper.
         chosen = await _search(anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id)
 
+    return _pairing(
+        chosen, anchor, heading=select.heading_for(anchor), tenant_id=tenant_id, source="automatic"
+    )
+
+
+def _pairing(
+    chosen: list[Product], anchor: Product, *, heading: str, tenant_id: str, source: str
+) -> Pairing:
+    """Cards and a heading, or an empty :class:`Pairing` — the same for both paths."""
     if not chosen:
         log.info(
-            "pairing_nothing_complementary",
+            "pairing_nothing_to_show",
             tenant_id=tenant_id,
             anchor_id=anchor.external_id,
+            source=source,
             detail="an empty block is a result, not a failure",
         )
         return Pairing()
@@ -163,16 +192,58 @@ async def suggest(
         "pairing_suggested",
         tenant_id=tenant_id,
         anchor_id=anchor.external_id,
+        source=source,
         suggested=len(cards),
         # Ids, never titles. A log is not a place to accumulate a merchant's
         # catalogue copy.
         suggested_ids=[card["id"] for card in cards],
     )
 
-    return Pairing(
-        suggestions=cards,
-        heading=select.heading_for(anchor),
-        paired_with=anchor_card,
+    return Pairing(suggestions=cards, heading=heading, paired_with=anchor_card)
+
+
+async def _owner_choice(
+    anchor: Product,
+    *,
+    adapter: Any,
+    excluded_ids: frozenset[str],
+    tenant_id: str,
+    choices: OwnerChoices | None,
+) -> list[Product] | None:
+    """The owner's list for this product, checked live — or ``None`` for automatic.
+
+    ``[]`` means *show nothing*, and it is returned in three cases, all on
+    purpose (ADR-0050 §4): the owner chose nothing, everything they chose is
+    unbuyable right now, or **their choice could not be read**. None of them
+    falls back to the automatic path, which could bring back the very product
+    the owner removed.
+    """
+    if choices is None:
+        return None
+
+    try:
+        chosen_ids = await choices.get(anchor.external_id)
+    except Exception as exc:
+        log.warning(
+            "pairing_owner_choice_unreadable",
+            tenant_id=tenant_id,
+            anchor_id=anchor.external_id,
+            error=type(exc).__name__,
+            detail="showing nothing rather than risk contradicting the owner",
+        )
+        return []
+
+    if chosen_ids is None:
+        return None
+    if not chosen_ids:
+        return []
+
+    live = await _load(chosen_ids[: select.MAX_CHOSEN], adapter=adapter, tenant_id=tenant_id)
+    by_id = {str(product.external_id): product for product in live}
+    # The owner's order, not lookup-completion order.
+    return select.choose_owned(
+        [by_id[product_id] for product_id in chosen_ids if product_id in by_id],
+        excluded_ids=excluded_ids,
     )
 
 
