@@ -24,6 +24,8 @@ import { GradeForm } from "@/components/review/grade-form";
 import { EvidencePanel } from "@/components/review/evidence-panel";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { When } from "@/components/when";
+import { assistantName } from "@/lib/assistants";
 
 /** Tokens the guard leaves behind — `[EMAIL_1]`, `[ADDRESS_2]`, `[CARD_1]`. */
 const PII_TOKEN = /\[[A-Z_]+_\d+\]/;
@@ -48,7 +50,7 @@ export function TurnCard({
             <EyeOff className="size-3" aria-hidden />
             Withheld — the shopper never saw this
           </Badge>
-          <Badge variant="outline">{turn.agent}</Badge>
+          <Badge variant="outline">{assistantName(turn.agent)}</Badge>
           {turn.intent ? <Badge variant="muted">{turn.intent}</Badge> : null}
           {turn.escalated ? (
             <Badge variant="outline" className="gap-1">
@@ -62,7 +64,9 @@ export function TurnCard({
               failed the grounding check
             </Badge>
           ) : null}
-          <span className="ml-auto">{formatWhen(turn.created_at)}</span>
+          <span className="ml-auto">
+            <When iso={turn.created_at} />
+          </span>
         </header>
 
         <section className="space-y-1.5">
@@ -130,7 +134,13 @@ export function TurnCard({
                   ? " by you"
                   : ` by ${turn.reviewed_by}`
                 : ""}
-              {turn.reviewed_at ? ` · ${formatWhen(turn.reviewed_at)}` : ""}. You can change it.
+              {turn.reviewed_at ? (
+                <>
+                  {" · "}
+                  <When iso={turn.reviewed_at} />
+                </>
+              ) : null}
+              . You can change it.
             </p>
           ) : null}
           <TurnFacts turn={turn} />
@@ -175,10 +185,4 @@ function Fact({ label, value, title }: { label: string; value: string; title?: s
       <dd className="text-foreground">{value}</dd>
     </div>
   );
-}
-
-function formatWhen(value: string | null): string {
-  if (!value) return "";
-  const when = new Date(value);
-  return Number.isNaN(when.getTime()) ? "" : when.toLocaleString();
 }

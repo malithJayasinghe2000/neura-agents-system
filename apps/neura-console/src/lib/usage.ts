@@ -33,6 +33,16 @@ export type Totals = {
   cost: Cost;
 };
 
+/**
+ * A sentence the **server** wrote about what the figures do not say. `key` is
+ * stable so a screen can show the one that belongs to its figures by name —
+ * Home shows counts and no cost, so it asks for `handed_to_a_person` only.
+ */
+export type Caveat = {
+  key: "practice_mode" | "cost_not_recorded" | "handed_to_a_person" | (string & {});
+  text: string;
+};
+
 export type Usage = {
   period: {
     key: string;
@@ -48,7 +58,7 @@ export type Usage = {
   /** The meter breaks down per agent by **day**, so this is today only. */
   today_by_agent: Record<string, Totals>;
   /** Only the ones that are true right now. Never boilerplate. */
-  caveats: string[];
+  caveats: Caveat[];
 };
 
 export const PERIODS: { key: string; label: string }[] = [

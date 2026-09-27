@@ -47,6 +47,7 @@ Shared vocabulary. Words here mean exactly one thing across code, docs and conve
 | **Resolution** | A conversation the agent closed without escalation. The billing unit. |
 | **Deflection rate** | Resolutions ÷ total conversations. Escalated and abandoned conversations are *not* deflected. |
 | **Shadow mode** | Agent runs on real traffic, sends nothing, logs what it would have said. |
+| **Practice mode** | The **merchant-facing name for shadow mode** — the same thing, said the way a shop owner would. Used in the console and in its server-written caveats; the code, the ADRs and `TurnMode.SHADOW` keep *shadow*. Owner-approved 2026-09-27. |
 | **Grounded** | Every factual claim in a reply is supported by retrieved context or tool output. |
 
 ## LLM

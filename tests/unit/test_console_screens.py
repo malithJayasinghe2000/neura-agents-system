@@ -190,11 +190,13 @@ class TestTheUsageScreenInventsNothing:
         """True numbers describing work no shopper ever saw is the most
         misleading page this console could produce. It leads."""
         caveats = _caveats(UsageTotals(tenant_id="tn_1", conversations=41), "shadow")
-        assert "shadow mode" in caveats[0]
+        assert caveats[0]["key"] == "practice_mode"
+        assert "practice mode" in caveats[0]["text"]
 
     def test_a_live_shop_claims_nothing_about_withholding(self) -> None:
         caveats = _caveats(UsageTotals(tenant_id="tn_1", conversations=41), "live")
-        assert not any("shadow mode" in caveat for caveat in caveats)
+        assert not any(caveat["key"] == "practice_mode" for caveat in caveats)
+        assert not any("practice mode" in caveat["text"] for caveat in caveats)
 
     def test_the_escalation_count_is_stated_with_its_denominator_and_disclaimed(
         self,
@@ -203,11 +205,11 @@ class TestTheUsageScreenInventsNothing:
         division and call the answer a deflection rate — which `CLAUDE.md §4`
         lists as unknown."""
         [caveat] = [
-            c
+            c["text"]
             for c in _caveats(
                 UsageTotals(tenant_id="tn_1", conversations=41, escalations=2), "live"
             )
-            if "conversations" in c
+            if c["key"] == "handed_to_a_person"
         ]
         assert "2 of 41 conversations" in caveat
         assert "not a deflection rate" in caveat
@@ -216,7 +218,7 @@ class TestTheUsageScreenInventsNothing:
         """Nothing recorded means nothing to disclaim. A caveat that is always
         present is a caveat the reader learns to skip."""
         caveats = _caveats(UsageTotals(tenant_id="tn_1"), "live")
-        assert not any("conversations were handed" in caveat for caveat in caveats)
+        assert not any(caveat["key"] == "handed_to_a_person" for caveat in caveats)
 
     def test_everything_ever_recorded_is_not_a_number_of_days(self) -> None:
         assert PERIODS["all"] is None

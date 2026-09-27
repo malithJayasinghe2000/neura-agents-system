@@ -18,11 +18,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { ShopNav } from "@/components/shop/shop-nav";
 import { StateBadge } from "@/components/shop/state-badge";
 import { TokenNote, hasToken } from "@/components/shop/token-note";
+import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
-import { STATE_HELP, type Transcript, type TranscriptMessage } from "@/lib/conversations";
+import { assistantName } from "@/lib/assistants";
+import {
+  STATE_HELP,
+  questions,
+  type Transcript,
+  type TranscriptMessage,
+} from "@/lib/conversations";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,7 +49,6 @@ export default async function TranscriptPage({
   if (!result.ok) {
     return (
       <>
-        <ShopNav tenantId={tenantId} current="conversations" />
         <Alert variant="destructive">
           <AlertTitle>
             {result.status === 404 ? "No such conversation" : "Could not load the transcript"}
@@ -63,8 +68,6 @@ export default async function TranscriptPage({
 
   return (
     <>
-      <ShopNav tenantId={tenantId} current="conversations" />
-
       <div className="space-y-3">
         <Button
           size="sm"
@@ -78,11 +81,14 @@ export default async function TranscriptPage({
 
         <div className="flex flex-wrap items-center gap-2">
           <StateBadge state={transcript.state} />
-          <Badge variant="outline">{transcript.agent}</Badge>
-          <Badge variant="muted">{transcript.channel}</Badge>
+          <Badge variant="outline">{assistantName(transcript.agent)}</Badge>
+          {/* The channel is shown only when it says something: every
+              conversation so far came through the website chat. */}
+          {transcript.channel !== "web" ? (
+            <Badge variant="muted">{transcript.channel}</Badge>
+          ) : null}
           <span className="text-xs text-muted-foreground">
-            {transcript.turns} {transcript.turns === 1 ? "turn" : "turns"} ·{" "}
-            {formatWhen(transcript.started_at)}
+            {questions(transcript.turns)} · started <When iso={transcript.started_at} />
           </span>
         </div>
 
@@ -135,12 +141,14 @@ function MessageBubble({ message }: { message: TranscriptMessage }) {
               rather than half a story told twice. Rendered only where it
               exists: null on the shopper's message, and on anything stored
               before a message could say. */}
-          {message.agent ? <Badge variant="outline">{message.agent}</Badge> : null}
+          {message.agent ? <Badge variant="outline">{assistantName(message.agent)}</Badge> : null}
           {message.intent ? <Badge variant="muted">{message.intent}</Badge> : null}
           {/* Per-turn outcome, on the reply. Null on the shopper's message,
               because the question did not have an outcome. */}
           {message.state ? <StateBadge state={message.state} /> : null}
-          <span className="ml-auto">{formatWhen(message.created_at)}</span>
+          <span className="ml-auto">
+            <When iso={message.created_at} />
+          </span>
         </div>
 
         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
@@ -158,10 +166,4 @@ function MessageBubble({ message }: { message: TranscriptMessage }) {
       </CardContent>
     </Card>
   );
-}
-
-function formatWhen(value: string | null): string {
-  if (!value) return "";
-  const when = new Date(value);
-  return Number.isNaN(when.getTime()) ? "" : when.toLocaleString();
 }

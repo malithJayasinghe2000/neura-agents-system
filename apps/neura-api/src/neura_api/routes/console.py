@@ -38,7 +38,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from neura_api.dependencies import DatabaseDep
 from neura_api.envelopes import envelope
-from neura_core import get_logger, get_settings
+from neura_core import Database, get_logger, get_settings
 from neura_core.email import Mailer
 from neura_core.identity import (
     COOKIE_NAME,
@@ -49,6 +49,7 @@ from neura_core.identity import (
     request_sign_in_link,
     verify,
 )
+from neura_core.tenancy import TenantRepository
 
 log = get_logger(__name__)
 
@@ -166,9 +167,30 @@ async def me(
         {
             "signed_in": True,
             "user_id": signed_in.user_id,
-            "memberships": [{"tenant_id": m.tenant_id, "role": m.role} for m in held],
+            "memberships": [
+                {
+                    "tenant_id": m.tenant_id,
+                    "role": m.role,
+                    "name": await _shop_name(db, m.tenant_id),
+                }
+                for m in held
+            ],
         }
     )
+
+
+async def _shop_name(db: Database, tenant_id: str) -> str | None:
+    """The shop's own name, so a merchant never has to recognise ``tn_01M…``.
+
+    ``tenants`` is tenant-scoped and the identity session names no tenant, so
+    the name is read in that shop's own session — and only for a membership
+    just proved above, which is what stops this being a way to read another
+    merchant's name. ``None`` when there is no name to show; the screen falls
+    back to the id rather than inventing one.
+    """
+    async with db.tenant_session(tenant_id) as session:
+        tenant = await TenantRepository(session).get(tenant_id)
+    return tenant.name if tenant is not None and tenant.name else None
 
 
 @router.post("/auth/sign-out", summary="End the session")

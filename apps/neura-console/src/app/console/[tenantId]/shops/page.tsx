@@ -21,7 +21,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CheckCircle2, PlugZap, XCircle } from "lucide-react";
-import { ShopNav } from "@/components/shop/shop-nav";
+import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
 import { ENTITY_LABELS, type ConnectedStore, type Health, type ShopView } from "@/lib/shop";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -53,12 +53,15 @@ export default async function ShopPage({
 
   return (
     <>
-      <ShopNav tenantId={tenantId} current="shops" />
-
       <div className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight">Shop</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Shop connection</h1>
         <p className="text-muted-foreground">
           What your assistant is connected to, and what it last read from it.
+        </p>
+        {/* The one place the id is shown: it means nothing to an owner until
+            support asks which shop they mean. */}
+        <p className="text-xs text-muted-foreground">
+          Shop ID, if support asks: <code className="text-foreground">{tenantId}</code>
         </p>
       </div>
 
@@ -155,9 +158,13 @@ function StoreCard({
                   {/* `null` is not a date. "Never finished" and "finished long
                       ago" are different facts and only one should worry anyone. */}
                   <span className="text-muted-foreground">
-                    {sync.completed_at
-                      ? `finished ${formatWhen(sync.completed_at)} · ${sync.last_run_count} read`
-                      : "has never finished"}
+                    {sync.completed_at ? (
+                      <>
+                        finished <When iso={sync.completed_at} /> · {sync.last_run_count} read
+                      </>
+                    ) : (
+                      "has never finished"
+                    )}
                   </span>
                   {sync.in_progress ? <Badge variant="secondary">part-way through</Badge> : null}
                 </li>
@@ -260,10 +267,4 @@ function NotConnected() {
       </CardContent>
     </Card>
   );
-}
-
-function formatWhen(value: string | null): string {
-  if (!value) return "";
-  const when = new Date(value);
-  return Number.isNaN(when.getTime()) ? "" : when.toLocaleString();
 }

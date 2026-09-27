@@ -162,7 +162,16 @@ async def main() -> int:
             _check("the link lands on the console", landed == "/console", failures)
 
             body = await browser.evaluate("document.body.innerText")
-            _check("the console greets the signed-in person", "Welcome back" in body, failures)
+            _check("the console lists the person's shops", "Your shops" in body, failures)
+            if held:
+                # By the name the shop has on record — `tn_01M…` means nothing
+                # to an owner, and the landing page must not ask them to read it.
+                name = await _shop_name(db, held[0].tenant_id)
+                _check(
+                    "a shop is listed by its name, not its id",
+                    bool(name) and name in body,
+                    failures,
+                )
 
             # 3. The claim HttpOnly actually makes. Only a page can test this.
             visible = await browser.evaluate("document.cookie")
@@ -184,6 +193,9 @@ async def main() -> int:
             #    nothing, and scoring that as a pass is how a green run stops
             #    meaning anything (open question E6, the same lesson).
             if seeded:
+                print(f"\n  {BOLD}home — what needs the owner, said first{OFF}")
+                await _check_home(browser, console, seeded, failures)
+
                 print(f"\n  {BOLD}review — grading what the agent would have said{OFF}")
                 await _check_review(browser, console, seeded, failures)
 
@@ -376,6 +388,86 @@ _CLICK_VERDICT = """
 """
 
 
+async def _check_home(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """The shop's Home (2026-09-27), against the rendered page.
+
+    Home is the screen most likely to become the dashboard console.md §3.5
+    warns about, so it is held to the same rules as Usage: the mode before any
+    figure, every count with its period, no rate, no `$0`. Also the frame: a
+    side menu with the shop's name, and on a phone one menu button and no
+    sideways scrolling.
+    """
+    # A desktop window, said explicitly: headless Chrome's default is narrower
+    # than the width at which the side menu stops folding into a button, and
+    # `innerText` — rightly — does not read what is folded away.
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=1280,
+        height=900,
+        deviceScaleFactor=1,
+        mobile=False,
+    )
+    await browser.goto(f"{console}/console/{seeded['tenant']}")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+
+    _check("home renders", "Needs you" in page, failures)
+    _check(
+        "the mode is stated before any figure",
+        ("Practice mode is on" in page or "Your assistant is live" in page)
+        and page.find("Practice mode is on" if "Practice mode is on" in page else "is live")
+        < page.find("Last 7 days"),
+        failures,
+    )
+    # The seed left two drafts ungraded; Review has not run yet.
+    _check(
+        "the drafts waiting are what needs the owner", "waiting for your review" in page, failures
+    )
+    _check("every count names its period", "Last 7 days" in page, failures)
+    _check("no rate of any kind is shown", "%" not in page, failures)
+    _check("no unmeasured cost is printed as a figure", "$0" not in page, failures)
+    _check(
+        "the side menu carries the shop and its screens",
+        "Switch shop" in page and "Shop connection" in page and "Usage and cost" in page,
+        failures,
+    )
+    _check("no API key reached home", "fn_sk_" not in page and "fn_pk_" not in page, failures)
+
+    # A phone: the menu folds into one button, and nothing scrolls sideways.
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
+    )
+    try:
+        await browser.goto(f"{console}/console/{seeded['tenant']}")
+        await asyncio.sleep(3)
+        _check(
+            "on a phone the menu is one button",
+            await browser.evaluate("!!document.querySelector('button[aria-controls=shop-menu]')"),
+            failures,
+        )
+        _check(
+            "on a phone nothing scrolls sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _shop_name(db: Database, tenant_id: str) -> str | None:
+    from neura_core.tenancy import TenantRepository
+
+    async with db.tenant_session(tenant_id) as session:
+        tenant = await TenantRepository(session).get(tenant_id)
+    return tenant.name if tenant is not None and tenant.name else None
+
+
 async def _check_conversations(
     browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
 ) -> None:
@@ -402,8 +494,38 @@ async def _check_conversations(
         failures,
     )
     _check(
-        "a shadowed thread says it was withheld, not answered",
-        "Withheld" in page,
+        "a shadowed thread says it is held for review, not answered",
+        "Held for your review" in page,
+        failures,
+    )
+
+    # 2026-09-27: a row leads with what the shopper asked, and a tokenised one
+    # is explained on the list as well as in the transcript.
+    _check("each row leads with the shopper's question", SEEDED_QUESTION in page, failures)
+    _check(
+        "a tokenised question on the list is explained there",
+        "[EMAIL_1]" in page and "replaced before the model saw it" in page,
+        failures,
+    )
+    _check("the list says how many there are", "Showing 1\u2013" in page, failures)
+
+    await browser.goto(f"{console}/console/{seeded['tenant']}/conversations?q=boots")
+    await asyncio.sleep(3)
+    found = await browser.evaluate("document.body.innerText")
+    _check(
+        "a search finds what the shopper wrote, and only that",
+        SEEDED_QUESTION in found and "where is my order?" not in found and "that match" in found,
+        failures,
+    )
+
+    await browser.goto(
+        f"{console}/console/{seeded['tenant']}/conversations?q=console-check-matches-nothing"
+    )
+    await asyncio.sleep(3)
+    nothing = await browser.evaluate("document.body.innerText")
+    _check(
+        "a search with no match says so, not an empty page",
+        "No conversation matches" in nothing,
         failures,
     )
 

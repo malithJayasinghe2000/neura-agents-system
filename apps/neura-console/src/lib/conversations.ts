@@ -30,6 +30,12 @@ export type ConversationRow = {
   escalations: number;
   started_at: string | null;
   updated_at: string | null;
+  /**
+   * One line of the shopper's first message, as stored — tokens included. On
+   * list rows only; `null` when the shopper never wrote, which the screen says
+   * in words rather than leaving a blank line.
+   */
+  first_question?: string | null;
 };
 
 export type TranscriptMessage = {
@@ -64,13 +70,19 @@ export type Transcript = ConversationRow & {
   truncated: boolean;
 };
 
-/** What each state means to the person reading it, in their terms, not ours. */
+/**
+ * What each state means to the person reading it, in their terms, not ours.
+ *
+ * `shadowed` is *"Held for your review"*: it says what happened **and** what the
+ * owner does next, where "withheld (shadow mode)" named our mechanism. Approved
+ * by the owner with the rest of the 2026-09-27 wording.
+ */
 export const STATE_LABELS: Record<ConversationState, string> = {
   resolved: "Answered",
-  awaiting_customer: "Waiting on the shopper",
+  awaiting_customer: "Waiting for the shopper",
   escalated: "Handed to a person",
   blocked: "Blocked as an attack",
-  shadowed: "Withheld (shadow mode)",
+  shadowed: "Held for your review",
 };
 
 export const STATE_HELP: Record<ConversationState, string> = {
@@ -85,9 +97,14 @@ export const STATE_HELP: Record<ConversationState, string> = {
 
 /** The filters offered above the list. `""` is first, so nothing is hidden by default. */
 export const STATE_FILTERS: { key: string; label: string }[] = [
-  { key: "", label: "Everything" },
-  { key: "escalated", label: "Handed to a person" },
-  { key: "blocked", label: "Blocked" },
-  { key: "shadowed", label: "Withheld" },
-  { key: "resolved", label: "Answered" },
+  { key: "", label: "All" },
+  { key: "shadowed", label: STATE_LABELS.shadowed },
+  { key: "escalated", label: STATE_LABELS.escalated },
+  { key: "blocked", label: STATE_LABELS.blocked },
+  { key: "resolved", label: STATE_LABELS.resolved },
 ];
+
+/** `1 question`, `19 questions` — a turn, said the way a shop owner counts it. */
+export function questions(count: number): string {
+  return count === 1 ? "1 question" : `${count} questions`;
+}

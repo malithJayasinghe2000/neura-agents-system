@@ -40,7 +40,17 @@ type Envelope<T> = { data: T; meta?: PageMeta; error?: { message?: string } };
  * turns and silently withholds the rest — which is sampling, arrived at by
  * accident, in the one screen whose design says not to sample.
  */
-export type PageMeta = { next_cursor?: string | null; has_more?: boolean };
+export type PageMeta = {
+  next_cursor?: string | null;
+  has_more?: boolean;
+  /** How many match in all — for the words "26–50 of 55". Not every list sends it. */
+  total?: number;
+  /** How many matching rows come before this page. Counted, never used to fetch. */
+  offset?: number;
+  has_previous?: boolean;
+  /** `null` with `has_previous` true: the page before is the first page. */
+  previous_cursor?: string | null;
+};
 
 export type ServerResult<T> =
   { ok: true; data: T; meta: PageMeta } | { ok: false; status: number; message: string };

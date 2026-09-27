@@ -1,21 +1,31 @@
 /**
- * Where a signed-in merchant lands. ADR-0026.
+ * Where a signed-in merchant lands: their shops. ADR-0026.
  *
- * Still deliberately small. It lists the shops this person may act for and the
- * one screen that is built — no figures, because `docs/console.md §5` is
- * explicit that a dashboard is where this project's honesty about unmeasured
- * numbers usually dies, and nothing here has been measured.
+ * One card per shop, the whole card one click, with the shop's own name and one
+ * line of status — the owner's approved mockup, 2026-09-27. The status is read
+ * from the same membership-checked endpoints the shop's own screens use, and it
+ * holds **no figure that was not counted**: the mode the shop is in, how many
+ * replies wait in Review right now, or that no online shop is connected. Nothing
+ * measured is claimed here, because `docs/console.md §5` is explicit that a
+ * dashboard is where this project's honesty about unmeasured numbers usually
+ * dies.
+ *
+ * This page draws its own header; a shop's screens carry the wordmark and
+ * *Sign out* in their side menu instead.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ClipboardCheck } from "lucide-react";
+import { ChevronRight, Store } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { SignOutButton } from "@/components/sign-out-button";
 import { fromApi, hasSession } from "@/lib/server-api";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import type { Scorecard } from "@/lib/review";
+import type { ShopView } from "@/lib/shop";
+import type { Usage } from "@/lib/usage";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-type Membership = { tenant_id: string; role: string };
+/** `name` is `null` when the shop has none on record; the id stands in for it. */
+type Membership = { tenant_id: string; role: string; name: string | null };
 type Me = { signed_in: boolean; memberships?: Membership[] };
 
 export default async function ConsolePage() {
@@ -28,21 +38,22 @@ export default async function ConsolePage() {
   if (!me.ok || !me.data.signed_in) redirect("/");
 
   const memberships: Membership[] = me.data.memberships ?? [];
+  const statuses = await Promise.all(memberships.map((m) => statusOf(m.tenant_id)));
 
   return (
-    <div className="min-h-dvh">
+    <>
       <header className="border-b">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 sm:px-6">
           <Brand />
           <SignOutButton />
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-8 px-6 py-12">
+      <main className="mx-auto max-w-3xl space-y-7 px-4 py-10 sm:px-6 sm:py-14">
         <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Your shops</h1>
           <p className="text-muted-foreground">
-            You&apos;re signed in. Here&apos;s what you can reach.
+            Choose a shop to see what its assistant has been doing.
           </p>
         </div>
 
@@ -58,67 +69,78 @@ export default async function ConsolePage() {
             </CardHeader>
           </Card>
         ) : (
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">Your shops</h2>
-            <ul className="space-y-2">
-              {memberships.map((membership) => (
-                <li key={membership.tenant_id}>
-                  <Card>
-                    <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
-                      <div className="space-y-1">
-                        <code className="text-sm">{membership.tenant_id}</code>
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                          {membership.role}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          // A link wearing a button's clothes — see the same
-                          // note on the Review screen's filters.
-                          nativeButton={false}
-                          render={
-                            <Link
-                              href={`/console/${encodeURIComponent(membership.tenant_id)}/review`}
-                            />
-                          }
-                        >
-                          <ClipboardCheck className="size-3.5" aria-hidden />
-                          Review drafts
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          nativeButton={false}
-                          render={
-                            <Link
-                              href={`/console/${encodeURIComponent(membership.tenant_id)}/conversations`}
-                            />
-                          }
-                        >
-                          Open shop
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <ul className="space-y-3">
+            {memberships.map((membership, index) => (
+              <li key={membership.tenant_id}>
+                <Link
+                  href={`/console/${encodeURIComponent(membership.tenant_id)}`}
+                  className="flex items-center gap-4 rounded-xl border bg-card px-4 py-4 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 sm:px-5"
+                >
+                  <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted">
+                    <Store className="size-5" aria-hidden />
+                  </span>
+                  <span className="min-w-0 flex-1 space-y-1">
+                    <span className="block truncate font-semibold">
+                      {membership.name ?? <code>{membership.tenant_id}</code>}
+                    </span>
+                    <StatusLine status={statuses[index]} />
+                  </span>
+                  <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                </Link>
+              </li>
+            ))}
+          </ul>
         )}
-
-        <Card className="border-dashed bg-muted/30">
-          <CardHeader>
-            <CardTitle className="text-base">Not built yet</CardTitle>
-            <CardDescription>
-              Shop and Usage are designed and not written. Conversations and Review are built —
-              Review is where you grade what the assistant drafted before any shopper sees it, and
-              it is the screen that earns the rest.
-            </CardDescription>
-          </CardHeader>
-        </Card>
       </main>
-    </div>
+    </>
+  );
+}
+
+type Status = {
+  /** `null` when it could not be read — then nothing is said about it. */
+  connected: boolean | null;
+  practice: boolean | null;
+  waiting: number | null;
+};
+
+/** Three reads per shop, in parallel, each one already membership-checked. */
+async function statusOf(tenantId: string): Promise<Status> {
+  const shop = encodeURIComponent(tenantId);
+  const [store, usage, card] = await Promise.all([
+    fromApi<ShopView>(`/shops/${shop}/store`),
+    fromApi<Usage>(`/shops/${shop}/usage?period=today`),
+    fromApi<Scorecard>(`/shops/${shop}/review/scorecard`),
+  ]);
+  return {
+    connected: store.ok ? store.data.connected : null,
+    practice: usage.ok ? usage.data.withheld : null,
+    waiting: card.ok ? card.data.ungraded : null,
+  };
+}
+
+function StatusLine({ status }: { status: Status }) {
+  if (status.connected === false) {
+    return (
+      <span className="block text-sm text-muted-foreground">
+        Not connected to your online shop yet
+      </span>
+    );
+  }
+  if (status.practice === null) return null;
+
+  return (
+    <span className="block text-sm text-muted-foreground">
+      {status.practice ? "Practice mode" : "Live"}
+      {status.waiting ? (
+        <>
+          {" · "}
+          <span className="font-medium text-foreground">
+            {status.waiting === 1
+              ? "1 reply waiting for your review"
+              : `${status.waiting} replies waiting for your review`}
+          </span>
+        </>
+      ) : null}
+    </span>
   );
 }

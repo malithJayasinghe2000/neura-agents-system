@@ -67,8 +67,8 @@ export function ScorecardStrip({ card }: { card: Scorecard }) {
         )}
 
         <p className="text-xs text-muted-foreground">
-          These are counts from this shop&apos;s own shadow traffic. Every turn recorded is listed —
-          nothing is sampled.
+          These are counts from this shop&apos;s own practice-mode replies. Every turn recorded is
+          listed — nothing is sampled.
         </p>
       </CardContent>
     </Card>

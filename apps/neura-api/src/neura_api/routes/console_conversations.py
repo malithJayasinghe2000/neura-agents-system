@@ -37,6 +37,17 @@ resolved here.** Deciding it means either rewriting that paragraph or reopening
 security-model.md §6.2, and neither is a decision to make inside a route module.
 Nothing in this file redacts anything; it returns what is stored, and the screen
 says what the tokens are.
+
+## Finding a conversation (2026-09-27)
+
+A list of fifty-five states and timestamps is a list nobody can use, so each row
+now carries **the shopper's first message** — one line, cut to
+:data:`PREVIEW_CHARS` — and the list takes ``q`` (words the shopper wrote) and
+``agent`` (which assistant held it). Its ``meta`` says how many match in all and
+where this page sits among them, and carries a cursor for the page *before* this
+one. Paging is still a keyset cursor (api-design.md §5): the position is
+**counted** for the label, never used to fetch, so a conversation written between
+two clicks can move the words by one but cannot skip or repeat a row.
 """
 
 from __future__ import annotations
@@ -63,6 +74,11 @@ router = APIRouter(prefix="/console/shops/{tenant_id}", tags=["console"])
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
 
+#: How much of the shopper's first message a list row carries. A line to
+#: recognise a thread by, not a transcript — a hundred rows must not ship a
+#: hundred conversations.
+PREVIEW_CHARS = 160
+
 #: How many messages one transcript returns. A bound rather than a judgement:
 #: an unbounded thread is an unbounded response, and a conversation long enough
 #: to hit this is a conversation with a different problem.
@@ -74,38 +90,68 @@ async def list_conversations(
     request: Request,
     tenant_id: str,
     state: Annotated[str | None, Query()] = None,
+    agent: Annotated[str | None, Query(max_length=64)] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     actor = await acting_for(request, tenant_id)
-    wanted = _state(state)
-
-    position = decode_cursor(cursor)
-    before = (
-        (datetime.fromisoformat(str(position["c"])), str(position["i"]))
-        if position is not None
-        else None
-    )
+    # One set of filters for the page, its count and its *Newer* cursor, so the
+    # three can never describe different rows.
+    matching: dict[str, Any] = {
+        "state": _state(state),
+        # An agent key is data here, never a branch: `neura-api` does not know
+        # any agent's name, so an unknown key is not refused — it matches
+        # nothing, which is what an honest filter on it would show.
+        "agent": (agent or "").strip() or None,
+        "search": (q or "").strip() or None,
+    }
+    before = _position(decode_cursor(cursor))
 
     db = request.app.state.database
     async with db.tenant_session(actor.tenant_id) as session:
-        rows = await ConversationRepository(session).list_for(
-            actor.tenant_id, state=wanted, before=before, limit=limit + 1
+        repository = ConversationRepository(session)
+        rows = await repository.list_for(
+            actor.tenant_id, before=before, limit=limit + 1, **matching
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        questions = await repository.first_questions(actor.tenant_id, [row.id for row in rows])
+        total = await repository.count_for(actor.tenant_id, **matching)
+        offset = (
+            await repository.count_for(actor.tenant_id, through=before, **matching)
+            if before is not None
+            else 0
+        )
+        previous = (
+            await repository.cursor_for_page_before(
+                actor.tenant_id, page_after=before, size=limit, **matching
+            )
+            if before is not None
+            else None
         )
 
-    has_more = len(rows) > limit
-    rows = rows[:limit]
     last = rows[-1] if rows else None
     next_cursor = (
-        encode_cursor({"c": last.updated_at.isoformat(), "i": last.id})
+        _cursor((last.updated_at, last.id))
         if has_more and last is not None and last.updated_at is not None
         else None
     )
 
     return page(
-        [_conversation_payload(row) for row in rows],
+        [
+            {**_conversation_payload(row), "first_question": _preview(questions.get(row.id))}
+            for row in rows
+        ],
         next_cursor=next_cursor,
         request_id=getattr(request.state, "request_id", None),
+        # Counts for the words "26-50 of 55". `offset` is how many matching
+        # conversations come before this page, not a way to fetch one.
+        total=total,
+        offset=offset,
+        has_previous=offset > 0,
+        # `null` with `has_previous` true means the page before is the first.
+        previous_cursor=_cursor(previous) if previous is not None else None,
     )
 
 
@@ -139,6 +185,29 @@ async def read_conversation(
     )
 
 
+def _position(decoded: dict[str, Any] | None) -> tuple[datetime, str] | None:
+    if decoded is None:
+        return None
+    return datetime.fromisoformat(str(decoded["c"])), str(decoded["i"])
+
+
+def _cursor(position: tuple[datetime, str]) -> str:
+    moment, row_id = position
+    return encode_cursor({"c": moment.isoformat(), "i": row_id})
+
+
+def _preview(text: str | None) -> str | None:
+    """One line of the shopper's first message, as stored — tokens included.
+
+    ``None`` when the shopper never wrote, which the screen says in words
+    rather than showing an empty line.
+    """
+    if text is None:
+        return None
+    line = " ".join(text.split())
+    return line if len(line) <= PREVIEW_CHARS else line[: PREVIEW_CHARS - 1].rstrip() + "…"
+
+
 def _state(value: str | None) -> ConversationState | None:
     """Parse the filter, or refuse it.
 
@@ -158,8 +227,9 @@ def _state(value: str | None) -> ConversationState | None:
 
 
 def _conversation_payload(conversation: Conversation) -> dict[str, Any]:
-    """One row in the list. **No message content** — listing a hundred
-    conversations must not ship a hundred transcripts."""
+    """One conversation, without its messages — listing a hundred conversations
+    must not ship a hundred transcripts. The list adds one line of the first
+    question on top of this (``first_question``); the transcript adds the rest."""
     return {
         "id": conversation.id,
         "agent": conversation.agent_key,
@@ -204,4 +274,4 @@ def _message_payload(message: Message) -> dict[str, Any]:
     }
 
 
-__all__ = ["DEFAULT_LIMIT", "MAX_LIMIT", "MAX_MESSAGES", "router"]
+__all__ = ["DEFAULT_LIMIT", "MAX_LIMIT", "MAX_MESSAGES", "PREVIEW_CHARS", "router"]

@@ -24,7 +24,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EyeOff, Info } from "lucide-react";
-import { ShopNav } from "@/components/shop/shop-nav";
+import { assistantName } from "@/lib/assistants";
 import { fromApi, hasSession } from "@/lib/server-api";
 import { PERIODS, type Totals, type Usage } from "@/lib/usage";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -50,10 +50,8 @@ export default async function UsagePage({
 
   return (
     <>
-      <ShopNav tenantId={tenantId} current="usage" />
-
       <div className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight">Usage</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Usage and cost</h1>
         <p className="text-muted-foreground">
           What your assistant did, and what these numbers do not say.
         </p>
@@ -107,14 +105,14 @@ function UsageBody({
       </nav>
 
       {/* Stated before any figure. A merchant reading "41 conversations" while
-          in shadow mode is reading about an assistant no shopper has met. */}
+          in practice mode is reading about an assistant no shopper has met. */}
       {usage.withheld ? (
         <Alert>
           <EyeOff aria-hidden />
           <AlertTitle>Nobody was shown any of this</AlertTitle>
           <AlertDescription>
-            This shop is in shadow mode. Everything below is work your assistant did with the
-            replies withheld — they are waiting for your verdict in{" "}
+            This shop is in practice mode. Everything below is work your assistant did with the
+            replies held back — they are waiting for your verdict in{" "}
             <Link
               className="underline underline-offset-3"
               href={`/console/${encodeURIComponent(tenantId)}/review`}
@@ -163,7 +161,7 @@ function UsageBody({
                 {Object.entries(usage.today_by_agent).map(([agent, totals]) => (
                   <div key={agent} className="space-y-2">
                     <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                      {agent}
+                      {assistantName(agent)}
                     </h3>
                     <Counters totals={totals} />
                   </div>
@@ -182,9 +180,12 @@ function UsageBody({
           <CardContent>
             <ul className="space-y-2">
               {usage.caveats.map((caveat) => (
-                <li key={caveat} className="flex items-start gap-2 text-sm text-muted-foreground">
+                <li
+                  key={caveat.key}
+                  className="flex items-start gap-2 text-sm text-muted-foreground"
+                >
                   <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  {caveat}
+                  {caveat.text}
                 </li>
               ))}
             </ul>

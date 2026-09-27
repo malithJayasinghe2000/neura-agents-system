@@ -19,7 +19,7 @@
  */
 import { redirect } from "next/navigation";
 import { Info, PackageX } from "lucide-react";
-import { ShopNav } from "@/components/shop/shop-nav";
+import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
 import type { SoldOut, SoldOutProduct } from "@/lib/sold-out";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -33,8 +33,6 @@ export default async function SoldOutPage({ params }: { params: Promise<{ tenant
 
   return (
     <>
-      <ShopNav tenantId={tenantId} current="sold-out" />
-
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">Wanted while sold out</h1>
         <p className="text-muted-foreground">
@@ -61,7 +59,12 @@ export default async function SoldOutPage({ params }: { params: Promise<{ tenant
 }
 
 function SoldOutBody({ soldOut }: { soldOut: SoldOut }) {
-  const period = `Last ${soldOut.period.days} days, ${day(soldOut.period.since)} to ${day(soldOut.period.through)}`;
+  const period = (
+    <>
+      Last {soldOut.period.days} days, <When iso={soldOut.period.since} date /> to{" "}
+      <When iso={soldOut.period.through} date />
+    </>
+  );
 
   return (
     <>
@@ -74,9 +77,15 @@ function SoldOutBody({ soldOut }: { soldOut: SoldOut }) {
                 : "Nothing is collected for this shop"}
             </CardTitle>
             <CardDescription>
-              {soldOut.agreement
-                ? `${period}. This screen also stays empty while product views are switched off in your shop's own settings — that switch is yours, and it cannot be seen from here.`
-                : "No data-processing agreement is on record for this shop, so nothing about your shoppers' visits is stored. Until one is recorded, this screen stays empty."}
+              {soldOut.agreement ? (
+                <>
+                  {period}. This screen also stays empty while product views are switched off in
+                  your shop&apos;s own settings — that switch is yours, and it cannot be seen from
+                  here.
+                </>
+              ) : (
+                "No data-processing agreement is on record for this shop, so nothing about your shoppers' visits is stored. Until one is recorded, this screen stays empty."
+              )}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -148,7 +157,7 @@ function Row({ product }: { product: SoldOutProduct }) {
           )}
           <p className="text-xs text-muted-foreground">
             {product.title ? `#${product.product_id} · ` : "Not in the synced catalogue yet · "}
-            last viewed {day(product.last_viewed_at)}
+            last viewed <When iso={product.last_viewed_at} date />
           </p>
         </div>
       </div>
@@ -164,9 +173,4 @@ function Row({ product }: { product: SoldOutProduct }) {
       </dl>
     </li>
   );
-}
-
-/** `2026-09-27T06:26:27+00:00` → `2026-09-27`. The date is what a merchant plans with. */
-function day(iso: string): string {
-  return iso.slice(0, 10);
 }

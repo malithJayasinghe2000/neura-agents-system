@@ -23,7 +23,6 @@
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ShopNav } from "@/components/shop/shop-nav";
 import { ScorecardStrip } from "@/components/review/scorecard-strip";
 import { TurnCard } from "@/components/review/turn-card";
 import { fromApi, hasSession } from "@/lib/server-api";
@@ -77,12 +76,10 @@ export default async function ReviewPage({
 
   return (
     <>
-      <ShopNav tenantId={tenantId} current="review" />
-
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
         <p className="text-muted-foreground">
-          Replies your assistant drafted while in shadow mode. Nobody was shown any of them. Your
+          Replies your assistant drafted while in practice mode. Nobody was shown any of them. Your
           verdicts are what decide whether it is safe to go live.
         </p>
       </div>
@@ -194,14 +191,14 @@ function EmptyQueue({ recorded, filtered }: { recorded: number; filtered: boolea
       <CardHeader>
         <CardTitle className="text-base">Nothing to review yet</CardTitle>
         <CardDescription>
-          This queue fills up while your assistant runs in <strong>shadow mode</strong>: it answers
-          real questions in full, nobody is shown the answer, and the draft lands here for you to
-          judge.
+          This queue fills up while your assistant runs in <strong>practice mode</strong>: it
+          answers real questions in full, nobody is shown the answer, and the draft lands here for
+          you to judge.
         </CardDescription>
       </CardHeader>
       <CardContent className="text-sm text-muted-foreground">
-        If it stays empty, shadow mode is probably off for this shop — an assistant that is already
-        live has nothing to withhold, so there is nothing to grade.
+        If it stays empty, practice mode is probably off for this shop — an assistant that is
+        already live has nothing to withhold, so there is nothing to grade.
       </CardContent>
     </Card>
   );

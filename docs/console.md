@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — and a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — both **built 2026-09-27** — `make console-check` — 43 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) — `make console-check` — 59 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -26,7 +26,8 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ **built 2026-08-27** |
 | 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
 | 4 | **Shop** | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4** |
-| 5 | **Usage** | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
+| 5 | **Usage** (on screen: *Usage and cost*) | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
+| — | **Home** — what needs the owner, and how the assistant is set up (§3.0) | nothing of its own — it reads the endpoints of Review, Usage, Shop, Sold out and Suggestions | ✅ **built 2026-09-27** — outside v1's five like the two below it. **Adds a screen and no data**: every figure on it is one another screen already shows, with its period and its server-written caveat |
 | — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name) |
 | — | **Suggestions** — what a basket suggests with each product, and the owner's way to change it ([ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md)) | `synced_entities`, `sell_pairings`, `sell_pairing_choices` | ✅ **built 2026-09-27** — the **second screen that writes** (after grading). Served by SELL's own routes under `/v1/sell/console/…`, so the SELL entitlement is checked inside the agent; a shop without SELL is told so. Reads the **synced** catalogue: a product the shop added since the last sync is not listed until a sync runs |
 | 6 | Security | `audit_log` | v1.1 — closes **S5** |
@@ -38,6 +39,37 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 ---
 
 ## 3. The screens
+
+### 3.0 The frame, the Home screen and the words — 2026-09-27
+
+**Asked for by the owner from screenshots, designed as a mockup on real data, approved, then built.** The owner's
+brief: *a shop owner is not always technical.*
+
+**The frame.** A side menu replaced the row of tabs: the shop's **name** (from `/me`, which now returns it — read in
+each held shop's own tenant session, never another's) with *Switch shop*, the everyday screens (Home, Review with a
+count of replies waiting, Conversations, Suggestions, Sold out), then *Setup* (Shop connection, Usage and cost), and
+*Sign out*. On a phone it folds into one menu button. The shop id is shown once, small, on Shop connection — *"if
+support asks"*.
+
+**Home** is the landing screen of a shop. Mode first (*Practice mode is on* / *Your assistant is live*), then
+**Needs you** — each item one counted fact said as a sentence with one action, shown only when true (replies waiting
+in Review; conversations handed to a person in the last 7 days; no shop connected) — then **Last 7 days** (three
+counts, the period's dates, and the server's `handed_to_a_person` caveat, chosen **by key**: usage caveats are
+`{key, text}` since this day so a screen can show the one that belongs to its figures without matching words), then
+**Your setup**. The Suggestions card counts only when SELL's page holds every product; otherwise it says no number.
+
+**The words** the owner approved, used everywhere a merchant reads them:
+
+| was | now |
+|:--|:--|
+| Withheld (shadow mode) · shadow mode | **Held for your review** · **practice mode** (glossary: same thing as shadow mode) |
+| `care` / `sell` | **Customer care** / **Shopping help** (`lib/assistants.ts`; an unknown key shows as itself) |
+| 1 turn | **1 question** |
+| `web` | not shown while it is the only channel |
+| Shop · Usage | **Shop connection** · **Usage and cost** |
+| `9/24/2026, 9:09:29 PM` (server's zone) | **Today, 9:09 PM** / **Sep 24, 9:09 PM** in the owner's own zone (`<When>`) |
+
+**Colour and type did not change**, on purpose — §8 still leaves branding undecided.
 
 ### 3.1 Sign in
 
@@ -95,6 +127,8 @@ approved this?"* with something nobody could type in.
 ### 3.3 Conversations
 
 Transcript list, filter by escalated / blocked / declined. Read-only.
+
+**Since 2026-09-27** each row leads with the shopper's **first question** (one line, as stored — tokens included and explained under the list), the list is searchable by **what shoppers wrote** (`?q=`, never the assistant's words; `%` and `_` are searched for, not interpreted) and narrowed by **assistant** (`?agent=` — a key the API matches as data and cannot refuse, so an unknown one matches nothing), and it says *"Showing 26–50 of 55"* with *Newer* and *Older*. Paging is still a keyset cursor (api-design.md §5): the position is **counted** for the words and never used to fetch, and the *Newer* cursor is computed by the server.
 
 **PII is shown to the merchant unredacted, and this is a decision rather than an oversight** — they are the data controller for their own customers, and a support conversation with the addresses starred out is useless for the purpose they need it for. The redaction that matters is on what reaches the *model* (`PiiVault`, per-turn, never persisted), and that is unchanged.
 
@@ -293,7 +327,7 @@ once been true of the route somebody added last. So clauses 1, 2, 4 and 6 are re
 — each against real PostgreSQL with **two populated tenants** — and `test_console_auth.py` owns
 3 and 5.
 
-`make console-check` then re-asserts them **in real headless Chrome**, 33 times, because every
+`make console-check` then re-asserts them **in real headless Chrome** — 59 checks since 2026-09-27 — because every
 rule this console has is a claim about what a *rendered page* contains. A server that offered
 safe material and a screen that displayed it are not the same thing, and only one of them is the
 product: a page can fetch a payload with no credential in it and still print `$0.00` under the

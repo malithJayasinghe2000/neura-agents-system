@@ -247,7 +247,7 @@ class TestTheUsageScreenInventsNothing:
         assert usage_of(client, shop)["totals"]["cost"]["measured"] is False
 
     def test_the_zero_cost_carries_a_sentence_explaining_it(self, client: TestClient, shop) -> None:
-        caveats = " ".join(usage_of(client, shop)["caveats"])
+        caveats = " ".join(c["text"] for c in usage_of(client, shop)["caveats"])
         assert "own hardware" in caveats and "no price" in caveats
 
     def test_the_escalation_count_arrives_with_its_denominator(
@@ -256,7 +256,7 @@ class TestTheUsageScreenInventsNothing:
         usage = usage_of(client, shop)
         assert usage["totals"]["conversations"] == 3
         assert usage["totals"]["escalations"] == 1
-        assert "of 3 conversations" in " ".join(usage["caveats"])
+        assert "of 3 conversations" in " ".join(c["text"] for c in usage["caveats"])
 
     def test_the_caveat_refuses_the_word_it_would_be_mistaken_for(
         self, client: TestClient, shop
@@ -264,7 +264,9 @@ class TestTheUsageScreenInventsNothing:
         """The count is stated *and* disclaimed in the same sentence, because a
         merchant reading "1 of 3 escalated" will otherwise do the division
         themselves and call the answer a deflection rate."""
-        assert "not a deflection rate" in " ".join(usage_of(client, shop)["caveats"])
+        assert "not a deflection rate" in " ".join(
+            c["text"] for c in usage_of(client, shop)["caveats"]
+        )
 
     def test_every_total_names_its_period(self, client: TestClient, shop) -> None:
         """ "142 turns" says nothing without "since when"."""
@@ -315,7 +317,7 @@ class TestShadowModeIsStatedNotImplied:
         rather than `shadow` — and an unknown mode must not claim either."""
         usage = usage_of(client, shop)
         assert usage["withheld"] is False
-        assert not any("shadow mode" in caveat for caveat in usage["caveats"])
+        assert not any(caveat["key"] == "practice_mode" for caveat in usage["caveats"])
 
     async def test_a_shadow_shop_says_so_before_any_figure(
         self, client: TestClient, db: Database, shop
@@ -337,8 +339,9 @@ class TestShadowModeIsStatedNotImplied:
             assert usage["mode"] == "shadow"
             assert usage["withheld"] is True
             # First in the list, so a screen rendering them in order leads with it.
-            assert "shadow mode" in usage["caveats"][0]
-            assert "no shopper was shown any of it" in usage["caveats"][0]
+            assert usage["caveats"][0]["key"] == "practice_mode"
+            assert "practice mode" in usage["caveats"][0]["text"]
+            assert "no shopper was shown any of it" in usage["caveats"][0]["text"]
         finally:
             from sqlalchemy import delete
 
