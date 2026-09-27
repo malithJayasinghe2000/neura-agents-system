@@ -39,7 +39,7 @@ This is the structural fact that shapes every other section, so it is stated fir
 | 1 | **Recommendation** | a shopper, in the widget | ✅ | yes | the graph in §2 |
 | 2 | **MCP server** | *someone else's* AI agent | ❌ | **no** | the policy engine, §6 |
 | 3 | **Product feed** | crawlers, answer engines | ❌ | no | the renderer, §7 |
-| 4 | **Paired suggestion** | a page in the merchant's own theme | ❌ | **yes — but never on the request path** | `sell:suggest:read`, [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) + [ADR-0045](../architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) |
+| 4 | **Paired suggestion** | a page in the merchant's own theme | ❌ | **yes — but never on the request path** | `sell:suggest:read`, [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) + [ADR-0045](../architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md). **The shop owner may choose a product's suggestions in the console, and that choice wins** — [ADR-0050](../architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md), which is also how upsell happens |
 
 Only surface 1 is an *Agent* as [the glossary](../glossary.md) defines one. Surfaces 2 and 3 have no nodes, no prompts and no LLM call of ours anywhere in them. The manifest and the entitlement gate all of them, which is what makes them one sellable product — but calling four surfaces "a graph" would be the kind of tidy fiction this repository exists to avoid.
 

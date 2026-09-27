@@ -65,6 +65,9 @@ agents/                     PRODUCTS — one folder per sellable agent
                             recovery list (ADR-0043) is accepted, NOT built
                             and NOT scheduled. Ask before starting it.
                             Build within that scope, not beyond it.
+                            The shop owner may choose any product's paired
+                            suggestions in the console, and that choice wins
+                            (ADR-0050) — it is also how upsell happens.
                             ONE of them has a model in it (ADR-0045):
                             the paired suggestion computes what KINDS go with
                             a product, in the background, on the job queue.
@@ -120,10 +123,10 @@ make pairs-check LIVE=1 URL=… SHOP=… TOKEN=…   # …and the half a stub ca
                     # page is on a DIFFERENT ORIGIN from the API, as a merchant's page
                     # always is, so the per-key CORS decision and the key's origin lock
                     # are exercised for real
-make console-check EMAIL=…   # ALL SIX console screens in REAL headless Chrome: sign in
+make console-check EMAIL=…   # ALL SEVEN console screens in REAL headless Chrome: sign in
                              # through a real link, read the evidence, grade a withheld turn,
                              # open a transcript, and check no credential or invented number
-                             # reaches a page. 39 checks. No models, no cost — __Host-,
+                             # reaches a page. 43 checks. No models, no cost — __Host-,
                              # HttpOnly and "did the screen actually render it" are browser
                              # facts and nothing else can assert them (docs/console.md §6).
                              # It seeds its own rows and removes exactly those
