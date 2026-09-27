@@ -223,6 +223,53 @@ Deliver at least once; we are idempotent. Duplicates are safe, silence is not.
 
 ---
 
+## 6a. Shopper events (optional — off unless the shop turns it on)
+
+A shop may tell us that a shopper viewed a product or added one to the basket
+([ADR-0044](../architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md),
+[ADR-0048](../architecture/adr/0048-observation-phase-1-what-the-build-decided.md)).
+**Your server sends it, after the page is served. Nothing of ours runs in the
+shopper's browser.** Put the on/off switch in your own configuration, default it
+to **off**, and check it *before* you queue anything: off means nothing exists to
+send, not that we discard what arrives.
+
+```http
+POST {neura_base_url}/v1/observe/events
+Authorization: Bearer fn_sk_...          (a secret key with scope observe:write)
+Content-Type: application/json
+
+{"event_id": "01J8ZQ7Y3W5K2M9N4P6R8T0V1X",
+ "session_id": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+ "type": "product.viewed",
+ "product_id": "1315",
+ "occurred_at": "2026-09-26T16:30:56+00:00",
+ "in_stock": false}
+```
+
+| field | rule |
+|:--|:--|
+| `event_id` | 16–64 chars, `[A-Za-z0-9_-]`. Yours, unique per event — a retry with the same id is one row |
+| `session_id` | 16–128 chars, same alphabet. **A keyed hash of your session id, never the session cookie** — the raw id is a live credential |
+| `type` | `product.viewed` or `cart.added` (send `cart.added` only when the add succeeded) |
+| `product_id` | the id your product endpoints report |
+| `occurred_at` | with a timezone; not in the future, not older than 7 days |
+| `in_stock` | **required on `product.viewed`, not sent on `cart.added`.** Could the product be bought *at that moment* — at least one variant in stock. Read it fresh, not from a cached page ([ADR-0049](../architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) |
+
+**Send nothing else.** An IP address, a user agent, an email or any other field
+is refused with a `400` that names it. `403 DPA_REQUIRED` means no
+data-processing agreement is on record for your shop — do not retry it; no key
+can be issued without one in the first place. A `4xx` is permanent, a `5xx` or a
+timeout is worth a few retries, and a failed payload should not be kept forever
+on your side either.
+
+**If your shop has a full-page cache, count cache hits.** A cached product page
+is served without being rendered, so a hook on rendering sees only the first
+visit — and loses most views of exactly the pages visited most. The reference
+bridge tags the cached copy with the product id and counts each time it is
+served.
+
+---
+
 ## 7. Conformance
 
 ```console

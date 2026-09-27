@@ -199,14 +199,15 @@ In the `guard` node, before anything reaches a model — critical when `REASONER
 
 ### 6.2 Retention and deletion
 
-| Data | Default retention | Notes |
-|:--|:--|:--|
-| Conversation transcripts | 90 days | Tenant-configurable |
-| Redaction token maps | Session + 24h | Never persisted long-term |
-| Audit log | 2 years | Append-only; compliance evidence |
-| Synced commerce data | While the tenant is active | Purged on offboarding |
-| Vector chunks | Until re-sync | Deleted with the source |
-| LLM traces (Langfuse) | 30 days | PII-redacted before storage |
+| Data | Default retention | Enforced? | Notes |
+|:--|:--|:--|:--|
+| Conversation transcripts | 90 days | ✅ **since 2026-09-26** — `retention.sweep`, daily ([ADR-0048](adr/0048-observation-phase-1-what-the-build-decided.md) §4) | Messages and checkpointed state go with the row. Platform-wide today; per-tenant is not built. `shadow_turns` are kept |
+| Observed shopper events | 7 days | ✅ **since 2026-09-26**, same job | All of a tenant's go at once if its data-processing agreement is withdrawn ([ADR-0044](adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)) |
+| Redaction token maps | Session + 24h | ✅ by construction (§6.1) | Never persisted long-term |
+| Audit log | 2 years | ❌ **not enforced** ([ADR-0048](adr/0048-observation-phase-1-what-the-build-decided.md) §5) | Append-only; compliance evidence. The app role cannot delete from it, and pruning a hash chain needs its own ADR |
+| Synced commerce data | While the tenant is active | not checked when this column was added | Purged on offboarding |
+| Vector chunks | Until re-sync | not checked when this column was added | Deleted with the source |
+| LLM traces (Langfuse) | 30 days | ❌ **not ours to enforce** | We hold none: OTel goes to an outside collector and Langfuse is off. That system's setting |
 
 **Deletion must propagate**, and this is where naive implementations fail: a DSAR that clears Postgres but leaves the customer's data embedded in a pgvector chunk, a Redis session, or an observability trace has not deleted anything. Deletion is implemented as a fan-out across all six stores above, and it is tested.
 

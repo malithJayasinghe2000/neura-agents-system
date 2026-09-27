@@ -179,6 +179,21 @@ order, and the signature will not match.
 
 ---
 
+## 7a. Shopper events (optional, off by default)
+
+If the merchant turns it on, your server can tell us when a shopper views a
+product or adds one to the basket. The shape is in
+[the spec, §6a](spec/generic-commerce-interface-v1.md#6a-shopper-events-optional--off-unless-the-shop-turns-it-on).
+Three rules matter more than the shape:
+
+1. **Off by default, and off means you queue nothing.** Check the switch before
+   the event exists, not after.
+2. **From your server, never from the browser.** A browser key is refused even
+   if it holds the scope.
+3. **Hash the session id with a key only you hold.** Never send the cookie.
+
+---
+
 ## 8. Then: the widget
 
 Once §5 is clean and the merchant's account is connected, the site gets two lines:

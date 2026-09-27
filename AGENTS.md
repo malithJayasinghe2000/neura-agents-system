@@ -144,6 +144,11 @@ make judge-check [ROLE_MAP=cloud-prod]   # is the judge reachable, does it catch
 make migrate        # alembic upgrade head
 make tenant-new NAME="Acme Store" AGENTS=care   # create a tenant
 make key-new TENANT=tn_… SCOPES=care:chat:write # issue a key — printed ONCE
+make tenant-dpa TENANT=tn_… [WITHDRAW=1]        # record a data-processing agreement (ADR-0042 §2).
+                    # An observe:write key cannot be issued without one. WITHDRAW=1
+                    # clears it AND deletes the tenant's observed events, same transaction
+make retention-sweep TENANT=tn_…                # the daily deletion pass (ADR-0048), run now:
+                    # observed events past 7 days, conversations untouched for 90
 make tenant-show TENANT=tn_…                    # tenant, keys, usage
 make tenant-usage TENANT=tn_…                  # what a tenant actually spent today
 make webhook-drain TENANT=tn_…                 # send queued webhooks now (open question P7)
@@ -337,6 +342,8 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | An API key that exists authenticates as nobody | The lookup runs on `Database.credential_session`, not `tenant_session` — the tenant is not known yet. Any other session sees no `api_keys` row at all ([ADR-0014](docs/architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
 | A tenant's agent suddenly calls no tools | It is over its **hard** daily budget, so its tool allowlist is empty and every turn escalates. By design — check `make tenant-usage TENANT=…`, not the graph |
 | A `fn_pk_` key is refused from the merchant's own site | A public key with an empty origin allowlist permits *nothing*. Issue it with `PUBLIC=1 ORIGINS=https://…` |
+| `make key-new SCOPES=observe:write` is refused | No data-processing agreement on record (`make tenant-dpa TENANT=…` first), or `PUBLIC=1` — a browser key may never send shopper events ([ADR-0048](docs/architecture/adr/0048-observation-phase-1-what-the-build-decided.md) §1–2) |
+| The shop is switched on and no product views arrive | A full-page cache serves the page without rendering it, so a render hook never fires. The Bagisto bridge counts cache hits through `ProductViewMarker`; a new bridge must too. Also check a queue worker is listening on `NEURA_OBSERVE_QUEUE` |
 | A key was issued and the token is gone | There is no command to show it again — only the hash is stored. Issue a new one and revoke the old |
 | New agent not mounted at startup | Missing `[project.entry-points."neura.agents"]`, or not installed in the workspace |
 | `GraphContractError: guard is reachable but the entry node is …` | A guard that runs after routing has already shown the raw message to a model. Make `guard` the entry, or do not route to it |
