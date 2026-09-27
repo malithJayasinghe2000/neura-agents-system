@@ -19,7 +19,16 @@ import { useSyncExternalStore } from "react";
 
 const noChange = () => () => {};
 
-export function When({ iso, date = false }: { iso: string | null; date?: boolean }) {
+export function When({
+  iso,
+  date = false,
+  time = false,
+}: {
+  iso: string | null;
+  date?: boolean;
+  /** The time alone — for a list that already says the day in a heading. */
+  time?: boolean;
+}) {
   const inBrowser = useSyncExternalStore(
     noChange,
     () => true,
@@ -32,7 +41,11 @@ export function When({ iso, date = false }: { iso: string | null; date?: boolean
 
   return (
     <time dateTime={iso} title={inBrowser ? moment.toLocaleString(undefined, FULL) : undefined}>
-      {inBrowser ? readable(moment, date) : iso.slice(0, 10)}
+      {inBrowser
+        ? time
+          ? moment.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+          : readable(moment, date)
+        : iso.slice(0, 10)}
     </time>
   );
 }

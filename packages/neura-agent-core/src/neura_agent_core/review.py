@@ -190,6 +190,7 @@ class ReviewQueue:
         graded: bool | None = None,
         before: tuple[datetime, str] | None = None,
         limit: int = 20,
+        **filters: Any,
     ) -> list[ReviewItem]:
         """One page of the queue, newest first, each turn with its evidence.
 
@@ -197,10 +198,18 @@ class ReviewQueue:
         to answer is in here beside a turn it answered confidently, because those
         are the interesting ones and a queue that hid them would be the
         merchant-facing version of the empty bubble ADR-0020 was written about.
-        ``graded`` filters on whether a *human* has looked, which is the only
-        axis a reviewer works along.
+        ``graded`` filters on whether a *human* has looked, which is the axis a
+        reviewer works along.
+
+        **Since 2026-09-27 the reader may also narrow it** (``filters``, passed
+        to :meth:`ShadowRepository.pending`): by what the turn would have done,
+        by verdict, by assistant and by date. That is not the state filter this
+        docstring refuses — nothing is hidden *by default*, the screen opens on
+        every waiting turn, and a narrowed view says so and how to clear it.
         """
-        turns = await self._shadow.pending(tenant_id, graded=graded, before=before, limit=limit)
+        turns = await self._shadow.pending(
+            tenant_id, graded=graded, before=before, limit=limit, **filters
+        )
         if not turns:
             return []
 

@@ -99,23 +99,77 @@ export type Scorecard = {
   total_latency_ms: number;
 };
 
+/**
+ * The three buttons, in the words the owner approved on 2026-09-27. The values
+ * behind them are unchanged — agree · disagree · would-have-harmed
+ * (agent-runtime.md §6) — only what a shop owner reads changed.
+ */
 export const VERDICT_LABELS: Record<Verdict, string> = {
-  agree: "I'd have sent this",
-  disagree: "Wrong or unhelpful",
-  would_have_harmed: "This would have caused harm",
+  agree: "Good — I'd send this",
+  disagree: "Not good",
+  would_have_harmed: "Harmful",
+};
+
+/** The same verdicts as a badge in the graded list. */
+export const VERDICT_BADGES: Record<Verdict, string> = {
+  agree: "Good",
+  disagree: "Not good",
+  would_have_harmed: "Harmful",
 };
 
 /**
- * What each verdict means, in the merchant's terms.
- *
- * Written out on the screen rather than assumed, because the difference between
- * the second and the third is the whole reason there are three. A merchant who
- * files a harmful answer under "wrong" has deleted the only signal that blocks
- * a go-live.
+ * Said under the buttons. *Harmful* is kept separate from *Not good* because
+ * one harmful reply is a reason not to go live, not a point off a percentage
+ * (shadow.py).
  */
-export const VERDICT_HELP: Record<Verdict, string> = {
-  agree: "You'd be happy for a shopper to receive this exactly as written.",
-  disagree: "Off-key, unhelpful or simply wrong — but nobody would have been hurt by it.",
-  would_have_harmed:
-    "A wrong order status, an invented refund, a policy stated more generously than yours. Kept separate because one of these is a reason not to go live, not a percentage.",
+export const HARMFUL_MEANS =
+  "Harmful means it could have misled a shopper — a wrong order status, an invented refund, a policy more generous than yours.";
+
+/**
+ * What the turn would have done — the same words, and the same `state` values,
+ * as the Conversations screen. A polite "that's outside what I can help with"
+ * is an answer there and an answer here: telling it apart would need the API
+ * to know each assistant's own labels, which it must not.
+ */
+export const OUTCOME_LABELS: Record<string, string> = {
+  resolved: "Answered",
+  awaiting_customer: "Waiting for the shopper",
+  escalated: "Would have handed to a person",
+  blocked: "Blocked as an attack",
 };
+
+export const OUTCOME_FILTERS: { key: string; label: string }[] = [
+  { key: "", label: "All" },
+  { key: "resolved", label: "Answered" },
+  { key: "escalated", label: "Handed to a person" },
+  { key: "blocked", label: "Blocked as an attack" },
+];
+
+export const VERDICT_FILTERS: { key: string; label: string }[] = [
+  { key: "", label: "All" },
+  { key: "agree", label: "Good" },
+  { key: "disagree", label: "Not good" },
+  { key: "would_have_harmed", label: "Harmful" },
+];
+
+/** How many turns match, split two ways. Counts only — never a rate. */
+export type ReviewCounts = {
+  total: number;
+  by_state: Record<string, number>;
+  by_verdict: Partial<Record<Verdict, number>>;
+};
+
+/**
+ * A lookup's name in plain words: `get_order_status` → "order status".
+ * Mechanical on purpose — a list of friendly names would go stale the day an
+ * assistant gains a tool, and a stale name is worse than a literal one.
+ */
+export function lookupWords(tool: string): string {
+  return tool.replace(/^(get|search|find|list|lookup)_/, "").replaceAll("_", " ");
+}
+
+/** What a cited document is, said the way a shop owner would. */
+export function documentKind(type: string): string {
+  const known: Record<string, string> = { product: "Product", policy: "Policy", page: "Page" };
+  return known[type] ?? type.charAt(0).toUpperCase() + type.slice(1);
+}

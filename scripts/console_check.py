@@ -315,63 +315,112 @@ async def _check_review(
     evidence and never rendered it would satisfy every pytest assertion in
     `tests/integration/test_console_review.py` and still be the wrong screen.
     """
-    await browser.goto(f"{console}/console/{seeded['tenant']}/review")
+    review = f"{console}/console/{seeded['tenant']}/review"
+    await browser.goto(review)
     await asyncio.sleep(3)
-
     page = await browser.evaluate("document.body.innerText")
 
     _check("the queue lists what the agent drafted", SEEDED_QUESTION in page, failures)
 
-    # Rule 1. A grader who cannot see what the agent worked from is grading
-    # fluency (open question E7).
-    _check("the evidence is on the page, not behind a click", SEEDED_POLICY in page, failures)
+    # Rule 2, half one: the screen says, before anything else, that no shopper
+    # saw any of it. Said once, at the top, since the 2026-09-27 redesign.
+    _check("a withheld turn says so", "No shopper saw any of these replies" in page, failures)
 
-    # Rule 2, half one: every row says the shopper never saw it.
-    _check("a withheld turn says so", "Withheld" in page, failures)
+    # Rule 4 on the queue: counts only. An unreviewed queue is not a queue that
+    # failed review, so there is no percentage, and the graded tab says plainly
+    # that nothing has been graded.
+    _check("no unmeasured cost is printed as a figure", "$0" not in page, failures)
+    await browser.goto(f"{review}?show=graded")
+    await asyncio.sleep(3)
+    nothing_graded = await browser.evaluate("document.body.innerText")
+    _check(
+        "an ungraded queue reports no agreement figure",
+        "%" not in page and "%" not in nothing_graded and "graded yet" in nothing_graded,
+        failures,
+    )
+
+    # Rule 1. A grader who cannot see what the agent worked from is grading
+    # fluency (E7) — so the evidence is on the page *with the buttons*, in the
+    # reply that is open, not behind another click.
+    await browser.goto(f"{review}?turn={seeded['answered']}")
+    await asyncio.sleep(3)
+    opened = await browser.evaluate("document.body.innerText")
+    _check(
+        "the evidence is on the page, not behind a click",
+        SEEDED_POLICY in opened and "send this" in opened,
+        failures,
+    )
+    _check("no API key reached the review screen", "fn_sk_" not in opened, failures)
 
     # Rule 2, half two, and the one a hurried build breaks: the turn the agent
     # *declined* is in the queue and explains itself instead of rendering an
-    # empty card (ADR-0020).
+    # empty box (ADR-0020).
+    await browser.goto(f"{review}?turn={seeded['declined']}")
+    await asyncio.sleep(3)
+    declined = await browser.evaluate("document.body.innerText")
     _check(
         "the turn the agent declined is in the queue and explains itself",
-        "handed this to a person" in page,
+        "handed this to a person" in declined,
         failures,
     )
 
-    # Rule 4. Cost is zero for a local model *and* for an unpriced cloud model,
-    # so "$0.00" on this screen would be a measurement in one case and a gap in
-    # the other (CLAUDE.md §4).
-    _check("no unmeasured cost is printed as a figure", "$0" not in page, failures)
-
-    # Rule 4 again, on the scorecard: an unreviewed queue is not a queue that
-    # failed review, so there is no percentage until somebody has graded.
+    # The filters narrow, say that they narrow, and match nothing honestly.
+    await browser.goto(f"{review}?state=escalated")
+    await asyncio.sleep(3)
+    narrowed = await browser.evaluate("document.body.innerText")
     _check(
-        "an ungraded queue reports no agreement figure",
-        "%" not in page and "graded yet" in page,
+        "a filtered queue says it is filtered and how to clear it",
+        "Showing 1 of" in narrowed and "Show all" in narrowed,
         failures,
     )
-
-    _check("no API key reached the review screen", "fn_sk_" not in page, failures)
+    await browser.goto(f"{review}?asked=today")
+    await asyncio.sleep(3)
+    _check(
+        "a date filter finds today's replies in the reader's own day",
+        SEEDED_QUESTION in await browser.evaluate("document.body.innerText"),
+        failures,
+    )
+    await browser.goto(f"{review}?asked=custom&from=2020-01-01&to=2020-01-02")
+    await asyncio.sleep(3)
+    _check(
+        "a date filter with nothing in it says so",
+        "No waiting reply matches" in await browser.evaluate("document.body.innerText"),
+        failures,
+    )
 
     # And the write path, through the real button rather than through fetch:
     # a screen whose grade does not persist is a screen that produces no
     # graded turns, which is the entire reason this one was built first (E1).
+    await browser.goto(f"{review}?turn={seeded['answered']}")
+    await asyncio.sleep(3)
     clicked = await browser.evaluate(_CLICK_VERDICT)
     _check("the queue offers a verdict to click", bool(clicked), failures)
 
     if clicked:
-        await asyncio.sleep(3)
-        await browser.goto(f"{console}/console/{seeded['tenant']}/review?show=graded")
+        await asyncio.sleep(4)
+        # Good opens the next waiting reply by itself — the inbox's whole point.
+        _check(
+            "grading a reply opens the next one",
+            seeded["declined"] in await browser.evaluate("window.location.search"),
+            failures,
+        )
+        # And the count in the side menu follows at once, rather than reading
+        # two until somebody reloads (a layout is not re-rendered on its own).
+        badge = await browser.evaluate(
+            "document.querySelector('#shop-menu a[href$=\"/review\"]')?.textContent || ''"
+        )
+        _check("the side menu's count goes down with it", "1 waiting" in badge, failures)
+        await browser.goto(f"{review}?show=graded")
         await asyncio.sleep(3)
         after = await browser.evaluate("document.body.innerText")
         _check(
             "a verdict given in the browser is still there after a reload",
-            "Graded" in after and SEEDED_QUESTION in after,
+            "Good" in after and SEEDED_QUESTION in after,
             failures,
         )
 
 
-#: Click the first "I'd have sent this" button on the page.
+#: Click the first "Good — I'd send this" button on the page.
 #:
 #: By its text, because that text is what a merchant reads — a `data-testid`
 #: would let the label change to something wrong while this stayed green. The
@@ -380,7 +429,7 @@ async def _check_review(
 _CLICK_VERDICT = """
 (() => {
   const button = [...document.querySelectorAll('button')]
-    .find((b) => /have sent this/i.test(b.textContent || ''));
+    .find((b) => /send this/i.test(b.textContent || ''));
   if (!button) return false;
   button.click();
   return true;

@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) — `make console-check` — 59 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2) — `make console-check` — 64 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -84,6 +84,45 @@ A queue of turns the agent drafted while in shadow mode: the shopper's question,
 * **Show the evidence, not just the reply.** A grader who cannot see what the agent was working from is grading fluency. This is `--out`/**E7** restated as a screen: a draft is only judgeable against what it was allowed to rely on.
 * **A withheld turn must look withheld.** 1.16 found that a shopper shown an empty panel is a bug report within a day ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)); the merchant-facing version of the same mistake is a grading queue that silently omits the turns the agent declined to answer. Those are the interesting ones.
 * **Do not add sampling.** **A4** is unanswered, and a sampling rate chosen before anyone has graded for an hour is a rate invented to fit an imaginary constraint.
+
+#### Redesigned 2026-09-27 — an inbox and a table, from the owner's approved mockup
+
+The owner found the card-per-turn page messy: every card fully expanded, our words (`get_order_status`,
+`order_status`, *"took 14874 ms"*, a prompt hash) at the same weight as the reply, and graded turns mixed
+into the queue. Now two tabs, because grading and looking back are different jobs:
+
+| tab | layout | what it does |
+|:--|:--|:--|
+| **To review** (default) | **inbox** — waiting replies on the left, grouped **by day** in the reader's own zone and **by chat** within a day (*"2 replies in one chat"*); one reply open on the right | question · *Earlier in this chat* · **What it looked at** (the documents' own words, the lookups by name) · the reply · *Fact check* · three buttons · *Details* (time, model calls, cost, type, prompt) folded away. **Good** saves and opens the next reply; **Not good** / **Harmful** save at once, then ask *what was wrong?* On a phone: the list, then one reply at a time with the buttons fixed at the bottom |
+| **Already graded** | **table** — question · assistant · grade · note · asked · graded by · graded | opens a reply again to change its grade |
+
+**Filters on both**, all in the URL: outcome (*All · Answered · Handed to a person · Blocked as an attack*) or
+grade (*All · Good · Not good · Harmful*), each with its count given the other filters; **Asked** (*Any time ·
+Today · Last 7 days · Last 30 days · Choose dates*) — the day the **shopper asked**, on both tabs, because it
+means one thing everywhere and it is the shopper's day the owner cares about (*day graded* waits for more than one
+grader, i.e. roles); and **Assistant**. A filtered view says *"Showing 2 of 6 waiting · asked Sep 21 – Sep 27"*
+and *Show all*.
+
+**Kept, and how:** the evidence is in the open reply beside the buttons — you cannot grade a reply you have not
+opened, so it is never behind a click at the moment of grading; declined and escalated turns are listed and
+explain themselves; every turn is reachable (the list pages, every filter clears); counts only — **the agreement
+percentage is no longer shown** (the API still returns it), because *"9 good, 1 not good, 0 harmful"* is the same
+fact with its denominator; *"No shopper saw any of these replies"* is said once, at the top.
+
+**Two decisions made while building it:**
+
+* **"Couldn't help" is not a separate filter.** The mockup had it; the system records a polite *"that's outside
+  what I can help with"* as an ordinary **answered** turn (`state=resolved`), exactly as Conversations shows it,
+  and telling it apart would need `neura-api` to know each assistant's own intent labels, which it may not. The
+  outcome filter is the conversation vocabulary instead.
+* **"Today" is the reader's today.** The browser writes its IANA zone into a `tz` cookie (a preference, not a
+  credential — `TimeZoneCookie`); the page groups by day in that zone and sends `since`/`until` as calendar days
+  **plus `tz`**, and the API turns them into instants with `zoneinfo` and refuses an unknown zone or a reversed
+  window with a 400.
+
+**API, 2026-09-27:** `GET /review` takes `state`, `verdict`, `agent`, `since`, `until`, `tz`;
+`GET /review/counts` returns `{total, by_state, by_verdict}` for the same filters; `GET /review/{id}` opens one
+turn by link (404 for another shop's). One filter definition (`shadow._matching`) serves the page and its counts.
 
 #### Built 2026-08-27, and the four things building it settled
 

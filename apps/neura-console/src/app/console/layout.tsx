@@ -12,6 +12,14 @@
  * stops running — the opposite of ADR-0026 §3's point that access is re-derived
  * per request. Every page below does its own `/me` and its own `acting_for`.
  */
+import { TimeZoneCookie } from "@/components/time-zone-cookie";
+
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-dvh">{children}</div>;
+  return (
+    <div className="min-h-dvh">
+      {/* So a screen that groups or filters by day uses the reader's day. */}
+      <TimeZoneCookie />
+      {children}
+    </div>
+  );
 }
