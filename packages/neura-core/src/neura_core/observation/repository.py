@@ -1,24 +1,37 @@
-"""Writing and deleting observed events, for one tenant.
+"""Writing, counting and deleting observed events, for one tenant.
 
-There is **no read of an event's content here**, on purpose. Phase 1 shows
-nothing (ADR-0044 §9), so nothing needs to select a session id; the only reads
-are *"is there anything left?"* and a count for the operator. The first method
-that returns rows arrives with ADR-0046 stage 1, which is where displaying
-begins.
+**No method here returns a session id, and none may.** The one read that
+returns rows — :meth:`ObservedEventRepository.sold_out_demand`, ADR-0046
+stage 1 — returns *counts* per product. A merchant is told how many sessions
+looked at a sold-out jumper, never which ones: a session token on a screen is
+a tracking identifier handed to a person, and nothing designed needs it.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, distinct, exists, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from neura_core.observation.models import ObservedEvent
+from neura_core.observation.models import ObservedEvent, ObservedEventType
 from neura_core.observation.schema import observed_events
+
+
+@dataclass(frozen=True, slots=True)
+class SoldOutDemand:
+    """How much one product was wanted while it could not be bought."""
+
+    product_id: str
+    views: int
+    #: Distinct session tokens. A session is one browsing visit, **not a
+    #: person** — the screen says so.
+    sessions: int
+    last_viewed_at: datetime
 
 
 class ObservedEventRepository:
@@ -78,6 +91,59 @@ class ObservedEventRepository:
             )
         )
 
+    async def sold_out_demand(
+        self, tenant_id: str, *, since: datetime, limit: int = 100
+    ) -> list[SoldOutDemand]:
+        """Views of products that were sold out **when viewed**, per product.
+
+        ADR-0046 stage 1, on ADR-0049's field. ``in_stock IS NULL`` is *unknown*
+        and is deliberately not counted — a view nobody measured is not evidence
+        that the product was sold out. Ordered by views for the merchant's
+        reading; this order is never shown to, or used for, a shopper (0046 §6).
+        """
+        viewed = observed_events.c
+        rows = (
+            await self._session.execute(
+                select(
+                    viewed.product_id,
+                    func.count().label("views"),
+                    func.count(distinct(viewed.session_id)).label("sessions"),
+                    func.max(viewed.occurred_at).label("last_viewed_at"),
+                )
+                .where(viewed.tenant_id == tenant_id)
+                .where(viewed.event_type == ObservedEventType.PRODUCT_VIEWED.value)
+                .where(viewed.in_stock.is_(False))
+                .where(viewed.occurred_at >= since)
+                .group_by(viewed.product_id)
+                .order_by(func.count().desc(), viewed.product_id)
+                .limit(limit)
+            )
+        ).all()
+        return [
+            SoldOutDemand(
+                product_id=str(row.product_id),
+                views=int(row.views),
+                sessions=int(row.sessions),
+                last_viewed_at=row.last_viewed_at,
+            )
+            for row in rows
+        ]
+
+    async def views_of_unknown_stock(self, tenant_id: str, *, since: datetime) -> int:
+        """Views with no ``in_stock`` value, which the sold-out count leaves out."""
+        viewed = observed_events.c
+        return int(
+            await self._session.scalar(
+                select(func.count())
+                .select_from(observed_events)
+                .where(viewed.tenant_id == tenant_id)
+                .where(viewed.event_type == ObservedEventType.PRODUCT_VIEWED.value)
+                .where(viewed.in_stock.is_(None))
+                .where(viewed.occurred_at >= since)
+            )
+            or 0
+        )
+
     async def count_for(self, tenant_id: str) -> int:
         """How many rows are held. For the operator, never for a screen."""
         return int(
@@ -90,4 +156,4 @@ class ObservedEventRepository:
         )
 
 
-__all__ = ["ObservedEventRepository"]
+__all__ = ["ObservedEventRepository", "SoldOutDemand"]

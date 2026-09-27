@@ -59,9 +59,15 @@ from neura_agent_core.conversations import (
 from neura_agent_core.rag.schema import document_chunks
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn, shadow_turns
 from neura_commerce.pagination import Cursor
-from neura_commerce.sync.schema import sync_checkpoints
+from neura_commerce.sync.schema import sync_checkpoints, synced_entities
 from neura_core import Database, get_settings, ids, load_env
 from neura_core.identity import COOKIE_NAME, memberships_for, request_sign_in_link
+from neura_core.observation import (
+    ObservedEvent,
+    ObservedEventRepository,
+    ObservedEventType,
+    observed_events,
+)
 from neura_core.tenancy.schema import tenant_stores, tenant_usage
 from neura_core.tenancy.usage import UsageDelta, UsageMeter, today
 
@@ -185,6 +191,9 @@ async def main() -> int:
                 print(f"\n  {BOLD}shop and usage — connection, and honest numbers{OFF}")
                 await _check_shop_and_usage(browser, console, seeded, failures)
 
+                print(f"\n  {BOLD}sold out — demand, counted, never who{OFF}")
+                await _check_sold_out(browser, console, seeded, failures)
+
             # 6. The link is single use. Reloading it must not sign anyone in again.
             await browser.goto(minted.url)
             await asyncio.sleep(3)
@@ -245,6 +254,14 @@ SEEDED_SECRET = "CONSOLE-CHECK-SECRET-MUST-NEVER-BE-RETURNED"  # noqa: S105
 #: platform names out of every file outside `neura-adapters`, and a fixture is a
 #: file.
 SEEDED_PLATFORM = "console-check"
+
+#: Screen 6's seeded demand (ADR-0046 stage 1). The session tokens are
+#: recognisable on purpose: the check is that neither ever reaches the page.
+SEEDED_SOLD_OUT_TITLE = "Console-check Sold-out Jumper"
+SEEDED_IN_STOCK_TITLE = "Console-check In-stock Jumper"
+SEEDED_SOLD_OUT_ID = "console-check-sold-out"
+SEEDED_IN_STOCK_ID = "console-check-in-stock"
+SEEDED_SESSIONS = ("consolechecksessionAAAAAAAAAAAAAAAA", "consolechecksessionBBBBBBBBBBBBBBBB")
 
 #: The agent this check bills its seeded usage to.
 #:
@@ -472,6 +489,47 @@ async def _check_shop_and_usage(
     )
 
 
+async def _check_sold_out(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """Screen 6 — ADR-0046 stage 1, against the rendered page.
+
+    The seeded sold-out product must be on it, and three things must not: the
+    product that was in stock when viewed (ADR-0049's whole point), either
+    session token, and any word that turns a session into a person.
+    """
+    await browser.goto(f"{console}/console/{seeded['tenant']}/sold-out")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+
+    _check("the sold-out screen renders", "Wanted while sold out" in page, failures)
+    _check(
+        "a product viewed while sold out is listed by its name",
+        SEEDED_SOLD_OUT_TITLE in page,
+        failures,
+    )
+    _check(
+        "a product that was in stock when viewed is not",
+        SEEDED_IN_STOCK_TITLE not in page,
+        failures,
+    )
+    _check(
+        "no session token reaches the page",
+        not any(token in page for token in SEEDED_SESSIONS),
+        failures,
+    )
+    _check(
+        "it says a session is not a person",
+        "not one person" in page and "customers" not in page.lower(),
+        failures,
+    )
+    _check(
+        "it says a listed product may be back in stock",
+        "back in stock" in page,
+        failures,
+    )
+
+
 async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
     """Two shadowed turns, one real conversation, and one policy to cite.
 
@@ -576,6 +634,32 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
             ),
         )
 
+        # Screen 6 needs demand to count: three views of a product while it was
+        # sold out, from two sessions, and one view of a product in stock that
+        # must NOT be listed. Titles come from the synced catalogue, as they do
+        # for a real shop — under this check's own platform string, so cleanup
+        # can find exactly these rows.
+        events = ObservedEventRepository(session)
+        made["observed"] = ",".join(
+            await _seed_views(events, tenant_id, SEEDED_SOLD_OUT_ID, in_stock=False, count=3)
+            + await _seed_views(events, tenant_id, SEEDED_IN_STOCK_ID, in_stock=True, count=1)
+        )
+        for product, title in (
+            (SEEDED_SOLD_OUT_ID, SEEDED_SOLD_OUT_TITLE),
+            (SEEDED_IN_STOCK_ID, SEEDED_IN_STOCK_TITLE),
+        ):
+            await session.execute(
+                synced_entities.insert().values(
+                    tenant_id=tenant_id,
+                    platform=SEEDED_PLATFORM,
+                    entity_type="product",
+                    external_id=product,
+                    neura_id=ids.new_id(ids.NEURA_ENTITY),
+                    fingerprint="console-check",
+                    document={"title": title},
+                )
+            )
+
         shadow = ShadowRepository(session)
         made["answered"] = await shadow.record(
             ShadowTurn(
@@ -609,6 +693,28 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
     return made
 
 
+async def _seed_views(
+    events: ObservedEventRepository, tenant_id: str, product: str, *, in_stock: bool, count: int
+) -> list[str]:
+    """``count`` views of one product, alternating between the two seeded sessions."""
+    made: list[str] = []
+    for n in range(count):
+        event_id = ids.new_id("obs")
+        await events.record(
+            tenant_id,
+            ObservedEvent(
+                event_id=event_id,
+                session_id=SEEDED_SESSIONS[n % 2],
+                type=ObservedEventType.PRODUCT_VIEWED,
+                product_id=product,
+                occurred_at=datetime.now(UTC),
+                in_stock=in_stock,
+            ),
+        )
+        made.append(event_id)
+    return made
+
+
 async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
     """Remove exactly the rows above, by id.
 
@@ -618,6 +724,18 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
     living inside a test.
     """
     async with db.tenant_session(seeded["tenant"]) as session:
+        # Exactly this run's events, by id — never "this tenant's events", which
+        # on a real shop would delete real shoppers' views.
+        await session.execute(
+            delete(observed_events)
+            .where(observed_events.c.tenant_id == seeded["tenant"])
+            .where(observed_events.c.event_id.in_(seeded["observed"].split(",")))
+        )
+        await session.execute(
+            delete(synced_entities)
+            .where(synced_entities.c.tenant_id == seeded["tenant"])
+            .where(synced_entities.c.platform == SEEDED_PLATFORM)
+        )
         await session.execute(
             delete(shadow_turns).where(
                 shadow_turns.c.id.in_([seeded["answered"], seeded["declined"]])

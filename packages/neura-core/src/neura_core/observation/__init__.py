@@ -13,8 +13,9 @@ What this package does enforce, in code rather than in a prompt:
   tenant with a data-processing agreement recorded (ADR-0042 §2);
 * how long it lives — the retention sweep in ``neura_api.jobs.retention``.
 
-**Nothing is scored and nothing is shown.** Phase 2 is the points table;
-displaying anything is ADR-0046 stage 1.
+**Nothing is scored, and nothing is shown to a shopper.** Phase 2 is the
+points table. The one thing shown is ADR-0046 stage 1's merchant-facing count of
+views of sold-out products — counts only, never a session.
 """
 
 from neura_core.observation.models import (
@@ -24,7 +25,7 @@ from neura_core.observation.models import (
     ObservedEventType,
     inadmissible,
 )
-from neura_core.observation.repository import ObservedEventRepository
+from neura_core.observation.repository import ObservedEventRepository, SoldOutDemand
 from neura_core.observation.schema import OBSERVED_EVENTS, observed_events
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "ObservedEvent",
     "ObservedEventRepository",
     "ObservedEventType",
+    "SoldOutDemand",
     "inadmissible",
     "observed_events",
 ]

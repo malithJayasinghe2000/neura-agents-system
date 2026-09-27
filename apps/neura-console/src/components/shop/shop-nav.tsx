@@ -1,5 +1,5 @@
 /**
- * Moving between one shop's four screens.
+ * Moving between one shop's screens.
  *
  * Built from a single list so the set of screens is stated once. A screen that
  * is designed and not written appears here as **disabled with a reason**, not as
@@ -10,13 +10,15 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-export type ShopScreen = "conversations" | "review" | "shops" | "usage";
+export type ShopScreen = "conversations" | "review" | "shops" | "usage" | "sold-out";
 
 const SCREENS: { key: ShopScreen; label: string; built: boolean }[] = [
   { key: "conversations", label: "Conversations", built: true },
   { key: "review", label: "Review", built: true },
   { key: "shops", label: "Shop", built: true },
   { key: "usage", label: "Usage", built: true },
+  // ADR-0046 stage 1 — views of products that were sold out when viewed.
+  { key: "sold-out", label: "Sold out", built: true },
 ];
 
 export function ShopNav({ tenantId, current }: { tenantId: string; current: ShopScreen }) {

@@ -1,8 +1,9 @@
 """``POST /v1/observe/events`` — a shop's server tells us a shopper did something.
 
 [ADR-0044](../../../../../docs/architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)
-phase 1: **collect, prove the pipe, show nothing.** There is no ``GET`` here and
-no screen anywhere; displaying is ADR-0046 stage 1.
+phase 1: **collect, prove the pipe.** There is no ``GET`` here, and nothing is
+shown to a shopper; the one screen that reads these rows is the merchant's
+sold-out count, ``console_sold_out`` (ADR-0046 stage 1).
 
 **The switch is not in this file.** It lives in the shop and governs *sending*
 (§3): a shop that has not turned observation on never calls this, so there is
