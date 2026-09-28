@@ -371,6 +371,29 @@ def _evidence_for(
     return evidence
 
 
+def no_draft_reason(turn: ShadowTurn) -> str:
+    """Why there is no reply to show, in the merchant's words.
+
+    Said by Review and by the transcript, so one held turn with no draft reads
+    the same on both screens. Ordered by what the reader most needs to know. An
+    escalation is a decision the agent made; a failed ``verify`` is a decision
+    made *about* the agent, and conflating them would hide the one that says the
+    model was wrong.
+    """
+    if turn.escalated:
+        return "The agent handed this to a person instead of answering."
+    if turn.grounded is False:
+        reason = turn.verify_reason.strip()
+        return (
+            f"The draft failed the grounding check and was discarded: {reason}"
+            if reason
+            else "The draft failed the grounding check and was discarded."
+        )
+    if turn.state == "blocked":
+        return "The guard stopped this turn before the agent answered."
+    return f"The agent produced no reply. It recorded the turn as {turn.state!r}."
+
+
 def evidence_payload(item: Evidence) -> dict[str, Any]:
     return {
         "kind": item.kind,
@@ -392,4 +415,5 @@ __all__ = [
     "ReviewItem",
     "ReviewQueue",
     "evidence_payload",
+    "no_draft_reason",
 ]

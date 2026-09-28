@@ -342,6 +342,24 @@ class ShadowRepository:
         )
         return [_from_row(row) for row in rows]
 
+    async def for_conversation(
+        self, tenant_id: str, conversation_id: str, *, limit: int = 200
+    ) -> list[ShadowTurn]:
+        """Every turn held back in one conversation, oldest first, graded or not.
+
+        For the transcript screen, which shows each draft under the question it
+        answered. Graded turns are included because a conversation is read
+        whole: a grade is part of what happened to it, not a reason to hide it.
+        """
+        rows = await self._session.execute(
+            select(shadow_turns)
+            .where(shadow_turns.c.tenant_id == tenant_id)
+            .where(shadow_turns.c.conversation_id == conversation_id)
+            .order_by(shadow_turns.c.created_at, shadow_turns.c.id)
+            .limit(limit)
+        )
+        return [_from_row(row) for row in rows]
+
     async def get(self, tenant_id: str, shadow_id: str) -> ShadowTurn | None:
         row = (
             await self._session.execute(

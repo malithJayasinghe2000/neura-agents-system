@@ -17,8 +17,10 @@ from datetime import UTC, datetime
 import pytest
 
 from neura_agent_core.conversations import Conversation, ConversationState, Message, Role
+from neura_agent_core.shadow import ShadowTurn, ShadowVerdict
 from neura_api.routes.console_conversations import (
     _conversation_payload,
+    _held_payload,
     _message_payload,
     _state,
 )
@@ -127,12 +129,79 @@ class TestTheMessage:
 
     def test_citations_travel_with_the_reply(self) -> None:
         cited = [{"type": "policy", "id": "returns"}]
-        assert _message_payload(message(citations=cited))["citations"] == cited
+        assert _message_payload(message(citations=cited))["citations"] == [
+            {"type": "policy", "id": "returns", "name": None}
+        ]
+
+    def test_a_citation_carries_its_catalogue_name_by_type_and_id(self) -> None:
+        """The pair is the key: a product and a policy can share an id."""
+        cited = [
+            {"type": "policy", "id": "7"},
+            {"type": "product", "id": "7"},
+            {"type": "tool", "id": "search_products"},
+        ]
+        names = {("policy", "7"): "Return Policy"}
+        payload = _message_payload(message(citations=cited), names)["citations"]
+        assert [c["name"] for c in payload] == ["Return Policy", None, None]
 
     def test_a_timestamp_is_iso_or_null_and_never_a_guess(self) -> None:
         when = datetime.now(UTC)
         assert _message_payload(message(created_at=when))["created_at"] == when.isoformat()
         assert _message_payload(message())["created_at"] is None
+
+
+def held(**overrides: object) -> ShadowTurn:
+    fields: dict[str, object] = {
+        "tenant_id": "tn_test",
+        "conversation_id": "cnv_1",
+        "message_id": "msg_question",
+        "agent_key": "care",
+        "mode": "shadow",
+        "state": "resolved",
+        "draft": "Yes — within 30 days.",
+        "id": "msg_draft",
+    }
+    fields.update(overrides)
+    return ShadowTurn(**fields)  # type: ignore[arg-type]
+
+
+class TestAHeldDraftOnTheChatPage:
+    """2026-09-28: the chat page shows each held draft under its question."""
+
+    def test_it_names_the_question_it_answers(self) -> None:
+        payload = _held_payload(held())
+        assert payload["message_id"] == "msg_question"
+        assert payload["id"] == "msg_draft"
+
+    def test_a_draft_needs_no_reason(self) -> None:
+        assert _held_payload(held())["no_draft_reason"] == ""
+
+    def test_no_draft_always_says_why(self) -> None:
+        """ADR-0020: an empty bubble reads as a bug."""
+        assert (
+            "handed this to a person"
+            in _held_payload(held(draft="", escalated=True))["no_draft_reason"]
+        )
+        assert _held_payload(held(draft="  "))["no_draft_reason"]
+
+    def test_ungraded_is_null_and_not_a_verdict(self) -> None:
+        payload = _held_payload(held())
+        assert payload["verdict"] is None
+        assert payload["reviewed_at"] is None
+
+    def test_a_grade_carries_its_verdict_and_who(self) -> None:
+        when = datetime.now(UTC)
+        payload = _held_payload(
+            held(verdict=ShadowVerdict.AGREE, reviewed_by="usr_1", reviewed_at=when)
+        )
+        assert payload["verdict"] == "agree"
+        assert payload["reviewed_by"] == "usr_1"
+        assert payload["reviewed_at"] == when.isoformat()
+
+    def test_the_evidence_and_the_cost_stay_in_review(self) -> None:
+        """Grading happens in Review, beside the evidence (console.md §3.2)."""
+        payload = _held_payload(held())
+        assert not {"evidence", "cost", "verify", "citations"} & payload.keys()
 
 
 class TestTheShopScreenSaysWhatItKnows:

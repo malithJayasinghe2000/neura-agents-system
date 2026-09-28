@@ -259,6 +259,14 @@ SEEDED_POLICY = "Returns are accepted within 30 days of delivery, unworn."
 #: holds what the agent *would* have said; this is what it *did* say.
 SEEDED_REPLY = "Unworn boots can be returned within 30 days of delivery."
 
+#: What the agent *would* have said to SEEDED_QUESTION, held in practice mode.
+#: Since 2026-09-28 the chat page shows it under the question, marked not sent.
+SEEDED_DRAFT = "Yes — unworn boots can be returned within 30 days of delivery."
+
+#: The cited policy's title in the synced catalogue. The chat page names what a
+#: reply looked at by this, never as `policy:console-check-returns`.
+SEEDED_POLICY_TITLE = "Console-check Returns Policy"
+
 #: A message carrying the guard's placeholders. On the screen these must be
 #: **explained** — `[EMAIL_1]` left bare reads to a merchant as lost data.
 SEEDED_TOKENISED = "my email is [EMAIL_1] and my address is [ADDRESS_1] — where is my order?"
@@ -603,6 +611,79 @@ async def _check_conversations(
         failures,
     )
 
+    # 2026-09-28: what a reply looked at, by the name the owner knows it by —
+    # and none of our words (`policy:…`, `order_status`) on the page.
+    _check(
+        "a reply's source is named from the catalogue, not by its id",
+        SEEDED_POLICY_TITLE in thread and "policy:console-check-returns" not in thread,
+        failures,
+    )
+    _check("the question type is not shown", "order_status" not in thread, failures)
+
+    # A held chat shows what the assistant wrote, under the question, each reply
+    # with its own way to Review. By now Review has graded the answered draft
+    # and left the declined one waiting, so both states are on this page.
+    await browser.goto(
+        f"{console}/console/{seeded['tenant']}/conversations/{seeded['conversation']}"
+    )
+    await asyncio.sleep(3)
+    held = await browser.evaluate("document.body.innerText")
+    _check(
+        "a held chat shows the reply the assistant wrote, marked as not sent",
+        SEEDED_DRAFT in held and "Held — not sent" in held,
+        failures,
+    )
+    _check(
+        "and says the shopper saw none of it",
+        "The shopper saw none of the replies below." in held,
+        failures,
+    )
+    _check(
+        "a held turn with no reply says why rather than showing an empty bubble",
+        "handed this to a person" in held,
+        failures,
+    )
+    _check("a graded reply says it is graded", "You graded this" in held, failures)
+    links = await browser.evaluate(
+        "[...document.querySelectorAll('a')]"
+        ".filter((a) => /Grade this reply/.test(a.textContent || ''))"
+        ".map((a) => a.getAttribute('href'))"
+    )
+    waiting = f"/console/{seeded['tenant']}/review?turn={seeded['declined']}"
+    _check(
+        "a waiting reply links to exactly that reply in Review",
+        waiting in (links or []),
+        failures,
+    )
+    await browser.goto(f"{console}{waiting}")
+    await asyncio.sleep(3)
+    _check(
+        "and the link opens it there, beside the grade buttons",
+        seeded["declined"] in await browser.evaluate("window.location.search")
+        and "Would you have sent this?" in await browser.evaluate("document.body.innerText"),
+        failures,
+    )
+
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
+    )
+    try:
+        await browser.goto(
+            f"{console}/console/{seeded['tenant']}/conversations/{seeded['conversation']}"
+        )
+        await asyncio.sleep(3)
+        _check(
+            "on a phone the chat does not scroll sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
 
 async def _check_shop_and_usage(
     browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
@@ -926,6 +1007,19 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
                     document={"title": title},
                 )
             )
+        # The policy the escalated reply cited, by its title, as a real shop's
+        # sync would record it — so the chat page can name it.
+        await session.execute(
+            synced_entities.insert().values(
+                tenant_id=tenant_id,
+                platform=SEEDED_PLATFORM,
+                entity_type="policy",
+                external_id="console-check-returns",
+                neura_id=ids.new_id(ids.NEURA_ENTITY),
+                fingerprint="console-check",
+                document={"title": SEEDED_POLICY_TITLE},
+            )
+        )
 
         shadow = ShadowRepository(session)
         made["answered"] = await shadow.record(
@@ -937,7 +1031,7 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
                 mode="shadow",
                 state="resolved",
                 intent="policy_question",
-                draft="Yes — unworn boots can be returned within 30 days of delivery.",
+                draft=SEEDED_DRAFT,
                 grounded=True,
                 citations=[{"type": "policy", "id": "console-check-returns"}],
                 cost_usd=Decimal("0"),

@@ -17,6 +17,9 @@ On top of the bar, the two things this screen is *for*:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -203,7 +206,10 @@ class TestTheTranscript:
         """The difference between a right answer from the right lookup and a
         right answer by luck — the same distinction Review is built around."""
         thread = transcript(client, shop, shop.answered_conversation)
-        assert thread["messages"][1]["citations"] == [{"type": "policy", "id": "fixture-returns"}]
+        # `name` is null: the fixture's synced catalogue holds no such policy.
+        assert thread["messages"][1]["citations"] == [
+            {"type": "policy", "id": "fixture-returns", "name": None}
+        ]
 
     def test_the_per_turn_state_is_on_the_reply_and_not_the_question(
         self, client: TestClient, shop
@@ -262,6 +268,163 @@ class TestTheTranscript:
         reply = thread["messages"][1]
         assert reply["intent"] == "policy_question"
         assert reply["state"] == "resolved"
+
+
+class TestHeldDraftsBesideTheThread:
+    """2026-09-28: a held chat shows what the assistant would have said, under
+    the question it answered — as its own field, never merged into history."""
+
+    def test_each_held_draft_names_the_question_it_answers(self, client: TestClient, shop) -> None:
+        thread = transcript(client, shop, shop.shadowed_conversation)
+        question = thread["messages"][0]
+        assert [held["id"] for held in thread["held"]] == [shop.answered_turn, shop.declined_turn]
+        assert {held["message_id"] for held in thread["held"]} == {question["id"]}
+        assert thread["held"][0]["draft"] == REPLY
+        assert thread["held"][0]["state"] == "resolved"
+
+    def test_a_draft_is_never_merged_into_the_messages(self, client: TestClient, shop) -> None:
+        """shadow.py's two tables exist so a draft never becomes history."""
+        thread = transcript(client, shop, shop.shadowed_conversation)
+        assert [m["role"] for m in thread["messages"]] == ["shopper"]
+        assert all(REPLY not in m["content"] for m in thread["messages"])
+
+    def test_a_held_turn_with_no_draft_says_why(self, client: TestClient, shop) -> None:
+        declined = transcript(client, shop, shop.shadowed_conversation)["held"][1]
+        assert declined["draft"] == ""
+        assert "handed this to a person" in declined["no_draft_reason"]
+        assert (
+            transcript(client, shop, shop.shadowed_conversation)["held"][0]["no_draft_reason"] == ""
+        )
+
+    def test_a_graded_draft_says_so_and_by_whom(self, client: TestClient, shop) -> None:
+        assert transcript(client, shop, shop.shadowed_conversation)["held"][0]["verdict"] is None
+        graded = client.post(
+            f"/v1/console/shops/{shop.tenant}/review/{shop.answered_turn}/grade",
+            json={"verdict": "agree", "note": ""},
+            cookies=cookie_for(shop.user),
+        )
+        assert graded.status_code == 200, graded.text
+
+        held = transcript(client, shop, shop.shadowed_conversation)["held"][0]
+        assert held["verdict"] == "agree"
+        assert held["reviewed_by"] == shop.user
+        assert held["reviewed_at"] is not None
+
+    def test_an_answered_chat_has_nothing_held(self, client: TestClient, shop) -> None:
+        assert transcript(client, shop, shop.answered_conversation)["held"] == []
+
+    async def test_another_shops_draft_never_appears_even_on_the_same_conversation_id(
+        self, client: TestClient, db: Database, shop, other_shop
+    ) -> None:
+        """Two populated tenants, and the sharper case: a draft in the *other*
+        tenant filed under *this* shop's conversation id. RLS is what keeps it
+        out, not a `WHERE` anybody wrote — which is why it is asserted."""
+        from sqlalchemy import delete
+
+        from neura_agent_core.shadow import ShadowRepository, ShadowTurn, shadow_turns
+
+        async with db.tenant_session(other_shop.tenant) as session:
+            planted = await ShadowRepository(session).record(
+                ShadowTurn(
+                    tenant_id=other_shop.tenant,
+                    conversation_id=shop.shadowed_conversation,
+                    message_id="msg_other_shop",
+                    agent_key="care",
+                    mode="shadow",
+                    state="resolved",
+                    draft="OTHER SHOP DRAFT — must never appear",
+                )
+            )
+        try:
+            response = client.get(
+                f"/v1/console/shops/{shop.tenant}/conversations/{shop.shadowed_conversation}",
+                cookies=cookie_for(shop.user),
+            )
+            assert response.status_code == 200, response.text
+            assert "OTHER SHOP DRAFT" not in response.text
+            assert planted not in response.text
+        finally:
+            async with db.tenant_session(other_shop.tenant) as session:
+                await session.execute(delete(shadow_turns).where(shadow_turns.c.id == planted))
+
+
+class TestWhatAReplyLookedAtByName:
+    """Each citation carries its title from the synced catalogue — the words a
+    shop owner knows it by, never `product:1311`."""
+
+    async def test_a_cited_source_carries_its_catalogue_title(
+        self, client: TestClient, db: Database, shop
+    ) -> None:
+        async with _catalogue(db, shop.tenant, "policy", "fixture-returns", {"title": "Returns"}):
+            reply = transcript(client, shop, shop.answered_conversation)["messages"][1]
+        assert reply["citations"] == [
+            {"type": "policy", "id": "fixture-returns", "name": "Returns"}
+        ]
+
+    async def test_a_category_is_named_by_its_name(
+        self, client: TestClient, db: Database, shop
+    ) -> None:
+        """A category's document has `name` where a product's has `title`."""
+        async with _catalogue(db, shop.tenant, "policy", "fixture-returns", {"name": "Knitwear"}):
+            reply = transcript(client, shop, shop.answered_conversation)["messages"][1]
+        assert reply["citations"][0]["name"] == "Knitwear"
+
+    async def test_another_shops_catalogue_never_names_this_shops_source(
+        self, client: TestClient, db: Database, shop, other_shop
+    ) -> None:
+        async with _catalogue(
+            db, other_shop.tenant, "policy", "fixture-returns", {"title": "OTHER SHOP TITLE"}
+        ):
+            response = client.get(
+                f"/v1/console/shops/{shop.tenant}/conversations/{shop.answered_conversation}",
+                cookies=cookie_for(shop.user),
+            )
+        assert response.status_code == 200, response.text
+        assert "OTHER SHOP TITLE" not in response.text
+        assert response.json()["data"]["messages"][1]["citations"][0]["name"] is None
+
+    async def test_the_same_id_under_another_type_is_not_used(
+        self, client: TestClient, db: Database, shop
+    ) -> None:
+        """A product and a policy can share an id; the pair is the key."""
+        async with _catalogue(
+            db, shop.tenant, "product", "fixture-returns", {"title": "A product"}
+        ):
+            reply = transcript(client, shop, shop.answered_conversation)["messages"][1]
+        assert reply["citations"][0]["name"] is None
+
+
+@asynccontextmanager
+async def _catalogue(
+    db: Database, tenant: str, entity_type: str, external_id: str, document: dict
+) -> AsyncIterator[None]:
+    """One synced catalogue row for the length of a test, then removed."""
+    from sqlalchemy import delete
+
+    from neura_commerce.sync.schema import synced_entities
+    from neura_core import ids
+
+    async with db.tenant_session(tenant) as session:
+        await session.execute(
+            synced_entities.insert().values(
+                tenant_id=tenant,
+                platform="console-test",
+                entity_type=entity_type,
+                external_id=external_id,
+                neura_id=ids.new_id(ids.NEURA_ENTITY),
+                fingerprint="console-test",
+                document=document,
+            )
+        )
+    try:
+        yield
+    finally:
+        async with db.tenant_session(tenant) as session:
+            await session.execute(
+                delete(synced_entities)
+                .where(synced_entities.c.tenant_id == tenant)
+                .where(synced_entities.c.platform == "console-test")
+            )
 
 
 class TestNoAuthorityAndNoOtherTenantInAnyBody:

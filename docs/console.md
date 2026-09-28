@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2) — `make console-check` — 64 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page was redesigned 2026-09-28 (§3.3) — `make console-check` — 73 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -182,6 +182,39 @@ Transcript list, filter by escalated / blocked / declined. Read-only.
 > discovering it at the top of the file: either the merchant gets tokens and this
 > paragraph is rewritten, or the transcript starts holding real addresses and
 > security-model.md §6.2 is reopened. Nothing has been changed here on either side.
+
+#### One chat, redesigned 2026-09-28 — the held reply is in the chat, from the owner's approved mockup
+
+The owner opened *"Where is my order 86?"* and saw the question, one sentence (*"The draft is in Review"*) and an
+empty page: most chats are held in practice mode, and a held reply lived only in Review. Now the page reads as a
+chat, and it answers the question the owner asked while designing it — **Conversations is for reading the whole
+story, Review is the to-do list for grading** (one row there is a chat; here, one reply):
+
+| what | how |
+|:--|:--|
+| **Title** | the shopper's **first question** — the words the owner clicked in the list |
+| **One sentence at the top** | what the shopper saw and how many held replies wait — *"Practice mode. The shopper saw none of the replies below. 2 are waiting for your grade."* / *"Sent. The shopper saw every reply below."* — counted from the replies on the page (`whatTheShopperSaw`) |
+| **A held reply** | under the question it answers, dashed edge, **Held — not sent**, the assistant's name and *would have answered*; then **Grade this reply** (`/review?turn=<id>`), or *"You graded this Good — I'd send this"* with **Open in Review**. **One per reply**: a chat with two questions has two buttons. A held turn with no draft says why, in Review's words (`no_draft_reason`, now shared) |
+| **A sent reply** | plain edge, **Sent**, and *What it looked at* in Review's words (`consulted()`, now shared) — *"It looked up products and read 6 items from your shop:"* — **by name** from the synced catalogue (three shown, *Show 3 more*), never `product:1311` |
+| **Removed** | the question type (`order_status`, `recommend`) — our word; the owner agreed to drop it |
+
+**Grading stays in Review**, where the evidence sits beside the buttons (§3.2). The chat page shows no evidence,
+fact check or cost for a held reply — only the draft and a way there.
+
+**API, 2026-09-28.** `GET /conversations/{id}` gains **`held`**: each `shadow_turns` row of that conversation, oldest
+first — `id`, `message_id` (the shopper message it answers), `agent`, `state`, `draft`, `no_draft_reason`,
+`verdict`, `reviewed_by`, `reviewed_at`. **A separate field, never merged into `messages`** — a draft is what the
+agent *would* have said, and merging it would make it history (shadow.py). Each citation gains **`name`**: the
+title from `synced_entities` for the same `(type, id)` pair (a product's or policy's `title`, a category's
+`name`), `null` for a lookup and for anything the synced catalogue lacks — read like Sold out reads titles, never
+from the shop. Asserted with two populated tenants: another shop's draft filed under **this** shop's conversation
+id, and another shop's catalogue title for the same id, never appear.
+
+**Known limits.** `shadow_turns` has no index on `conversation_id`, so the read scans one tenant's held turns —
+fine at pilot size, and an index is a migration. And a name comes from the **synced catalogue** while Review's
+evidence comes from the **search index**, which can disagree: on the test shop category 32 is *"Shirts &
+Knitwear"* in the catalogue and *"men clothes"* in the index, so one citation can be worded differently on the two
+screens until the index is rebuilt.
 
 #### Built 2026-08-27, and it shipped against the tokens
 
@@ -366,7 +399,7 @@ once been true of the route somebody added last. So clauses 1, 2, 4 and 6 are re
 — each against real PostgreSQL with **two populated tenants** — and `test_console_auth.py` owns
 3 and 5.
 
-`make console-check` then re-asserts them **in real headless Chrome** — 59 checks since 2026-09-27 — because every
+`make console-check` then re-asserts them **in real headless Chrome** — 73 checks since 2026-09-28 — because every
 rule this console has is a claim about what a *rendered page* contains. A server that offered
 safe material and a screen that displayed it are not the same thing, and only one of them is the
 product: a page can fetch a payload with no credential in it and still print `$0.00` under the

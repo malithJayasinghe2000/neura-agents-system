@@ -16,6 +16,8 @@
  *   eventually be sold on.
  */
 
+import type { Verdict } from "@/lib/review";
+
 export type ConversationState =
   "resolved" | "awaiting_customer" | "escalated" | "blocked" | "shadowed";
 
@@ -46,7 +48,12 @@ export type TranscriptMessage = {
   intent: string | null;
   /** Present on the agent's message, `null` on the shopper's. */
   state: ConversationState | null;
-  citations: { type: string; id: string }[];
+  /**
+   * What the reply looked at. `name` is the synced catalogue's title for a
+   * product, category or policy; `null` for a lookup (`type: "tool"`) and for
+   * anything the synced catalogue does not hold.
+   */
+  citations: { type: string; id: string; name: string | null }[];
   /**
    * Which service wrote this message (ADR-0031 §5).
    *
@@ -63,8 +70,36 @@ export type TranscriptMessage = {
   created_at: string | null;
 };
 
+/**
+ * A reply the assistant wrote in practice mode, which no shopper saw.
+ *
+ * Kept **beside** the thread and never in it, the same separation the API keeps
+ * (`console_conversations.py`): `messages` is what a shopper read. Shown under
+ * the question it answers (`message_id`), with a link to grade it in Review.
+ */
+export type HeldReply = {
+  /** The Review id — `?turn=` opens exactly this reply there. */
+  id: string;
+  /** The shopper message this draft answers. */
+  message_id: string;
+  agent: string;
+  /** What it would have done: the same values as a reply's `state`. */
+  state: string;
+  /** May be empty — see `no_draft_reason`. */
+  draft: string;
+  /** Non-empty whenever `draft` is empty (ADR-0020). */
+  no_draft_reason: string;
+  verdict: Verdict | null;
+  /** A user id; compared with the reader's own, never shown. */
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string | null;
+};
+
 export type Transcript = ConversationRow & {
   messages: TranscriptMessage[];
+  /** Oldest first. Empty for a chat that was never held. */
+  held: HeldReply[];
   /** The thread hit the server's message bound. Shown, so a cut thread does not
    *  look like a thread that ended. */
   truncated: boolean;
@@ -94,6 +129,54 @@ export const STATE_HELP: Record<ConversationState, string> = {
   shadowed:
     "The assistant answered in full and the shopper was shown nothing. The draft is in Review, waiting for your verdict.",
 };
+
+/** What a sent reply did, said after the assistant's name: "Shopping help · answered". */
+export const SENT_OUTCOME: Record<ConversationState, string> = {
+  resolved: "answered",
+  awaiting_customer: "waiting for the shopper",
+  escalated: "handed to a person",
+  blocked: "blocked as an attack",
+  shadowed: "held",
+};
+
+/** What a held reply would have done: "Customer care · would have answered". */
+export const HELD_OUTCOME: Record<string, string> = {
+  resolved: "would have answered",
+  awaiting_customer: "would have asked the shopper for more",
+  escalated: "would have handed to a person",
+  blocked: "would have been blocked",
+};
+
+/**
+ * The one sentence at the top of a chat: what the shopper saw, and how many held
+ * replies wait for a grade. Counted from the replies on the page, never guessed.
+ * `null` when there is no reply of either kind to describe.
+ */
+export function whatTheShopperSaw(
+  held: HeldReply[],
+  sent: number,
+): { lead: string; rest: string } | null {
+  if (held.length === 0) {
+    return sent > 0 ? { lead: "Sent.", rest: "The shopper saw every reply below." } : null;
+  }
+
+  const seen =
+    sent > 0
+      ? "The shopper did not see the replies marked Held — they saw the others."
+      : held.length === 1
+        ? "The shopper did not see the reply below."
+        : "The shopper saw none of the replies below.";
+  const waiting = held.filter((reply) => reply.verdict === null).length;
+  const grade =
+    waiting === 0
+      ? held.length === 1
+        ? "You have graded it."
+        : "You have graded all of them."
+      : waiting === 1
+        ? "1 is waiting for your grade."
+        : `${waiting} are waiting for your grade.`;
+  return { lead: "Practice mode.", rest: `${seen} ${grade}` };
+}
 
 /** The filters offered above the list. `""` is first, so nothing is hidden by default. */
 export const STATE_FILTERS: { key: string; label: string }[] = [

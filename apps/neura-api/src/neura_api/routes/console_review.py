@@ -48,7 +48,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from neura_agent_core.conversations import ConversationState
-from neura_agent_core.review import ReviewItem, ReviewQueue, evidence_payload
+from neura_agent_core.review import ReviewItem, ReviewQueue, evidence_payload, no_draft_reason
 from neura_agent_core.shadow import ShadowRepository, ShadowVerdict
 from neura_api.dependencies import acting_for
 from neura_api.envelopes import decode_cursor, encode_cursor, envelope, page
@@ -280,7 +280,7 @@ def _item_payload(item: ReviewItem) -> dict[str, Any]:
             "asked_at": item.asked_at.isoformat() if item.asked_at else None,
         },
         "draft": turn.draft,
-        "no_draft_reason": "" if item.has_draft else _no_draft_reason(item),
+        "no_draft_reason": "" if item.has_draft else no_draft_reason(item.turn),
         "intent": turn.intent,
         "state": turn.state,
         "escalated": turn.escalated,
@@ -350,28 +350,6 @@ def _verdict(value: str | None) -> ShadowVerdict | None:
             "Unknown verdict.",
             details={"verdict": value, "expected": [v.value for v in ShadowVerdict]},
         ) from None
-
-
-def _no_draft_reason(item: ReviewItem) -> str:
-    """Why there is no reply to grade, in the merchant's words.
-
-    Ordered by what the grader most needs to know. An escalation is a decision
-    the agent made; a failed ``verify`` is a decision made *about* the agent, and
-    conflating them would hide the one that says the model was wrong.
-    """
-    turn = item.turn
-    if turn.escalated:
-        return "The agent handed this to a person instead of answering."
-    if turn.grounded is False:
-        reason = turn.verify_reason.strip()
-        return (
-            f"The draft failed the grounding check and was discarded: {reason}"
-            if reason
-            else "The draft failed the grounding check and was discarded."
-        )
-    if turn.state == "blocked":
-        return "The guard stopped this turn before the agent answered."
-    return f"The agent produced no reply. It recorded the turn as {turn.state!r}."
 
 
 def _cost_payload(cost: Any) -> dict[str, Any]:

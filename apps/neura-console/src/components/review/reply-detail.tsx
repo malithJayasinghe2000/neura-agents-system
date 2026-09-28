@@ -25,8 +25,8 @@ import type { TranscriptMessage } from "@/lib/conversations";
 import {
   OUTCOME_LABELS,
   VERDICT_BADGES,
+  consulted,
   documentKind,
-  lookupWords,
   type ReviewTurn,
 } from "@/lib/review";
 import { cn } from "@/lib/utils";
@@ -211,10 +211,8 @@ function FactCheck({ turn }: { turn: ReviewTurn }) {
 
 /** One sentence: what the assistant consulted before writing, or that it consulted nothing. */
 function lookedAt(turn: ReviewTurn, documents: number): string {
-  const parts: string[] = [];
-  if (turn.tools.length > 0) parts.push(`looked up ${turn.tools.map(lookupWords).join(" and ")}`);
-  if (documents > 0) parts.push(`read ${plural(documents, "item")} from your shop`);
-  if (parts.length > 0) return `It ${parts.join(" and ")}${documents > 0 ? ":" : "."}`;
+  const said = consulted(turn.tools, documents);
+  if (said) return said;
 
   if (turn.escalated) return "Nothing — it handed the chat to a person instead of answering.";
   if (turn.state === "blocked")

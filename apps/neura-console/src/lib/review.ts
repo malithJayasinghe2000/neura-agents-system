@@ -168,6 +168,20 @@ export function lookupWords(tool: string): string {
   return tool.replace(/^(get|search|find|list|lookup)_/, "").replaceAll("_", " ");
 }
 
+/**
+ * What a reply consulted, in one sentence — *"It looked up products and read 6
+ * items from your shop:"* — or `null` when it consulted nothing, which each
+ * screen says in its own words. Shared by Review and the chat page, so one reply
+ * is described the same way on both.
+ */
+export function consulted(tools: string[], documents: number): string | null {
+  const parts: string[] = [];
+  if (tools.length > 0) parts.push(`looked up ${tools.map(lookupWords).join(" and ")}`);
+  if (documents > 0)
+    parts.push(`read ${documents} ${documents === 1 ? "item" : "items"} from your shop`);
+  return parts.length > 0 ? `It ${parts.join(" and ")}${documents > 0 ? ":" : "."}` : null;
+}
+
 /** What a cited document is, said the way a shop owner would. */
 export function documentKind(type: string): string {
   const known: Record<string, string> = { product: "Product", policy: "Policy", page: "Page" };

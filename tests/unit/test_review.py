@@ -30,12 +30,12 @@ from neura_agent_core.review import (
     Evidence,
     ReviewItem,
     _evidence_for,
+    no_draft_reason,
 )
 from neura_agent_core.shadow import ShadowTurn, ShadowVerdict
 from neura_api.routes.console_review import (
     _cost_payload,
     _item_payload,
-    _no_draft_reason,
     _scorecard_payload,
 )
 
@@ -133,25 +133,25 @@ class TestAWithheldTurnSaysSo:
         assert payload["withheld"] is True
 
     def test_an_escalated_turn_with_no_draft_explains_itself(self) -> None:
-        reason = _no_draft_reason(ReviewItem(turn=turn(draft="", escalated=True)))
+        reason = no_draft_reason(turn(draft="", escalated=True))
         assert "handed this to a person" in reason
 
     def test_a_draft_discarded_by_verify_quotes_the_reason(self) -> None:
         """A failed grounding check is a decision made *about* the agent, and
         conflating it with an escalation hides the one that says it was wrong."""
-        reason = _no_draft_reason(
-            ReviewItem(turn=turn(draft="", grounded=False, verify_reason="claimed a refund policy"))
+        reason = no_draft_reason(
+            turn(draft="", grounded=False, verify_reason="claimed a refund policy")
         )
         assert "grounding check" in reason
         assert "claimed a refund policy" in reason
 
     def test_a_blocked_turn_names_the_guard(self) -> None:
-        reason = _no_draft_reason(ReviewItem(turn=turn(draft="", state="blocked")))
+        reason = no_draft_reason(turn(draft="", state="blocked"))
         assert "guard" in reason
 
     def test_an_unexplained_empty_draft_still_produces_words(self) -> None:
         """The fallback case. Whatever happened, the card is never blank."""
-        assert _no_draft_reason(ReviewItem(turn=turn(draft="", state="resolved"))).strip()
+        assert no_draft_reason(turn(draft="", state="resolved")).strip()
 
     def test_no_draft_reason_is_empty_exactly_when_there_is_a_draft(self) -> None:
         assert _item_payload(ReviewItem(turn=turn()))["no_draft_reason"] == ""
