@@ -181,7 +181,17 @@ class TestTheShopScreenReportsWhatWasRecorded:
         [store] = view["stores"]
         assert store["id"] == shop.store
         assert store["platform"] == PLATFORM
-        assert set(store) == {"id", "platform", "base_url", "status", "catalogue", "syncs"}
+        assert set(store) == {
+            "id",
+            "platform",
+            "base_url",
+            "status",
+            "catalogue",
+            "syncs",
+            "index",
+            "sync_asked",
+            "notes",
+        }
 
     def test_the_last_sync_is_reported_per_entity_type(self, client: TestClient, shop) -> None:
         [store] = store_view(client, shop)["stores"]
@@ -213,6 +223,274 @@ class TestTheShopScreenReportsWhatWasRecorded:
             cookies=cookie_for(shop.user),
         )
         assert response.status_code == 404
+
+
+class TestTheShopConnectionChecklist:
+    """The 2026-09-28 redesign (`console.md §3.4`): a *Get set up* checklist read
+    from our own tables, *Sync now*, and the index line.
+
+    The chat-box tick is the one that could leak: it reads `api_keys`. So a
+    real public key is issued here, used, and then looked for in the body by
+    every part of it the screen must never show."""
+
+    @pytest.fixture
+    async def dressed(self, db: Database, shop):
+        """The shop, with a tenant row, an agreement, a used chat box key, a
+        revoked key used later, a product view, and a half-indexed catalogue."""
+        from datetime import UTC, datetime
+
+        from sqlalchemy import insert
+
+        from neura_agent_core.rag.schema import document_chunks
+        from neura_commerce.sync.schema import synced_entities
+        from neura_core import ids
+        from neura_core.observation import (
+            ObservedEvent,
+            ObservedEventRepository,
+            ObservedEventType,
+        )
+        from neura_core.tenancy import ApiKeyKind, ApiKeyRepository, TenantRepository
+
+        now = datetime.now(UTC)
+        made: dict[str, str] = {}
+        async with db.tenant_session(shop.tenant) as session:
+            tenants = TenantRepository(session)
+            await tenants.create(tenant_id=shop.tenant, name="Checklist Shop")
+            await tenants.set_dpa_signed_at(shop.tenant, now - timedelta(days=2))
+
+            keys = ApiKeyRepository(session)
+            used, issued = await keys.issue(
+                shop.tenant,
+                kind=ApiKeyKind.PUBLIC,
+                scopes=["care:chat:write"],
+                name="widget",
+                allowed_origins=["https://shop.example.com"],
+            )
+            await keys.touch(used.id, at=now - timedelta(hours=1))
+            made["token"] = issued.token
+            made["prefix"] = used.token_prefix
+            # Revoked, and used more recently: it must not be the one reported.
+            revoked, _ = await keys.issue(
+                shop.tenant,
+                kind=ApiKeyKind.PUBLIC,
+                scopes=["care:chat:write"],
+                allowed_origins=["https://old.example.com"],
+            )
+            await keys.touch(revoked.id, at=now)
+            await keys.revoke(revoked.id)
+
+            await ObservedEventRepository(session).record(
+                shop.tenant,
+                ObservedEvent.model_construct(
+                    event_id=ids.new_id("obs"),
+                    session_id="checklistsession" * 4,
+                    type=ObservedEventType.PRODUCT_VIEWED,
+                    product_id="501",
+                    occurred_at=now - timedelta(hours=1),
+                    in_stock=True,
+                ),
+            )
+
+            # Four products synced, two of them indexed — one of those twice,
+            # in two chunks, which must still count once.
+            for product in ("501", "502", "503", "504"):
+                await session.execute(
+                    insert(synced_entities).values(
+                        tenant_id=shop.tenant,
+                        platform=PLATFORM,
+                        entity_type="product",
+                        external_id=product,
+                        neura_id=ids.new_id(ids.NEURA_ENTITY),
+                        fingerprint="console-checklist",
+                        document={"title": f"Product {product}"},
+                    )
+                )
+            for product, chunk in (("501", 0), ("501", 1), ("502", 0), ("999", 0)):
+                await session.execute(
+                    insert(document_chunks).values(
+                        id=ids.new_id(ids.CHUNK),
+                        tenant_id=shop.tenant,
+                        embedding_model="console-checklist",
+                        dimensions=3,
+                        embedding="[0,0,0]",
+                        content=f"product {product}",
+                        content_hash="console-checklist",
+                        source_type="product",
+                        source_id=product,
+                        chunk_index=chunk,
+                    )
+                )
+        yield made
+        await _undress(db, shop)
+
+    def test_every_setup_fact_is_reported(self, client: TestClient, shop, dressed) -> None:
+        setup = store_view(client, shop)["setup"]
+        assert setup["agreement_since"] is not None
+        assert setup["receiving"] is True
+        assert setup["window_days"] == 7
+        # The used, live key — not the revoked one used later.
+        assert setup["chat_box"]["origins"] == ["https://shop.example.com"]
+        assert setup["chat_box"]["last_used_at"] is not None
+        assert set(setup["chat_box"]) == {"last_used_at", "origins"}
+
+    def test_no_part_of_the_chat_box_key_is_ever_returned(
+        self, client: TestClient, shop, dressed
+    ) -> None:
+        body = client.get(
+            f"/v1/console/shops/{shop.tenant}/store", cookies=cookie_for(shop.user)
+        ).text
+        assert dressed["token"] not in body
+        assert dressed["prefix"] not in body
+        assert "fn_pk_" not in body
+        assert "care:chat:write" not in body, "a key's scopes are not the screen's business"
+        assert "token_hash" not in body
+
+    def test_a_shop_with_nothing_set_up_says_so(self, client: TestClient, shop) -> None:
+        """No tenant row, no key, no agreement, no views — each a plain no."""
+        setup = store_view(client, shop)["setup"]
+        assert setup == {
+            "chat_box": None,
+            "agreement_since": None,
+            "receiving": False,
+            "window_days": 7,
+        }
+
+    def test_the_index_counts_synced_products_it_can_find(
+        self, client: TestClient, shop, dressed
+    ) -> None:
+        """Two of four: a product in two chunks counts once, and an indexed
+        product the catalogue no longer has does not count at all."""
+        [store] = store_view(client, shop)["stores"]
+        assert store["index"] == {"products": 4, "searchable": 2}
+        notes = {note["key"]: note["text"] for note in store["notes"]}
+        assert notes["index"] == (
+            "Search by meaning covers 2 of 4 products — the other 2 are not in it yet, "
+            "so the AI can't find them that way."
+        )
+
+    def test_it_says_nothing_syncs_by_itself(self, client: TestClient, shop) -> None:
+        [store] = store_view(client, shop)["stores"]
+        assert store["notes"][0]["key"] == "no_schedule"
+        assert "nothing syncs by itself yet" in store["notes"][0]["text"]
+        # No products synced, so no index sentence to say anything about.
+        assert [note["key"] for note in store["notes"]] == ["no_schedule"]
+
+    def test_variants_are_not_counted(self, client: TestClient, shop) -> None:
+        [store] = store_view(client, shop)["stores"]
+        assert set(store["catalogue"]) == {"product", "category", "policy"}
+
+
+class TestSyncNow:
+    """The console's third write — and it writes only our copy (`console.md §3.4`)."""
+
+    @pytest.fixture
+    async def jobs(self, db: Database, shop):
+        yield
+        from sqlalchemy import delete
+
+        from neura_core.jobs import job_queue
+
+        async with db.tenant_session(shop.tenant) as session:
+            await session.execute(delete(job_queue).where(job_queue.c.tenant_id == shop.tenant))
+
+    def _sync(self, client: TestClient, shop, *, store: str | None = None, user: str | None = None):
+        return client.post(
+            f"/v1/console/shops/{shop.tenant}/store/{store or shop.store}/sync",
+            cookies=cookie_for(user or shop.user),
+        )
+
+    async def test_it_queues_a_full_read_of_the_shop(
+        self, client: TestClient, db: Database, shop, jobs
+    ) -> None:
+        """Full, not incremental: a shop's *changed since* filter follows a
+        product's own edits, and a sale that lowers stock is not one."""
+        from neura_core.jobs import JobQueue
+
+        response = self._sync(client, shop)
+        assert response.status_code == 202
+        asked = response.json()["data"]["sync_asked"]
+        assert asked["status"] in {"pending", "running"}
+
+        async with db.tenant_session(shop.tenant) as session:
+            [job] = await JobQueue(session).list_for(shop.tenant)
+        assert job.kind == "sync.store"
+        assert job.payload == {"store_id": shop.store, "incremental": False}
+
+    async def test_pressing_it_twice_is_one_sync(
+        self, client: TestClient, db: Database, shop, jobs
+    ) -> None:
+        from neura_core.jobs import JobQueue
+
+        assert self._sync(client, shop).status_code == 202
+        assert self._sync(client, shop).status_code == 202
+        async with db.tenant_session(shop.tenant) as session:
+            assert len(await JobQueue(session).list_for(shop.tenant)) == 1
+
+    def test_the_screen_shows_a_sync_that_has_not_finished(
+        self, client: TestClient, shop, jobs
+    ) -> None:
+        [before] = store_view(client, shop)["stores"]
+        assert before["sync_asked"] is None
+        self._sync(client, shop)
+        [after] = store_view(client, shop)["stores"]
+        assert after["sync_asked"]["status"] in {"pending", "running"}
+        assert set(after["sync_asked"]) == {"status", "queued_at"}
+
+    async def test_an_unknown_store_is_a_404_and_queues_nothing(
+        self, client: TestClient, db: Database, shop, jobs
+    ) -> None:
+        from neura_core.jobs import JobQueue
+
+        assert self._sync(client, shop, store="st_nope").status_code == 404
+        async with db.tenant_session(shop.tenant) as session:
+            assert await JobQueue(session).list_for(shop.tenant) == []
+
+    async def test_another_shops_store_cannot_be_synced(
+        self, client: TestClient, db: Database, shop, other_shop, jobs
+    ) -> None:
+        """Both ways round: another shop's store id under my shop, and my
+        person under another shop."""
+        from neura_core.jobs import JobQueue
+
+        assert self._sync(client, shop, store=other_shop.store).status_code == 404
+        response = client.post(
+            f"/v1/console/shops/{other_shop.tenant}/store/{other_shop.store}/sync",
+            cookies=cookie_for(shop.user),
+        )
+        assert response.status_code == 404
+        async with db.tenant_session(other_shop.tenant) as session:
+            assert await JobQueue(session).list_for(other_shop.tenant) == []
+
+    def test_no_session_syncs_nothing(self, client: TestClient, shop, jobs) -> None:
+        response = client.post(f"/v1/console/shops/{shop.tenant}/store/{shop.store}/sync")
+        assert response.status_code == 401
+
+
+async def _undress(db: Database, shop: Shop) -> None:
+    """Remove what `dressed` made. A test tenant's own rows, so by tenant is safe."""
+    from sqlalchemy import delete
+
+    from neura_agent_core.rag.schema import document_chunks
+    from neura_commerce.sync.schema import synced_entities
+    from neura_core.observation import observed_events
+    from neura_core.tenancy.schema import api_keys, tenants
+
+    async with db.tenant_session(shop.tenant) as session:
+        await session.execute(delete(api_keys).where(api_keys.c.tenant_id == shop.tenant))
+        await session.execute(
+            delete(observed_events).where(observed_events.c.tenant_id == shop.tenant)
+        )
+        await session.execute(
+            delete(synced_entities)
+            .where(synced_entities.c.tenant_id == shop.tenant)
+            .where(synced_entities.c.fingerprint == "console-checklist")
+        )
+        await session.execute(
+            delete(document_chunks)
+            .where(document_chunks.c.tenant_id == shop.tenant)
+            .where(document_chunks.c.embedding_model == "console-checklist")
+        )
+        await session.execute(delete(tenants).where(tenants.c.tenant_id == shop.tenant))
 
 
 class TestTheUsageScreenInventsNothing:

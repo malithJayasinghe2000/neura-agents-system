@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3), Suggestions (§3.6), Sold out (§3.7) and Usage and cost (§3.5) were redesigned 2026-09-28 — `make console-check` — 91 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3), Suggestions (§3.6), Sold out (§3.7), Usage and cost (§3.5) and Shop connection (§3.4, with a new **Help** page) were redesigned 2026-09-28 — `make console-check` — 91 checks in a real browser before Shop connection's (which adds 18; see PROJECT_STATE, B7, for the run still owed). · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -25,7 +25,7 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 1 | **Sign in** | `users`, `login_tokens` | ✅ **built 2026-08-27** |
 | 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ **built 2026-08-27** |
 | 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
-| 4 | **Shop** | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4** |
+| 4 | **Shop** (on screen: *Shop connection*) | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4.** Redesigned 2026-09-28: a *Get set up* checklist (also `api_keys`, `tenants`, `observed_events`, `document_chunks`), and **Sync now** — the third console write, and it writes only our copy. With it, a **Help** page, *Connecting your shop* (ADR-0026 §7) |
 | 5 | **Usage** (on screen: *Usage and cost*) | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** — redesigned 2026-09-28 (§3.5): every part follows the period, by assistant included |
 | — | **Home** — what needs the owner, and how the assistant is set up (§3.0) | nothing of its own — it reads the endpoints of Review, Usage, Shop, Sold out and Suggestions | ✅ **built 2026-09-27** — outside v1's five like the two below it. **Adds a screen and no data**: every figure on it is one another screen already shows, with its period and its server-written caveat |
 | — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name). **Redesigned 2026-09-28 (§3.7)**: opening it asks the shop, in one stock lookup for every product listed, whether each can be bought now — the second console call that reaches the shop, and Home never makes it |
@@ -285,6 +285,79 @@ tell the two apart.
 **The opaque sync cursor is never rendered.** Whether a crawl is part-way through
 is the fact a merchant needs; the value is a string they can only paste somewhere
 it will go stale (api-design.md §5).
+
+#### Redesigned 2026-09-28 — approved and BUILT (canvas seventh row, boards 21–23)
+
+The owner found the screen thin and asked what connecting a new shop takes. It was **nine steps, two
+people, all in a terminal** (docs/CONNECTING_THE_SHOP.md), and nothing in the console guided any of it. Approved
+from the mockup and built the same day: **stage 1** below. **Stage 2 is not decided** — the widget install code with a key made in the
+console, a connect form (still deliberately not built, as above), creating a shop and inviting its owner, and
+recording the data agreement from the console (the admin side, group C — an ADR).
+
+**Shop connection** (board 21, phone board 23):
+
+| part | what it shows | from |
+|:--|:--|:--|
+| **Get set up** — a checklist, each step ✔ / not yet, and who does it | *Your shop is connected* (host, "set up by FiveNeurals") · *Your shop answers* — **still a button** (*Check now* / *Check again*): the shop is asked only when pressed, as today · *Your catalogue is copied* (products, last read) · *The chat box is on your shop* — **"used today from bagisto.test"**, from the public key's `last_used_at` and its allowed origin (**owner-approved**; never the key, its prefix, its hash or its scopes) · then **Optional — needed for Sold out**: *Data agreement on record* (since when) · *Your shop is sending product views* (the Sold out `receiving` fact) | `tenant_stores`, the health probe, `sync_checkpoints`, `api_keys`, `tenants.dpa_signed_at`, `observed_events` |
+| **Our copy of your catalogue** | products · categories · policy pages (**Variants is dropped** — sizes and colours live inside a product, so it always read 0); *"Last read from your shop yesterday, 2:51 PM. New products and stock changes show up after the next sync — nothing syncs by itself yet."*; **Sync now** (*"Reads your shop again. Nothing in your shop changes."*) and, after it, *"Asked your shop for a fresh copy. The counts and the time above update when it finishes."*; per kind *"38 read"*, and `last_run_count = 0` said as *"no changes since the time before"* (it read as a contradiction beside *11 policy pages*); **"Search by meaning covers 29 of 38 products — the 9 newest are not in it yet"** (**owner-approved**; display only — rebuilding the index runs a model and is not offered) | the synced catalogue, `document_chunks` (distinct `source_id` per `source_type`) |
+| **What your shop lets the assistant do** | after *Check now*: the declared capabilities **in plain words** (read and search products, categories, check stock, look up orders, a customer's details, policy pages, copy only what changed, send change messages — *"NEURA does not listen to these yet"*); before it, *"Press Check now above to ask your shop."*; always **"Read only. Your assistant cannot change anything in your shop."** | the health probe |
+| **Connection details** — for your developer or support | address, *Standard NEURA bridge* (was `generic`), status, Shop ID | `tenant_stores` |
+
+**Sync now — owner-approved 2026-09-28.** A new console action, the third that writes (after grading and the
+owner's suggestions), and it writes **only our copy**: it queues the sync job that already exists
+(`neura_api.jobs.enqueue_sync`, which returns the running job rather than queueing a second — pressing it four
+times is one sync). Nothing is written to the shop.
+
+**Help — "Connecting your shop"** (board 22), a new console page under *Setup* in the side menu. **Already
+decided in [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) §7** (merchant
+help lives inside the console), never built until now: who does what (*You* · *Your developer* · *FiveNeurals, for
+now*); six steps, each with who and **"How you'll know"** — the same ticks as the checklist; **For your developer**:
+the one-line chat box snippet (`<script src=".../v1/widget/widget.js" async data-neura-key="fn_pk_…">` —
+platform-agnostic, the same `SNIPPET` the API serves; no platform's own settings or commands, Rule 1) and the two
+keys explained (the shop token is secret and stays on the shop's server; the chat box key is public and locked to
+the shop's address), with *Copy these steps for your developer*; and **If something doesn't work** — five common
+problems in plain words. **No time estimates and no numbers**: nothing has been measured.
+
+**Rewritten with it:** `docs/CONNECTING_THE_SHOP.md` (2026-09-19) predated the console — no owner account or
+sign-in link, no data agreement, no product views, no suggestions key scope, and `NEURA_WIDGET_HOST=…:8000`, where
+another project listens on this machine. It now follows the Help page's six steps, each with the checklist tick
+that shows it is done.
+
+**What building it decided — each a correction of the mockup, none a new feature:**
+
+| # | the mockup said | built as | why |
+|:--|:--|:--|:--|
+| 1 | *Sync now* (mode unstated) | a **full** read (`incremental=False`) | the screen promises *"stock changes show up after the next sync"*, and a shop's *changed since* filter follows a product's own edits — the reference bridge filters on the product rows, so a sale that lowers stock is invisible to an incremental read |
+| 2 | *"Products — 38 read"* | *"Products — 1 new or changed"*; 0 is still *"no changes since the time before"* | `last_run_count` is what the sync **wrote** (created + updated), not what it read. The first live *Sync now* read all 38 products and recorded **1**. The old screen's *"118 read"* had the same error |
+| 3 | *"the 9 newest are not in it yet"* | *"the other 9 are not in it yet"* | nothing checks that the missing ones are the newest. Counted from the catalogue's side (a synced product with at least one chunk), across embedding models, so an index entry for a product the shop no longer has does not count |
+| 4 | *Check now* as a link (`?check=`) | a button whose answer lives in the page, not the address | *Sync now* re-reads the page when its sync finishes; an address carrying the check would have asked the shop again on that re-read. **A page load still never asks the shop** |
+| 5 | *"used today from bagisto.test"* | the most recently used **live** public key (not revoked, not expired) — its `last_used_at` and allowed addresses, **two columns selected by name** | a shop can hold several public keys; a revoked key used later must not tick the box. The key, prefix, hash and scopes cannot be returned because they are never read |
+| 6 | Help step 2: *"This moves into the console later"* | dropped | the connect form is stage 2 and **not decided**; a help page must not promise it |
+| 7 | Help step 5: *"no shopper sees it yet"* | *"While practice mode is on, … no shopper sees them"* | **a new tenant starts live** (`TenantConfig.mode` defaults to `live`) |
+| 8 | one shop connection | the connection steps and the two cards repeat per connection, named by address when there is more than one | `make console-check` adds a second connection to a real shop |
+
+**Sync now, as built:** the button queues the job and the page then re-reads **our own** `/store` every few
+seconds (never the shop) until the job is no longer queued or running, then refreshes: *"Finished. The counts and
+the time above are the fresh copy."* — or, if the product sync's time did not move, *"The sync stopped before it
+finished…"*. It stops watching after a few minutes and says the sync has not finished yet. Seen live on the test
+shop: pressed, *"Asked your shop for a fresh copy…"*, the time changed by itself, *"Finished."*
+
+**Help's chat box line** is fetched from `GET /v1/widget/snippet` — exactly the API's `SNIPPET` — so its address is
+the API's `PUBLIC_BASE_URL`, which **defaults to `http://localhost:8000`**. On this machine that shows the wrong
+port until `.env` sets `PUBLIC_BASE_URL=http://localhost:8010`.
+
+**API, 2026-09-28.** `GET /console/shops/{t}/store` gains, per connection, `index` (`products`, `searchable`),
+`sync_asked` (`status`, `queued_at` of a sync still queued or running — nothing else of the job) and `notes`
+(`{key, text}`: `no_schedule` always, `index` when there are products), and at the top a `setup` block —
+`chat_box` (`last_used_at`, `origins`, or `null`), `agreement_since`, `receiving` (any product view in 7 days,
+`ObservedEventRepository.any_views_since`, as Sold out asks it) and `window_days`. `variant` is no longer counted.
+New `POST /console/shops/{t}/store/{store}/sync` → **202**, `enqueue_sync(…, incremental=False)`; a store that is
+not this shop's is a 404 and queues nothing. Tests: `test_console_shop_and_usage.py` +12 (every setup fact; no part
+of a chat box key — token, prefix, scopes — in the body; a revoked key used later is not the one reported; an
+empty shop says no to each; the index counts a product in two chunks once and ignores an indexed product the
+catalogue lacks; Sync now queues one full read, twice is one, shows on the screen, 404 for an unknown or another
+shop's store, 401 with no session); `test_console_screens.py` +6 (the sentences, singular and plural; variants not
+counted).
 
 ### 3.5 Usage
 

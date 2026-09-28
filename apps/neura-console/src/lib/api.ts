@@ -27,6 +27,7 @@
 const BASE = "/api";
 
 import type { ReviewTurn, Verdict } from "@/lib/review";
+import type { Health, ShopView, SyncAsked } from "@/lib/shop";
 
 /** The API's envelope: `{ data, meta }`, on success and on error alike. */
 type Envelope<T> = { data: T; error?: { message?: string } };
@@ -108,6 +109,37 @@ export function gradeTurn(
     method: "POST",
     body: JSON.stringify({ verdict, note }),
   });
+}
+
+// ── Shop connection (console.md §3.4) ────────────────────────────────────────
+
+/**
+ * *Check now* — asks the shop, right now, whether it answers and what it
+ * allows. Made only when the owner presses the button, never on a page load:
+ * it is a request to the merchant's own server. A shop that did not answer is
+ * a 200 describing the failure, so this resolves either way.
+ */
+export function checkShop(tenantId: string, storeId: string): Promise<Health> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/store/${encodeURIComponent(storeId)}/health`);
+}
+
+/**
+ * *Sync now* — queues a fresh read of the shop into **our copy**. Nothing is
+ * written to the shop. Pressing it again while one is queued or running
+ * returns that one: it is one sync, not two.
+ */
+export function syncShop(
+  tenantId: string,
+  storeId: string,
+): Promise<{ id: string; sync_asked: SyncAsked | null }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/store/${encodeURIComponent(storeId)}/sync`, {
+    method: "POST",
+  });
+}
+
+/** The screen's own read, again — used to notice when an asked-for sync finishes. */
+export function readShop(tenantId: string): Promise<ShopView> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/store`);
 }
 
 // ── Suggestions (ADR-0050) ───────────────────────────────────────────────────

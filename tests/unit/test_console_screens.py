@@ -24,7 +24,7 @@ from neura_api.routes.console_conversations import (
     _message_payload,
     _state,
 )
-from neura_api.routes.console_shop import COUNTED, _checkpoint_payload
+from neura_api.routes.console_shop import COUNTED, _checkpoint_payload, _notes
 from neura_api.routes.console_usage import PERIODS, _caveats, _totals_payload
 from neura_commerce.identity import EntityType
 from neura_core import ValidationError
@@ -232,6 +232,45 @@ class TestTheShopScreenSaysWhatItKnows:
         assert EntityType.ORDER not in COUNTED
         assert EntityType.CUSTOMER not in COUNTED
         assert EntityType.PRODUCT in COUNTED
+
+    def test_variants_are_not_counted(self) -> None:
+        """Sizes and colours live inside a product's document, so a variant
+        count always read 0 beside a catalogue that plainly had them."""
+        assert EntityType.VARIANT not in COUNTED
+
+
+class TestTheShopScreensSentences:
+    """The sentences under the catalogue's figures (`console.md §3.4`), from the
+    server so they can change when what they describe does."""
+
+    def test_it_always_says_nothing_syncs_by_itself(self) -> None:
+        [note] = _notes(products=0, searchable=0)
+        assert note["key"] == "no_schedule"
+        assert "nothing syncs by itself yet" in note["text"]
+
+    def test_the_index_line_says_what_is_missing(self) -> None:
+        index = _notes(products=38, searchable=29)[1]
+        assert index == {
+            "key": "index",
+            "text": (
+                "Search by meaning covers 29 of 38 products — the other 9 are not in it "
+                "yet, so the AI can't find them that way."
+            ),
+        }
+
+    def test_one_missing_product_is_said_in_the_singular(self) -> None:
+        assert _notes(products=5, searchable=4)[1]["text"].endswith(
+            "the other 1 is not in it yet, so the AI can't find it that way."
+        )
+
+    def test_a_complete_index_says_so_without_a_shortfall(self) -> None:
+        assert _notes(products=38, searchable=38)[1]["text"] == (
+            "Search by meaning covers all 38 products."
+        )
+
+    def test_no_products_means_no_index_line(self) -> None:
+        """Nothing to cover, so no sentence about covering it."""
+        assert [n["key"] for n in _notes(products=0, searchable=0)] == ["no_schedule"]
 
 
 class TestTheUsageScreenInventsNothing:

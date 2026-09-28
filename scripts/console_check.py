@@ -64,13 +64,14 @@ from neura_commerce.pagination import Cursor
 from neura_commerce.sync.schema import sync_checkpoints, synced_entities
 from neura_core import Database, get_settings, ids, load_env
 from neura_core.identity import COOKIE_NAME, memberships_for, request_sign_in_link
+from neura_core.jobs import job_queue
 from neura_core.observation import (
     ObservedEvent,
     ObservedEventRepository,
     ObservedEventType,
     observed_events,
 )
-from neura_core.tenancy.schema import tenant_stores, tenant_usage
+from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage
 from neura_core.tenancy.usage import UsageDelta, UsageMeter, today
 
 GREEN = "\033[32m"
@@ -205,6 +206,9 @@ async def main() -> int:
 
                 print(f"\n  {BOLD}shop and usage — connection, and honest numbers{OFF}")
                 await _check_shop_and_usage(browser, console, seeded, failures)
+
+                print(f"\n  {BOLD}help — connecting your shop{OFF}")
+                await _check_help(browser, console, seeded, failures)
 
                 print(f"\n  {BOLD}sold out — demand, counted, never who{OFF}")
                 await _check_sold_out(browser, console, seeded, failures)
@@ -711,7 +715,86 @@ async def _check_shop_and_usage(
         "console-check.invalid" in shop,
         failures,
     )
-    _check("what was synced is reported", "118 read" in shop, failures)
+    # What the last sync WROTE — new or changed — which is what the count is;
+    # "118 read" claimed a read count nobody records (2026-09-28).
+    _check("what the last sync changed is reported", "118 new or changed" in shop, failures)
+
+    # The 2026-09-28 redesign (console.md §3.4): a checklist, with one set of
+    # connection steps per connection this shop holds — counted in the database,
+    # because whether this shop had one of its own before the seed is not ours
+    # to assume — and the seed's among them.
+    connections = await browser.evaluate(
+        "document.querySelectorAll('[data-item=connected]').length"
+    )
+    held = await _store_count(seeded["tenant"])
+    _check(
+        f"the setup checklist lists every connection ({connections} of {held})",
+        connections == held
+        and "Get set up" in shop
+        and await browser.evaluate(
+            f"!!document.querySelector('[data-item=connected][data-store=\\"{seeded['store']}\\"]')"
+        ),
+        failures,
+    )
+    _check(
+        "the chat box, the agreement and product views are on the checklist",
+        await browser.evaluate(
+            "['chat-box','agreement','views'].every(i => document.querySelector(`[data-item=${i}]`))"
+        ),
+        failures,
+    )
+    _check(
+        "the shop is not asked on a page load",
+        await browser.evaluate(
+            "[...document.querySelectorAll('[data-item=answers]')]"
+            ".every(r => r.dataset.step === 'not-yet')"
+        )
+        and "Press Check now above to ask your shop." in shop,
+        failures,
+    )
+    _check("variants are not counted", "Variants" not in shop, failures)
+    _check("freshness is said honestly", "nothing syncs by itself yet" in shop, failures)
+    _check("the read-only promise is on the screen", "Read only." in shop, failures)
+    # Never any part of a chat box key — the tick is its time and its address.
+    prefixes = await _key_prefixes(seeded["tenant"])
+    _check(
+        "no chat box key or prefix reaches the shop screen",
+        "fn_pk_" not in shop and not any(prefix in shop for prefix in prefixes),
+        failures,
+    )
+
+    # Check now, on the seeded connection only: its address is `.invalid`, so
+    # the failure path runs and the owner's real shop is never asked.
+    store = seeded["store"]
+    await browser.evaluate(
+        f"document.querySelector('[data-store=\"{store}\"] [data-check-now]').click() || true"
+    )
+    await asyncio.sleep(4)
+    _check(
+        "Check now asks the shop only when pressed, and shows the failure",
+        await browser.evaluate(
+            f"document.querySelector('[data-item=answers][data-store=\"{store}\"]').dataset.step"
+        )
+        == "failed",
+        failures,
+    )
+
+    # Sync now, on the seeded connection: one job, for that store, a full read —
+    # and the screen says it asked. The job is removed with the seed.
+    await browser.evaluate(
+        f"document.querySelector('[data-store=\"{store}\"] [data-sync-now]').click() || true"
+    )
+    await asyncio.sleep(2)
+    line = await browser.evaluate(
+        f"(document.querySelector('[data-store=\"{store}\"] [data-sync-line]') || {{}})"
+        ".innerText || ''"
+    )
+    queued = await _sync_jobs(seeded["tenant"], store)
+    _check(
+        "Sync now queues one full read of our copy and says so",
+        "Asked your shop for a fresh copy" in line and queued == [False],
+        failures,
+    )
 
     # `console.md §3.4`: never a stored credential, not even masked, because a
     # field that can be revealed is a field that gets revealed in a screen-share.
@@ -780,6 +863,124 @@ async def _check_shop_and_usage(
         and await browser.evaluate(f"!!document.querySelector('[data-agent=\"{SEEDED_AGENT}\"]')"),
         failures,
     )
+
+
+async def _check_help(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """Help — *Connecting your shop* (2026-09-28, ADR-0026 §7), rendered.
+
+    Rule 1 reaches the console: no commerce platform is named, and the chat box
+    line is the API's own. No time estimates: nothing about setting up a shop
+    has been measured.
+    """
+    await browser.goto(f"{console}/console/{seeded['tenant']}/help")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    lowered = page.lower()
+
+    _check("the help page renders", "Connecting your shop" in page, failures)
+    _check(
+        "it lists the six steps with how you'll know",
+        await browser.evaluate("document.querySelectorAll('[data-help-step]').length") == 6
+        and page.count("How you'll know") == 6,
+        failures,
+    )
+    snippet = await browser.evaluate(
+        "(document.querySelector('[data-snippet]') || {}).innerText || ''"
+    )
+    _check(
+        "the chat box line is the one the API serves",
+        "/v1/widget/widget.js" in snippet and "data-neura-key" in snippet,
+        failures,
+    )
+    _check(
+        "no commerce platform is named on the help page",
+        not any(name in lowered for name in ("bagisto", "shopify", "woocommerce", "magento")),
+        failures,
+    )
+    _check(
+        "no time estimate on the help page",
+        re.search(r"\b(minutes?|hours?|days?)\b", lowered) is None,
+        failures,
+    )
+    _check("no secret key on the help page", "fn_sk_" not in page, failures)
+
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
+    )
+    try:
+        for path in ("help", "shops"):
+            await browser.goto(f"{console}/console/{seeded['tenant']}/{path}")
+            await asyncio.sleep(3)
+            _check(
+                f"on a phone the {path} page does not scroll sideways",
+                await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+                failures,
+            )
+        await browser.evaluate(
+            "document.querySelector('button[aria-controls=shop-menu]').click() || true"
+        )
+        await asyncio.sleep(0.5)
+        _check(
+            "Help is in the side menu",
+            await browser.evaluate(
+                "[...document.querySelectorAll('#shop-menu a')].some(a => a.pathname.endsWith('/help'))"
+            ),
+            failures,
+        )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _store_count(tenant_id: str) -> int:
+    """How many shop connections this tenant holds, the seed's included."""
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(tenant_id) as session:
+            return int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(tenant_stores)
+                    .where(tenant_stores.c.tenant_id == tenant_id)
+                )
+                or 0
+            )
+    finally:
+        await db.dispose()
+
+
+async def _key_prefixes(tenant_id: str) -> list[str]:
+    """Every key prefix this shop holds — none of which may appear on a page."""
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(tenant_id) as session:
+            rows = await session.execute(
+                select(api_keys.c.token_prefix).where(api_keys.c.tenant_id == tenant_id)
+            )
+            return [str(row.token_prefix) for row in rows]
+    finally:
+        await db.dispose()
+
+
+async def _sync_jobs(tenant_id: str, store_id: str) -> list[bool]:
+    """The sync jobs queued for one store — each one's `incremental` flag."""
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(tenant_id) as session:
+            rows = await session.execute(
+                select(job_queue.c.payload)
+                .where(job_queue.c.tenant_id == tenant_id)
+                .where(job_queue.c.kind == "sync.store")
+                .where(job_queue.c.payload["store_id"].astext == store_id)
+            )
+            return [bool(row.payload.get("incremental", True)) for row in rows]
+    finally:
+        await db.dispose()
 
 
 async def _check_sold_out(
@@ -1349,6 +1550,14 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
         )
         await session.execute(delete(conversations).where(conversations.c.id.in_(threads)))
         await session.execute(delete(tenant_stores).where(tenant_stores.c.id == seeded["store"]))
+        # The sync Sync now queued for the seeded store — by that store's id,
+        # never "this tenant's jobs", which would take a real sync with it.
+        await session.execute(
+            delete(job_queue)
+            .where(job_queue.c.tenant_id == seeded["tenant"])
+            .where(job_queue.c.kind == "sync.store")
+            .where(job_queue.c.payload["store_id"].astext == seeded["store"])
+        )
         # By platform, which is this check's own string and nothing else's — not
         # "this tenant's checkpoints", which would take a real sync's position
         # with it and silently restart a merchant's next crawl from the top.

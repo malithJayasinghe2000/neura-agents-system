@@ -1,67 +1,63 @@
 /**
- * Screen 4 — Shop. What we are connected to, and what we last read from it.
+ * Screen 4 — Shop connection. Redesigned 2026-09-28 from the owner's approved
+ * mockup (console.md §3.4, canvas boards 21 and 23).
  *
- * **Read-only, deliberately.** `docs/console.md §3.4` designs a connect form
- * that submits a store credential; it is not built, because the console's whole
- * write surface today is one grading verdict and a credential form would be the
- * highest-value target in the application, added before anyone has connected a
- * shop through anything but the CLI. The reasoning is in
- * `routes/console_shop.py` and in PROJECT_STATE, so whoever adds it later adds
- * it on purpose. Connecting stays on `POST /v1/stores` / `make tenant-new`.
+ * The owner found it thin and asked what connecting a new shop takes. It is now
+ * four parts, in the order an owner needs them:
  *
- * **No credential is displayed, not even masked.** §3.4: a field that can be
- * revealed is a field that gets revealed in a screen-share. The guarantee is in
- * the query, which never selects those columns — not in this file.
+ * - **Get set up** — a checklist, each step ticked or not yet, and who does it:
+ *   connected, answers (*Check now*, still a click), catalogue copied, chat box
+ *   on the shop; then, optional and needed for Sold out, the data agreement and
+ *   product views arriving. Every tick but *answers* is read from our own
+ *   tables.
+ * - **Our copy of your catalogue** — counts, when it was last read, *"nothing
+ *   syncs by itself yet"*, **Sync now** (writes our copy, never the shop), each
+ *   kind's last run, and how much search by meaning covers.
+ * - **What your shop lets the assistant do** — the shop's own declaration in
+ *   plain words, after *Check now*; and always *Read only*.
+ * - **Connection details** — for a developer or support.
  *
- * **Nothing here is live unless asked.** The counts and sync times are what the
- * database recorded; "is it reachable right now?" is a button, because a page
- * that probes the merchant's own server on every glance is a monitoring agent
- * nobody asked for.
+ * **Still read-only towards the shop.** The connect form stays unbuilt (§3.4:
+ * a credential form would be the highest-value target in the application), and
+ * **no credential is displayed, not even masked** — guaranteed by the query,
+ * which never selects those columns, not by this file.
+ *
+ * **Nothing here reaches the shop on a page load.** *Check now* is a button;
+ * its answer lives in the page (`HealthChecks`), not in the address, so the
+ * page can be re-read after a sync without asking the shop again.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CheckCircle2, PlugZap, XCircle } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import { AllowedList, AnswersItem, HealthChecks } from "@/components/shop/health-check";
+import { SetupItem } from "@/components/shop/setup-item";
+import { SyncNow } from "@/components/shop/sync-now";
 import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
-import { ENTITY_LABELS, type ConnectedStore, type Health, type ShopView } from "@/lib/shop";
+import {
+  ENTITY_LABELS,
+  SHOWN_KINDS,
+  connectionKind,
+  counted,
+  host,
+  readLine,
+  type ConnectedStore,
+  type ShopView,
+} from "@/lib/shop";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default async function ShopPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ tenantId: string }>;
-  searchParams: Promise<{ check?: string }>;
-}) {
+export default async function ShopPage({ params }: { params: Promise<{ tenantId: string }> }) {
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
-  const { check } = await searchParams;
-
   const view = await fromApi<ShopView>(`/shops/${encodeURIComponent(tenantId)}/store`);
-
-  // Only when the merchant asked. `check` carries the store id, so the request
-  // to their own server happens on a click and never on a page view.
-  const health = check
-    ? await fromApi<Health>(
-        `/shops/${encodeURIComponent(tenantId)}/store/${encodeURIComponent(check)}/health`,
-      )
-    : null;
 
   return (
     <>
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">Shop connection</h1>
         <p className="text-muted-foreground">
-          What your assistant is connected to, and what it last read from it.
-        </p>
-        {/* The one place the id is shown: it means nothing to an owner until
-            support asks which shop they mean. */}
-        <p className="text-xs text-muted-foreground">
-          Shop ID, if support asks: <code className="text-foreground">{tenantId}</code>
+          How your assistant is connected to your shop, and whether everything is set up.
         </p>
       </div>
 
@@ -76,173 +72,309 @@ export default async function ShopPage({
               : view.message}
           </AlertDescription>
         </Alert>
-      ) : !view.data.connected ? (
-        <NotConnected />
       ) : (
-        <div className="space-y-4">
-          {view.data.stores.map((store) => (
-            <StoreCard
-              key={store.id}
-              tenantId={tenantId}
-              store={store}
-              health={health && check === store.id ? health : null}
-            />
-          ))}
-        </div>
+        <HealthChecks tenantId={tenantId}>
+          <GetSetUp tenantId={tenantId} view={view.data} />
+          {view.data.connected ? (
+            <>
+              {view.data.stores.map((store) => (
+                <StoreParts
+                  key={store.id}
+                  tenantId={tenantId}
+                  store={store}
+                  named={view.data.stores.length > 1}
+                />
+              ))}
+              <ConnectionDetails tenantId={tenantId} stores={view.data.stores} />
+            </>
+          ) : (
+            <NotConnected />
+          )}
+        </HealthChecks>
       )}
     </>
   );
 }
 
-function StoreCard({
-  tenantId,
-  store,
-  health,
-}: {
-  tenantId: string;
-  store: ConnectedStore;
-  health: Awaited<ReturnType<typeof fromApi<Health>>> | null;
-}) {
+/** When products were last read from the shop — `null` if never. */
+function lastRead(store: ConnectedStore): string | null {
+  return store.syncs.find((sync) => sync.entity_type === "product")?.completed_at ?? null;
+}
+
+function GetSetUp({ tenantId, view }: { tenantId: string; view: ShopView }) {
+  const setup = view.setup;
+  const several = view.stores.length > 1;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">
-          <code>{store.base_url}</code>
-        </CardTitle>
-        <CardDescription>
-          {store.platform} · {store.status}
-        </CardDescription>
-      </CardHeader>
+    <section aria-labelledby="get-set-up" className="overflow-hidden rounded-2xl border">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-4 py-3.5 sm:px-5">
+        <h2 id="get-set-up" className="text-lg font-semibold">
+          Get set up
+        </h2>
+        <Link
+          href={`/console/${encodeURIComponent(tenantId)}/help`}
+          className="inline-flex items-center gap-1 text-sm font-medium underline-offset-3 hover:underline"
+        >
+          Help: connecting your shop <ArrowRight className="size-3.5" aria-hidden />
+        </Link>
+      </div>
 
-      <CardContent className="space-y-5">
-        <section className="space-y-2">
-          <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            In the catalogue
-          </h3>
-          {Object.keys(store.catalogue).length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing has been synced yet.</p>
-          ) : (
-            <dl className="flex flex-wrap gap-x-8 gap-y-2">
-              {Object.entries(store.catalogue).map(([kind, count]) => (
-                <div key={kind}>
-                  <dt className="text-xs tracking-wide text-muted-foreground uppercase">
-                    {ENTITY_LABELS[kind] ?? kind}
-                  </dt>
-                  <dd className="text-xl font-semibold tabular-nums">{count}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Orders and customers aren&apos;t listed because they aren&apos;t copied here — your
-            assistant looks those up in your shop at the moment it needs them.
+      <ul className="divide-y">
+        {view.connected ? (
+          view.stores.map((store) => <StoreSteps key={store.id} store={store} named={several} />)
+        ) : (
+          <SetupItem
+            item="connected"
+            state="not-yet"
+            title="Your shop is connected"
+            detail="Not yet · FiveNeurals connects it, with your shop's address and its secret token"
+          />
+        )}
+
+        {setup ? <ChatBoxStep chatBox={setup.chat_box} /> : null}
+      </ul>
+
+      {setup ? (
+        <>
+          <p className="border-t px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground sm:px-5">
+            Optional — needed for Sold out
           </p>
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Last sync
-          </h3>
-          {store.syncs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No sync has run for this shop yet, so the catalogue above is empty and your assistant
-              has nothing to answer product questions from.
-            </p>
-          ) : (
-            <ul className="space-y-1.5">
-              {store.syncs.map((sync) => (
-                <li key={sync.entity_type} className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="min-w-28">
-                    {ENTITY_LABELS[sync.entity_type] ?? sync.entity_type}
-                  </span>
-                  {/* `null` is not a date. "Never finished" and "finished long
-                      ago" are different facts and only one should worry anyone. */}
-                  <span className="text-muted-foreground">
-                    {sync.completed_at ? (
-                      <>
-                        finished <When iso={sync.completed_at} /> · {sync.last_run_count} read
-                      </>
-                    ) : (
-                      "has never finished"
-                    )}
-                  </span>
-                  {sync.in_progress ? <Badge variant="secondary">part-way through</Badge> : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="space-y-2 border-t pt-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              size="sm"
-              variant="outline"
-              nativeButton={false}
-              render={
-                <Link
-                  href={`/console/${encodeURIComponent(tenantId)}/shops?check=${encodeURIComponent(store.id)}`}
-                />
+          <ul className="divide-y">
+            <SetupItem
+              compact
+              item="agreement"
+              state={setup.agreement_since ? "done" : "not-yet"}
+              title="Data agreement on record"
+              detail={
+                setup.agreement_since ? (
+                  <>
+                    Since <When iso={setup.agreement_since} date />
+                  </>
+                ) : (
+                  "Not recorded yet · FiveNeurals records it"
+                )
               }
-            >
-              <PlugZap className="size-3.5" aria-hidden />
-              Check it&apos;s reachable
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Everything above is what we last recorded. This asks your shop right now.
-            </p>
-          </div>
-
-          {health ? <HealthResult health={health} /> : null}
-        </section>
-      </CardContent>
-    </Card>
+            />
+            <SetupItem
+              compact
+              item="views"
+              state={setup.receiving ? "done" : "not-yet"}
+              title="Your shop is sending product views"
+              detail={
+                setup.receiving
+                  ? `Some arrived in the last ${setup.window_days} days`
+                  : !setup.agreement_since
+                    ? "Needs the data agreement first"
+                    : `None arrived in the last ${setup.window_days} days · your developer switches them on in your shop's settings`
+              }
+            />
+          </ul>
+        </>
+      ) : null}
+    </section>
   );
 }
 
-function HealthResult({ health }: { health: Awaited<ReturnType<typeof fromApi<Health>>> }) {
-  if (!health.ok) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>The check could not run</AlertTitle>
-        <AlertDescription>{health.message}</AlertDescription>
-      </Alert>
-    );
-  }
+/** The three steps that belong to one connection. Named only when there is more than one. */
+function StoreSteps({ store, named }: { store: ConnectedStore; named: boolean }) {
+  const read = lastRead(store);
+  const products = store.catalogue.product ?? 0;
+  return (
+    <>
+      {named ? (
+        <li className="bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground sm:px-5">
+          {host(store.base_url)}
+        </li>
+      ) : null}
+      <SetupItem
+        item="connected"
+        store={store.id}
+        state={store.status === "active" ? "done" : "failed"}
+        title="Your shop is connected"
+        detail={
+          store.status === "active"
+            ? `${host(store.base_url)} · set up by FiveNeurals`
+            : `${host(store.base_url)} · the connection is ${store.status}`
+        }
+      />
+      <AnswersItem storeId={store.id} />
+      <SetupItem
+        item="catalogue"
+        state={read ? "done" : "not-yet"}
+        title="Your catalogue is copied"
+        detail={
+          read ? (
+            <>
+              {counted(products, "product")} · last read <When iso={read} inline />
+            </>
+          ) : (
+            "Not yet · press Sync now below"
+          )
+        }
+      />
+    </>
+  );
+}
 
-  if (!health.data.reachable) {
-    return (
-      <Alert variant="destructive">
-        <XCircle aria-hidden />
-        <AlertTitle>Your shop did not answer</AlertTitle>
-        <AlertDescription>
-          {/* The adapter's own words. A friendlier sentence invented here would
-              hide the one detail whoever fixes this needs. */}
-          {health.data.detail || "No detail was returned."}
-        </AlertDescription>
-      </Alert>
-    );
-  }
+function ChatBoxStep({ chatBox }: { chatBox: NonNullable<ShopView["setup"]>["chat_box"] }) {
+  const where = chatBox ? chatBox.origins.map(host) : [];
+  const from =
+    where.length === 1
+      ? ` from ${where[0]}`
+      : where.length > 1
+        ? ` · works on ${where.join(", ")}`
+        : "";
 
   return (
-    <Alert>
-      <CheckCircle2 aria-hidden />
-      <AlertTitle>Your shop answered</AlertTitle>
-      <AlertDescription>
-        <p>It says it can do the following. This is what your shop declares, not what we assume.</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {health.data.capabilities.length === 0 ? (
-            <span className="text-sm">It declared no capabilities at all.</span>
+    <SetupItem
+      item="chat-box"
+      state={chatBox?.last_used_at ? "done" : "not-yet"}
+      title="The chat box is on your shop"
+      detail={
+        chatBox?.last_used_at ? (
+          <>
+            Used <When iso={chatBox.last_used_at} day />
+            {from} · added by your developer
+          </>
+        ) : chatBox ? (
+          "Not used yet — this is ticked once a shopper uses it · added by your developer"
+        ) : (
+          "Not yet · your developer adds it, with a key from FiveNeurals"
+        )
+      }
+    />
+  );
+}
+
+/** The two cards that belong to one connection: our copy, and what the shop allows. */
+function StoreParts({
+  tenantId,
+  store,
+  named,
+}: {
+  tenantId: string;
+  store: ConnectedStore;
+  named: boolean;
+}) {
+  const read = lastRead(store);
+  const note = (key: string) => store.notes.find((n) => n.key === key)?.text;
+  const byKind = new Map(store.syncs.map((sync) => [sync.entity_type, sync]));
+
+  return (
+    <div className="grid items-start gap-5 lg:grid-cols-2">
+      <section
+        aria-label={named ? `Our copy of ${host(store.base_url)}` : "Our copy of your catalogue"}
+        data-store={store.id}
+        className="space-y-4 rounded-2xl border p-4 sm:p-5"
+      >
+        <h2 className="text-lg font-semibold">
+          Our copy of your catalogue
+          {named ? (
+            <span className="font-normal text-muted-foreground"> · {host(store.base_url)}</span>
+          ) : null}
+        </h2>
+
+        <ul className="grid grid-cols-3 gap-2.5">
+          {SHOWN_KINDS.map((kind) => (
+            <li key={kind} data-count={kind} className="rounded-xl border px-3 py-2.5 sm:px-3.5">
+              <span className="block text-2xl font-semibold tabular-nums">
+                {store.catalogue[kind] ?? 0}
+              </span>
+              <span className="block text-sm text-muted-foreground">
+                {(ENTITY_LABELS[kind] ?? kind).toLowerCase()}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        <p className="leading-relaxed">
+          {read ? (
+            <>
+              Last read from your shop{" "}
+              <strong className="font-semibold">
+                <When iso={read} inline />
+              </strong>
+              .{" "}
+            </>
           ) : (
-            health.data.capabilities.map((capability) => (
-              <Badge key={capability} variant="outline">
-                {capability}
-              </Badge>
-            ))
+            "Nothing has been read from your shop yet. "
           )}
+          <span className="text-muted-foreground">{note("no_schedule")}</span>
+        </p>
+
+        <SyncNow tenantId={tenantId} storeId={store.id} asked={store.sync_asked} lastRead={read} />
+
+        <div className="space-y-1.5 border-t pt-3 text-sm text-muted-foreground">
+          {SHOWN_KINDS.filter((kind) => byKind.has(kind)).map((kind) => {
+            const sync = byKind.get(kind)!;
+            return (
+              <p key={kind} data-kind={kind}>
+                {ENTITY_LABELS[kind]} — {readLine(sync, store.catalogue[kind] ?? 0)}
+                {sync.in_progress ? " · part-way through" : ""}
+              </p>
+            );
+          })}
+          {note("index") ? (
+            <p data-index className="pt-1.5 text-foreground/80">
+              {note("index")}
+            </p>
+          ) : null}
         </div>
-      </AlertDescription>
-    </Alert>
+      </section>
+
+      <section
+        aria-label={named ? `What ${host(store.base_url)} allows` : "What your shop allows"}
+        className="space-y-3.5 rounded-2xl border p-4 sm:p-5"
+      >
+        <h2 className="text-lg font-semibold">What your shop lets the assistant do</h2>
+        <AllowedList storeId={store.id} />
+        <p className="rounded-xl bg-muted/60 px-3.5 py-3 text-sm leading-relaxed">
+          <strong className="font-semibold">Read only.</strong> Your assistant cannot change
+          anything in your shop — no orders, prices or stock.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function ConnectionDetails({ tenantId, stores }: { tenantId: string; stores: ConnectedStore[] }) {
+  return (
+    <section aria-labelledby="details" className="space-y-3 rounded-2xl border p-4 sm:p-5">
+      <h2 id="details" className="font-semibold">
+        Connection details{" "}
+        <span className="font-normal text-muted-foreground">· for your developer or support</span>
+      </h2>
+      {stores.map((store) => (
+        <dl
+          key={store.id}
+          className="grid gap-x-6 gap-y-2.5 text-sm sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr]"
+        >
+          <Detail label="Address">
+            <code className="break-all">{store.base_url}</code>
+          </Detail>
+          <Detail label="Connection">{connectionKind(store.platform)}</Detail>
+          <Detail label="Status">
+            {store.status.charAt(0).toUpperCase() + store.status.slice(1)}
+          </Detail>
+        </dl>
+      ))}
+      {/* The one place the id is shown: it means nothing to an owner until
+          support asks which shop they mean. */}
+      <dl className="text-sm">
+        <Detail label="Shop ID, if support asks">
+          <code className="break-all">{tenantId}</code>
+        </Detail>
+      </dl>
+    </section>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd>{children}</dd>
+    </div>
   );
 }
 
@@ -252,19 +384,17 @@ function HealthResult({ health }: { health: Awaited<ReturnType<typeof fromApi<He
  */
 function NotConnected() {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">No shop connected yet</CardTitle>
-        <CardDescription>
-          Until a shop is connected, your assistant has no catalogue to answer from and no orders to
-          look up — every other screen here stays empty.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="text-sm text-muted-foreground">
-        Connecting is not done from this screen yet: it needs your shop&apos;s address and an access
-        token, and those go in through the API rather than through a form in a browser. Whoever set
-        this up can do it, and this page fills in as soon as they have.
-      </CardContent>
-    </Card>
+    <section className="space-y-2 rounded-2xl border border-dashed p-5 sm:p-7">
+      <h2 className="text-lg font-semibold">No shop connected yet</h2>
+      <p className="leading-relaxed">
+        Until a shop is connected, your assistant has no catalogue to answer from and no orders to
+        look up — every other screen here stays empty.
+      </p>
+      <p className="leading-relaxed text-muted-foreground">
+        Connecting is not done from this screen: it needs your shop&apos;s address and its secret
+        token, and those go in through FiveNeurals rather than through a form in a browser. This
+        page fills in as soon as they have.
+      </p>
+    </section>
   );
 }

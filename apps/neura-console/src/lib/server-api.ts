@@ -98,3 +98,18 @@ export async function hasSession(): Promise<boolean> {
   const jar = await cookies();
   return jar.get(SESSION_COOKIE) !== undefined;
 }
+
+/**
+ * The chat box's embed lines, exactly as the API serves them (`GET
+ * /v1/widget/snippet`) — so the Help page can never show a different line from
+ * the one a developer would be given. A public endpoint: no cookie, no key.
+ * The key in it is the API's own placeholder; FiveNeurals gives the real one.
+ */
+export async function widgetSnippet(): Promise<string | null> {
+  const response = await fetch(`${API_BASE}/v1/widget/snippet`, { cache: "no-store" }).catch(
+    () => null,
+  );
+  if (!response?.ok) return null;
+  const body = (await response.json().catch(() => null)) as { snippet?: string } | null;
+  return body?.snippet?.trim() || null;
+}

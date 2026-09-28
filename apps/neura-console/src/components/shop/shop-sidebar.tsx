@@ -21,6 +21,7 @@ import { useState } from "react";
 import {
   BarChart3,
   ChevronsUpDown,
+  CircleQuestionMark,
   ClipboardCheck,
   House,
   Menu,
@@ -61,6 +62,7 @@ export function ShopSidebar({
   const setup: Item[] = [
     { href: `${base}/shops`, label: "Shop connection", icon: Plug },
     { href: `${base}/usage`, label: "Usage and cost", icon: BarChart3 },
+    { href: `${base}/help`, label: "Help", icon: CircleQuestionMark },
   ];
 
   // Home is the shop's own address, so it is current only on exactly that

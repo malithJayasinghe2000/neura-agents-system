@@ -23,11 +23,17 @@ export function When({
   iso,
   date = false,
   time = false,
+  inline = false,
+  day = false,
 }: {
   iso: string | null;
   date?: boolean;
   /** The time alone — for a list that already says the day in a heading. */
   time?: boolean;
+  /** Mid-sentence: *"last read yesterday, 2:51 PM"* — the relative word in lower case. */
+  inline?: boolean;
+  /** The day alone, relative where it can be: *"used today"*, *"used 24 Sep"*. Lower case. */
+  day?: boolean;
 }) {
   const inBrowser = useSyncExternalStore(
     noChange,
@@ -44,7 +50,11 @@ export function When({
       {inBrowser
         ? time
           ? moment.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-          : readable(moment, date)
+          : day
+            ? relativeDay(moment)
+            : inline
+              ? readable(moment, date).replace(/^(Today|Yesterday)/, (word) => word.toLowerCase())
+              : readable(moment, date)
         : iso.slice(0, 10)}
     </time>
   );
@@ -76,6 +86,16 @@ function readable(moment: Date, dateOnly: boolean): string {
   if (sameDay(moment, now)) return `Today, ${time}`;
   if (sameDay(moment, yesterday)) return `Yesterday, ${time}`;
   return `${day}, ${time}`;
+}
+
+/** `today` · `yesterday` · `24 Sep` — a day, said the way it would be mid-sentence. */
+function relativeDay(moment: Date): string {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(moment, now)) return "today";
+  if (sameDay(moment, yesterday)) return "yesterday";
+  return readable(moment, true);
 }
 
 function sameDay(a: Date, b: Date): boolean {
