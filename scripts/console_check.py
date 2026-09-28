@@ -48,7 +48,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from widget_check import Chrome, find_chrome
 
 from neura_agent_core.conversations import (
@@ -215,7 +215,7 @@ async def main() -> int:
             if sell_shop:
                 seeded_choice = sell_shop
                 print(f"\n  {BOLD}suggestions — the owner's choice wins{OFF}")
-                await _check_suggestions(browser, console, sell_shop, failures)
+                await _check_suggestions(browser, console, db, sell_shop, failures)
             else:
                 print(f"  {DIM}no shop with SELL — the Suggestions checks are skipped{OFF}")
 
@@ -804,25 +804,177 @@ async def _check_sold_out(
 
 
 async def _check_suggestions(
-    browser: Chrome, console: str, made: dict[str, str], failures: list[str]
+    browser: Chrome, console: str, db: Database, made: dict[str, str], failures: list[str]
 ) -> None:
-    """Screen 7 — ADR-0050, against the rendered page."""
-    await browser.goto(f"{console}/console/{made['tenant']}/suggestions?q=Console-check")
-    await asyncio.sleep(3)
-    page = await browser.evaluate("document.body.innerText")
+    """Screen 7 — ADR-0050, redesigned 2026-09-28, against the rendered page.
 
-    _check("the suggestions screen renders", "Suggestions" in page, failures)
-    _check(
-        "the owner's choice is shown as theirs",
-        "Your choice" in page and SEEDED_CHOICE_PICK[1] in page,
-        failures,
+    The redesign's promise is a preview of what a basket shows, asked of the
+    shop when the owner opens a product — and **never a model run**. That last
+    part is a claim about the job queue, so it is checked there.
+    """
+    base = f"{console}/console/{made['tenant']}/suggestions"
+    anchor = SEEDED_CHOICE_ANCHOR
+    # Wide: on a phone the list and the open product are one at a time.
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=1280,
+        height=900,
+        deviceScaleFactor=1,
+        mobile=False,
     )
-    _check(
-        "it says the choice is the same for every shopper",
-        "Same for every shopper" in page,
-        failures,
+    try:
+        await browser.goto(f"{base}?q=Console-check")
+        await asyncio.sleep(3)
+        page = await browser.evaluate("document.body.innerText")
+        _check("the suggestions screen renders", "Suggestions" in page, failures)
+        _check(
+            "the owner's choice is shown as theirs",
+            "Your choice" in page and anchor[1] in page,
+            failures,
+        )
+        _check(
+            "it says the choice is the same for every shopper",
+            "Same for every shopper" in page,
+            failures,
+        )
+        _check(
+            "each filter says how many it holds",
+            await browser.evaluate(
+                "[...document.querySelectorAll('nav[aria-label=\\'Show products that are\\'] a')]"
+                ".every((a) => /\\d/.test(a.textContent || ''))"
+            ),
+            failures,
+        )
+        _check("no API key reached the suggestions screen", "fn_sk_" not in page, failures)
+
+        await browser.goto(f"{base}?q=Console-check&mode=owner")
+        await asyncio.sleep(3)
+        rows = await browser.evaluate(
+            "[...document.querySelectorAll('[data-product-list] [data-product]')]"
+            ".map((a) => a.getAttribute('data-product'))"
+        )
+        _check(
+            "the 'Your choice' filter shows only products the owner chose",
+            rows == [anchor[0]],
+            failures,
+        )
+
+        # The seeded products carry no category: exactly what "No category"
+        # is for — the products that can never get an automatic suggestion.
+        await browser.goto(f"{base}?q=Console-check&category=none")
+        await asyncio.sleep(3)
+        uncategorised = await browser.evaluate(
+            "[...document.querySelectorAll('[data-product-list] [data-product]')]"
+            ".map((a) => a.getAttribute('data-product'))"
+        )
+        listed = await browser.evaluate("document.body.innerText")
+        _check(
+            "the 'No category' filter lists products with no category",
+            anchor[0] in (uncategorised or []),
+            failures,
+        )
+        _check("the list says where its page sits", "Showing 1\u2013" in listed, failures)
+
+        await browser.goto(f"{base}?q=Console-check&product={anchor[0]}")
+        await asyncio.sleep(5)
+        opened = await browser.evaluate(
+            "document.querySelector('[data-open-product]')?.innerText || ''"
+        )
+        _check(
+            "opening a product says what a basket shows with it, or why it cannot",
+            anchor[1] in opened
+            and any(
+                words in opened
+                for words in (
+                    "Recommended with your",
+                    "Nothing is shown with this product",
+                    "did not answer just now",
+                )
+            ),
+            failures,
+        )
+        _check(
+            "and offers the owner's way to change it",
+            "Change these" in opened or "Choose suggestions" in opened,
+            failures,
+        )
+
+        # A real product of the shop that the AI has never run for — the case
+        # where a shopper's basket WOULD queue it — opened the way an owner opens
+        # one. The basket's own code runs against the live shop, and the job
+        # queue must not grow. Chosen from the database so the check cannot pass
+        # on a product that would not have queued anyway (E6).
+        never = await _never_paired(db, made["tenant"])
+        if never is None:
+            print(f"  {DIM}every product has an AI result — the no-queue check is skipped{OFF}")
+        else:
+            before = await _pairing_jobs(db, made["tenant"])
+            await browser.goto(f"{base}?product={never}")
+            await asyncio.sleep(6)
+            _check(
+                "opening a product never queues the AI",
+                await _pairing_jobs(db, made["tenant"]) == before,
+                failures,
+            )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
     )
-    _check("no API key reached the suggestions screen", "fn_sk_" not in page, failures)
+    try:
+        await browser.goto(f"{base}?q=Console-check&product={anchor[0]}")
+        await asyncio.sleep(4)
+        _check(
+            "on a phone one product is open at a time, and nothing scrolls sideways",
+            "All products" in await browser.evaluate("document.body.innerText")
+            and await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _never_paired(db: Database, tenant_id: str) -> str | None:
+    """A synced product of this shop with no stored AI pairing at all, or None."""
+    from neura_agent_sell.pairing.schema import sell_pairings
+
+    async with db.tenant_session(tenant_id) as session:
+        found = await session.scalar(
+            select(synced_entities.c.external_id)
+            .where(synced_entities.c.tenant_id == tenant_id)
+            .where(synced_entities.c.entity_type == "product")
+            .where(synced_entities.c.platform != SEEDED_PLATFORM)
+            .where(
+                ~select(sell_pairings.c.id)
+                .where(sell_pairings.c.tenant_id == tenant_id)
+                .where(sell_pairings.c.product_id == synced_entities.c.external_id)
+                .exists()
+            )
+            .order_by(synced_entities.c.external_id)
+            .limit(1)
+        )
+    return str(found) if found is not None else None
+
+
+async def _pairing_jobs(db: Database, tenant_id: str) -> int:
+    """How many pairing computations this shop has ever queued."""
+    from neura_core.jobs.schema import job_queue
+
+    async with db.tenant_session(tenant_id) as session:
+        return int(
+            await session.scalar(
+                select(func.count())
+                .select_from(job_queue)
+                .where(job_queue.c.tenant_id == tenant_id)
+                .where(job_queue.c.kind == "sell.pairing.compute")
+            )
+            or 0
+        )
 
 
 async def _seed_choice(db: Database, held: list[Any]) -> dict[str, str] | None:

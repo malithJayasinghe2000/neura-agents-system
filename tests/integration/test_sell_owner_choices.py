@@ -11,6 +11,7 @@ Run with ``make test-integration`` (needs ``make up`` and ``make migrate``).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,12 +26,13 @@ from neura_core import Database, get_settings, ids, load_env
 from neura_core.identity import COOKIE_NAME, issue
 from neura_core.tenancy import TenantRepository
 from neura_core.tenancy.schema import tenants
-from neura_domain import Product
+from neura_domain import Money, Product
 from tests.integration.console_fixtures import PLATFORM, Shop, drop_shop, make_shop
 
 pytestmark = pytest.mark.integration
 
 JUMPER, CASHMERE, WOOL_WASH, AUTO = "8001", "8002", "8003", "8004"
+KNITWEAR = "c_knit"
 TITLES = {
     JUMPER: "Cotton Jumper",
     CASHMERE: "Cashmere Jumper",
@@ -64,6 +66,18 @@ async def _seed(db: Database, shop: Shop, *, agents: list[str]) -> None:
     async with db.tenant_session(shop.tenant) as session:
         await TenantRepository(session).create(
             tenant_id=shop.tenant, name="Choices shop", enabled_agents=agents
+        )
+        # One category, named, for the list's category names (2026-09-28).
+        await session.execute(
+            insert(synced_entities).values(
+                tenant_id=shop.tenant,
+                platform=PLATFORM,
+                entity_type="category",
+                external_id=KNITWEAR,
+                neura_id=ids.new_id(ids.NEURA_ENTITY),
+                fingerprint="owner-choices",
+                document={"name": "Knitwear"},
+            )
         )
         for product_id, title in TITLES.items():
             document = _product(shop.tenant, product_id, title).model_dump(mode="json")
@@ -111,6 +125,9 @@ async def shop_without_sell(db: Database):
 
 
 def _product(tenant: str, product_id: str, title: str) -> Product:
+    # The cotton jumper is the one with a category and a price, so the list's
+    # names and prices have something to show and something to leave empty.
+    jumper = product_id == JUMPER
     return Product(
         neura_id=f"ne_{product_id}",
         tenant_id=tenant,
@@ -119,6 +136,8 @@ def _product(tenant: str, product_id: str, title: str) -> Product:
         external_id=product_id,
         title=title,
         description=f"{title} — a product for the owner-choices test.",
+        category_ids=[KNITWEAR, "c_unnamed"] if jumper else [],
+        price_range_min=Money(amount=Decimal("45.00"), currency="GBP") if jumper else None,
     )
 
 
@@ -284,6 +303,210 @@ class TestWhatTheScreenCallsAutomatic:
                     suggested_ids=[WOOL_WASH] if suggested is None else suggested,
                 )
             )
+
+
+class TestTheListSaysWhoDecides:
+    """2026-09-28, the owner's redesign: counts per mode, a filter by mode, and
+    each product's category and price — all from the synced catalogue."""
+
+    def test_each_row_carries_its_category_names_and_price(self, client: TestClient, shop) -> None:
+        rows = _listing(client, shop)
+        # An id the catalogue cannot name is left out, never shown as a code.
+        assert rows[JUMPER]["categories"] == ["Knitwear"]
+        assert rows[JUMPER]["price"] == {"amount": "45.00", "currency": "GBP"}
+        assert rows[CASHMERE]["categories"] == []
+        assert rows[CASHMERE]["price"] is None
+
+    def test_the_counts_say_who_decides_every_product(self, client: TestClient, shop) -> None:
+        _choose(client, shop, JUMPER, [CASHMERE])
+        meta = client.get(_base(shop), cookies=_cookie(shop.user)).json()["meta"]
+        assert meta["counts"] == {"all": 4, "owner": 1, "automatic": 0, "pending": 3}
+        assert meta["counted_all"] is True
+
+    def test_the_mode_filter_narrows_the_list_and_not_the_counts(
+        self, client: TestClient, shop
+    ) -> None:
+        """Each chip says what choosing it would show, so the counts ignore the
+        mode filter — and still follow the search."""
+        _choose(client, shop, JUMPER, [CASHMERE])
+        body = client.get(_base(shop), params={"mode": "owner"}, cookies=_cookie(shop.user)).json()
+        assert [item["product_id"] for item in body["data"]["products"]] == [JUMPER]
+        assert body["meta"]["counts"]["all"] == 4
+
+        searched = client.get(_base(shop), params={"q": "jumper"}, cookies=_cookie(shop.user))
+        assert searched.json()["meta"]["counts"]["all"] == 2
+
+    def test_an_unknown_mode_is_refused_rather_than_ignored(self, client: TestClient, shop) -> None:
+        response = client.get(_base(shop), params={"mode": "nope"}, cookies=_cookie(shop.user))
+        assert response.status_code == 400
+
+
+class TestTheCategoryFilterAndPages:
+    """2026-09-28, the owner's follow-up: filter by category (including *no
+    category*, the products that can never get an automatic suggestion), and
+    pages of 25 like Conversations instead of one list in a scroll box."""
+
+    def test_the_menu_names_each_category_and_counts_products_with_none(
+        self, client: TestClient, shop
+    ) -> None:
+        meta = client.get(_base(shop), cookies=_cookie(shop.user)).json()["meta"]
+        # The unnamed id the jumper also carries is not offered: an owner
+        # could not recognise it.
+        assert meta["categories"] == {
+            "named": [{"id": KNITWEAR, "name": "Knitwear", "count": 1}],
+            "none": 3,
+        }
+
+    def test_a_category_narrows_the_list_and_the_counts(self, client: TestClient, shop) -> None:
+        body = client.get(
+            _base(shop), params={"category": KNITWEAR}, cookies=_cookie(shop.user)
+        ).json()
+        assert [item["product_id"] for item in body["data"]["products"]] == [JUMPER]
+        assert body["meta"]["counts"]["all"] == 1
+        # The menu still offers every way out.
+        assert body["meta"]["categories"]["none"] == 3
+
+    def test_no_category_lists_exactly_the_products_with_none(
+        self, client: TestClient, shop
+    ) -> None:
+        body = client.get(
+            _base(shop), params={"category": "none"}, cookies=_cookie(shop.user)
+        ).json()
+        assert sorted(item["product_id"] for item in body["data"]["products"]) == sorted(
+            [CASHMERE, WOOL_WASH, AUTO]
+        )
+
+    def test_an_unknown_category_matches_nothing_rather_than_everything(
+        self, client: TestClient, shop
+    ) -> None:
+        body = client.get(
+            _base(shop), params={"category": "c_nowhere"}, cookies=_cookie(shop.user)
+        ).json()
+        assert body["data"]["products"] == []
+        assert body["meta"]["total"] == 0
+
+    def test_pages_say_where_they_sit_and_walk_back_exactly(
+        self, client: TestClient, shop, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from neura_agent_sell import console as sell_console
+
+        monkeypatch.setattr(sell_console, "PAGE_SIZE", 2)
+        first = client.get(_base(shop), cookies=_cookie(shop.user)).json()
+        assert [item["product_id"] for item in first["data"]["products"]] == [JUMPER, CASHMERE]
+        meta = first["meta"]
+        assert (meta["total"], meta["offset"], meta["has_previous"]) == (4, 0, False)
+        assert first["meta"]["next_cursor"] == CASHMERE
+
+        second = client.get(
+            _base(shop), params={"after": CASHMERE}, cookies=_cookie(shop.user)
+        ).json()
+        assert [item["product_id"] for item in second["data"]["products"]] == [WOOL_WASH, AUTO]
+        assert second["meta"]["offset"] == 2
+        assert second["meta"]["has_previous"] is True
+        assert second["meta"]["has_more"] is False
+        # `null` with `has_previous` true: the page before is the first.
+        assert second["meta"]["previous_cursor"] is None
+
+
+class TestWhoMayPreview:
+    """The preview is the only console call that reaches the shop, so the gate
+    in front of it is asserted on its own route."""
+
+    def test_no_session_reaches_nothing(self, client: TestClient, shop) -> None:
+        assert client.get(f"{_base(shop)}/{JUMPER}/preview").status_code == 401
+
+    def test_a_shop_without_sell_is_refused(self, client: TestClient, shop_without_sell) -> None:
+        response = client.get(
+            f"{_base(shop_without_sell)}/{JUMPER}/preview",
+            cookies=_cookie(shop_without_sell.user),
+        )
+        assert response.status_code == 403
+
+    async def test_another_persons_shop_is_not_reachable(self, client: TestClient, db) -> None:
+        mine, theirs = await make_shop(db), await make_shop(db)
+        try:
+            await _seed(db, mine, agents=["sell"])
+            response = client.get(f"{_base(mine)}/{JUMPER}/preview", cookies=_cookie(theirs.user))
+            assert response.status_code == 404
+        finally:
+            await _unseed(db, mine)
+            await drop_shop(db, mine)
+            await drop_shop(db, theirs)
+
+
+class TestAShopThatDoesNotAnswer:
+    def test_the_preview_says_so_and_still_names_the_product(
+        self, client: TestClient, shop
+    ) -> None:
+        """The fixture's connection holds placeholder credentials, so the shop
+        cannot be reached — which must read as that, not as "nothing to show",
+        with the product still named from the synced catalogue."""
+        response = client.get(f"{_base(shop)}/{JUMPER}/preview", cookies=_cookie(shop.user))
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["reachable"] is False
+        assert data["suggestions"] == []
+        assert data["product"]["title"] == "Cotton Jumper"
+        assert data["product"]["categories"] == ["Knitwear"]
+
+
+class TestWhatTheAiLookedFor:
+    """Shown under a preview only for the product's **current** text.
+
+    `_computed` is called directly, on this test's own database: the module's
+    shared one belongs to whichever event loop first opened it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _this_database(self, monkeypatch: pytest.MonkeyPatch, db: Database) -> None:
+        from neura_agent_sell import console as sell_console
+
+        monkeypatch.setattr(sell_console, "get_database", lambda: db)
+
+    async def test_a_current_pairing_says_what_it_looked_for(self, db, shop) -> None:
+        from neura_agent_sell import console as sell_console
+
+        await self._store(db, shop, fingerprint_of=TITLES[AUTO])
+        assert await sell_console._computed(shop.tenant, shop.store, AUTO) == {
+            "kinds": ["wool wash"],
+            "found": 1,
+        }
+
+    async def test_a_stale_one_says_nothing(self, db, shop) -> None:
+        from neura_agent_sell import console as sell_console
+
+        await self._store(db, shop, fingerprint_of="An older title")
+        assert await sell_console._computed(shop.tenant, shop.store, AUTO) is None
+
+    async def test_another_shops_pairing_is_not_read(self, db, shop, shop_without_sell) -> None:
+        from neura_agent_sell import console as sell_console
+
+        await self._store(db, shop, fingerprint_of=TITLES[AUTO])
+        assert await sell_console._computed(shop_without_sell.tenant, shop.store, AUTO) is None
+
+    @staticmethod
+    async def _store(db: Database, shop: Shop, *, fingerprint_of: str) -> None:
+        async with db.tenant_session(shop.tenant) as session:
+            await session.execute(
+                insert(sell_pairings).values(
+                    id=ids.new_id("prg"),
+                    tenant_id=shop.tenant,
+                    store_id=shop.store,
+                    product_id=AUTO,
+                    source_hash=source_hash(_product(shop.tenant, AUTO, fingerprint_of)),
+                    suggested_ids=[WOOL_WASH],
+                    kinds=["wool wash"],
+                )
+            )
+
+
+def _choose(client: TestClient, shop: Shop, product_id: str, chosen: list[str]) -> None:
+    response = client.put(
+        f"{_base(shop)}/{product_id}",
+        json={"product_ids": chosen},
+        cookies=_cookie(shop.user),
+    )
+    assert response.status_code == 200, response.text
 
 
 class TestThePicker:

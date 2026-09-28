@@ -945,6 +945,187 @@ class TestTheEndpoint:
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "INVALID_REQUEST"
 
+    def test_a_shoppers_page_learns_nothing_new(self, shop: Any) -> None:
+        """2026-09-28: `Pairing` gained `origin` and `reason` for the owner's
+        preview. The storefront names its three fields, so a cart page is told
+        neither who chose nor why a block is empty."""
+        body = shop.post("/v1/sell/suggestions", json={"product_ids": [RAIN_SHELL]}).json()
+        assert set(body) == {"heading", "paired_with", "suggestions"}
+
+
+class OneProduct:
+    """A shop holding one product, whose searches go to the fixture store."""
+
+    capabilities = ALL
+
+    def __init__(self, item: Product) -> None:
+        self.item = item
+
+    async def get_product(self, external_id: str) -> Product | None:
+        return self.item if external_id == self.item.external_id else None
+
+    async def search_products(self, query: Any) -> Any:
+        return await store().search_products(query)
+
+
+class TestWhatThePreviewIsTold:
+    """2026-09-28 — `suggest()` says who chose what it shows, and why it shows
+    nothing, so the owner's preview can say both. The rules are unchanged."""
+
+    @pytest.mark.asyncio
+    async def test_a_miss_is_answered_from_the_words(self) -> None:
+        pairing = await pairing_for([RAIN_SHELL], cache=FakeCache())
+        assert pairing.suggestions
+        assert pairing.origin == "words"
+
+    @pytest.mark.asyncio
+    async def test_a_stored_pairing_is_the_models(self) -> None:
+        cache = FakeCache()
+        cache.store(RAIN_SHELL, [BOOT])
+        pairing = await pairing_for([RAIN_SHELL], cache=cache)
+        assert [card["id"] for card in pairing.suggestions] == [BOOT]
+        assert pairing.origin == "model"
+
+    @pytest.mark.asyncio
+    async def test_the_owners_choice_is_the_owners(self) -> None:
+        pairing = await pairing_for([RAIN_SHELL], choices=FakeChoices(**{RAIN_SHELL: [SOCKS]}))
+        assert pairing.origin == "owner"
+        assert pairing.reason == ""
+
+    @pytest.mark.asyncio
+    async def test_an_owner_who_chose_nothing_is_told_so(self) -> None:
+        pairing = await pairing_for([RAIN_SHELL], choices=FakeChoices(**{RAIN_SHELL: []}))
+        assert pairing.is_empty
+        assert pairing.reason == "owner_nothing"
+
+    @pytest.mark.asyncio
+    async def test_a_product_with_no_category_is_told_so(self) -> None:
+        """The one empty result an owner can fix in their own shop."""
+        bare = product("p_bare", title="Merino Crew Knit", categories=[])
+        pairing = await suggest(
+            ["p_bare"], adapter=OneProduct(bare), capabilities=ALL, tenant_id=TENANT
+        )
+        assert pairing.reason == "no_category"
+
+    @pytest.mark.asyncio
+    async def test_nothing_matched_is_told_so(self) -> None:
+        lonely = product("p_lonely", title="Zyxwv Qqqqq", description="Zyxwv")
+        pairing = await suggest(
+            ["p_lonely"], adapter=OneProduct(lonely), capabilities=ALL, tenant_id=TENANT
+        )
+        assert pairing.is_empty
+        assert pairing.reason == "nothing_matched"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_product_and_a_shop_that_cannot_search(self) -> None:
+        assert (await pairing_for(["p_does_not_exist"])).reason == "not_found"
+        cannot = await pairing_for([RAIN_SHELL], capabilities=frozenset({Capability.PRODUCT_READ}))
+        assert cannot.reason == "cannot_search"
+
+
+class TestTheOwnersPreview:
+    """The console's preview endpoint (2026-09-28): the basket's own answer,
+    asked of the shop when the owner opens a product — and never a model run.
+
+    The console session check is replaced at `console._owner` (its own
+    integration tests cover it); the shop, cache and choices at the same seams
+    the storefront tests use, so this is the real route and the real
+    `suggest()`.
+    """
+
+    @pytest.fixture
+    def preview(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        from neura_agent_sell import console as sell_console
+        from neura_agent_sell import routes as sell_routes
+        from neura_api.main import create_app
+
+        async def _owner(request: Any, tenant_id: str, agent_key: str) -> Any:
+            return SimpleNamespace(tenant_id=TENANT, user_id="usr_owner"), "st_pairing"
+
+        async def _computed(tenant_id: str, store_id: str, product_id: str) -> Any:
+            return self.tried
+
+        async def _rows(tenant_id: str, store_id: str, **_: Any) -> Any:
+            return [], True
+
+        self.tried: Any = None
+        self.adapter: Any = store()
+        cache, choices = FakeCache(), FakeChoices()
+        monkeypatch.setattr(sell_console, "_owner", _owner)
+        monkeypatch.setattr(sell_console, "_computed", _computed)
+        monkeypatch.setattr(sell_console, "_rows", _rows)
+        monkeypatch.setattr(sell_routes, "_pairing_cache", lambda tenant_id, store_id: cache)
+        monkeypatch.setattr(sell_routes, "_owner_choices", lambda tenant_id, store_id: choices)
+
+        test = self
+
+        class Directory:
+            async def connect(self, tenant_id: str, *, store_id: str | None = None) -> Any:
+                return SimpleNamespace(
+                    adapter=test.adapter, capabilities=ALL, store_id="st_pairing"
+                )
+
+        with TestClient(create_app()) as client:
+            client.app.state.stores = Directory()
+            client.pairing_cache = cache
+            client.owner_choices = choices
+            yield client
+
+    def ask(self, client: Any, product_id: str) -> dict[str, Any]:
+        response = client.get(f"/v1/sell/console/shops/{TENANT}/suggestions/{product_id}/preview")
+        assert response.status_code == 200, response.text
+        data: dict[str, Any] = response.json()["data"]
+        return data
+
+    def test_opening_a_product_never_queues_the_model(self, preview: Any) -> None:
+        """The one way it differs from a basket. A basket's miss queues a model
+        computation; an owner clicking through products must not spend one."""
+        data = self.ask(preview, RAIN_SHELL)
+        assert data["suggestions"]
+        assert data["origin"] == "words"
+        assert preview.pairing_cache.queued == []
+
+    def test_a_stored_pairing_is_previewed_as_the_ais(self, preview: Any) -> None:
+        preview.pairing_cache.store(RAIN_SHELL, [BOOT])
+        data = self.ask(preview, RAIN_SHELL)
+        assert data["origin"] == "model"
+        assert [card["id"] for card in data["suggestions"]] == [BOOT]
+
+    def test_the_owners_choice_is_previewed_as_theirs(self, preview: Any) -> None:
+        preview.owner_choices.chosen[RAIN_SHELL] = [SOCKS]
+        data = self.ask(preview, RAIN_SHELL)
+        assert data["origin"] == "owner"
+        assert data["heading"].startswith("Recommended with your")
+
+    def test_a_shop_that_does_not_answer_is_said_not_shown_as_empty(self, preview: Any) -> None:
+        """`suggest()` forgives a failed lookup as a missing product; here that
+        would read as "not in your shop" while the shop was simply down."""
+
+        class Down:
+            capabilities = ALL
+
+            async def get_product(self, external_id: str) -> Any:
+                raise RuntimeError("the shop is down")
+
+        self.adapter = Down()
+        data = self.ask(preview, RAIN_SHELL)
+        assert data["reachable"] is False
+        assert data["suggestions"] == []
+        assert data["reason"] is None
+
+    def test_a_product_the_shop_no_longer_has(self, preview: Any) -> None:
+        data = self.ask(preview, "p_does_not_exist")
+        assert data["reachable"] is True
+        assert data["reason"] == "not_found"
+
+    def test_what_the_ai_looked_for_is_passed_through(self, preview: Any) -> None:
+        self.tried = {"kinds": ["socks", "shoe polish"], "found": 1}
+        assert self.ask(preview, RAIN_SHELL)["ai"] == self.tried
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ADR-0045 — a pairing may be computed by a model, but never while a shopper

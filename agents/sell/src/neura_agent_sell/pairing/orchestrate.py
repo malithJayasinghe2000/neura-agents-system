@@ -59,11 +59,22 @@ class Pairing:
     ``heading`` and ``paired_with`` are present only when there is something to
     head — a heading with no products under it is an empty block that still
     takes up space and still makes a claim.
+
+    ``origin`` and ``reason`` are for the owner's preview in the console
+    (2026-09-28), which shows what a basket shows and must say where it came
+    from and, when it is empty, why. **The storefront route does not send
+    them** — it names its three fields — so a shopper's page learns nothing new.
     """
 
     suggestions: list[dict[str, str]] = field(default_factory=list)
     heading: str = ""
     paired_with: dict[str, str] | None = None
+    #: Who chose what is shown: ``owner``, ``model`` (a stored pairing) or
+    #: ``words`` (the product's own text). Empty when nothing is shown.
+    origin: str = ""
+    #: Why nothing is shown, when nothing is: ``cannot_search``, ``not_found``,
+    #: ``owner_nothing``, ``no_category`` or ``nothing_matched``. Empty otherwise.
+    reason: str = ""
 
     @property
     def is_empty(self) -> bool:
@@ -109,11 +120,11 @@ async def suggest(
         # Declared capability, not a guess — and an absent one is normal, per
         # INTEGRATION_GUIDE §4: the feature is simply not offered.
         log.info("pairing_store_cannot_search", tenant_id=tenant_id)
-        return Pairing()
+        return Pairing(reason="cannot_search")
 
     on_the_page = await _load(wanted, adapter=adapter, tenant_id=tenant_id)
     if not on_the_page:
-        return Pairing()
+        return Pairing(reason="not_found")
 
     anchor = select.anchor_of(on_the_page)
     if anchor is None:  # pragma: no cover — _load returning [] is handled above
@@ -135,6 +146,7 @@ async def suggest(
             heading=select.heading_for_owner_choice(anchor),
             tenant_id=tenant_id,
             source="owner",
+            origin="owner",
         )
 
     if not anchor.category_ids:
@@ -147,11 +159,12 @@ async def suggest(
             tenant_id=tenant_id,
             product_id=anchor.external_id,
         )
-        return Pairing()
+        return Pairing(reason="no_category")
 
     chosen = await _stored(
         anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id, cache=cache
     )
+    origin = "model"
 
     if not chosen:
         # Either there is no cache, or nothing was stored, or everything stored
@@ -159,16 +172,33 @@ async def suggest(
         # ordinary: **the word path answers now**, and the computation queued
         # above lands before the next shopper.
         chosen = await _search(anchor, adapter=adapter, excluded_ids=excluded, tenant_id=tenant_id)
+        origin = "words"
 
     return _pairing(
-        chosen, anchor, heading=select.heading_for(anchor), tenant_id=tenant_id, source="automatic"
+        chosen,
+        anchor,
+        heading=select.heading_for(anchor),
+        tenant_id=tenant_id,
+        source="automatic",
+        origin=origin,
     )
 
 
 def _pairing(
-    chosen: list[Product], anchor: Product, *, heading: str, tenant_id: str, source: str
+    chosen: list[Product],
+    anchor: Product,
+    *,
+    heading: str,
+    tenant_id: str,
+    source: str,
+    origin: str,
 ) -> Pairing:
-    """Cards and a heading, or an empty :class:`Pairing` — the same for both paths."""
+    """Cards and a heading, or an empty :class:`Pairing` — the same for both paths.
+
+    ``source`` is what the log has always said (``owner`` or ``automatic``);
+    ``origin`` splits automatic into ``model`` and ``words`` for the preview.
+    """
+    empty = Pairing(reason="owner_nothing" if origin == "owner" else "nothing_matched")
     if not chosen:
         log.info(
             "pairing_nothing_to_show",
@@ -177,7 +207,7 @@ def _pairing(
             source=source,
             detail="an empty block is a result, not a failure",
         )
-        return Pairing()
+        return empty
 
     cards = [card for product in chosen if (card := product_card(product))]
     anchor_card = product_card(anchor)
@@ -186,7 +216,7 @@ def _pairing(
         # `product_card` returns None for a product with nothing to name. A
         # heading naming an unnameable anchor is the grey box that module
         # already refuses to render.
-        return Pairing()
+        return empty
 
     log.info(
         "pairing_suggested",
@@ -199,7 +229,7 @@ def _pairing(
         suggested_ids=[card["id"] for card in cards],
     )
 
-    return Pairing(suggestions=cards, heading=heading, paired_with=anchor_card)
+    return Pairing(suggestions=cards, heading=heading, paired_with=anchor_card, origin=origin)
 
 
 async def _owner_choice(

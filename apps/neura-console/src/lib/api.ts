@@ -116,7 +116,12 @@ export function gradeTurn(
 
 const SELL = "/v1/sell/console";
 
-export type PickedProduct = { product_id: string; title: string | null };
+export type PickedProduct = {
+  product_id: string;
+  title: string | null;
+  /** From the synced catalogue; absent on a product the editor already held. */
+  price?: { amount: string; currency: string } | null;
+};
 
 export function chooseSuggestions(
   tenantId: string,

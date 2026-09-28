@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page was redesigned 2026-09-28 (§3.3) — `make console-check` — 73 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3) and Suggestions (§3.6) were redesigned 2026-09-28 — `make console-check` — 81 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -29,7 +29,7 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 5 | **Usage** (on screen: *Usage and cost*) | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
 | — | **Home** — what needs the owner, and how the assistant is set up (§3.0) | nothing of its own — it reads the endpoints of Review, Usage, Shop, Sold out and Suggestions | ✅ **built 2026-09-27** — outside v1's five like the two below it. **Adds a screen and no data**: every figure on it is one another screen already shows, with its period and its server-written caveat |
 | — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name) |
-| — | **Suggestions** — what a basket suggests with each product, and the owner's way to change it ([ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md)) | `synced_entities`, `sell_pairings`, `sell_pairing_choices` | ✅ **built 2026-09-27** — the **second screen that writes** (after grading). Served by SELL's own routes under `/v1/sell/console/…`, so the SELL entitlement is checked inside the agent; a shop without SELL is told so. Reads the **synced** catalogue: a product the shop added since the last sync is not listed until a sync runs |
+| — | **Suggestions** — what a basket suggests with each product, and the owner's way to change it ([ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md)) | `synced_entities`, `sell_pairings`, `sell_pairing_choices` | ✅ **built 2026-09-27** — the **second screen that writes** (after grading). Served by SELL's own routes under `/v1/sell/console/…`, so the SELL entitlement is checked inside the agent; a shop without SELL is told so. Reads the **synced** catalogue: a product the shop added since the last sync is not listed until a sync runs. **Redesigned 2026-09-28 (§3.6)**: opening a product previews what a basket shows — the only console call that reaches the shop, and never a model run |
 | 6 | Security | `audit_log` | v1.1 — closes **S5** |
 | 7 | Settings & keys | `api_keys` | v1.1 |
 | 8 | Approvals | — | **blocked** by [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) |
@@ -328,6 +328,53 @@ the list never becomes boilerplate a reader learns to skip.
 
 ---
 
+### 3.6 Suggestions — redesigned 2026-09-28, from the owner's approved design
+
+**The screen could change what it could not show.** Every product whose suggestions come from its own words read
+*"Automatic"* over an empty row, because a word-path answer is worked out live on a shopper's basket and never
+stored. On the test shop that was **37 of 38 products** — so the owner, asked what the screen was for, answered
+correctly (*see each product's suggestions, change them if you want*) and could only do the second half.
+
+| what | how |
+|:--|:--|
+| **Layout** | products on the left, one open on the right, like Review; on a phone the list, then one product with *All products* to go back. **Pages of 25** like Conversations — *"Showing 26–38 of 38"*, *Previous / Next* (products have no date order, so not *Newer / Older*) — rather than a list in its own scroll box; the open product **stays on screen** while the page scrolls |
+| **Filters with counts** | *All · Your choice · Chosen by AI · Automatic* — counted given the search and category, never given the mode filter, so each chip says what choosing it would show. A **Category** menu (the shop's own categories with counts, and **No category** — the products that can never get an automatic suggestion), from the synced catalogue: no call to the shop |
+| **Each row** | title, category names and price from the synced catalogue; *No category* is said, because it is the reason nothing can be picked automatically |
+| **Open a product → the preview** | *"What a shopper's basket shows with it now"*: the heading and cards a basket gets, then **where they came from** — *Your choice* / *Picked by the AI — it looked for …* / *Picked automatically from this product's own words* |
+| **When nothing shows** | **why**, in words the owner can act on: no category in the shop, nothing matched, the owner chose nothing, the owner's choices are sold out, the shop did not find the product |
+| **When the AI tried and lost** | *"The AI also tried: it looked for laundry detergent, garment bag and phone case, matched nothing in your shop, so word matching is used"* — so *the AI found nothing* and *the AI never ran* read apart |
+| **Change these** | the same ADR-0050 editor, in the panel, starting from what shoppers see now (or the owner's own list); the product picker now shows prices. With the list empty the sentence says what to do (*No products picked yet. Use Find below to add some.*) and **the button says what it does — *Show nothing with this product*** rather than *Save*, because an empty choice turns automatic suggestions off for that product (owner-approved after the first version confused the owner) |
+
+**Two rules the owner approved with it:**
+
+* **The shop is asked only when the owner opens a product** (and on *Ask your shop again*). Everything else on the
+  screen is the synced catalogue. A shop that does not answer is **said** (*"Your shop did not answer just now"*),
+  never shown as *nothing to suggest* — `suggest()` forgives a failed lookup as a missing product, so the preview
+  asks for the product itself first.
+* **A preview never runs the model and never saves anything.** It calls the basket's own `suggest()` with the
+  basket's own cache and choices, through the same seams (`routes._pairing_cache`, `routes._owner_choices`), so it
+  cannot drift from what a shopper sees — but the cache is wrapped read-only (`_ReadOnlyPairings`): a basket's miss
+  queues a model computation ([ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) §2), and an owner clicking through products is not a shopper's first use.
+  `make console-check` asserts the job queue does not grow when a never-paired product is opened.
+
+**API, 2026-09-28.** `GET /v1/sell/console/shops/{t}/suggestions` gains `mode` (`owner` · `automatic` · `pending`,
+400 on anything else), `category` (an id, or `none`; an unknown id matches nothing rather than being refused),
+`meta.counts` and `meta.counted_all` (it reads up to 2,000 products to count and filter by mode, and says when it
+stopped short), `meta.categories` (`named` with counts, and `none`), paging as Conversations pages
+(`total`, `offset`, `has_previous`, `previous_cursor`; pages of 25), and each row's `categories` and `price`. New
+`GET …/suggestions/{product}/preview` → `product` (the list's row), `reachable`, `origin` (`owner` · `model` ·
+`words`), `reason`, `heading`, `suggestions` (the basket's cards), `ai` (`kinds`, `found` — only for the product's
+current text). `Pairing` gained `origin` and `reason` for it; **the storefront route still sends only `heading`,
+`paired_with` and `suggestions`**, and a test pins that a shopper's page learns nothing new.
+
+**Found while designing it, on the test shop — not fixed here:** the AI has run for 4 of 38 products (it runs only
+when a basket first shows a product) and found something once (*Leather Loafer → Merino Walking Socks*, after the
+owner added the loafer to a cart on 2026-09-28). Two causes, both setup rather than code: `.env` has
+`NEURA_ROLE_MAP=ollama-dev`, so the worker uses the small local `qwen3:8b` (it asked for *phone case* and *towel*
+for clothes), where ADR-0045's measured run used `gemini-3.8-flash`; and the **search index lacks the 9 newest
+products** (belt, socks, tights, tie, shoe cream, shoe trees, waterproofing spray, wool wash, clothes brush), so
+the AI's search by meaning cannot find the very complements the shop stocks.
+
 ## 4. Identity — the part that is genuinely new
 
 ### 4.1 Three tables
@@ -399,7 +446,7 @@ once been true of the route somebody added last. So clauses 1, 2, 4 and 6 are re
 — each against real PostgreSQL with **two populated tenants** — and `test_console_auth.py` owns
 3 and 5.
 
-`make console-check` then re-asserts them **in real headless Chrome** — 73 checks since 2026-09-28 — because every
+`make console-check` then re-asserts them **in real headless Chrome** — 81 checks since 2026-09-28 — because every
 rule this console has is a claim about what a *rendered page* contains. A server that offered
 safe material and a screen that displayed it are not the same thing, and only one of them is the
 product: a page can fetch a payload with no credential in it and still print `$0.00` under the
