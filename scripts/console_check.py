@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -765,17 +766,54 @@ async def _check_shop_and_usage(
 async def _check_sold_out(
     browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
 ) -> None:
-    """Screen 6 — ADR-0046 stage 1, against the rendered page.
+    """Screen 6 — ADR-0046 stage 1, redesigned 2026-09-28, against the rendered page.
 
     The seeded sold-out product must be on it, and three things must not: the
     product that was in stock when viewed (ADR-0049's whole point), either
     session token, and any word that turns a session into a person.
+
+    Since the redesign the screen also asks the shop whether each product can be
+    bought **now**. The seeded product is one no real shop has, so whatever the
+    shop does — answers, or does not — it must read *Couldn't check*, never
+    *Still sold out*: a product nobody vouched for is not reported as sold out.
     """
     await browser.goto(f"{console}/console/{seeded['tenant']}/sold-out")
-    await asyncio.sleep(3)
+    await asyncio.sleep(4)
     page = await browser.evaluate("document.body.innerText")
+    row = await browser.evaluate(
+        f"document.querySelector('[data-product=\"{SEEDED_SOLD_OUT_ID}\"]')?.innerText ?? ''"
+    )
+    now = await browser.evaluate(
+        f"document.querySelector('[data-product=\"{SEEDED_SOLD_OUT_ID}\"] [data-now]')"
+        "?.innerText ?? ''"
+    )
 
-    _check("the sold-out screen renders", "Wanted while sold out" in page, failures)
+    _check(
+        "the sold-out screen renders, saying what it is for",
+        "so you know what to restock" in page,
+        failures,
+    )
+    _check(
+        "each product is a sentence, not VIEWS and SESSIONS columns",
+        "Opened 3 times, in 2 visits" in row,
+        failures,
+    )
+    _check(
+        "a product the shop did not vouch for is never called sold out",
+        now == "Couldn't check",
+        failures,
+    )
+    _check(
+        "it says the shop was asked, or that it could not be",
+        await browser.evaluate("!!document.querySelector('[data-stock-line]')"),
+        failures,
+    )
+    _check(
+        "'Is it working?' says views are arriving",
+        "Is it working?" in page and "Some arrived in the last" in page,
+        failures,
+    )
+    _check("'How this works' is on the screen", "How this works" in page, failures)
     _check(
         "a product viewed while sold out is listed by its name",
         SEEDED_SOLD_OUT_TITLE in page,
@@ -792,15 +830,28 @@ async def _check_sold_out(
         failures,
     )
     _check(
-        "it says a session is not a person",
+        "it says a visit is not a person",
         "not one person" in page and "customers" not in page.lower(),
         failures,
     )
-    _check(
-        "it says a listed product may be back in stock",
-        "back in stock" in page,
-        failures,
+
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
     )
+    try:
+        await browser.goto(f"{console}/console/{seeded['tenant']}/sold-out")
+        await asyncio.sleep(4)
+        _check(
+            "on a phone the sold-out screen does not scroll sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
 
 
 async def _check_suggestions(
@@ -823,6 +874,20 @@ async def _check_suggestions(
         mobile=False,
     )
     try:
+        # Home's Suggestions card, for this shop — which has SELL, so the card
+        # must count rather than say "not in this shop's plan". Counted by the
+        # server across the whole catalogue, never from the list's first page:
+        # that is how a 38-product shop lost its number when pages went from 50
+        # to 25 (2026-09-28).
+        await browser.goto(f"{console}/console/{made['tenant']}")
+        await asyncio.sleep(3)
+        home = await browser.evaluate("document.body.innerText")
+        _check(
+            "home's Suggestions card counts the whole catalogue",
+            re.search(r"Automatic for all \d+|Your choice for \d+ of \d+", home) is not None,
+            failures,
+        )
+
         await browser.goto(f"{base}?q=Console-check")
         await asyncio.sleep(3)
         page = await browser.evaluate("document.body.innerText")

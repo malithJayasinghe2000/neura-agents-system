@@ -27,7 +27,7 @@ import { fromApi, hasSession } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
 import type { ShopView } from "@/lib/shop";
 import type { SoldOut } from "@/lib/sold-out";
-import type { SuggestionsPage } from "@/lib/suggestions";
+import type { SuggestionsMeta, SuggestionsPage } from "@/lib/suggestions";
 import type { Usage } from "@/lib/usage";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -87,7 +87,7 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
               <CatalogueCard store={store.ok ? store.data : null} href={`${base}/shops`} />
               <SuggestionsCard
                 page={suggestions.ok ? suggestions.data : null}
-                complete={suggestions.ok && !suggestions.meta.has_more}
+                meta={suggestions.ok ? (suggestions.meta as SuggestionsMeta) : null}
                 forbidden={!suggestions.ok && suggestions.status === 403}
                 href={`${base}/suggestions`}
               />
@@ -361,17 +361,20 @@ function CatalogueCard({ store, href }: { store: ShopView | null; href: string }
 }
 
 /**
- * Counts only when the page holds every product — otherwise "for all 50" would
- * be a claim about the first page dressed as one about the shop.
+ * Counts from the server's own count of every product (`meta.counts`), and only
+ * when it counted them all (`counted_all`) — otherwise "for all 50" would be a
+ * claim about part of the catalogue dressed as one about the shop. It counted
+ * the first page until 2026-09-28, when pages went from 50 to 25 and a
+ * 38-product shop lost its number here.
  */
 function SuggestionsCard({
   page,
-  complete,
+  meta,
   forbidden,
   href,
 }: {
   page: SuggestionsPage | null;
-  complete: boolean;
+  meta: SuggestionsMeta | null;
   forbidden: boolean;
   href: string;
 }) {
@@ -390,8 +393,10 @@ function SuggestionsCard({
       />
     );
   }
-  const chosen = page.products.filter((product) => product.mode === "owner").length;
-  const total = page.products.length;
+  const counts = meta?.counted_all ? meta.counts : undefined;
+  const complete = counts !== undefined;
+  const chosen = counts?.owner ?? 0;
+  const total = counts?.all ?? 0;
 
   return (
     <SetupCard

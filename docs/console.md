@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3) and Suggestions (§3.6) were redesigned 2026-09-28 — `make console-check` — 81 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3), Suggestions (§3.6) and Sold out (§3.7) were redesigned 2026-09-28 — `make console-check` — 87 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -28,7 +28,7 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 4 | **Shop** | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4** |
 | 5 | **Usage** (on screen: *Usage and cost*) | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
 | — | **Home** — what needs the owner, and how the assistant is set up (§3.0) | nothing of its own — it reads the endpoints of Review, Usage, Shop, Sold out and Suggestions | ✅ **built 2026-09-27** — outside v1's five like the two below it. **Adds a screen and no data**: every figure on it is one another screen already shows, with its period and its server-written caveat |
-| — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name) |
+| — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name). **Redesigned 2026-09-28 (§3.7)**: opening it asks the shop, in one stock lookup for every product listed, whether each can be bought now — the second console call that reaches the shop, and Home never makes it |
 | — | **Suggestions** — what a basket suggests with each product, and the owner's way to change it ([ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md)) | `synced_entities`, `sell_pairings`, `sell_pairing_choices` | ✅ **built 2026-09-27** — the **second screen that writes** (after grading). Served by SELL's own routes under `/v1/sell/console/…`, so the SELL entitlement is checked inside the agent; a shop without SELL is told so. Reads the **synced** catalogue: a product the shop added since the last sync is not listed until a sync runs. **Redesigned 2026-09-28 (§3.6)**: opening a product previews what a basket shows — the only console call that reaches the shop, and never a model run |
 | 6 | Security | `audit_log` | v1.1 — closes **S5** |
 | 7 | Settings & keys | `api_keys` | v1.1 |
@@ -375,6 +375,40 @@ for clothes), where ADR-0045's measured run used `gemini-3.8-flash`; and the **s
 products** (belt, socks, tights, tie, shoe cream, shoe trees, waterproofing spray, wool wash, clothes brush), so
 the AI's search by meaning cannot find the very complements the shop stocks.
 
+### 3.7 Sold out — redesigned 2026-09-28, from the owner's approved design
+
+**The owner could not tell how it worked, and could not act on it.** Empty, it said *"No sold-out product was
+viewed"* and that a switch *"cannot be seen from here"* — without saying where the switch is. With data, it said
+*VIEWS 2 · SESSIONS 1* in capitals beside an internal id (`#1320`), and a caveat handed the most useful fact back to
+the owner: *"some may be back in stock now"*. And the synced copy of the catalogue could not answer that either: on
+the test shop it still said the sold-out jumper was **in stock**, because nothing had synced since its stock went to
+0 — the same undecided recurring sync as §3.6.
+
+| what | how |
+|:--|:--|
+| **One name** | *Sold out*, in the menu and as the title (was *Wanted while sold out*), with its job under it: *"Products shoppers wanted while you had none, so you know what to restock."* |
+| **Each product is a sentence** | *"Opened **3 times**, in 1 visit · last opened 28 Sep"*, then category and price from the synced catalogue; the id is gone (a product the catalogue lacks is still shown, by id, and says so). The API still says `sessions`; the screen says *visits* |
+| **Now** — *Still sold out* / *Back in stock* / *Couldn't check* | Asked of the shop **when the owner opens the screen** (and on *Check again*): **one stock lookup for every product listed**, never one per product (`GET /inventory?variant_ids=…`, which takes many). The rule is the shop's own for a view (ADR-0049): in stock when **any** variant has stock. *Back in stock* adds *"These visits happened while it could not."* A shop that does not answer, or does not share stock, is said under the list (*"…so we can't say what is in stock today. The counts are still right."*), and a product the shop said nothing about reads *Couldn't check* — **never** *Still sold out* |
+| **Is it working?** | ✔/✗ *Data agreement on record* (since when), ✔/✗ *Your shop is sending product views* — whether **any** product view arrived in the window, sold out or not: a yes or no, never a count. It is what tells *switched off* from *nothing sold out was opened*. The switch itself is in the shop and cannot be seen; the screen says so and says *usually*, not *the switch is off* |
+| **How this works** | three numbered steps (a sequence), and *"Nothing here reaches your shoppers, and we never contact them."* Step 3's *"We keep it for N days"* is the retention setting the sweep enforces (`kept_days`), not a number typed into the page |
+| **Three empty screens** | no agreement (*Nothing is collected*), no views arriving (*Nothing to show yet* — *usually this means product views are switched off in your shop's settings; whoever set up your shop can switch them on*), views arriving but nothing sold out opened (*No sold-out product was opened … Nothing to restock*) |
+| **Fine print** | one line, from the server: a visit is not a person, crawlers are counted, *"We never know who the shopper was."* The *"may be back in stock"* caveat is gone — the screen now says, per product |
+
+**The rule the owner approved with it: the shop is asked only when this screen opens.** Home reads the same route
+without `?stock=now` and never reaches the shop; an empty list asks nothing. It is the second console call that
+reaches the shop, after the Suggestions preview (§3.6). It opens a connection like the Shop screen's probe
+(§3.4) — the store directory reuses a shop's declared capabilities for a minute, so a first opening may also make
+the shop's `/health` call.
+
+**The checklist is built entirely on our side.** The agreement is our row; *views arriving* is our table. Nothing
+changed in the shop's bridge — a merchant turns views on once, in their shop's settings (ADR-0044), and this screen
+only reads what arrives.
+
+**API, 2026-09-28.** `GET /v1/console/shops/{t}/sold-out` gains `agreement_since`, `receiving`, `kept_days`, each
+product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), and `stock` (`asked_at`, `answered`,
+`reason`: `unreachable` · `not_supported`) — `null` unless `?stock=now`, the only value it takes (400 otherwise).
+`ObservedEventRepository.any_views_since` answers *receiving* with an `EXISTS`, never a count.
+
 ## 4. Identity — the part that is genuinely new
 
 ### 4.1 Three tables
@@ -446,7 +480,7 @@ once been true of the route somebody added last. So clauses 1, 2, 4 and 6 are re
 — each against real PostgreSQL with **two populated tenants** — and `test_console_auth.py` owns
 3 and 5.
 
-`make console-check` then re-asserts them **in real headless Chrome** — 81 checks since 2026-09-28 — because every
+`make console-check` then re-asserts them **in real headless Chrome** — 87 checks since 2026-09-28 — because every
 rule this console has is a claim about what a *rendered page* contains. A server that offered
 safe material and a screen that displayed it are not the same thing, and only one of them is the
 product: a page can fetch a payload with no credential in it and still print `$0.00` under the

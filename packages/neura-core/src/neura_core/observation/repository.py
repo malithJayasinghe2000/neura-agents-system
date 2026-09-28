@@ -129,6 +129,27 @@ class ObservedEventRepository:
             for row in rows
         ]
 
+    async def any_views_since(self, tenant_id: str, *, since: datetime) -> bool:
+        """Did the shop send any product view since ``since`` — sold out or not?
+
+        The Sold out screen's *"Is it working?"* line. The switch that turns
+        views on lives in the shop and cannot be seen from here (ADR-0044 §3);
+        whether views arrive can, and it is what tells *switched off* apart from
+        *nothing sold out was opened*. A yes or no, never a count: the screen
+        shows demand for sold-out products and nothing else about traffic.
+        """
+        viewed = observed_events.c
+        return bool(
+            await self._session.scalar(
+                select(
+                    exists()
+                    .where(viewed.tenant_id == tenant_id)
+                    .where(viewed.event_type == ObservedEventType.PRODUCT_VIEWED.value)
+                    .where(viewed.occurred_at >= since)
+                )
+            )
+        )
+
     async def views_of_unknown_stock(self, tenant_id: str, *, since: datetime) -> int:
         """Views with no ``in_stock`` value, which the sold-out count leaves out."""
         viewed = observed_events.c

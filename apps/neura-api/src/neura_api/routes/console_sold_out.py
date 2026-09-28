@@ -12,9 +12,13 @@ restocked on Friday still shows Monday's demand.
 * **No session token leaves this module.** The repository returns counts.
 * **Nothing here reaches a shopper**, and the order — most-viewed first — is
   for the merchant's reading only (0046 §6).
-* **No call to the shop.** Titles come from the synced catalogue; a product it
-  does not hold is shown by its id and says so, rather than being fetched live
-  on every page load or silently dropped.
+* **The shop is asked only when the screen asks** (``?stock=now``, redesigned
+  2026-09-28 from the owner's approved mockup). Titles, categories and prices
+  come from the synced catalogue; whether each listed product can be bought
+  *now* is one question to the shop — one stock lookup for every product on
+  the list, never one per product — because the synced copy can be days old
+  (it said the test shop's sold-out jumper was in stock). Home reads this
+  route without the parameter and never reaches the shop.
 
 **Not gated by the SELL entitlement.** 0046 calls this a SELL surface, and the
 argument for that is in the ADR — but ``neura-api`` may not learn an agent's
@@ -25,18 +29,25 @@ has no events, and the screen says which of those it can see.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from sqlalchemy import select
 
 from neura_api.dependencies import acting_for
 from neura_api.envelopes import envelope
+from neura_api.routes.console_shop import _close
+from neura_commerce.identity import EntityType
 from neura_commerce.sync.schema import synced_entities
+from neura_core import ValidationError, get_logger, get_settings
 from neura_core.observation import ObservedEventRepository, SoldOutDemand
 from neura_core.tenancy import TenantRepository
+from neura_domain import Capability, InventoryLevel
+
+log = get_logger(__name__)
 
 router = APIRouter(prefix="/console/shops/{tenant_id}", tags=["console"])
 
@@ -48,10 +59,39 @@ WINDOW_DAYS = 7
 #: this has a different problem, and the payload says the list was cut.
 LIMIT = 100
 
+#: The one value ``?stock=`` takes. Anything else is a 400: a parameter quietly
+#: ignored would read as "your shop was asked" when it was not.
+STOCK_NOW = "now"
+
+
+@dataclass(frozen=True, slots=True)
+class StockNow:
+    """What the shop said about the listed products' stock, just now.
+
+    ``answered`` is false when the shop could not be asked — unreachable, or its
+    connection does not share stock. ``in_stock`` then holds nothing, and the
+    screen says it could not check rather than showing yesterday's copy.
+    """
+
+    asked_at: datetime
+    answered: bool
+    #: ``unreachable`` · ``not_supported`` — ``None`` when it answered.
+    reason: str | None = None
+    #: Per product: ``True`` / ``False``; absent when the shop said nothing about it.
+    in_stock: Mapping[str, bool] = field(default_factory=dict)
+
 
 @router.get("/sold-out", summary="Products viewed while they could not be bought")
-async def sold_out(request: Request, tenant_id: str) -> dict[str, Any]:
+async def sold_out(
+    request: Request,
+    tenant_id: str,
+    stock: Annotated[str | None, Query(max_length=16)] = None,
+) -> dict[str, Any]:
     actor = await acting_for(request, tenant_id)
+    if stock not in (None, "", STOCK_NOW):
+        raise ValidationError(
+            "Unknown stock parameter.", details={"stock": stock, "expected": [STOCK_NOW]}
+        )
     now = datetime.now(UTC)
     since = now - timedelta(days=WINDOW_DAYS)
 
@@ -60,28 +100,127 @@ async def sold_out(request: Request, tenant_id: str) -> dict[str, Any]:
         events = ObservedEventRepository(session)
         demand = await events.sold_out_demand(actor.tenant_id, since=since, limit=LIMIT + 1)
         unknown = await events.views_of_unknown_stock(actor.tenant_id, since=since)
+        receiving = await events.any_views_since(actor.tenant_id, since=since)
         tenant = await TenantRepository(session).get(actor.tenant_id)
-        titles = await _catalogue(session, actor.tenant_id, [d.product_id for d in demand])
+        shown = demand[:LIMIT]
+        catalogue = await _catalogue(session, actor.tenant_id, [d.product_id for d in shown])
+        names = await _category_names(
+            session, actor.tenant_id, sorted({c for p in catalogue.values() for c in p["cats"]})
+        )
 
-    agreement = bool(tenant and tenant.may_hold_personal_data)
-    shown = demand[:LIMIT]
+    # Only when asked, and only when there is something to ask about: an empty
+    # list costs the merchant's server nothing.
+    live = (
+        await _stock_now(request, actor.tenant_id, shown, catalogue)
+        if stock == STOCK_NOW and shown
+        else None
+    )
 
     return envelope(
         {
             "period": {"since": since.isoformat(), "through": now.isoformat(), "days": WINDOW_DAYS},
-            "agreement": agreement,
-            "products": [_product(d, titles.get(d.product_id)) for d in shown],
+            "agreement": bool(tenant and tenant.may_hold_personal_data),
+            "agreement_since": (
+                tenant.dpa_signed_at.isoformat() if tenant and tenant.dpa_signed_at else None
+            ),
+            # Did any product view arrive in the window, sold out or not. A yes
+            # or no — see `any_views_since`.
+            "receiving": receiving,
+            # How long a view is kept before the retention sweep deletes it — the
+            # setting that sweep enforces, so "we keep it for N days" on the
+            # screen cannot drift from what actually happens.
+            "kept_days": get_settings().retention_observed_events_days,
+            "products": [_product(d, catalogue.get(d.product_id), names, live) for d in shown],
             "truncated": len(demand) > LIMIT,
+            # `null` when the shop was not asked (Home, or an empty list).
+            "stock": (
+                None
+                if live is None
+                else {
+                    "asked_at": live.asked_at.isoformat(),
+                    "answered": live.answered,
+                    "reason": live.reason,
+                }
+            ),
             "caveats": _caveats(shown, unknown),
         },
         request_id=getattr(request.state, "request_id", None),
     )
 
 
+async def _stock_now(
+    request: Request,
+    tenant_id: str,
+    shown: Sequence[SoldOutDemand],
+    catalogue: Mapping[str, dict[str, Any]],
+) -> StockNow:
+    """One stock lookup at the shop for every product listed.
+
+    The same rule the shop applies when it records a view (ADR-0049): a product
+    can be bought when **any** of its variants has stock. The variant ids come
+    from the synced catalogue; a product it lacks is asked about by its own id.
+
+    Every failure is a result, never an error: a shop that did not answer is
+    said on the screen, and the counts above it are still right.
+    """
+    asked_at = datetime.now(UTC)
+    variants = {
+        d.product_id: _variant_ids(catalogue.get(d.product_id), d.product_id) for d in shown
+    }
+
+    try:
+        connection = await request.app.state.stores.connect(tenant_id)
+    except Exception as exc:
+        log.info(
+            "console_sold_out_stock_unreachable", tenant_id=tenant_id, error=type(exc).__name__
+        )
+        return StockNow(asked_at=asked_at, answered=False, reason="unreachable")
+
+    try:
+        if Capability.INVENTORY_READ not in connection.capabilities:
+            return StockNow(asked_at=asked_at, answered=False, reason="not_supported")
+        try:
+            levels = await connection.adapter.get_inventory(
+                sorted({vid for ids in variants.values() for vid in ids})
+            )
+        except Exception as exc:
+            log.info(
+                "console_sold_out_stock_unreachable", tenant_id=tenant_id, error=type(exc).__name__
+            )
+            return StockNow(asked_at=asked_at, answered=False, reason="unreachable")
+    finally:
+        # An adapter holds an HTTP client; one abandoned per page view leaks a pool.
+        await _close(connection.adapter)
+
+    return StockNow(
+        asked_at=asked_at, answered=True, in_stock=in_stock_by_product(variants, levels)
+    )
+
+
+def in_stock_by_product(
+    variants: Mapping[str, Iterable[str]], levels: Iterable[InventoryLevel]
+) -> dict[str, bool]:
+    """``True`` when any of a product's variants is in stock, ``False`` when the
+    shop reported on its variants and none is; left out when the shop said
+    nothing about any of them — a product it no longer has is not "sold out"."""
+    reported = {level.variant_external_id: level.in_stock for level in levels}
+    result: dict[str, bool] = {}
+    for product_id, ids in variants.items():
+        known = [reported[vid] for vid in ids if vid in reported]
+        if known:
+            result[product_id] = any(known)
+    return result
+
+
+def _variant_ids(entry: Mapping[str, Any] | None, product_id: str) -> list[str]:
+    ids = list((entry or {}).get("variants") or [])
+    return ids or [product_id]
+
+
 async def _catalogue(
     session: Any, tenant_id: str, product_ids: Sequence[str]
 ) -> dict[str, dict[str, Any]]:
-    """Title and URL for each product, from the synced catalogue — never the shop."""
+    """What the synced catalogue holds for each product — never the shop."""
     if not product_ids:
         return {}
     entities = synced_entities.c
@@ -89,43 +228,89 @@ async def _catalogue(
         await session.execute(
             select(entities.external_id, entities.document)
             .where(entities.tenant_id == tenant_id)
-            .where(entities.entity_type == "product")
+            .where(entities.entity_type == EntityType.PRODUCT.value)
             .where(entities.external_id.in_(list(product_ids)))
         )
     ).all()
+    return {str(row.external_id): _entry(row.document or {}) for row in rows}
+
+
+def _entry(document: Mapping[str, Any]) -> dict[str, Any]:
+    price = document.get("price_range_min") or {}
     return {
-        str(row.external_id): {"title": row.document.get("title"), "url": row.document.get("url")}
-        for row in rows
+        "title": document.get("title"),
+        "url": document.get("url"),
+        "cats": [str(c) for c in (document.get("category_ids") or [])],
+        "price": (
+            {"amount": str(price["amount"]), "currency": str(price.get("currency") or "")}
+            if price.get("amount")
+            else None
+        ),
+        "variants": [
+            str(v["external_id"])
+            for v in (document.get("variants") or [])
+            if isinstance(v, dict) and v.get("external_id")
+        ],
     }
 
 
-def _product(demand: SoldOutDemand, catalogue: dict[str, Any] | None) -> dict[str, Any]:
+async def _category_names(session: Any, tenant_id: str, category_ids: list[str]) -> dict[str, str]:
+    """Name per category id, for the ids the synced catalogue holds."""
+    if not category_ids:
+        return {}
+    entities = synced_entities.c
+    rows = (
+        await session.execute(
+            select(entities.external_id, entities.document)
+            .where(entities.tenant_id == tenant_id)
+            .where(entities.entity_type == EntityType.CATEGORY.value)
+            .where(entities.external_id.in_(category_ids))
+        )
+    ).all()
+    return {
+        str(row.external_id): str(name)
+        for row in rows
+        if (name := (row.document or {}).get("name") or (row.document or {}).get("title"))
+    }
+
+
+def _product(
+    demand: SoldOutDemand,
+    catalogue: Mapping[str, Any] | None,
+    names: Mapping[str, str],
+    live: StockNow | None,
+) -> dict[str, Any]:
+    entry = catalogue or {}
     return {
         "product_id": demand.product_id,
         # `None` when the synced catalogue does not hold it — the screen says so
         # rather than inventing a name or hiding the demand.
-        "title": (catalogue or {}).get("title"),
-        "url": (catalogue or {}).get("url"),
+        "title": entry.get("title"),
+        "url": entry.get("url"),
+        # Names only; an id the catalogue cannot name is left out, not shown as a code.
+        "categories": [names[c] for c in entry.get("cats", []) if c in names],
+        "price": entry.get("price"),
         "views": demand.views,
         "sessions": demand.sessions,
         "last_viewed_at": demand.last_viewed_at.isoformat(),
+        # From the shop, just now — `null` when it was not asked, did not
+        # answer, or said nothing about this product.
+        "in_stock_now": (live.in_stock.get(demand.product_id) if live else None),
     }
 
 
 def _caveats(products: Sequence[SoldOutDemand], unknown: int) -> list[str]:
     """What these counts do not say — written here, not in the JavaScript (ADR-0020 §3).
 
-    Each appears only when it is true, so the list is never boilerplate.
+    Each appears only when it is true, so the list is never boilerplate. That a
+    listed product may be back in stock is no longer one of them: the screen
+    asks the shop and says, per product.
     """
     caveats: list[str] = []
     if products:
         caveats.append(
-            "Each product was sold out when these views happened. Some may be back in "
-            "stock now — this list is the demand you had while you could not sell it."
-        )
-        caveats.append(
-            "A session is one browsing visit, not one person: someone on two devices counts "
-            "twice, and search-engine crawlers are not filtered out."
+            "A visit is one browsing session, not one person: someone on two devices counts "
+            "twice, and search-engine crawlers are counted too. We never know who the shopper was."
         )
     if unknown:
         caveats.append(
@@ -135,4 +320,4 @@ def _caveats(products: Sequence[SoldOutDemand], unknown: int) -> list[str]:
     return caveats
 
 
-__all__ = ["LIMIT", "WINDOW_DAYS", "router"]
+__all__ = ["LIMIT", "STOCK_NOW", "WINDOW_DAYS", "StockNow", "in_stock_by_product", "router"]
