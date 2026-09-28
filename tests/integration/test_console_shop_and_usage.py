@@ -21,12 +21,15 @@ and no silent period.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
 from neura_api.main import create_app
 from neura_core import Database, get_settings, load_env
 from neura_core.identity import COOKIE_NAME, issue
+from neura_core.tenancy.usage import UsageDelta, UsageMeter, today
 from tests.integration.console_fixtures import PLATFORM, Shop, drop_shop, make_shop
 
 pytestmark = pytest.mark.integration
@@ -294,11 +297,47 @@ class TestTheUsageScreenInventsNothing:
         )
         assert response.status_code == 400
 
-    def test_the_per_agent_split_is_labelled_as_today(self, client: TestClient, shop) -> None:
-        """The meter breaks usage down per agent by day. Summing it over a
-        30-day selector would be a number nobody recorded."""
-        usage = usage_of(client, shop)
-        assert set(usage["today_by_agent"]) == {"care"}
+    async def test_the_split_by_agent_covers_the_period_chosen(
+        self, client: TestClient, db: Database, shop
+    ) -> None:
+        """Today-only until 2026-09-28. The rollup is one row per (day, agent),
+        so a period's per-agent figure is a sum of recorded rows like the total
+        is — and the agents' rows add up to the total."""
+        async with db.tenant_session(shop.tenant) as session:
+            await UsageMeter(session).record(
+                shop.tenant,
+                "sell",
+                UsageDelta(conversations=2, turns=3, llm_calls=5),
+                on=today() - timedelta(days=10),
+            )
+
+        month = usage_of(client, shop, period="30d")
+        assert set(month["by_agent"]) == {"care", "sell"}
+        assert month["by_agent"]["sell"]["turns"] == 3
+        for counter in ("conversations", "turns", "llm_calls", "total_tokens"):
+            assert (
+                sum(agent[counter] for agent in month["by_agent"].values())
+                == month["totals"][counter]
+            )
+        # Ten days ago is outside a week: the split follows the period.
+        assert set(usage_of(client, shop, period="7d")["by_agent"]) == {"care"}
+
+    async def test_ai_work_without_a_conversation_is_explained_only_when_it_happened(
+        self, client: TestClient, db: Database, shop
+    ) -> None:
+        """Model calls with no turn — a pairing computed in the background — read
+        as a broken assistant unless the screen says why."""
+        assert not any(c["key"] == "background_ai" for c in usage_of(client, shop)["caveats"])
+
+        async with db.tenant_session(shop.tenant) as session:
+            await UsageMeter(session).record(
+                shop.tenant, "sell", UsageDelta(llm_calls=7, prompt_tokens=3000)
+            )
+        caveats = {c["key"]: c["text"] for c in usage_of(client, shop)["caveats"]}
+        assert "without a conversation" in caveats["background_ai"]
+
+    def test_everything_says_where_it_starts(self, client: TestClient, shop) -> None:
+        assert usage_of(client, shop, period="all")["period"]["first_recorded"] == str(today())
 
     def test_another_tenants_usage_is_not_counted(
         self, client: TestClient, shop, other_shop

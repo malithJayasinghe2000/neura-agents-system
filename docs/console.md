@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3), Suggestions (§3.6) and Sold out (§3.7) were redesigned 2026-09-28 — `make console-check` — 87 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3), Suggestions (§3.6), Sold out (§3.7) and Usage and cost (§3.5) were redesigned 2026-09-28 — `make console-check` — 91 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -26,7 +26,7 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ **built 2026-08-27** |
 | 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
 | 4 | **Shop** | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4** |
-| 5 | **Usage** (on screen: *Usage and cost*) | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
+| 5 | **Usage** (on screen: *Usage and cost*) | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** — redesigned 2026-09-28 (§3.5): every part follows the period, by assistant included |
 | — | **Home** — what needs the owner, and how the assistant is set up (§3.0) | nothing of its own — it reads the endpoints of Review, Usage, Shop, Sold out and Suggestions | ✅ **built 2026-09-27** — outside v1's five like the two below it. **Adds a screen and no data**: every figure on it is one another screen already shows, with its period and its server-written caveat |
 | — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name). **Redesigned 2026-09-28 (§3.7)**: opening it asks the shop, in one stock lookup for every product listed, whether each can be bought now — the second console call that reaches the shop, and Home never makes it |
 | — | **Suggestions** — what a basket suggests with each product, and the owner's way to change it ([ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md)) | `synced_entities`, `sell_pairings`, `sell_pairing_choices` | ✅ **built 2026-09-27** — the **second screen that writes** (after grading). Served by SELL's own routes under `/v1/sell/console/…`, so the SELL entitlement is checked inside the agent; a shop without SELL is told so. Reads the **synced** catalogue: a product the shop added since the last sync is not listed until a sync runs. **Redesigned 2026-09-28 (§3.6)**: opening a product previews what a basket shows — the only console call that reaches the shop, and never a model run |
@@ -63,7 +63,7 @@ counts, the period's dates, and the server's `handed_to_a_person` caveat, chosen
 | was | now |
 |:--|:--|
 | Withheld (shadow mode) · shadow mode | **Held for your review** · **practice mode** (glossary: same thing as shadow mode) |
-| `care` / `sell` | **Customer care** / **Shopping help** (`lib/assistants.ts`; an unknown key shows as itself) |
+| `care` / `sell` | **NEURA-CARE** / **NEURA-SELL** since 2026-09-28 — the owner's decision: the name on what a merchant pays for is the name on every screen. What each does (*Customer care* / *Shopping help*, the words approved the day before) stays beside it where there is room — the Usage table, a phone card (`assistantPurpose`). One file, `lib/assistants.ts`; an unknown key shows as itself |
 | 1 turn | **1 question** |
 | `web` | not shown while it is the only channel |
 | Shop · Usage | **Shop connection** · **Usage and cost** |
@@ -318,13 +318,39 @@ entirely from true numbers.**
 
 **Every total names its period**, and an unknown `?period=` is a 400 rather than
 a silent correction: a quietly adjusted window is a wrong number, not a wrong
-parameter. The per-agent split is labelled *today* because that is the grain the
+parameter. ~~The per-agent split is labelled *today* because that is the grain the
 meter records; summing it across a 30-day selector would report something nobody
-measured.
+measured.~~ **Corrected 2026-09-28:** the meter's grain is one row per
+`(tenant, day, agent)` (ADR-0015), so a period's per-agent figure is the same kind of
+sum as the period's total, and the agents' rows add up to it. The split now follows
+the period chosen — see below.
 
 **The caveats come from the server**, not from the JavaScript bundle — ADR-0020's
 rule for merchant-facing sentences — and each appears only when it is true, so
 the list never becomes boilerplate a reader learns to skip.
+
+#### Redesigned 2026-09-28, from the owner's approved mockup
+
+The owner's screen read *TURNS 82*, *TOKENS 291,499*, `2026-08-30 to 2026-09-28`,
+*not priced* three times, practice mode twice, a per-assistant split for **today**
+under a **30-day** selector — and *Shopping help: 0 conversations, 3,326 tokens*,
+which looks broken and is the AI computing pairings in the background (ADR-0045).
+
+| what | how |
+|:--|:--|
+| **Period** | chips *Today · Last 7 days · Last 30 days · Everything*; the heading says it in words — *Last 30 days · Aug 30 – Sep 28*, *Everything recorded · since Sep 1* (`period.first_recorded`). The meter's days are UTC calendar days, formatted as days (`dayWords`), never converted through a time zone |
+| **Practice mode** | once, before any figure (the server's `practice_mode` caveat is not repeated under it) |
+| **Conversations** | four counts — conversations, **questions** shoppers asked (was *turns*), handed to a person, blocked as attacks — with *See them →* on conversations and on handed to a person (`?state=escalated`); the server's *"36 of 53 … a count, not a deflection rate"* under them |
+| **AI use** | AI calls, tokens (*"the unit AI providers charge by"*), and cost: an amount when measured, else **Not priced** said once, the server's reason under it — never a zero figure. **When an agent called a model on a day it served no turn** (`background_ai`), one sentence: *"Some AI work happens without a conversation, like working out product suggestions."* A day that mixed both cannot be split by the rollup, so the sentence errs towards silence |
+| **By assistant** | a table (a card per assistant on a phone) **for the period chosen**, each named as the merchant buys it — **NEURA-CARE** / **NEURA-SELL**, with *Customer care* / *Shopping help* under it — and *"The rows add up to the totals."* |
+
+Still true: no rate, no trend, no chart, and `$0` never renders (`make console-check`).
+
+**API, 2026-09-28.** `GET /usage` replaces `today_by_agent` with **`by_agent`** for the
+period (`UsageMeter.by_agent_since`), adds `period.first_recorded`
+(`UsageMeter.first_recorded`) and the `background_ai` caveat
+(`UsageMeter.worked_without_a_conversation`). `neura-api` still names no agent: the
+sentence names a feature, and the screen maps keys to names.
 
 ---
 
@@ -480,7 +506,7 @@ once been true of the route somebody added last. So clauses 1, 2, 4 and 6 are re
 — each against real PostgreSQL with **two populated tenants** — and `test_console_auth.py` owns
 3 and 5.
 
-`make console-check` then re-asserts them **in real headless Chrome** — 87 checks since 2026-09-28 — because every
+`make console-check` then re-asserts them **in real headless Chrome** — 91 checks since 2026-09-28 — because every
 rule this console has is a claim about what a *rendered page* contains. A server that offered
 safe material and a screen that displayed it are not the same thing, and only one of them is the
 product: a page can fetch a payload with no credential in it and still print `$0.00` under the

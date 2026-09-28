@@ -39,7 +39,8 @@ export type Totals = {
  * Home shows counts and no cost, so it asks for `handed_to_a_person` only.
  */
 export type Caveat = {
-  key: "practice_mode" | "cost_not_recorded" | "handed_to_a_person" | (string & {});
+  key:
+    "practice_mode" | "cost_not_recorded" | "handed_to_a_person" | "background_ai" | (string & {});
   text: string;
 };
 
@@ -50,13 +51,18 @@ export type Usage = {
     through: string;
     /** `null` means everything recorded — not a number of days. */
     days: number | null;
+    /** The first day anything was recorded — where "everything" starts. */
+    first_recorded: string | null;
   };
   /** `live` or `shadow`. In shadow, nobody saw any of the work below. */
   mode: string;
   withheld: boolean;
   totals: Totals;
-  /** The meter breaks down per agent by **day**, so this is today only. */
-  today_by_agent: Record<string, Totals>;
+  /**
+   * The same period, per assistant (since 2026-09-28; today only before). The
+   * meter keeps one row per day per assistant, so these add up to `totals`.
+   */
+  by_agent: Record<string, Totals>;
   /** Only the ones that are true right now. Never boilerplate. */
   caveats: Caveat[];
 };

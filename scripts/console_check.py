@@ -566,6 +566,9 @@ async def _check_conversations(
         failures,
     )
     _check("the list says how many there are", "Showing 1\u2013" in page, failures)
+    # The seeded chats are CARE's. Named as the merchant buys it (the owner's
+    # decision, 2026-09-28), never by its key.
+    _check("an assistant is named as the merchant buys it", "NEURA-CARE" in page, failures)
 
     await browser.goto(f"{console}/console/{seeded['tenant']}/conversations?q=boots")
     await asyncio.sleep(3)
@@ -758,7 +761,23 @@ async def _check_shop_and_usage(
     # window between two visits would look like traffic changing.
     _check(
         "every total names the period it covers",
-        "Everything recorded for this shop" in usage,
+        "Everything recorded · since" in usage,
+        failures,
+    )
+    # The owner's word since 2026-09-27 (console.md §3.0), on this screen too
+    # since the 2026-09-28 redesign.
+    _check(
+        "it says questions, never turns",
+        "shoppers asked" in usage or "a shopper asked" in usage,
+        failures,
+    )
+    _check("the word 'turns' is gone", re.search(r"\bturns?\b", usage.lower()) is None, failures)
+    # The split by assistant follows the period chosen — it was today only. The
+    # seed bills this check's own agent, so its row must be in "everything".
+    _check(
+        "the split by assistant covers the period chosen",
+        "By assistant · Everything recorded" in usage
+        and await browser.evaluate(f"!!document.querySelector('[data-agent=\"{SEEDED_AGENT}\"]')"),
         failures,
     )
 

@@ -208,3 +208,64 @@ class UsageMeter:
             )
             for row in rows
         }
+
+    async def by_agent_since(
+        self, tenant_id: str, *, since: date | None = None
+    ) -> dict[str, UsageTotals]:
+        """Per-agent totals over a period — ``since`` a day, or everything.
+
+        The rollup's grain is ``(tenant, day, agent)``, so this is the same sum
+        :meth:`totals` does, grouped by agent: the rows for one agent over the
+        period add up to that agent's figure, and every agent's figure adds up
+        to the period's total. The Usage screen shows it for the period chosen
+        (console.md §3.5, 2026-09-28) rather than for today only.
+        """
+        query = (
+            select(
+                tenant_usage.c.agent_key,
+                *(func.sum(tenant_usage.c[name]) for name in COUNTERS),
+                func.sum(tenant_usage.c.cost_usd),
+            )
+            .where(tenant_usage.c.tenant_id == tenant_id)
+            .group_by(tenant_usage.c.agent_key)
+            .order_by(tenant_usage.c.agent_key)
+        )
+        if since is not None:
+            query = query.where(tenant_usage.c.usage_date >= since)
+        rows = (await self._session.execute(query)).all()
+        return {
+            row[0]: UsageTotals(
+                tenant_id=tenant_id,
+                **dict(zip(COUNTERS, (int(v or 0) for v in row[1:-1]), strict=True)),
+                cost_usd=Decimal(row[-1] or 0),
+            )
+            for row in rows
+        }
+
+    async def worked_without_a_conversation(
+        self, tenant_id: str, *, since: date | None = None
+    ) -> bool:
+        """Did an agent call a model on a day it served no turn, in the period?
+
+        Background work — a pairing computed off the request path (ADR-0045) —
+        records model calls and no turn, so the Usage screen can show AI use on
+        a day nobody chatted and must say why. A day that mixed both is not
+        detected: the rollup cannot split it, so this errs towards saying
+        nothing rather than guessing.
+        """
+        rows = (
+            select(tenant_usage.c.agent_key)
+            .where(tenant_usage.c.tenant_id == tenant_id)
+            .where(tenant_usage.c.turns == 0)
+            .where(tenant_usage.c.llm_calls > 0)
+        )
+        if since is not None:
+            rows = rows.where(tenant_usage.c.usage_date >= since)
+        return bool(await self._session.scalar(select(rows.exists())))
+
+    async def first_recorded(self, tenant_id: str) -> date | None:
+        """The first day anything was recorded — what "everything" starts from."""
+        first: date | None = await self._session.scalar(
+            select(func.min(tenant_usage.c.usage_date)).where(tenant_usage.c.tenant_id == tenant_id)
+        )
+        return first

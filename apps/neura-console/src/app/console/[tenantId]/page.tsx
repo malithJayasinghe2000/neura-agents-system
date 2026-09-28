@@ -385,7 +385,7 @@ function SuggestionsCard({
         headline={forbidden ? "Not in this shop's plan" : "Could not be read"}
         body={
           forbidden
-            ? "Suggestions come with the Shopping help assistant, which this shop doesn't have."
+            ? "Suggestions come with NEURA-SELL, which this shop doesn't have."
             : "Try again in a moment."
         }
         action="Suggestions"

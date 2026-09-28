@@ -83,10 +83,14 @@ async def usage(
     async with db.tenant_session(actor.tenant_id) as session:
         meter = UsageMeter(session)
         totals = await meter.totals(actor.tenant_id, since=since)
-        # Per-agent is a *daily* breakdown in the meter, so it is reported for
-        # today only and labelled as such rather than silently summed over a
-        # period it does not cover.
-        per_agent = await meter.by_agent(actor.tenant_id, on=day)
+        # Per agent **for the same period**. Until 2026-09-28 this was today
+        # only, on the reading that the meter's per-agent grain is a day and a
+        # period sum "would report something nobody measured" — but the rollup
+        # is one row per (day, agent), so a period's per-agent figure is the
+        # same kind of sum as the period's total, and the rows add up to it.
+        per_agent = await meter.by_agent_since(actor.tenant_id, since=since)
+        background = await meter.worked_without_a_conversation(actor.tenant_id, since=since)
+        first = await meter.first_recorded(actor.tenant_id)
         tenant = await TenantRepository(session).get(actor.tenant_id)
 
     mode = tenant.config.mode.value if tenant else "unknown"
@@ -100,18 +104,19 @@ async def usage(
                 # `None` days means "everything recorded", which is not a number
                 # of days and must not be rendered as one.
                 "days": None if lookback is None else lookback + 1,
+                # What "everything" starts from; `null` when nothing was ever recorded.
+                "first_recorded": first.isoformat() if first else None,
             },
             # The mode is on this payload for the reason in the module docstring:
             # without it, true numbers describe an assistant nobody has met.
             "mode": mode,
             "withheld": mode == "shadow",
             "totals": _totals_payload(totals),
-            "today_by_agent": {
-                key: _totals_payload(value) for key, value in sorted(per_agent.items())
-            },
+            # For the period above, keyed by agent — the screen names them.
+            "by_agent": {key: _totals_payload(value) for key, value in sorted(per_agent.items())},
             # Said once, by the server, rather than hard-coded into a JavaScript
             # bundle — the rule ADR-0020 set for merchant-facing sentences.
-            "caveats": _caveats(totals, mode),
+            "caveats": _caveats(totals, mode, background=background),
         },
         request_id=getattr(request.state, "request_id", None),
     )
@@ -144,7 +149,7 @@ def _totals_payload(totals: UsageTotals) -> dict[str, Any]:
     }
 
 
-def _caveats(totals: UsageTotals, mode: str) -> list[dict[str, str]]:
+def _caveats(totals: UsageTotals, mode: str, *, background: bool = False) -> list[dict[str, str]]:
     """What these numbers do not say, in the merchant's words.
 
     Returned rather than rendered client-side because a sentence a merchant
@@ -183,6 +188,21 @@ def _caveats(totals: UsageTotals, mode: str) -> list[dict[str, str]]:
                     "No cost is shown because none was recorded. A model running on your own "
                     "hardware costs nothing per message, and a hosted model with no price "
                     "configured also records nothing — this figure cannot tell you which."
+                ),
+            }
+        )
+
+    if background:
+        # Without it, an assistant with 0 conversations and 3,326 tokens reads
+        # as broken (found on the test shop, 2026-09-28). A feature named, not
+        # an agent: this module still does not know which agent does it.
+        caveats.append(
+            {
+                "key": "background_ai",
+                "text": (
+                    "Some AI work happens without a conversation, like working out product "
+                    "suggestions. That is why AI use can be above zero when no shopper was "
+                    "chatting."
                 ),
             }
         )

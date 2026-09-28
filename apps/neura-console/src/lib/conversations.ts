@@ -130,7 +130,7 @@ export const STATE_HELP: Record<ConversationState, string> = {
     "The assistant answered in full and the shopper was shown nothing. The draft is in Review, waiting for your verdict.",
 };
 
-/** What a sent reply did, said after the assistant's name: "Shopping help · answered". */
+/** What a sent reply did, said after the assistant's name: "NEURA-SELL · answered". */
 export const SENT_OUTCOME: Record<ConversationState, string> = {
   resolved: "answered",
   awaiting_customer: "waiting for the shopper",
@@ -139,7 +139,7 @@ export const SENT_OUTCOME: Record<ConversationState, string> = {
   shadowed: "held",
 };
 
-/** What a held reply would have done: "Customer care · would have answered". */
+/** What a held reply would have done: "NEURA-CARE · would have answered". */
 export const HELD_OUTCOME: Record<string, string> = {
   resolved: "would have answered",
   awaiting_customer: "would have asked the shopper for more",
