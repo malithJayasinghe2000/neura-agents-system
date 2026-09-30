@@ -350,9 +350,9 @@ class TestTheScheduleKeepsItself:
 class TestANewConversationBooksItsDeletion:
     """The other write that creates something to expire: ``TurnService`` opening a transcript.
 
-    Proved here rather than in ``test_api_postgres.py``, whose turn tests fail
-    before they could assert it (a stub missing ``structured_repairs`` — 40
-    failures on ``main`` as well, not this change's). A tenant with **no store**
+    Proved here rather than in ``test_api_postgres.py``, whose turn tests were
+    failing when this was written (a stub missing ``structured_repairs``; fixed
+    2026-09-30, G42 in CONNECTING_A_NEW_SHOP_LOG.md). A tenant with **no store**
     fails with ``NO_STORE_CONNECTED`` *after* the opening transaction has
     committed, so the conversation and its booking are both observable without
     running a turn, a graph or a model.

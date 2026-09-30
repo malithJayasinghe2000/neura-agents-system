@@ -181,15 +181,23 @@ class StubLLM:
         return _Embedding()
 
 
-class _Response:
-    def __init__(self, content: str = "") -> None:
-        from neura_llm import FinishReason
+def _Response(content: str = "") -> Any:  # noqa: N802 — kept as the name every call site uses
+    """A model reply, built from the REAL type so it cannot fall behind it.
 
-        self.content = content
-        self.tool_calls: list[Any] = []
-        self.usage = _Usage()
-        self.cost_usd = Decimal("0.0005")
-        self.finish_reason = FinishReason.STOP
+    It used to be a hand-written class. The real `ChatResponse` gained
+    `structured_repairs` and `model`, the copy did not, and 40 tests here failed
+    for weeks unnoticed — `make check` does not run this suite (G42 in
+    CONNECTING_A_NEW_SHOP_LOG.md). Same numbers as before: 120 + 30 tokens, $0.0005.
+    """
+    from neura_llm import FinishReason
+    from neura_llm.types import ChatResponse, Usage
+
+    return ChatResponse(
+        content=content,
+        usage=Usage(prompt_tokens=120, completion_tokens=30),
+        cost_usd=Decimal("0.0005"),
+        finish_reason=FinishReason.STOP,
+    )
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -971,7 +979,9 @@ class TestWebhooks:
             jobs = await JobQueue(session).list_for(TENANT_A)
 
         assert deliveries, "the turn queued no deliveries; this test proves nothing"
-        assert [j.kind for j in jobs] == [WEBHOOK_DRAIN]
+        # Webhook jobs only: a new conversation also books its own deletion
+        # (`retention.sweep`, ADR-0048), which is not this test's subject.
+        assert [j.kind for j in jobs if j.kind == WEBHOOK_DRAIN] == [WEBHOOK_DRAIN]
 
     async def test_a_tenant_with_no_endpoints_queues_no_drain_job(
         self, client: TestClient, db: Database
@@ -983,7 +993,10 @@ class TestWebhooks:
         client.post("/v1/care/chat", json={"message": "hello"}, headers=_auth(token))
 
         async with db.tenant_session(TENANT_A) as session:
-            assert await JobQueue(session).list_for(TENANT_A) == []
+            jobs = await JobQueue(session).list_for(TENANT_A)
+        # The conversation's own `retention.sweep` booking (ADR-0048) is expected;
+        # a drain job is what must not be there.
+        assert [j.kind for j in jobs if j.kind == WEBHOOK_DRAIN] == []
 
     async def test_a_delivery_dies_after_its_attempts_are_used(self, db: Database) -> None:
         """And is still readable — that is the dead-letter queue api-design.md §9

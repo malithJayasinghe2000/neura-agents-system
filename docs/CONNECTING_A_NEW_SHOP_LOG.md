@@ -308,6 +308,20 @@ they say nothing about the fix. Later the owner added new keys; Gemini stayed ov
 passed · 40 failed after, 404 passed · 40 failed before** — the **same 40** in both (G42), the new refusal test
 passes. No AI eval: no agent's behaviour changed (the free dataset check in `make check` ran).
 
+**Committed by the owner's request: `52f7b5e`** (G34).
+
+**G42 — fixed (2026-09-30, the owner said go ahead):** the 40 were **two** stale test helpers, not broken code.
+
+| Cause | Tests | Fix |
+|:--|:--|:--|
+| The fake AI reply (`_Response`) was a hand-written copy of the real one, missing `structured_repairs` and then `model` | 38 | Built from the **real** `ChatResponse` type, same numbers (120 + 30 tokens, $0.0005) — it cannot fall behind again |
+| Two webhook tests expected the drain job to be the **only** job; since ADR-0048 a new conversation also books its `retention.sweep` | 2 | They look at webhook jobs only |
+
+Also corrected the comment in `test_observation_postgres.py` that said *"40 failures on main"*. **Result:
+integration 445 passed, 0 failed** (was 405 / 40) — which also properly proves G34's socket-header change;
+`make check` green. **Still open:** `make check` does not run the integration tests, which is how they went stale
+(they need the database running). Whether to add them is the owner's decision.
+
 ## What we found
 
 Every problem in our guide, in the order found. **Status** is `open` until the guide is changed.
@@ -355,7 +369,7 @@ Every problem in our guide, in the order found. **Status** is `open` until the g
 | G39 | 6 | **Review says the products were deleted when they were not.** For the gift reply, *What it looked at* shows three cards: *"This source is no longer in the search index — it may have been deleted or re-indexed since this turn ran."* The three products were read from the shop (the search tool) and **were never in a search index** — this shop has none (G21), and search by meaning was off (`cloud-prod`, no embedder). | The owner thinks three of their products vanished. | open — dashboard |
 | G40 | 6 | **The sidebar's Review number goes stale.** The owner saw **Review 5** in the menu while the page said **To review 6**. Loaded fresh, both say 6 — the menu is counted when the page first loads and not again when new replies arrive. | Small: the owner may think they have finished reviewing. | open — dashboard, small |
 | G41 | 7 | **SELL's replies show the shopper our internal product ids.** The reply text itself says *"Enamel Camp Mug 350ml **(Product 4)**"* — and on Ceylon Harvester *"Ceylon Black Tea BOPF 400g **(Product 4)**"*; on the test shop *"(p_socks_1)"*. The compose prompt tells the AI to use the ids when naming products (that is how the fact check and the cards know which product is meant), and nothing removes them before the shopper reads the reply. Found in the G36 test run. | A shopper reads *"(p_socks_1)"* or *"(Product 4)"* — it looks broken, and means nothing to them. Needs a decision on how ids are hidden without breaking G36's citations. | open — to discuss |
-| G42 | 7 | **40 of our integration tests fail on the committed code, and nothing noticed.** Found while checking G34: `tests/integration/test_api_postgres.py` — streaming, review queue, usage, webhooks and more. One cause seen in all the ones read: the tests' **fake AI reply** (`_Response`, line 184) has no `structured_repairs` field, which the real code reads since commit `737532e` (*"count every model call…"*). `make check` runs only the unit tests, so the integration suite is never run by the gate and went stale. | Tests that exist but fail are worse than none: nobody trusts them, and a real break (like one G34 could have caused) hides among the 40. Probably a one-line fix in the fake; the owner decides. | open — to discuss |
+| G42 | 7 | **40 of our integration tests fail on the committed code, and nothing noticed.** Found while checking G34: `tests/integration/test_api_postgres.py` — streaming, review queue, usage, webhooks and more. One cause seen in all the ones read: the tests' **fake AI reply** (`_Response`, line 184) has no `structured_repairs` field, which the real code reads since commit `737532e` (*"count every model call…"*). `make check` runs only the unit tests, so the integration suite is never run by the gate and went stale. | Tests that exist but fail are worse than none: nobody trusts them, and a real break (like one G34 could have caused) hides among the 40. Probably a one-line fix in the fake; the owner decides. | **fixed, 2026-09-30** — 445 of 445 pass; open: should `make check` run them? |
 
 ### Messages between the shop and NEURA (checked 2026-09-30)
 
