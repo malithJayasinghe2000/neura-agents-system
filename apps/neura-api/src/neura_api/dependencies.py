@@ -48,7 +48,14 @@ from neura_core import (
 # thing to find in an authentication path.
 from neura_core.identity import COOKIE_NAME, memberships_for
 from neura_core.identity import verify as verify_session
-from neura_core.tenancy import AuthenticatedCaller, authenticate, require_agent, require_scopes
+from neura_core.tenancy import (
+    ApiKeyKind,
+    AuthenticatedCaller,
+    authenticate,
+    require_agent,
+    require_scopes,
+)
+from neura_core.tenancy import keys as api_keys
 
 log = get_logger(__name__)
 
@@ -107,7 +114,23 @@ async def authenticate_request(
     one. That is the *only* difference the two transports are allowed to have —
     everything after this line is identical, which is what keeps api-design.md
     §8's "the transport is never allowed to become a second code path" true.
+
+    **Only a public key may travel in the address.** An address is written down
+    by things we do not control — the web server's own request line, a proxy's
+    access log, a browser's history — and the web server's line did print the
+    whole key (CONNECTING_A_NEW_SHOP_LOG.md G34). A public key is public by
+    design; a secret one in an address is a leak waiting for a log reader. A
+    server is not a browser and *can* send a header, so a secret key over the
+    socket goes in ``Authorization``, as on every REST route. Refused before any
+    lookup, and without saying whether the key exists.
     """
+    if token is not None:
+        parsed = api_keys.parse(token)
+        if parsed is not None and parsed[0] is not ApiKeyKind.PUBLIC:
+            raise AuthenticationError(
+                "A secret key may not be sent in the address. "
+                "Send it in the Authorization header instead."
+            )
     presented = token or bearer_token(request.headers.get("authorization"))
 
     caller = await authenticate(

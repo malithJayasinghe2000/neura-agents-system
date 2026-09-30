@@ -84,3 +84,36 @@ class TestErrorContract:
     def test_error_request_id_matches_the_header(self, client: TestClient) -> None:
         response = client.get("/v1/does-not-exist")
         assert response.json()["error"]["request_id"] == response.headers["X-Request-Id"]
+
+
+class TestNoSecretKeyInAnAddress:
+    """G34: an address is written down by things we do not control, so only a
+    public key may travel in one. A server sends a secret key in a header."""
+
+    class _Request:
+        def __init__(self) -> None:
+            self.headers: dict[str, str] = {}
+
+    def test_a_secret_key_in_the_address_is_refused_before_any_lookup(self) -> None:
+        import asyncio
+
+        from neura_api.dependencies import authenticate_request
+        from neura_core import AuthenticationError
+        from neura_core.tenancy.keys import ApiKeyKind, generate
+
+        secret = generate(ApiKeyKind.SECRET).token
+        with pytest.raises(AuthenticationError, match="Authorization header"):
+            # No database is configured here, so reaching the lookup would fail
+            # differently: the refusal has to come first.
+            asyncio.run(authenticate_request(self._Request(), token=secret))  # type: ignore[arg-type]
+
+    def test_a_public_key_in_the_address_is_not_refused_for_being_there(self) -> None:
+        import asyncio
+
+        from neura_api.dependencies import authenticate_request
+        from neura_core.tenancy.keys import ApiKeyKind, generate
+
+        public = generate(ApiKeyKind.PUBLIC).token
+        with pytest.raises(Exception) as raised:
+            asyncio.run(authenticate_request(self._Request(), token=public))  # type: ignore[arg-type]
+        assert "Authorization header" not in str(raised.value)

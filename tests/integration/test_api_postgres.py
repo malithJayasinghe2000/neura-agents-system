@@ -1190,7 +1190,7 @@ class TestShadowMode:
         second place that has to be true."""
         token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
@@ -1295,7 +1295,7 @@ class TestAWithheldTurnIsNeverEmptyHanded:
         socket happened to open."""
         token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
@@ -1528,7 +1528,7 @@ class TestStreaming:
     ) -> None:
         token = await _provision(db, TENANT_A)
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
@@ -1548,7 +1548,7 @@ class TestStreaming:
         something: it is the one stream nobody treats as a response body."""
         token = await _provision(db, TENANT_A)
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
@@ -1562,7 +1562,7 @@ class TestStreaming:
         a character at a time is theatre."""
         token = await _provision(db, TENANT_A)
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json(
                 {
                     "type": "message",
@@ -1584,7 +1584,7 @@ class TestStreaming:
         client.post(
             "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
         )
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             _drain(socket)
 
@@ -1606,6 +1606,22 @@ class TestStreaming:
         with (
             pytest.raises(WebSocketDisconnect) as raised,
             client.websocket_connect("/v1/care/stream?token=nonsense") as socket,
+        ):
+            socket.receive_json()
+        assert raised.value.code == 4401
+
+    async def test_a_secret_key_in_the_socket_address_is_refused(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """G34 in CONNECTING_A_NEW_SHOP_LOG.md: an address is written down by the
+        web server, a proxy and a browser's history. A valid secret key sent there
+        is refused, even though the same key in the header is accepted."""
+        from starlette.websockets import WebSocketDisconnect
+
+        token = await _provision(db, TENANT_A)
+        with (
+            pytest.raises(WebSocketDisconnect) as raised,
+            client.websocket_connect(f"/v1/care/stream?token={token}") as socket,
         ):
             socket.receive_json()
         assert raised.value.code == 4401

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from neura_core import ConfigurationError, bind_context, current_context, new_id
 from neura_core.config import Environment, Settings
 from neura_core.crypto import decrypt, encrypt, generate_key, unwrap_dek, wrap_dek
 from neura_core.ids import CONVERSATION, is_valid
-from neura_core.logging import _redact
+from neura_core.logging import _redact, _StdlibRedactionFilter
 
 
 class TestIds:
@@ -40,6 +42,30 @@ class TestRedaction:
         scrubbed = _redact("failed for jane@example.com using fn_sk_abcdefgh123", "detail")
         assert "jane@example.com" not in scrubbed
         assert "fn_sk_abcdefgh123" not in scrubbed
+
+
+class TestStdlibRedaction:
+    """G34 in CONNECTING_A_NEW_SHOP_LOG.md: the web server's request line printed
+    the chat socket's whole address, key included. It logs through the standard
+    library, which the structlog processor never sees."""
+
+    def _render(self, template: str, *args: object) -> str:
+        record = logging.LogRecord("uvicorn.error", logging.INFO, __file__, 1, template, args, None)
+        assert _StdlibRedactionFilter().filter(record) is True, "scrubs, never drops"
+        return record.getMessage()
+
+    def test_a_key_in_a_socket_address_is_hidden(self) -> None:
+        line = self._render(
+            '%s - "WebSocket %s" [accepted]',
+            "127.0.0.1:52235",
+            "/v1/stream?token=fn_pk_test_E2K4MOaMCJru2KwvFevuZSez7vv9MU6QPrdVMgC11h8",
+        )
+        assert "E2K4MOaM" not in line
+        assert line == '127.0.0.1:52235 - "WebSocket /v1/stream?token=***" [accepted]'
+
+    def test_any_token_in_an_address_is_hidden_and_the_rest_kept(self) -> None:
+        line = self._render('"GET %s HTTP/1.1" %d', "/auth/verify?token=abc.def&next=/x", 200)
+        assert line == '"GET /auth/verify?token=***&next=/x HTTP/1.1" 200'
 
 
 class TestCrypto:

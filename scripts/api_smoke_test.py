@@ -181,7 +181,11 @@ def _run_socket(client: TestClient, key: str) -> bool:
     """One turn over the WebSocket, checking ADR-0016's central promise."""
     print(f"\n  {BOLD}STREAM — progress frames, then only verified text{OFF}")
 
-    with client.websocket_connect(f"/v1/care/stream?token={key}") as socket:
+    # A secret key goes in the header: only a public key may travel in the
+    # address, which the web server writes down (G34).
+    with client.websocket_connect(
+        "/v1/care/stream", headers={"Authorization": f"Bearer {key}"}
+    ) as socket:
         socket.send_json({"type": "message", "content": "do you sell waterproof hiking shoes?"})
         frames: list[dict[str, Any]] = []
         for _ in range(500):
