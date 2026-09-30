@@ -42,9 +42,12 @@ export function ShopSidebar({
   tenantId,
   shopName,
   waiting,
+  sell,
 }: {
   tenantId: string;
   shopName: string;
+  /** Whether the shop has NEURA-SELL. Without it, its two screens are not listed. */
+  sell: boolean;
   /** Replies waiting in Review. `null` when it could not be read — then no badge, not a 0. */
   waiting: number | null;
 }) {
@@ -56,8 +59,12 @@ export function ShopSidebar({
     { href: base, label: "Home", icon: House },
     { href: `${base}/review`, label: "Review", icon: ClipboardCheck, waiting: waiting ?? 0 },
     { href: `${base}/conversations`, label: "Conversations", icon: MessageSquare },
-    { href: `${base}/suggestions`, label: "Suggestions", icon: ShoppingBag },
-    { href: `${base}/sold-out`, label: "Sold out", icon: PackageX },
+    ...(sell
+      ? [
+          { href: `${base}/suggestions`, label: "Suggestions", icon: ShoppingBag },
+          { href: `${base}/sold-out`, label: "Sold out", icon: PackageX },
+        ]
+      : []),
   ];
   const setup: Item[] = [
     { href: `${base}/shops`, label: "Shop connection", icon: Plug },

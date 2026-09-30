@@ -26,6 +26,7 @@ import { redirect } from "next/navigation";
 import { CheckCircle2, ExternalLink, PackageX, XCircle } from "lucide-react";
 import { CheckAgain } from "@/components/sold-out/check-again";
 import { When } from "@/components/when";
+import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { fromApi, hasSession } from "@/lib/server-api";
 import { notCheckedLine, opened, type SoldOut, type SoldOutProduct } from "@/lib/sold-out";
 import { money } from "@/lib/suggestions";
@@ -36,6 +37,21 @@ export default async function SoldOutPage({ params }: { params: Promise<{ tenant
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
+  // Reached by its address only: the menu does not list it for a shop without
+  // NEURA-SELL. Said the way Suggestions says it, and nothing is asked of the shop.
+  if (!hasSell(await shopAssistants(tenantId))) {
+    return (
+      <>
+        <h1 className="text-2xl font-semibold tracking-tight">Sold out</h1>
+        <Alert>
+          <AlertTitle>Sold out is not part of this shop&apos;s plan</AlertTitle>
+          <AlertDescription>
+            Sold out comes with NEURA-SELL, which this shop doesn&apos;t have.
+          </AlertDescription>
+        </Alert>
+      </>
+    );
+  }
   // `stock=now`: the one request on this screen that reaches the shop, made
   // because the owner opened it. Home reads the same route without it.
   const result = await fromApi<SoldOut>(

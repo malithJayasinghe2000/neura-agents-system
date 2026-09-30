@@ -84,3 +84,5 @@ Nothing has been built or measured. Every figure below is illustrative or a targ
 ## 6. Before you finish a session
 
 Update [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md): what changed, what is next, anything newly decided or newly blocked. That file is the handoff to the next session — including your own next session, which will remember none of this.
+
+**A feature is not finished until its line in [`docs/FEATURES.md`](docs/FEATURES.md) is updated** — added, its status changed, or removed — in the same change as the code. The public websites are written from that file.

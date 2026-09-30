@@ -250,15 +250,21 @@ class TestTheWidgetShipsAsItsOwnSource:
         reviews (ADR-0019 §1). The console is served by us, to a merchant, and
         carries none of that argument.
 
-        The exclusion is a single named directory rather than a pattern, so the
-        next `package.json` to appear anywhere else still fails this test.
+        The exclusion is a list of named directories rather than a pattern, so
+        the next `package.json` to appear anywhere else still fails this test.
+        **The second, 2026-09-30:** the public website, `apps/neura-web`
+        ([ADR-0051](../../docs/architecture/adr/0051-the-public-website-is-its-own-app-and-says-only-what-the-code-does.md)).
+        Served by us as static pages, never pasted into a merchant's page — the
+        console's argument, not the widget's.
         """
         root = Path(__file__).parents[2]
-        console = root / "apps" / "neura-console"
+        allowed = (root / "apps" / "neura-console", root / "apps" / "neura-web")
         stray = [
             p
             for p in root.rglob("package.json")
-            if ".venv" not in p.parts and "node_modules" not in p.parts and console not in p.parents
+            if ".venv" not in p.parts
+            and "node_modules" not in p.parts
+            and not any(app in p.parents for app in allowed)
         ]
         assert stray == [], f"a JS toolchain appeared without an ADR: {stray}"
 

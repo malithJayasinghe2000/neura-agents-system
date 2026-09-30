@@ -118,6 +118,7 @@ async def main() -> int:
     db = Database.from_settings()
     failures: list[str] = []
     seeded: dict[str, str] = {}
+    sell_seeded: dict[str, str] = {}
     seeded_choice: dict[str, str] = {}
 
     try:
@@ -134,8 +135,19 @@ async def main() -> int:
         async with db.identity_session(minted.user_id) as session:
             held = await memberships_for(session, minted.user_id)
 
+        # Since 2026-09-30 a shop without NEURA-SELL is not shown Sold out, so
+        # the Sold out checks need a shop WITH it — seeded separately when the
+        # first shop lacks it, and removed by id like the first. The first shop
+        # stays the one every other screen is checked on. A shop without SELL
+        # is also checked for the screens it must NOT show.
+        with_sell = [m.tenant_id for m in held if await _holds_sell(db, m.tenant_id)]
+        without_sell = [m.tenant_id for m in held if m.tenant_id not in with_sell]
         if held:
             seeded = await _seed_shop(db, held[0].tenant_id)
+            seeded["sell"] = "yes" if held[0].tenant_id in with_sell else ""
+            sell_seeded = seeded if seeded["sell"] else {}
+            if not sell_seeded and with_sell:
+                sell_seeded = await _seed_shop(db, with_sell[0])
         else:
             print(f"  {DIM}no membership — the Review checks below are skipped, not passed{OFF}")
 
@@ -210,8 +222,17 @@ async def main() -> int:
                 print(f"\n  {BOLD}help — connecting your shop{OFF}")
                 await _check_help(browser, console, seeded, failures)
 
-                print(f"\n  {BOLD}sold out — demand, counted, never who{OFF}")
-                await _check_sold_out(browser, console, seeded, failures)
+                if sell_seeded:
+                    print(f"\n  {BOLD}sold out — demand, counted, never who{OFF}")
+                    await _check_sold_out(browser, console, sell_seeded, failures)
+                else:
+                    print(f"  {DIM}no shop with SELL — the Sold out checks are skipped{OFF}")
+
+            if without_sell:
+                print(f"\n  {BOLD}a shop without NEURA-SELL — its screens are not shown{OFF}")
+                await _check_without_sell(browser, console, without_sell[0], failures)
+            else:
+                print(f"  {DIM}every shop has SELL — the without-SELL checks are skipped{OFF}")
 
             # Screen 7 needs a shop with SELL, which the first membership may not
             # have. Found rather than assumed, and skipped — not passed — when
@@ -238,6 +259,8 @@ async def main() -> int:
     finally:
         if seeded:
             await _unseed_shop(db, seeded)
+        if sell_seeded and sell_seeded is not seeded:
+            await _unseed_shop(db, sell_seeded)
         if seeded_choice:
             await _unseed_choice(db, seeded_choice)
         await db.dispose()
@@ -732,7 +755,7 @@ async def _check_shop_and_usage(
         connections == held
         and "Get set up" in shop
         and await browser.evaluate(
-            f"!!document.querySelector('[data-item=connected][data-store=\\"{seeded['store']}\\"]')"
+            f"!!document.querySelector('[data-item=connected][data-store=\"{seeded['store']}\"]')"
         ),
         failures,
     )
@@ -740,7 +763,10 @@ async def _check_shop_and_usage(
         "the chat box, the agreement and product views are on the checklist",
         await browser.evaluate(
             "['chat-box','agreement','views'].every(i => document.querySelector(`[data-item=${i}]`))"
-        ),
+        )
+        if seeded["sell"]
+        # The two optional steps are for Sold out, which a shop without SELL is not shown.
+        else await browser.evaluate("!!document.querySelector('[data-item=chat-box]')"),
         failures,
     )
     _check(
@@ -881,9 +907,10 @@ async def _check_help(
 
     _check("the help page renders", "Connecting your shop" in page, failures)
     _check(
-        "it lists the six steps with how you'll know",
-        await browser.evaluate("document.querySelectorAll('[data-help-step]').length") == 6
-        and page.count("How you'll know") == 6,
+        # Five: Sold out is a NEURA-SELL feature, not a connection step (owner, 2026-09-30).
+        "it lists the five connection steps with how you'll know",
+        await browser.evaluate("document.querySelectorAll('[data-help-step]').length") == 5
+        and page.count("How you'll know") == 5,
         failures,
     )
     snippet = await browser.evaluate(
@@ -981,6 +1008,63 @@ async def _sync_jobs(tenant_id: str, store_id: str) -> list[bool]:
             return [bool(row.payload.get("incremental", True)) for row in rows]
     finally:
         await db.dispose()
+
+
+async def _holds_sell(db: Database, tenant_id: str) -> bool:
+    """Whether this shop has NEURA-SELL — its entitlement, read as the API reads it."""
+    from neura_core.tenancy import TenantRepository
+
+    async with db.tenant_session(tenant_id) as session:
+        tenant = await TenantRepository(session).get(tenant_id)
+    return tenant is not None and tenant.may_use("sell")
+
+
+async def _check_without_sell(
+    browser: Chrome, console: str, tenant_id: str, failures: list[str]
+) -> None:
+    """A shop without NEURA-SELL is not shown NEURA-SELL's screens (2026-09-30).
+
+    The owner found *Sold out* in the menu of a shop with NEURA-CARE only — a gym
+    app showing the pool to a member without the pool. Checked on a real shop of
+    the signed-in person's that lacks SELL, never on one made up for the check.
+    """
+    base = f"{console}/console/{tenant_id}"
+    await browser.goto(base)
+    await asyncio.sleep(3)
+    menu = await browser.evaluate(
+        "[...document.querySelectorAll('nav[aria-label=Screens] a')].map(a => a.innerText).join('|')"
+    )
+    _check(
+        "its menu lists neither Suggestions nor Sold out",
+        "Home" in menu and "Suggestions" not in menu and "Sold out" not in menu,
+        failures,
+    )
+    home = await browser.evaluate("document.body.innerText")
+    _check("its Home shows no Suggestions or Sold out card", "Open Sold out" not in home, failures)
+
+    await browser.goto(f"{base}/sold-out")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    _check(
+        "opened by its address, Sold out says it is not part of this shop's plan",
+        "comes with NEURA-SELL" in page and "Is it working?" not in page,
+        failures,
+    )
+
+    await browser.goto(f"{base}/shops")
+    await asyncio.sleep(3)
+    _check(
+        "its checklist has no Sold out steps",
+        await browser.evaluate(
+            "!document.querySelector('[data-item=agreement]') && !document.querySelector('[data-item=views]')"
+        ),
+        failures,
+    )
+
+    await browser.goto(f"{base}/help")
+    await asyncio.sleep(3)
+    help_page = await browser.evaluate("document.body.innerText")
+    _check("its Help does not mention Sold out", "Sold out" not in help_page, failures)
 
 
 async def _check_sold_out(

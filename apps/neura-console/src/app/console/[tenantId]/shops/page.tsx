@@ -31,6 +31,7 @@ import { redirect } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { AllowedList, AnswersItem, HealthChecks } from "@/components/shop/health-check";
 import { SetupItem } from "@/components/shop/setup-item";
+import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { SyncNow } from "@/components/shop/sync-now";
 import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
@@ -50,7 +51,11 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
-  const view = await fromApi<ShopView>(`/shops/${encodeURIComponent(tenantId)}/store`);
+  const [view, assistants] = await Promise.all([
+    fromApi<ShopView>(`/shops/${encodeURIComponent(tenantId)}/store`),
+    shopAssistants(tenantId),
+  ]);
+  const sell = hasSell(assistants);
 
   return (
     <>
@@ -74,7 +79,7 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
         </Alert>
       ) : (
         <HealthChecks tenantId={tenantId}>
-          <GetSetUp tenantId={tenantId} view={view.data} />
+          <GetSetUp tenantId={tenantId} view={view.data} sell={sell} />
           {view.data.connected ? (
             <>
               {view.data.stores.map((store) => (
@@ -101,7 +106,8 @@ function lastRead(store: ConnectedStore): string | null {
   return store.syncs.find((sync) => sync.entity_type === "product")?.completed_at ?? null;
 }
 
-function GetSetUp({ tenantId, view }: { tenantId: string; view: ShopView }) {
+/** `sell`: the two optional steps are for Sold out, a NEURA-SELL screen — not listed without it. */
+function GetSetUp({ tenantId, view, sell }: { tenantId: string; view: ShopView; sell: boolean }) {
   const setup = view.setup;
   const several = view.stores.length > 1;
 
@@ -134,7 +140,7 @@ function GetSetUp({ tenantId, view }: { tenantId: string; view: ShopView }) {
         {setup ? <ChatBoxStep chatBox={setup.chat_box} /> : null}
       </ul>
 
-      {setup ? (
+      {setup && sell ? (
         <>
           <p className="border-t px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground sm:px-5">
             Optional — needed for Sold out

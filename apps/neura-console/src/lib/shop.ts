@@ -81,7 +81,7 @@ export const ENTITY_LABELS: Record<string, string> = {
 /** In the order the owner reads them. Variants are not counted (sizes live inside a product). */
 export const SHOWN_KINDS = ["product", "category", "policy"] as const;
 
-/** `http://bagisto.test/neura/v1` → `bagisto.test`. The whole address stays in the details. */
+/** `https://shop.example/neura/v1` → `shop.example`. The whole address stays in the details. */
 export function host(address: string): string {
   try {
     return new URL(address).host || address;

@@ -47,15 +47,10 @@ export const STEPS: HelpStep[] = [
     check: "Replies appear in Review",
     who: "You",
   },
-  {
-    title: "Optional: Sold out",
-    body: "Needs a data agreement, then product views switched on in your shop.",
-    check: "'Your shop is sending product views' is ticked",
-    who: "FiveNeurals + your developer",
-  },
 ];
 
-export const TROUBLE: { seen: string; fix: string }[] = [
+/** `sell`: a problem only a shop with NEURA-SELL can have — not listed for one without it. */
+export const TROUBLE: { seen: string; fix: string; sell?: true }[] = [
   {
     seen: "'Your shop answers' fails",
     fix: "Your shop is down, or the bridge isn't installed at the address FiveNeurals has. Your developer can check the address opens in a browser.",
@@ -74,6 +69,7 @@ export const TROUBLE: { seen: string; fix: string }[] = [
   },
   {
     seen: "Sold out stays empty",
+    sell: true,
     fix: "Either no data agreement is recorded, or product views are switched off in your shop's settings. 'Is it working?' on Sold out says which.",
   },
 ];

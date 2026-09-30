@@ -42,6 +42,16 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 
 ### 3.0 The frame, the Home screen and the words — 2026-09-27
 
+**2026-09-30 — a shop sees only its own assistants' screens.** The owner found *Sold out* in the menu of a shop
+with NEURA-CARE only (*"a gym app showing the pool to a member without the pool"*). `/me` now carries each
+membership's `assistants` (its `enabled_agents`, sorted — passed through as data, so the API still names no agent),
+and `lib/shop-assistants.ts` hides NEURA-SELL's screens from a shop without it: **Suggestions** and **Sold out** leave
+the menu and Home; *Sold out* opened by its address says it *"comes with NEURA-SELL, which this shop doesn't have"*;
+Shop connection drops the two optional Sold-out steps; Help drops its Sold-out lines. **Display only** — SELL's own
+routes still check the entitlement; `/sold-out` itself is not gated by it (it lives in `neura-api`, which may not
+name an agent). An unreadable `/me` shows the screens rather than hiding a feature silently. `make console-check`
+now checks both kinds of shop (**114**).
+
 **Asked for by the owner from screenshots, designed as a mockup on real data, approved, then built.** The owner's
 brief: *a shop owner is not always technical.*
 
@@ -311,7 +321,8 @@ times is one sync). Nothing is written to the shop.
 **Help — "Connecting your shop"** (board 22), a new console page under *Setup* in the side menu. **Already
 decided in [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) §7** (merchant
 help lives inside the console), never built until now: who does what (*You* · *Your developer* · *FiveNeurals, for
-now*); six steps, each with who and **"How you'll know"** — the same ticks as the checklist; **For your developer**:
+now*); five steps (six when built; the owner removed *Optional: Sold out* on 2026-09-30 — it is a
+NEURA-SELL feature, not a connection step), each with who and **"How you'll know"** — the same ticks as the checklist; **For your developer**:
 the one-line chat box snippet (`<script src=".../v1/widget/widget.js" async data-neura-key="fn_pk_…">` —
 platform-agnostic, the same `SNIPPET` the API serves; no platform's own settings or commands, Rule 1) and the two
 keys explained (the shop token is secret and stays on the shop's server; the chat box key is public and locked to
@@ -320,7 +331,7 @@ problems in plain words. **No time estimates and no numbers**: nothing has been 
 
 **Rewritten with it:** `docs/CONNECTING_THE_SHOP.md` (2026-09-19) predated the console — no owner account or
 sign-in link, no data agreement, no product views, no suggestions key scope, and `NEURA_WIDGET_HOST=…:8000`, where
-another project listens on this machine. It now follows the Help page's six steps, each with the checklist tick
+another project listens on this machine. It now follows the Help page's five steps (product views an unnumbered optional section after them), each with the checklist tick
 that shows it is done.
 
 **What building it decided — each a correction of the mockup, none a new feature:**

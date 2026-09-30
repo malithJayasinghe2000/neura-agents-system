@@ -17,6 +17,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CopySteps } from "@/components/help/copy-steps";
+import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { STEPS, TROUBLE, TWO_KEYS } from "@/lib/help";
 import { hasSession, widgetSnippet } from "@/lib/server-api";
 
@@ -25,7 +26,9 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
 
   const { tenantId } = await params;
   const base = `/console/${encodeURIComponent(tenantId)}`;
-  const snippet = await widgetSnippet();
+  const [snippet, assistants] = await Promise.all([widgetSnippet(), shopAssistants(tenantId)]);
+  // Sold out is NEURA-SELL's; a shop without it is not told how to set it up.
+  const sell = hasSell(assistants);
 
   return (
     <>
@@ -58,11 +61,11 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
           </Who>
           <Who title="Your developer">
             Installs the NEURA bridge in your shop, and adds the chat box to your shop&apos;s pages.
-            Switches on product views if you want Sold out.
+            {sell ? " Switches on product views if you want Sold out." : null}
           </Who>
           <Who title="FiveNeurals" aside="(for now)">
             Creates your account, connects your shop and copies your catalogue the first time.
-            Records a data agreement if you want Sold out.
+            {sell ? " Records a data agreement if you want Sold out." : null}
           </Who>
         </div>
       </section>
@@ -142,7 +145,7 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
           If something doesn&apos;t work
         </h2>
         <dl className="divide-y overflow-hidden rounded-2xl border">
-          {TROUBLE.map((row) => (
+          {TROUBLE.filter((row) => sell || !row.sell).map((row) => (
             <div
               key={row.seen}
               className="grid gap-1 px-4 py-3 text-sm sm:grid-cols-[18rem_1fr] sm:gap-4 sm:px-5"

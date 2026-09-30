@@ -61,7 +61,8 @@ the old), never recovered.
 
 ## 3. The steps
 
-Six steps, in order. Each ends with **How you'll know** — the tick on *Shop connection*.
+Five steps, in order. Each ends with **How you'll know** — the tick on *Shop connection*. Product views
+(for NEURA-SELL's *Sold out*) come after, as an optional section: a feature, not a connection step.
 
 Throughout: `$SHOP_URL` is where the bridge is mounted (for example `https://shop.example/neura/v1`),
 `$SHOP_TOKEN` is the shop token, `tn_…` is the tenant id step 2 prints, and **NEURA's own address**
@@ -89,6 +90,10 @@ owner presses **Check now** — a live question to the shop, asked only on that 
 ```bash
 make tenant-new NAME="Shop Name" AGENTS=care,sell        # prints tn_…
 make user-new EMAIL=owner@shop.example NAME="Owner" TENANT=tn_…
+make key-new TENANT=tn_… SCOPES=stores:write NAME=connect   # prints fn_sk_… once
+curl -X POST http://localhost:8010/v1/stores \
+  -H "Authorization: Bearer fn_sk_…" -H "Content-Type: application/json" \
+  -d '{"platform":"generic","base_url":"'"$SHOP_URL"'","credentials":{"token":"'"$SHOP_TOKEN"'"}}'
 make sync-check URL="$SHOP_URL" TOKEN="$SHOP_TOKEN" TENANT=tn_…
 ```
 
@@ -97,8 +102,11 @@ make sync-check URL="$SHOP_URL" TOKEN="$SHOP_TOKEN" TENANT=tn_…
 - **A new shop starts live, not in practice mode.** Practice mode is the tenant's
   `config.mode = shadow`; there is no `make` command for it yet (`TenantRepository.set_config`).
   `make tenant-show TENANT=tn_…` prints what is set.
-- `make sync-check` stores the shop's address and token (encrypted) **and** copies the catalogue the
-  first time. Without the stored connection every chat returns **404 `NO_STORE_CONNECTED`**.
+- `POST /v1/stores` stores the shop's address and token (the token encrypted, and never returned by
+  any endpoint). Without it every chat returns **404 `NO_STORE_CONNECTED`**. There is no `make`
+  command for it yet. `platform` is `generic` for any shop that serves the NEURA spec.
+- `make sync-check` **only copies the catalogue**, under `TENANT`; it stores no connection. (Until
+  2026-09-29 this page said it did — checked against `scripts/sync_smoke_test.py`, it does not.)
 - The owner signs in with a one-time link. Until an email provider is configured nothing is mailed:
   `make user-link EMAIL=owner@shop.example` prints the link to hand over.
 
@@ -173,7 +181,7 @@ sees the reply** — they see an honest *"no automated answer"* message instead
 
 **How you'll know:** replies appear in Review.
 
-### Step 6 — Optional: Sold out · *FiveNeurals, then the developer*
+### Optional — product views, for NEURA-SELL's *Sold out* · *FiveNeurals, then the developer*
 
 *Sold out* lists products shoppers opened while they could not be bought. It needs the shop's server
 to send product views, and that needs a data-processing agreement first

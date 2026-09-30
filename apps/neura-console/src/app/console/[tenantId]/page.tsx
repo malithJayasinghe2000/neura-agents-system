@@ -26,6 +26,7 @@ import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
 import type { ShopView } from "@/lib/shop";
+import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import type { SoldOut } from "@/lib/sold-out";
 import type { SuggestionsMeta, SuggestionsPage } from "@/lib/suggestions";
 import type { Usage } from "@/lib/usage";
@@ -39,13 +40,16 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
   const shop = encodeURIComponent(tenantId);
   const base = `/console/${shop}`;
 
+  // A shop without NEURA-SELL is not shown its two screens, so Home does not
+  // ask for them either (lib/assistants.ts).
+  const sell = hasSell(await shopAssistants(tenantId));
   const [usage, card, store, soldOut, suggestions] = await Promise.all([
     fromApi<Usage>(`/shops/${shop}/usage?period=7d`),
     fromApi<Scorecard>(`/shops/${shop}/review/scorecard`),
     fromApi<ShopView>(`/shops/${shop}/store`),
-    fromApi<SoldOut>(`/shops/${shop}/sold-out`),
+    sell ? fromApi<SoldOut>(`/shops/${shop}/sold-out`) : null,
     // SELL's own route: the API that mounts it never learns an agent's name.
-    fromApi<SuggestionsPage>(`/shops/${shop}/suggestions`, "/v1/sell/console"),
+    sell ? fromApi<SuggestionsPage>(`/shops/${shop}/suggestions`, "/v1/sell/console") : null,
   ]);
 
   return (
@@ -85,13 +89,17 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
             </h2>
             <div className="grid gap-3 md:grid-cols-3">
               <CatalogueCard store={store.ok ? store.data : null} href={`${base}/shops`} />
-              <SuggestionsCard
-                page={suggestions.ok ? suggestions.data : null}
-                meta={suggestions.ok ? (suggestions.meta as SuggestionsMeta) : null}
-                forbidden={!suggestions.ok && suggestions.status === 403}
-                href={`${base}/suggestions`}
-              />
-              <SoldOutCard soldOut={soldOut.ok ? soldOut.data : null} href={`${base}/sold-out`} />
+              {suggestions ? (
+                <SuggestionsCard
+                  page={suggestions.ok ? suggestions.data : null}
+                  meta={suggestions.ok ? (suggestions.meta as SuggestionsMeta) : null}
+                  forbidden={!suggestions.ok && suggestions.status === 403}
+                  href={`${base}/suggestions`}
+                />
+              ) : null}
+              {soldOut ? (
+                <SoldOutCard soldOut={soldOut.ok ? soldOut.data : null} href={`${base}/sold-out`} />
+              ) : null}
             </div>
           </section>
         </>

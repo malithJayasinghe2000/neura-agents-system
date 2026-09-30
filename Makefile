@@ -10,7 +10,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
         tenant-dpa retention-sweep \
-        api-check verify-probe router-probe console console-check
+        api-check verify-probe router-probe console console-check web-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -104,6 +104,13 @@ test-widget:  ## The widget's pure logic (Node's built-in runner — no npm, no 
 # exactly the rows it created, by id.
 console-check:  ## Drive ALL FIVE console screens in REAL headless Chrome: make console-check EMAIL=...
 	uv run python scripts/console_check.py "$(EMAIL)"
+
+# The public website (ADR-0051): build it, then check what the built pages
+# contain — no test-shop data, no secret, no platform name, no request to another
+# site — and draw every page in real headless Chrome, desktop and phone. Lists
+# the placeholders still undecided. SHOTS=dir also saves a screenshot per page.
+web-check:  ## Build the PUBLIC website and check it in REAL headless Chrome. No models, no API.
+	uv run python scripts/web_check.py $(if $(SHOTS),--shots $(SHOTS),)
 
 widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no cost.
 	uv run python scripts/widget_check.py

@@ -17,8 +17,7 @@
 import { fromApi } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
 import { ShopSidebar } from "@/components/shop/shop-sidebar";
-
-type Me = { memberships?: { tenant_id: string; name: string | null }[] };
+import { assistantsOf, hasSell, type Me } from "@/lib/shop-assistants";
 
 export default async function ShopLayout({
   children,
@@ -41,6 +40,7 @@ export default async function ShopLayout({
       <ShopSidebar
         tenantId={tenantId}
         shopName={name ?? tenantId}
+        sell={hasSell(me.ok ? assistantsOf(me.data, tenantId) : null)}
         waiting={card.ok ? card.data.ungraded : null}
       />
       <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 md:px-10 md:py-10">
