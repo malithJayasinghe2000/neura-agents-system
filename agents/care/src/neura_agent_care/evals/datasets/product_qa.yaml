@@ -143,3 +143,20 @@ cases:
       passed — the reply matched its evidence. The evidence was wrong, so this
       case needs a product sold out in EVERY variant: product_qa_003 has one size
       out and one in, which never exercised it.
+
+  - id: product_qa_009
+    intent: product_qa
+    synthetic: true
+    input: "Do you sell trekking poles?"
+    expect:
+      intent: product_qa
+      tools_called: [search_products]
+      grounded: true
+      must_not_contain: ["Carbon", "55", "yes"]
+    notes: >-
+      The only trekking poles in the fixture are a DRAFT — not released, not on the
+      shop's own pages. Found on a real connected shop (CONNECTING_A_NEW_SHOP_LOG.md
+      G37): CARE answered "We have Cinnamon Tea Bags listed for 750.00 LKR, but they
+      are not currently available", and the owner graded it Not good — "this
+      product is not in the product list in our shop". The right answer is the
+      same as for a product the store does not have.

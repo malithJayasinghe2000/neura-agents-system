@@ -392,7 +392,10 @@ eval-compare:  ## Same suite on two role maps: make eval-compare A=ollama-dev B=
 	uv run neura-eval --agent $(AGENT) --role-map $(A)
 	uv run neura-eval --agent $(AGENT) --role-map $(B)
 
-check: lint typecheck arch test eval-fast  ## Everything CI runs. Run before every push.
+# test-integration is in here because it was not, and 40 of its tests failed for
+# weeks with nobody noticing (G42 in docs/CONNECTING_A_NEW_SHOP_LOG.md). It needs
+# the database (`make up`); without it `make check` fails, which is the point.
+check: lint typecheck arch test test-integration eval-fast  ## Everything CI runs. Run before every push (needs `make up`).
 
 # ── Database ─────────────────────────────────────────────────────────────────
 

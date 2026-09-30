@@ -52,12 +52,16 @@ async def search_products(query: str, ctx: ToolContext) -> str:
     page = await ctx.adapter.search_products(ProductQuery(text=text, limit=MAX_RESULTS))
     products = list(page.items)[:MAX_RESULTS]
 
-    # Products the merchant has taken off sale are named rather than dropped.
-    # An agent that silently omits them answers "we don't sell that" about
-    # something the shopper is looking at in a search engine's cache, and the
-    # merchant then explains a product they unpublished — the same reasoning that
-    # keeps DRAFT and ARCHIVED out of the retrieval index (1.9 session log).
-    sellable = [p for p in products if p.status is not ProductStatus.ARCHIVED]
+    # Only products the shop itself shows. An ARCHIVED product is withdrawn and a
+    # DRAFT one is not released yet; neither is on the shop's own pages, which is
+    # the same line the retrieval index and SELL draw. A draft used to be listed
+    # here, and CARE told a shopper about an unreleased product and its price
+    # (CONNECTING_A_NEW_SHOP_LOG.md G37 — the owner: "this product is not in the
+    # product list in our shop"). A withdrawn product asked about by id is still
+    # named as withdrawn, by `get_product_details`, because the shopper may be
+    # holding an old link; a draft has no link to hold.
+    hidden = (ProductStatus.ARCHIVED, ProductStatus.DRAFT)
+    sellable = [p for p in products if p.status not in hidden]
 
     if not sellable:
         return f"The catalogue returned no products matching {text!r}."
@@ -87,7 +91,10 @@ async def get_product_details(product_ref: str, ctx: ToolContext) -> str:
     ref = product_ref.strip()
     product = await ctx.adapter.get_product(ref)
 
-    if product is None:
+    # A draft is answered exactly as a product that does not exist: not released
+    # means not there yet, and "we have it but you can't buy it" is already the
+    # leak (G37).
+    if product is None or product.status is ProductStatus.DRAFT:
         return (
             f"The store has no product with id {ref!r}. Do not describe a product "
             "from memory — search the catalogue instead."

@@ -95,6 +95,25 @@
           "stock_quantity": 0
         }
       ]
+    },
+    {
+      "external_id": "p_500",
+      "title": "Carbon Trekking Poles (Pair)",
+      "description": "Lightweight carbon poles with cork grips. Not released yet.",
+      "status": "draft",
+      "category_ids": ["c_20"],
+      "price_range_min": { "amount": "55.00", "currency": "GBP" },
+      "price_range_max": { "amount": "55.00", "currency": "GBP" },
+      "variants": [
+        {
+          "external_id": "v_500",
+          "sku": "CTP-1",
+          "title": "Pair",
+          "options": {},
+          "in_stock": true,
+          "stock_quantity": 20
+        }
+      ]
     }
   ],
 

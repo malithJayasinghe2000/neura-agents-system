@@ -177,7 +177,7 @@ make api-check URL=… TOKEN=…   # the whole request path against a real shop:
                                # authenticating, a store decrypted from the database, a
                                # usage row written, an audit entry for a blocked turn,
                                # and the same turn over REST and over a WebSocket
-make check          # everything CI runs
+make check          # everything CI runs — including the integration tests, so `make up` first
 ```
 
 **Two database URLs, on purpose.** `DATABASE_URL` is the unprivileged app role;
