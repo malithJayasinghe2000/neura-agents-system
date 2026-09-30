@@ -76,13 +76,33 @@
       "price_range_min": { "amount": "74.00", "currency": "GBP" },
       "price_range_max": { "amount": "74.00", "currency": "GBP" },
       "variants": []
+    },
+    {
+      "external_id": "p_400",
+      "title": "Insulated Water Bottle 750ml",
+      "description": "Double-walled steel bottle. Keeps drinks cold for 24 hours.",
+      "status": "active",
+      "category_ids": ["c_20"],
+      "price_range_min": { "amount": "24.00", "currency": "GBP" },
+      "price_range_max": { "amount": "24.00", "currency": "GBP" },
+      "variants": [
+        {
+          "external_id": "v_400",
+          "sku": "IWB-750",
+          "title": "750ml",
+          "options": {},
+          "in_stock": false,
+          "stock_quantity": 0
+        }
+      ]
     }
   ],
 
   "inventory": [
     { "variant_external_id": "v_100_8", "quantity": 12, "in_stock": true },
     { "variant_external_id": "v_100_9", "quantity": 0, "in_stock": false },
-    { "variant_external_id": "v_200_m", "quantity": 40, "in_stock": true }
+    { "variant_external_id": "v_200_m", "quantity": 40, "in_stock": true },
+    { "variant_external_id": "v_400", "quantity": 0, "in_stock": false }
   ],
 
   "policies": [

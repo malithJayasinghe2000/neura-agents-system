@@ -1,0 +1,392 @@
+# Connecting a new shop from zero — the log
+
+> **Purpose.** Connect a shop NEURA has never seen, following **our own published guide word by word**, the way a
+> real developer and shop owner would — and write down every place where the guide is wrong, unclear, missing a
+> step, or hard to follow. **The findings are the point**: they are what gets fixed in the guide afterwards.
+> Started 2026-09-30 by the owner.
+>
+> **How we work (the owner's rules).** One step at a time: explain it simply, do it, check it against the guide,
+> log it. Treat the shop as a **real** shop; if anything is an issue, **stop and discuss it with the owner**. A problem
+> goes into *What we found* **before** it is mentioned — never say it is recorded unless it is in this file. At the
+> **end of each step**, give the owner that step's issue list straight from this file. Decisions are the owner's
+> (*Decisions*); dashboard ideas go in the D list. **Ask before any AI model runs** (a chat message, indexing).
+> **Nothing is fixed or built until step 7.** Secrets (the shop token, `fn_sk_` keys) are never printed. The owner
+> commits. Plain words, tables, a real-world example for each issue.
+>
+> **If you are a fresh session picking this up:** read `CLAUDE.md` and `docs/PROJECT_STATE.md` first, then this
+> file. Continue from the first step not marked ✅.
+
+## What we check against
+
+The documents people will actually read — **not the canvas mockups**, which are only drawings:
+
+| Who reads it | Document | Where |
+|:--|:--|:--|
+| The shop's developer | **Guide for developers** on the public website | `apps/neura-web/src/app/docs/developers/page.tsx` — `/docs/developers/` (run `npm run dev` in `apps/neura-web`, port 3100) |
+| The shop owner | **Help → Connecting your shop** in the dashboard | `apps/neura-console/src/lib/help.ts`, `.../[tenantId]/help/page.tsx` |
+| FiveNeurals (us) | The internal runbook | [`CONNECTING_THE_SHOP.md`](CONNECTING_THE_SHOP.md) |
+
+## The shop
+
+**Ceylon Harvester** — a custom-built shop (not a known platform), cloned by the owner to `~/Developer/ecommerce`.
+There is **no ready-made bridge** for it, so the developer has to build one: the real test of the guide.
+
+| | |
+|:--|:--|
+| Address | http://ecommerce.test (served by Herd: `herd link ecommerce`; `herd unlink ecommerce` undoes it) |
+| Database | MySQL on port 3308, `root`, no password, database `ceylon_harvester` |
+| Admin login (local only) | `admin@ceylonharvester.test` / `admin12345` |
+| Products | **none** — the shop ships empty |
+
+## The steps
+
+| # | Step | Who | Status |
+|:--|:--|:--|:--|
+| 0 | Set up and run the shop | (not ours — setting up the shop itself) | ✅ 2026-09-30 |
+| 1 | Build the bridge — the nine addresses | The developer (Claude, playing the developer, using **only** the public guide and the OpenAPI file) | ✅ 2026-09-30 — built, tested by hand |
+| 2 | Say what the shop can do (`/health`) | The developer | ✅ 2026-09-30 |
+| 3 | Check the work with the check tool | The developer — **run by Claude as FiveNeurals** (G10: a developer cannot get the tool) | ✅ 2026-09-30 — 19 of 19 passed |
+| 4 | Connect the shop (address + shop token) and copy the catalogue | FiveNeurals | ✅ 2026-09-30 — connected, catalogue copied |
+| 5 | Chat box key, and the chat box line on the shop | FiveNeurals, then the developer | ✅ 2026-09-30 — key made, line on the shopper pages, the dashboard ticks |
+| 6 | Practice mode: ask in the chat box, grade in Review (uses the AI — ask the owner first) | The owner | ✅ 2026-09-30 — six questions, all graded (4 Good · 1 Not good · 1 Harmful); G35–G40 found |
+| 7 | Fix the guide with everything below | Claude, with the owner | ⏳ started — code bugs first, G35 first |
+
+### Step 0 — set up and run the shop ✅
+
+`.env` from `.env.example` (`APP_ENV=local`, `APP_URL=http://ecommerce.test`, `DB_PORT=3308`,
+`DB_DATABASE=ceylon_harvester`, `MAIL_MAILER=log`) · `composer install` · `php artisan key:generate` · database
+created · `php artisan migrate` · seeders run by hand (the default seeder does not call them): `RoleSeeder`,
+`SettingsSeeder`, `ConfigurationSeeder`, `PaymentOptionsSeeder` · an admin user with role `admin` ·
+`npm install && npm run build` · `php artisan storage:link` · `herd link ecommerce`. The home page renders.
+Nothing here is about NEURA — it is the shop's own setup.
+
+**Made-up data added** (the shop ships empty; a real owner would have their own): 2 categories (Spices, Tea), 6
+products — one **sold out** (Green Cardamom Pods), one **not for sale yet** (Cinnamon Tea Bags) — one customer
+(Nimal Perera) with one **shipped, paid** order. Script: scratch only, not in either repository.
+
+### Step 1 — build the bridge ✅
+
+**Built from the guide and the OpenAPI file only.** Honest caveat: Claude played the developer while knowing NEURA
+well, so a real outside developer will find it **harder** than this — treat the findings below as the least there is.
+
+What the developer added to the shop (5 files, about 400 lines, nothing existing changed except one registration line):
+
+| File | What it is |
+|:--|:--|
+| `config/neura.php` | The bridge's two settings: the shop token, and the currency |
+| `app/Http/Middleware/NeuraShopToken.php` | Refuses every request without the right token (except `/health`); refuses everything if no token is set |
+| `routes/neura.php` | The nine addresses |
+| `app/Http/Controllers/Neura/BridgeController.php` | Reads the shop's data and answers in NEURA's format (the mapping is in the table below) |
+| `bootstrap/app.php` | One line: serve the addresses under `/neura/v1`, without the website's sessions |
+
+Tested by hand with `curl`: no token / wrong token → **401**; `/health` open; paging walks every page and ends;
+search; *in stock only*; `updated_since`; categories; stock (an unknown id is left out); orders by email, by
+`#1`, by a stranger's email (empty); an order's address; a customer; **staff accounts are not customers (404)**;
+missing product / order → **404** with an error message; `/policies` → empty list.
+
+**A temporary shop token** is in the shop's `.env` (`NEURA_SHOP_TOKEN=tmp_…`) so the bridge could be tested — the
+guide gives the token only at step 4 (G3). It is replaced at step 4.
+
+### Step 2 — say what the shop can do ✅
+
+`/health` (built in step 1) lists **8 of the guide's 10**: `product.read`, `product.search`, `category.read`,
+`inventory.read`, `order.read`, `order.search`, `customer.read`, `sync.incremental` — each one built and tested in
+step 1. **Left out on purpose:** `policy.read` (the shop has no policies — the owner's G5 decision) and
+`events.realtime` (the shop sends no change messages, and NEURA does not use them yet).
+
+### Step 3 — check the work ✅
+
+Run as FiveNeurals would today (G10), with the shop's temporary token:
+`uv run neura-conformance --url http://ecommerce.test/neura/v1 --token <token>` → **19 passed · 0 failed · 0
+warnings — "Conformant. This store can be connected."**
+
+**What the tool checks:** `/health` (open, JSON, spec version); the token (required, wrong one refused); a missing
+product / order / customer → 404; search with nothing and with nonsense; statuses in NEURA's words; paging and its
+limit; `updated_since`. **What it does not check** (G18): categories, stock, order search by email / phone /
+number, the currency, customers-only, policies when not declared — and whether any answer is **right**.
+
+### Step 4 — connect the shop ⏳
+
+**First, the shop's account in NEURA** — not in the developer guide (the owner guide says *"FiveNeurals creates your
+account"*): `make tenant-new NAME="Ceylon Harvester" AGENTS=care,sell` → **`tn_01M3RR45SK09PV28RPR22NH0GH`**;
+`make user-new EMAIL=<owner> TENANT=…` → the owner's existing sign-in now holds this shop too. The account starts
+**live**, not in practice mode (matters at step 6).
+
+**Then the shop token** — the guide's *"the shop token FiveNeurals gives you"*. **There is no command that makes
+one** (G3): FiveNeurals would have to invent a long random secret by hand, and nothing says how it reaches the
+developer safely. Stopped here to decide (see *Decisions*) — the owner chose the dashboard (D5); for this test it
+was made by hand.
+
+**Then, following the internal runbook (`CONNECTING_THE_SHOP.md` §3, step 2) word by word:**
+
+1. **The shop token**, made by hand (a random `st_…` secret) and put in the shop's `.env` as `NEURA_SHOP_TOKEN`,
+   replacing the temporary one — the old one is now refused (**401**).
+2. `make key-new TENANT=… SCOPES=stores:write NAME=connect` → a one-off FiveNeurals key, then the runbook's `curl`
+   `POST /v1/stores` (`platform: generic`, the bridge's address, the token) → **200**, connection
+   `st_01M3RRQX2N2N5JR10XHAWJWBT4`. **The one-off key was then revoked** — the runbook does not say to (G19).
+   (`make key-revoke` needs `TENANT=` as well as `KEY=`.)
+3. `make sync-check URL=… TOKEN=… TENANT=…` → **6 products, 2 categories, 0 policies** (*"shop does not declare the
+   capability for policy; nothing synced"* — as decided). It is a **test tool**: it also deletes a product from our
+   copy on purpose and repairs it (G20).
+
+**How you'll know — checked in the dashboard (headless Chrome, the owner's sign-in):** *Your shop is connected* ✓ ·
+*Your shop answers* ✓ (after **Check now**) · *Your catalogue is copied* ✓ *6 products* · *Our copy*: 6 products,
+2 categories, **0 policy pages** · *What your shop lets the assistant do*: six ✓ lines — **no line says policies are
+missing** (D1). And: **"Search by meaning covers 0 of 6 products"** (G21).
+
+### Step 5 — the chat box ✅
+
+As the developer guide says: FiveNeurals makes the **chat box key** for the shop's exact address — a **public**
+`fn_pk_` key, by command for now (`CONNECTING_THE_SHOP.md` §3 *Step 4 — The chat box*: `make key-new … PUBLIC=1
+ORIGINS=http://ecommerce.test` and its scope list) — and the developer adds the **one `<script>` line** to every page
+(the shop's layouts are `resources/views/layouts/*.blade.php`). **How you'll know:** *The chat box is on your shop*
+ticks — only **after the chat box is used once**, which is an AI call: ask the owner first. Check the owner guide's
+step 4 too: it says FiveNeurals makes the key (the owner making it in the dashboard is a direction, not built).
+
+**Done so far (2026-09-30):**
+
+1. **The chat box key**, made exactly as the runbook says (its 11 scopes, `ORIGINS=http://ecommerce.test`) →
+   `key_01M3RS6MM4MV5YR9DD2GKR98FS`, a public key starting **`fn_pk_test_…`** (G30). It is public, so it may be
+   written in the shop's pages; it is not repeated here only because nothing needs it here.
+2. **Checked the runbook's scope list against the code**: it matches — the chat door asks for `care:chat:write` or
+   `sell:chat:write` for whichever assistant it picks; the paired suggestions need `sell:suggest:read`.
+3. **Where the line comes from.** The developer guide shows `https://[NEURA ADDRESS]/…` (the website is not deployed,
+   so the address is a placeholder). The dashboard's Help shows the line NEURA itself serves
+   (`GET /v1/widget/snippet`) — and on this machine that line points at **`http://localhost:8000`**, the other
+   project (G24).
+4. **Where the line goes, in this shop** — the guide says *"every page"*:
+
+   | Layout | Pages | Who sees them |
+   |:--|:--|:--|
+   | `layouts/home.blade.php` | 14 — home, category, product, search, basket, checkout, order done, my orders, my profile, payment, 404 | **shoppers** |
+   | `layouts/app.blade.php` | 27 — dashboard, products, orders, customers, settings, roles… | **the shop's staff (admin)** |
+   | `layouts/guest.blade.php` | 4 — password reset and e-mail check pages | both |
+   | (no layout) `auth/login`, `auth/register` | 2 | both |
+
+5. **The shop has no content security policy** (no `Content-Security-Policy` header), so the guide's third bullet
+   needs nothing here.
+6. **The tick.** *The chat box is on your shop* reads when the public key was **last used** — any request made
+   with it counts, not only a chat message. So a basket page with product ids would tick it too, **but that is also
+   an AI call** (G27). Every way to tick it uses the AI: ask the owner first.
+
+**Stopped here to discuss** G24 (which address the line uses on this machine) and G25 (which pages get it).
+The owner decided: fix the setting, shopper pages only (*Decisions*). Then:
+
+7. **NEURA's address fixed**: `PUBLIC_BASE_URL=http://localhost:8010` added to NEURA's `.env` (a copy of the old file
+   is in the session's scratch folder), the API restarted with `NEURA_API_PORT=8010` as before. The served line — so
+   Help's line — now says `http://localhost:8010/v1/widget/widget.js`.
+8. **The line on the shop**, on the shopper layout only (`layouts/home.blade.php`, just before `</body>`), reading
+   NEURA's address and the key from the shop's settings (G32): `config/neura.php` gains `chat_url` and `chat_key`,
+   the shop's `.env` gains `NEURA_CHAT_URL` and `NEURA_CHAT_KEY`; both empty = no chat box. **No
+   `data-neura-products` on the basket page** — that is an AI call (G27), not asked for yet.
+9. **Checked**: the line is on the home page, a product page and the 404 page; not in the admin layout;
+   `widget.js` loads (200). In headless Chrome the **chat button shows** at the bottom right of a product page.
+   Loading a page makes no call with the key — so the dashboard tick is still empty until the chat box is used.
+
+10. **One chat message, with the owner's permission** — sent through the real chat box in headless Chrome, on the
+    Green Tea product page: *"Do you have green tea?"*. The chat box connected (`WebSocket /v1/stream`, key accepted
+    from `http://ecommerce.test`), NEURA chose CARE, and the reply was a **handover** (G33). 1 model call, local
+    Ollama, $0. The conversation now waits for a person in the dashboard.
+11. **The tick, in the dashboard** (headless Chrome, the owner's sign-in): **The chat box is on your shop ✓ —
+    *"Used today from ecommerce.test · added by your developer"***. The other ticks unchanged (connected ✓,
+    catalogue ✓ 6 products; *Your shop answers* not pressed this time).
+
+### Step 6 — practice mode ✅
+
+**Practice mode switched on** (owner's G22 decision): `mode` = `shadow` for this shop only. From now on no shopper
+reads a reply; each one is kept for grading in **Review**.
+
+**Which AI models (G33) — what exists, checked in `neura_llm/roles.py` and NEURA's `.env`:**
+
+| Setup (`NEURA_ROLE_MAP`) | Decides *"can I answer?"* (router) | Writes the answer | Search by meaning | Cost |
+|:--|:--|:--|:--|:--|
+| `ollama-dev` (today) | local `llama3.2:3b` — the one that gave 0.00 (G33) | local | local `nomic-embed-text` | free; heats the laptop |
+| `hybrid` | **still local `llama3.2:3b`** | Gemini (`gemini-3.8-flash`) | local | Gemini for answers only |
+| `cloud-prod` | Gemini | Gemini | **not set up** — `CLOUD_MODEL_EMBEDDER` is empty in `.env` | Gemini for everything |
+
+So `hybrid` would **not** fix G33 (the router stays the small local model). The cloud provider in `.env` is
+Google Gemini, not OpenRouter as Claude said earlier in the session. The setting is for **all of NEURA**, so it
+changes the Bagisto shop too while it is on — and, with `cloud-prod`, search by meaning (Bagisto has an index,
+built with the local model) would not match. Waiting for the owner.
+
+**The owner asked the six questions** in their own browser, in one chat, on `cloud-prod` (Gemini
+`gemini-3.8-flash`), and opened Review. What happened (checked in NEURA's log and against the shop's own data):
+
+| # | Question | Assistant | Reply (short) | Right? |
+|:--|:--|:--|:--|:--|
+| 1 | *Do you have green tea?* | CARE | *Yes, Green Tea Loose Leaf 100g, 1200.00 LKR* | ✅ — the G33 question, fine on Gemini |
+| 2 | *Is cardamom in stock?* | CARE | *Yes… available to buy for 1650.00 LKR* | ❌ **harmful — it is sold out** (G35) |
+| 3 | *Do you sell cinnamon tea bags?* | CARE | *Listed for 750.00 LKR, not currently available* | ⚠️ tells about an unreleased product and its price (G37) |
+| 4 | *What is your return policy?* | CARE | *I cannot confirm… I can pass you to a colleague* | ⚠️ honest, but only *offers* a person (G38) |
+| 5 | *Where is my order #1?* | CARE | handed to a person (*ownership*) | ✅ as designed (G16) |
+| 6 | *A gift for a tea lover, under 2000 rupees?* | SELL | black tea or green tea, cardamom sold out — **true**, but **blocked** by the fact check and handed over | ❌ a good answer thrown away (G36) |
+
+About 21 Gemini calls in all; NEURA records **$0** for each (Gemini's price is not in our price list, so the cost
+is unknown, not zero). Search by meaning was off the whole time (no cloud embedder — expected). **Grading is the
+owner's.** Graded so far by the owner: #1 **Good**, #2 **Harmful** (*"the product is not in the stock"*), #5
+**Good**, #6 **Good**, then #3 **Not good** (*"this product is not in the product list in our shop"*) and #4
+**Good**. **Final: 4 Good · 1 Not good · 1 Harmful.** The owner's view on #4 (agreed): the shop has no return policy
+anywhere, so *"I cannot confirm"* is the right, honest answer — the missing handover is G38, not these words.
+**G35 and G36 are code bugs, not guide mistakes**: no real shopper uses NEURA and this shop is in practice mode, so
+nothing forces an early fix — they are fixed at step 7, each with an eval case (Rule 4), and before any real shop
+goes live.
+
+**Afterwards:** NEURA restarted plainly → back on `ollama-dev` (checked: `role_map=ollama-dev`, port 8010 from
+`.env`). **Practice mode stays ON** for this shop — no shopper sees a reply until the owner decides to go live.
+The API log of the six turns is kept in the session scratch folder (`neura-api-step6.log`).
+
+### Step 7 — fix everything ⏳ — code bugs first
+
+**G35 — fixed in code (2026-09-30), not yet run with the AI:**
+
+| Where | Change |
+|:--|:--|
+| `agents/care/src/neura_agent_care/tools/render.py` `_availability` | An active product is *"available to buy, in stock"* only when a variant is in stock. All variants sold out → *"listed for sale but out of stock, so it cannot be bought right now"*. Stock not reported → *"listed for sale; this store did not report whether it is in stock"*. Used by both the search-result line and the product-details text, so both are fixed. |
+| `…/evals/fixtures/store.json` | New test product **p_400 Insulated Water Bottle 750ml** — active, its only variant sold out (the cardamom case; the test shop had none) |
+| `…/evals/datasets/product_qa.yaml` | New case **product_qa_008** *"Is the insulated water bottle in stock?"* — must not say *yes* / *is in stock*, grounded, not handed over |
+| `tests/unit/test_care.py` | Three tests: sold out never reads *available to buy*; in stock says so; unreported stock is not called available |
+
+**Checked (free, no AI):** `make check` — lint, types (239 files), architecture, **1351 tests passed**, every eval
+dataset valid (CARE 49 cases).
+
+**Run with the AI (owner approved, 2026-09-30):** `neura-eval --agent care --dataset product_qa --role-map cloud-prod`
+(Gemini; judge `nemotron` on OpenRouter's free tier) → **7 of 8 passed. The new case product_qa_008 passed** — no
+*yes*, no *is in stock*, not handed over, fact check passed. The one failure, **product_qa_006** (*"what colours?"* →
+no *Brown*), is an **old known failure**: PROJECT_STATE lists it among six cases that *"fail in some combination in
+every run"*, long before this change. Groundedness 1.00 on **5 of 8** — the free judge failed on 3 cases (an empty
+answer from OpenRouter), so some cases were not judged; which ones is not known because the run was not saved
+(`--out` was not passed — use it next time). Cost shown $0 (Gemini is not in our price list — unknown, not zero).
+
+## What we found
+
+Every problem in our guide, in the order found. **Status** is `open` until the guide is changed.
+
+| # | Step | Problem | Why it matters | Status |
+|:--|:--|:--|:--|:--|
+| G1 | 1 | The guide says **what** to build, not **how**: no example answer for any address (what one product looks like) — only `/health` has one. The OpenAPI file has the shapes but almost no examples either. | A developer has to work the format out from a technical file. | open |
+| G2 | 1 | The **OpenAPI file** — the thing a developer needs before writing any code — is mentioned only in passing, and its download is at the very bottom of the page. | It should be the first instruction: *"download this before you start"*. | open |
+| G3 | 1, 3, 4 | The **shop token** is given in step 4, but the developer needs it in step 1 (every address must refuse a request without it) and in step 3 (the check tool takes `--token`). | The steps are in the wrong order; a developer is stuck or invents a token. | open |
+| G4 | 1 | Nothing explains how to **fit the shop's own data into our format** — e.g. a shop without sizes (variants), where policy pages come from, which order status is which. | The developer has to guess, and a wrong guess is a wrong answer to a shopper. | open |
+| G5 | 1 | **This shop has no policy pages at all** — no returns, shipping or privacy text anywhere (checked: database, pages). The guide does not say what to do then: build `/policies` returning nothing? leave `policy.read` out? Nor that returns questions will then all go to a person. | A real, common case (small shops). **Needs the owner's decision** — see *Decisions* below. | open — to discuss |
+| G6 | 1 | `Money.currency` does not say its format. This shop shows prices as plain numbers and stores `LKR` in its settings; the developer must guess that an ISO code (`LKR`) is wanted, not `Rs.`. | A wrong guess shows shoppers a wrong currency. | open |
+| G7 | 1 | Nothing says `/customers/{id}` must return **customers only, never the shop's staff**. A simple build (look the id up in the users table) would hand NEURA an admin's email and details. | Privacy — built correctly here only because the developer thought of it. | open |
+| G8 | 1–2 | The dashboard's *What your shop lets the assistant do* (Shop connection) lists **only what the shop sends**, with ✓. What it does **not** send is not shown at all — so an owner whose shop sends no policies never learns that every returns question will go to a person. | The owner cannot see a gap until a shopper hits it. **The owner's idea (2026-09-30):** show every item — ✓ when the shop sends it, **red ✗ when it does not**, with what that means. | open — idea, needs a mockup |
+| G9 | 1–2 | **The developer has no view of their own.** The dashboard has one kind of account — every account is created as an owner (`make user-new`) and sees everything, **including shoppers' conversations**. So giving the developer a dashboard account to see what works would also show them customers' chats. Their own tool, the check tool, is how they see it today — and how a developer gets it is still undecided. | A developer needs to see what NEURA gets from the bridge; a shopper's chat is not theirs to read. | open — to discuss (roles are group C, an ADR) |
+| G10 | 3 | **An outside developer cannot get the check tool.** It is `neura-conformance`, and it exists only inside our own code (`packages/neura-adapters/src/neura_adapters/generic/cli.py`; we run it with `make conformance`). The guide says *"Ask FiveNeurals for the check tool"*, but there is nothing to hand over — no download, no package, no web page. | Step 3 of the guide cannot be done by a developer alone. Options for later (not decided): publish it as a package to install, a web page that checks a bridge address, or FiveNeurals runs it for them. | open — to decide |
+| G11 | 1 | The guide says *"build these nine addresses"*, but **each assistant needs fewer**. From the manifests: **NEURA-SELL needs 3** (`/health`, `/products`, `/products/{id}` — product read + search; stock and categories optional); **NEURA-CARE needs 6** (products search, orders, policies; stock, customers and order search optional). The guide never says which assistant needs what. | A shop with only NEURA-SELL builds six addresses for nothing; nobody can *start small*. | open |
+| G12 | 2 | The capability table says what each item **means**, not **which address or filter it needs**: `order.search` = `/orders?email=` / `?phone=` / `?customer_id=` / `?order_number=`; `customer.read` = `/customers/{id}`; `sync.incremental` = `updated_since` honoured on **both** `/products` and `/orders`. | The developer has to work it out from the OpenAPI descriptions — and a half-built item listed as done breaks a shopper's conversation. | open |
+| G13 | 2 | `events.realtime` (*"you send change messages"*) is in the capability table, but further down the same guide says **NEURA does not use change messages yet**. It does not say whether to list it, or what listing it does (today: nothing). | A developer may build change messages for nothing, or wonder if leaving it out breaks something. | open |
+| G14 | 2 | The `/health` example shows `"status": "ok"` and `"spec_version": "1.0"`, but the guide never says these **exact values are required** (the OpenAPI file says any other status is read as *unhealthy*). | A developer writing `"status": "OK"` or `"healthy"` makes the shop look broken, with no clue why. | open |
+| G15 | 2 | **The guide never mentions that NEURA can notify the shop's own server** — e.g. *a chat was handed to a person* (`conversation.escalated`, with the whole story), *a chat started / was resolved*. It is built (`POST /v1/webhooks`, a key with `webhooks:write`, signed messages), but neither the developer guide nor the dashboard's Help says it exists or how to switch it on. | Without it, a handed-over shopper is seen only when someone opens the dashboard (FEATURES.md L2). A real shop would want it sent to its email or help desk. | open |
+| G16 | 1–5 | **Neither guide says that, from the chat box, "where is my order?" goes to a person.** The chat box cannot prove who the shopper is (and must not be able to), so NEURA-CARE hands every order question over (FEATURES.md **L1**, [A21](open-questions.md)). The developer builds `/orders` and `/customers` and would expect order questions to be answered in the chat. Today the only way is the shop's **own server** sending the chat with the customer's id — not described for developers, and the safe way for the chat box (a short-lived pass from the shop's server) is **not designed** (an ADR and a security review). | The owner and developer are surprised the first time a customer asks about an order; the shop's product page promises it. | open — the guide must say it; the fix itself is A21 |
+| G17 | 3 | The check tool's last line sends the developer to **`Spec: docs/spec/generic-commerce-interface-v1.md`** — a file inside **our** code, which an outside developer does not have (and which cannot be published: it names platforms). | A dead end at the moment the developer wants more detail. | open |
+| G18 | 3 | The guide says *"When it's clean, your bridge is done"*, but **clean means the format is right, not the answers**. The tool does not test categories, stock, order search by email / phone / number, the currency, or customers-only — a bridge that marks a sold-out product *in stock*, sends `Rs.` instead of `LKR`, or returns staff as customers **still passes 19 of 19**. | A developer (and FiveNeurals) trusts a green result that has not checked what shoppers will be told. | open |
+| G19 | 4 | The internal runbook makes a one-off FiveNeurals key (`stores:write`) to save the connection, and **never says to remove it**. Left alive, it can **replace this shop's connection** — point NEURA at another server, and shoppers would be shown that server's products and links. | A forgotten, powerful key per shop. Revoked here by hand. The real fix is D5 / a screen, so no such key is needed. | open |
+| G20 | 4 | The runbook **copies the catalogue with a test tool** (`make sync-check`), which also deletes one product from our copy on purpose and repairs it, and prints test results. There is no plain *copy* command — though the dashboard's **Sync now** does exactly this job. | FiveNeurals runs a test to do real work; the step should be *press Sync now* (or a plain command). | open |
+| G21 | 4 | **Nothing says to build the *search by meaning* index.** After connecting, the dashboard says *"covers 0 of 6 products"*; a sync does not fill it (checked: the sync job never indexes). The only way today is `make rag-check … KEEP=1 TENANT=…` — another test tool, and it **uses an AI model** (the embeddings). | Until someone indexes, NEURA finds products only by matching words; *"something warm for winter"* may find nothing. Neither guide mentions it. | open |
+| G22 | 4 (→ 6) | **A new shop starts live, not in practice mode, and nobody can switch practice mode on** — no command, no screen; only code (`TenantRepository.set_config`). Yet the owner guide's step 5 is *"You check replies in practice mode"*, and the docs say *"No shopper sees them until you go live"*. (The internal runbook knows; the public guides do not.) | The first real shopper's question would be answered live, before the owner has checked a single reply. | open |
+| G23 | 4 | The runbook's `curl` puts **both secrets on the command line** — the shop token and the one-off `fn_sk_…` key — where the shell saves them in its history. (Avoided here by reading them from a file.) | Secrets left behind on FiveNeurals' machine. The real fix is D5 / a screen. | open |
+| G24 | 5 | **The dashboard's Help gives the developer a chat box line that points at the wrong server.** Help (and *Copy these steps for your developer*) shows the line NEURA serves (`GET /v1/widget/snippet`), whose address comes from the API setting `PUBLIC_BASE_URL`. It is **not set** on this machine, so it falls back to its default, **`http://localhost:8000`** — another project's app. The runbook warns about it in one sentence; nothing checks it, and the default is a value that is never right. | The developer pastes the line exactly as told, the chat box loads from the wrong server, and no page says why. In production the same slip gives an address that answers nothing. | open — to discuss |
+| G25 | 5 | *"One line on **every page** of your shop"* — followed word by word, that puts the chat box on the **admin pages** too. This shop has 27 admin pages and 14 shopper pages, each group in its own layout. The guide should say *the pages shoppers see* — and say whether the log-in, sign-up and password pages count. | Staff see a chat box in their admin; their test questions cost money and land in Review as if a shopper asked. | open — to discuss |
+| G26 | 5 | `data-neura-products` is described in one line. It does not say: the **format** (product ids, **comma-separated**, the **same ids the bridge sends**, at most 10); **how** to set it when the line lives in one shared layout (the layout must take a value from each page); and **which page** — the guide says *basket page*, FEATURES.md says *product or basket page*. | The developer guesses the format, or copies the line into the basket page a second time and gets two chat boxes. | open |
+| G27 | 5 | **Product ids on a basket page start AI calls, and no guide says so.** For each product NEURA has not paired yet, the suggestions request queues a **model job** in the background (ADR-0045; `pairing/cache.py`) — always on, no switch. It is paid once per product, then stored. | The owner and developer think the basket suggestions are free (*"no model in it"* was true before ADR-0045). For us here: putting ids on the basket page is an AI run — ask the owner first. | open — owner decided: a dashboard switch (D6) |
+| G28 | 5 | The attribute table misses **two attributes the chat box reads**: `data-neura-pairs-auto-open` (ADR-0041's *"the panel may open itself once, only when there is a suggestion"* — off unless `"true"`) and `data-neura-api` (NEURA's address, when the script is served from somewhere else). The runbook describes auto-open only as the reference bridge's `NEURA_PAIRS_AUTO_OPEN`. | A shop without our reference bridge cannot find the switch at all. | open |
+| G29 | 5 | The chat box key needs **11 scope names typed by hand** (the runbook's list), different for a shop with only one assistant. A missing one fails **silently** — e.g. without `sell:suggest:read` the basket suggestions just never appear (widget.js: *"every failure is silent"*). | A small typo gives a chat box that half works, and nothing tells anyone. Like D5: the dashboard should make this key, with the scopes read from the shop's assistants. | open |
+| G30 | 5 | The key made here is **`fn_pk_test_…`**; the developer guide shows `fn_pk_…`, Help and the served line show `fn_pk_live_…`. Nothing says what `test` / `live` mean. (In the code: `test` only marks a key made on a NEURA that is not production — it works the same.) `test` also sounds like **practice mode**, which it is not (G22). | An owner sees `test` in their key and thinks the shop is in practice mode, or that the key is a trial one. Small. | open |
+| G31 | 5 | **FEATURES.md** says *Suggestions that go with it* appear on the **Shop page** — *"a block on the shop's own product or basket page — **not a chat**"*. Since ADR-0041 (2026-09-24) they appear **in the chat panel**; the on-page block (`pairs.js`, `<neura-pairs>`) still exists but no guide mentions it. The public website is written from FEATURES.md. | The website could promise a block on the shop's page that the developer guide never tells anyone how to build. | open |
+| G32 | 5 | The guide gives **one fixed line** to paste, but the key is locked to **one exact address** — so a shop with a test site and a live site (or `www.` and no `www.`) needs **a different key for each**, and a line pasted into the template cannot change between them. The guide should say: keep the key (and NEURA's address) in the shop's settings, like the shop token, and let the page read them. Done that way here (`NEURA_CHAT_URL`, `NEURA_CHAT_KEY`). | The developer pastes the test key into the template; it goes live with the next release, and on the real shop every chat is refused. | open |
+| G33 | 5 | **The first chat message ever, an easy one, was handed to a person.** *"Do you have green tea?"*, asked on the Green Tea product page (the shop has it, in stock): the local router model (`llama3.2:3b`, role map `ollama-dev`) gave confidence **0.00** — on the **first** message, with no history — so CARE handed over (`routing confidence 0.00 is below 0.5`), no tool used. A20 knew 0.00 only **after** a handover; this is new. The shopper was told *"I'm passing you to a colleague"* — but no one is told (no notifications, G15), and the shop is **live** (G22), so a real shopper would have seen it. | The very first thing a new owner sees is their assistant giving up on the easiest question. It says nothing about the product on the cloud models (A20: 0.95–1.00 there), but step 6 on `ollama-dev` would mostly grade the small local model. **For the owner (step 6): which model setup to practise with.** | open — to discuss at step 6 |
+| G34 | 5 | **A key in the chat socket's address is written, in full, into NEURA's log.** The chat box sends its key as `/v1/stream?token=fn_pk_…`, and the web server's own request line (`"WebSocket /v1/stream?token=…" [accepted]`) prints it — that line does not pass through our redaction filter. The socket accepts **any** key there (`authenticate_request(token=…)`), so a shop's server using a **secret** `fn_sk_` key on the socket would leave that secret in the log. Harmless for this public key; seen in the log for this step. | A secret key sitting in plain text in a server log file — anyone who can read the logs can use it. Not a guide problem: a code fix (hide the query string in the request log, or refuse secret keys in the address). | open — security, not the guide |
+| G35 | 6 | **CARE told a shopper a SOLD-OUT product is available.** *"Is cardamom in stock?"* → *"Yes, we have Green Cardamom Pods 50g **available to buy** for 1650.00 LKR."* The shop says `in_stock: false`, quantity 0. Cause, in our code: the search-result line CARE's AI reads (`care/tools/render.py`, `product_summary` → `_availability`) says **"available to buy"** whenever the product's *status* is active — **it carries no stock at all** — and CARE only searched, it never called `check_stock`. The fact check **passed**, because the reply matched what it was given. (SELL, in the same chat, said cardamom is *out of stock* — its evidence has stock.) The file's own comment tells the same story about *"on sale"*: a phrase with two meanings gets published in the wrong one. | **Harmful.** The shopper orders, or travels to buy it, and it is not there. Not a guide problem — a code fix, with an eval case (Rule 4). | **fixed, 2026-09-30** — unit tests + eval case product_qa_008 (passes on Gemini) |
+| G36 | 6 | **SELL cannot see a short product id, so a true recommendation was blocked.** The gift reply was correct — *"brisk, bright, strong brew from Nuwara Eliya"* is the shop's own description of product 4 — but the fact check failed it and it was handed to a person. Cause: SELL decides which products a reply *cites* with a pattern that needs **3+ characters** (`_CITED` in `sell/evidence.py` and `sell/nodes/respond.py`). This shop's ids are **1 character** (`3`, `4`, `5`), so no product counts as cited, every description is hidden from the fact check, and any claim taken from a description fails. Proven: `4` → not cited, `1303` → cited. The Bagisto shop's 4-digit ids hid it. The same pattern is `respond.py`'s check that a reply cites only shortlisted products — blind for these ids too. | Every small new shop (products 1–99) gets its best recommendations thrown away and handed to a person. Code fix + eval case. | open — **code bug** |
+| G37 | 6 | **CARE told a shopper about a product the shop has not released.** *"Do you sell cinnamon tea bags?"* → *"We have Cinnamon Tea Bags (25) listed for 750.00 LKR, but they are not currently available."* The product is **not active** in the shop (its own website hides it); the bridge sends it as `draft`, as the step-1 table notes the guide never says what to do with it. NEURA shows it, with its price. Neither the guide nor the specification says whether a bridge should send drafts, or that NEURA will mention them. | A shop preparing a launch finds its new product and price told to shoppers by the chat box before the launch. **The owner's call** whether this is wrong (see *Decisions* when made). | open — owner decided: do not show it (*Decisions*) |
+| G38 | 6 | **"Returns go to a person" (the G5 decision) is not what happens.** *"What is your return policy?"* → *"I cannot confirm… I can pass you to a colleague who can help."* — recorded as **Answered**, no handover. The shopper must ask a second time to reach a person. | The owner expects returns questions in the handed-over list; they are not there, and the shopper leaves without an answer. | open |
+| G39 | 6 | **Review says the products were deleted when they were not.** For the gift reply, *What it looked at* shows three cards: *"This source is no longer in the search index — it may have been deleted or re-indexed since this turn ran."* The three products were read from the shop (the search tool) and **were never in a search index** — this shop has none (G21), and search by meaning was off (`cloud-prod`, no embedder). | The owner thinks three of their products vanished. | open — dashboard |
+| G40 | 6 | **The sidebar's Review number goes stale.** The owner saw **Review 5** in the menu while the page said **To review 6**. Loaded fresh, both say 6 — the menu is counted when the page first loads and not again when new replies arrive. | Small: the owner may think they have finished reviewing. | open — dashboard, small |
+
+### Messages between the shop and NEURA (checked 2026-09-30)
+
+| Message | Direction | Built in NEURA? | Built in this shop's bridge (step 1)? |
+|:--|:--|:--|:--|
+| *"A product or order changed"* (change messages, `events.realtime`) | shop → NEURA | **No** — defined in the specification, but NEURA has **no address that receives them** | **No, on purpose** — nothing would receive them. Comes with *keeping our copy fresh*, which the owner deferred |
+| *"A shopper viewed a product / added to basket"* (product views, for NEURA-SELL's *Sold out*) | shop's server → NEURA | Yes — optional, off by default, needs a data agreement | Not yet — the guide's optional section; to decide later for this shop |
+| *"A chat needs a person"* and others (notifications, outbound webhooks) | NEURA → shop's server | Yes — `POST /v1/webhooks` | Not yet — and **not in the guide at all** (G15) |
+
+**Tested 2026-09-30, because the owner remembered change messages working.** On the older test shop (whose bridge
+*does* send them), the shop's own *product changed* message for product 1303 was sent the same way an admin save
+sends it (`DeliverWebhook::dispatchSync('product.updated', '1303')`, nothing in the shop changed):
+
+| Test | Result |
+|:--|:--|
+| **A.** To where that shop sends it today — `http://127.0.0.1:8787/webhook` (an old test address) | **Failed** — nothing is listening there |
+| **B.** To NEURA's own server — `http://localhost:8010/v1/webhooks/commerce` (the address the bridge's README names) | **Failed** — `405`: NEURA has no such address |
+| **C.** NEURA's copy of product 1303 afterwards | **Unchanged** — still from 2026-09-27 |
+
+**What the owner remembers is right about the shop's side**: the shop sends the message, signed correctly — that was
+tested before (the signature and the sending). **NEURA's side was never built**: no address receives the message, so
+nothing is updated. That shop also has **21 old messages** waiting in its queue for the 8787 address.
+
+**Order of work for change messages (agreed 2026-09-30):** first **we** build NEURA's receiving address (part of
+*keeping our copy fresh*, deferred); only then does the guide ask developers to send them — as an **optional extra
+step**, not step 1, because the basics work without it (NEURA reads the shop directly). Until then the guide must
+say plainly: *do not build change messages yet* (G13).
+
+### The keys a connection uses (checked 2026-09-30)
+
+| Key | Secret? | Direction | What it can do | Needed? |
+|:--|:--|:--|:--|:--|
+| **Shop token** | secret | NEURA → shop | **Read** the shop through the nine addresses — products, stock, categories, orders, customers, policies. **Cannot change anything**: every address only reads. Leaked, it exposes customers' names, emails and addresses. | yes — step 4 |
+| **Chat box key** (`fn_pk_…`) | public | shop's pages → NEURA | Lets the chat box talk to NEURA — **only from the shop's own web address** | yes — step 5 |
+| **Product views key** (`fn_sk_…`, `observe:write`) | secret | shop's server → NEURA | Sends product views for *Sold out*; needs the data agreement first | optional |
+
+FiveNeurals also uses a key of its own to **save** the connection (`stores:write`, `POST /v1/stores`) — only because
+there is no command or screen for it; the owner and developer never see it.
+
+### Decisions (the owner's)
+
+| # | Question | Decision |
+|:--|:--|:--|
+| G3 | **How is a shop token made, and how does it reach the developer?** Today: no command; nothing written. | **Decided by the owner, 2026-09-30: the dashboard makes it** (D5) — shown once, with *make a new one* to replace a leaked one. For this test: made by hand, as FiveNeurals would today. How it reaches the developer safely: still to decide |
+| G24 | The chat box line on Help points at port 8000 (another project). Fix NEURA's setting, or type the address by hand? | **Decided by the owner, 2026-09-30: fix the setting** — `PUBLIC_BASE_URL=http://localhost:8010` in NEURA's `.env`, API restarted, so Help shows the line a real developer would copy. (Found while doing it: the `.env` also says `NEURA_API_PORT=8000`; NEURA runs on 8010 only because it is started with `NEURA_API_PORT=8010` typed on the command line — the `.env` line was left as it is.) |
+| Step 7 | In what order? | **Decided by the owner, 2026-09-30: the code bugs first** — G35 (harmful) first, then G36, G34, G37, G39, G40 — then the guide fixes, then the dashboard ideas (mockup first). None had to be fixed before step 7: no real shopper uses NEURA, and this shop is in practice mode. All must be fixed **before any real shop goes live** |
+| G37 | CARE told a shopper about a product the shop has not released (`draft`). Is that wrong? | **Decided by the owner, 2026-09-30 (by grading it *Not good*): yes — NEURA must not mention a product the shop does not show.** *"This product is not in the product list in our shop."* Fix at step 7: the guide says what `draft` means, and NEURA keeps drafts away from shoppers |
+| G22 | The shop starts live and nothing can switch practice mode on. Switch it on for this test? | **Decided by the owner, 2026-09-30: yes.** Done the only way there is — a one-off script (session scratch folder, `TenantRepository.set_config`, `mode` → `shadow`), as FiveNeurals would have to today. `make tenant-show` now says `SHADOW`. The real fix (a command, and a dashboard switch) stays open for step 7 |
+| G33 | Which AI models for step 6? | **Decided by the owner, 2026-09-30: `cloud-prod` (Gemini for every role), for step 6 only**, then back to `ollama-dev`. Set on the command line when NEURA starts (`NEURA_ROLE_MAP=cloud-prod`), so NEURA's `.env` still says `ollama-dev` and a plain restart goes back to it. Known while it is on: all of NEURA uses it (the Bagisto shop too); no search by meaning (no cloud embedder set); Gemini may cost a little |
+| — | NEURA's `.env` said `NEURA_API_PORT=8000`, but NEURA runs on 8010 only because the port is typed each time | **Decided by the owner, 2026-09-30: change it to 8010.** Done — a plain `make api` now starts on the right port |
+| G25 | *"Every page"* would put the chat box on the admin pages too. Which pages? | **Decided by the owner, 2026-09-30: shopper pages only** — the `home` layout; not the admin (`app`) |
+| G27 | Basket suggestions use an AI call per product, with **no way to turn that off**. Add a switch? | **Decided by the owner, 2026-09-30: yes — the shop owner chooses, in the dashboard** (D6). *"If they don't need it, the owner can decide."* Off means suggestions still show, chosen from the products' own words (free). The guide must also say it uses AI. Needs a small ADR at step 7, because ADR-0045 fixed how pairing works |
+| G5 | The shop has no policies — what does the bridge do? Checked: NEURA-CARE still works without them, but **every returns or shipping question goes to a person** (the policy tool is simply not offered). | **Decided by the owner, 2026-09-30:** leave policies out for this shop (`policy.read` not declared), and the dashboard will **show it in red** (D1) |
+
+### Ideas for the dashboard (collected during the connection; designed together at the end, mockup first)
+
+| # | Idea | From |
+|:--|:--|:--|
+| D1 | **Show every item the shop can send** on Shop connection: ✓ when it sends it, **red ✗ when it does not**, with what that means (*"Your shop doesn't send policies, so returns and shipping questions go to your team"*). Builds on the existing **Check now**. | The owner, 2026-09-30 (G8) |
+| D2 | **Run the full check (the check tool) from the owner's dashboard**, in two levels: **simple** for the owner (the D1 list in plain words), **technical** for the developer — a **"Copy the full check for your developer"** button, like Help's *Copy these steps for your developer*. Answers G10 for now, without handing over our code. | The owner, 2026-09-30 (G9, G10) |
+| D3 | **Later: a developer account** the owner invites, seeing only Shop connection and Help — never shoppers' chats. Needs roles (group C, an ADR). | Discussed 2026-09-30 (G9) |
+| D4 | **Keep every list of what a shop sends in step.** Today it is written by hand in about 7 places — the list in our code (`neura_domain/enums.py`), the OpenAPI file, the written specification, the check tool (`neura_commerce/conformance.py`), the dashboard's list (`apps/neura-console/src/lib/shop.ts`), the developer guide (`apps/neura-web/.../docs/developers/page.tsx`), `INTEGRATION_GUIDE.md`. Proposed: **(1) a rule** for CLAUDE.md — *a change to what NEURA asks of a shop (an address or a capability, added, changed or removed) is not finished until the specification, the check tool, the dashboard's list and the developer guide say the same*; **(2) an automatic test** that fails when something is in the code's list but missing from the dashboard's list or the developer guide. | The owner, 2026-09-30 — **approved**: the rule and the test, done at the end with the other dashboard changes |
+| D5 | **The owner makes the shop token in the dashboard** (Shop connection): a strong random token, **shown once**, stored locked away; **"Make a new one"** stops the old one (today there is no way to replace a leaked token either). Safe delivery to the developer (a password manager or a one-time link, never plain email) to be written in the guide. | The owner, 2026-09-30 (G3) |
+| D6 | **A switch in the dashboard to turn off AI in basket suggestions.** On: NEURA asks the AI once per product what goes with it (today's behaviour). Off: suggestions still show, picked from the products' own words — no AI, no cost. The owner decides per shop. Needs a small ADR (ADR-0045 fixed the behaviour; a switch changes it, it does not delete it). | The owner, 2026-09-30 (G27) |
+
+### Recommendations to make connecting easier (Claude, 2026-09-30 — for the owner to choose)
+
+| # | Recommendation | Why it helps |
+|:--|:--|:--|
+| E1 | **Fix the guide**: start with *download the OpenAPI file*; give a test token at the start; one example answer per address; a *how to fit your data* section (no sizes → one variant; no policies → what happens; a status table); *customers only, never staff*. (G1–G7) | The developer stops guessing. |
+| E2 | **"Build only what you need"** — a table per assistant: NEURA-SELL 3 addresses, NEURA-CARE 6, the rest optional. (G11) | Less work; a shop can start small and add more later. |
+| E3 | **A starter kit**: a ready example bridge the developer copies and fills in (the Ceylon Harvester bridge, made general, is a first one for PHP/Laravel). | Filling in blanks instead of starting from nothing. Needs a decision: where it lives, which languages. |
+| E4 | **Give developers the check tool** (G10; D2 for now). | They can test alone. |
+| E5 | **Later: ready-made add-ons** for popular shop systems — install, no code. Already planned as phase 2 ([ADR-0009](architecture/adr/0009-generic-commerce-interface.md)). | No code at all for the most common shops. |
+
+### How this shop's data fits our format (the G4 detail, as found)
+
+| Our format wants | This shop has | What the bridge does |
+|:--|:--|:--|
+| Products with **variants** (the buyable item, with its own stock) | One price and one stock count per product; size-like "variations" are picked in the cart and have no stock of their own | **One variant per product**, with the product's own id |
+| `price`, `compare_at_price` | `price`, and an optional `discount_price` that the shop shows as the price | `discount_price` (when set) is the price; `price` becomes `compare_at_price` |
+| `in_stock`, `stock_quantity` | `is_stock_available` and `available_qty` (stored as text); the shop sells only when both allow it | in stock = available **and** quantity ≥ 1 |
+| Product `status` (`active`, `draft`, `archived`) | `is_active` yes / no | yes → `active`; no → `draft` (the guide does not say which) |
+| `order_number` (what the customer calls it) | Customers see `#` and the order's id | the id |
+| Order `status` (`pending`, `processing`, `shipped`, …) | `pending`, `confirmed`, `paid`, `shipped`, `delivered`, `canceled` / `cancelled` (both spellings used) | mapped one by one |
+| Tracking (carrier, number) | none | left out |
+| Payment `status` (`pending`, `paid`, `failed`, `refunded`, …) | also `canceled` — our list has no *cancelled payment* | `unknown` (the guide says unknown is the worst answer, but offers no better one) |
