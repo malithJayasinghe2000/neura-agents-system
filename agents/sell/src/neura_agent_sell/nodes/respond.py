@@ -33,15 +33,11 @@ import re
 from langchain_core.runnables import RunnableConfig
 
 from neura_agent_core.graph import AgentState, runtime_of
+from neura_agent_sell.citations import cited_ids
 from neura_agent_sell.prompts import REVISION
 from neura_core import get_logger
 
 log = get_logger(__name__)
-
-#: Product ids as `tools/render.py` writes them into a reply's evidence. Used
-#: only to *find* candidate citations in a draft; whether each is legitimate is
-#: decided by set membership against `promises`.
-_CITED = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9_-]{2,})\b")
 
 
 async def respond(state: AgentState, config: RunnableConfig) -> AgentState:
@@ -129,9 +125,9 @@ def _cards_for(draft: str, state: AgentState, runtime: object) -> list[dict[str,
 
     cards: list[dict[str, str]] = []
     seen: set[str] = set()
-    for token in _CITED.findall(draft):
-        if token in promised and token not in seen and (card := available.get(token)):
-            seen.add(token)
+    for product_id in cited_ids(draft, promised):
+        if product_id not in seen and (card := available.get(product_id)):
+            seen.add(product_id)
             cards.append(card)
     return cards
 
@@ -154,7 +150,7 @@ def _invented_ids(draft: str, state: AgentState) -> set[str]:
 
     # Only ids the store returned this turn are checked. A token that resembles
     # an id but was never in any tool result is prose, not a fabricated citation.
-    cited = {token for token in _CITED.findall(draft) if token in returned}
+    cited = set(cited_ids(draft, returned))
     return cited - promised
 
 
