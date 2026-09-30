@@ -26,7 +26,7 @@
  */
 const BASE = "/api";
 
-import type { ReviewTurn, Verdict } from "@/lib/review";
+import type { ReviewTurn, Scorecard, Verdict } from "@/lib/review";
 import type { Health, ShopView, SyncAsked } from "@/lib/shop";
 
 /** The API's envelope: `{ data, meta }`, on success and on error alike. */
@@ -135,6 +135,14 @@ export function syncShop(
   return call(`/shops/${encodeURIComponent(tenantId)}/store/${encodeURIComponent(storeId)}/sync`, {
     method: "POST",
   });
+}
+
+/**
+ * The Review scorecard, read from the browser — for the side menu's badge. The
+ * layout reads it once; this keeps it current as the owner moves around (G40).
+ */
+export function readScorecard(tenantId: string): Promise<Scorecard> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/review/scorecard`);
 }
 
 /** The screen's own read, again — used to notice when an asked-for sync finishes. */

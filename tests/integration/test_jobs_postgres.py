@@ -35,7 +35,8 @@ from neura_api.jobs.sync import SYNC_STORE, enqueue_sync
 from neura_api.jobs.webhooks import WEBHOOK_DRAIN, WebhookDrainHandler, enqueue_drain
 from neura_api.webhooks import WebhookDrainer
 from neura_core import Database, get_settings
-from neura_core.jobs import CrossTenantJobWriteError, JobQueue, JobStatus, due_tenants
+from neura_core.jobs import CrossTenantJobWriteError, JobQueue, JobStatus
+from neura_core.jobs import due_tenants as all_due_tenants
 from neura_core.jobs.schema import DUE_TENANTS_FUNCTION, JOB_QUEUE_TABLE, SCHEDULER_ROLE
 from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
 
@@ -48,6 +49,19 @@ TENANT_B = "tn_ijob_b"
 TENANT_QUIET = "tn_ijob_quiet"
 
 KIND = "probe"
+
+
+async def due_tenants(db: Database, *, now: datetime | None = None) -> list[str]:
+    """``due_tenants``, narrowed to the tenants this file creates.
+
+    The suite runs against the development database, where the test shops live
+    too, and one of their real jobs coming due made an exact-list assertion here
+    fail (CONNECTING_A_NEW_SHOP_LOG.md G43). The function itself is still called
+    unfiltered, across every tenant; only the comparison ignores tenants this
+    file does not own. ``TENANT_QUIET`` still proves nobody extra is named.
+    """
+    return [t for t in await all_due_tenants(db, now=now) if t.startswith("tn_ijob_")]
+
 
 #: 32 random bytes, base64. Webhook signing secrets are envelope-encrypted and
 #: the placeholder KEK is refused on purpose.

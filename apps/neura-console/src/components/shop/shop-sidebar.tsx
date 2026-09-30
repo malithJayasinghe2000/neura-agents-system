@@ -12,12 +12,17 @@
  * from the same membership-checked API every page uses, and each page still
  * asks the API for itself (ADR-0026 §3). This component only draws links.
  *
- * A client component for two reasons only: it has to know which screen is open
- * (`usePathname`), and on a phone it folds into one menu button.
+ * A client component for three reasons: it has to know which screen is open
+ * (`usePathname`), on a phone it folds into one menu button, and it re-reads the
+ * Review count as the owner moves around. The layout's count is read **once** —
+ * a layout does not re-render when a nested page navigates, or when a reply is
+ * opened (`?turn=`) — so the menu said *Review 5* while the page said *To review
+ * 6* (G40 in docs/CONNECTING_A_NEW_SHOP_LOG.md). A failed re-read keeps the last
+ * number rather than dropping the badge.
  */
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   BarChart3,
   ChevronsUpDown,
@@ -34,6 +39,7 @@ import {
 } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { SignOutButton } from "@/components/sign-out-button";
+import { readScorecard } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Item = { href: string; label: string; icon: LucideIcon; waiting?: number };
@@ -52,12 +58,35 @@ export function ShopSidebar({
   waiting: number | null;
 }) {
   const pathname = usePathname();
+  const search = useSearchParams().toString();
   const [open, setOpen] = useState(false);
+  const [count, setCount] = useState(waiting);
+  const [fromServer, setFromServer] = useState(waiting);
   const base = `/console/${encodeURIComponent(tenantId)}`;
+
+  // A fresh number from the server (`router.refresh()` after grading) wins —
+  // adjusted while rendering, React's pattern for state that follows a prop.
+  if (waiting !== fromServer) {
+    setFromServer(waiting);
+    setCount(waiting);
+  }
+
+  // And on every move — another screen, or another reply opened in Review.
+  useEffect(() => {
+    let current = true;
+    readScorecard(tenantId)
+      .then((card) => {
+        if (current) setCount(card.ungraded);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [tenantId, pathname, search]);
 
   const everyday: Item[] = [
     { href: base, label: "Home", icon: House },
-    { href: `${base}/review`, label: "Review", icon: ClipboardCheck, waiting: waiting ?? 0 },
+    { href: `${base}/review`, label: "Review", icon: ClipboardCheck, waiting: count ?? 0 },
     { href: `${base}/conversations`, label: "Conversations", icon: MessageSquare },
     ...(sell
       ? [

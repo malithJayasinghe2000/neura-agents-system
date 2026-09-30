@@ -237,6 +237,14 @@ The API log of the six turns is kept in the session scratch folder (`neura-api-s
 
 ### Step 7 — fix everything ⏳ — code bugs first
 
+**⚠️ To do later — tests still owed (do not forget):**
+
+| # | Test | Why it is owed | Command |
+|:--|:--|:--|:--|
+| T1 | **CARE `product_qa` on Gemini** (G37 + G35) | Gemini was overloaded; it ran on the local models only. 3 cases failed there — **product_qa_003** (UK 9), **product_qa_006** (colours), **product_qa_007** (wide feet) — and they fail the **same way on the old code**, so they look like the weak local AI, not our change. **Only a Gemini run can confirm that.** | `uv run neura-eval --agent care --dataset product_qa --role-map cloud-prod --concurrency 1 --out evals/reports/care-g37-product_qa.json` |
+| T2 | If T1 still fails 003 or 007 on Gemini | Then it is a real CARE weakness (it does not look up a size; it invents *"standard sizes"*), to be logged as a new finding | — |
+
+
 **G35 — fixed in code (2026-09-30), not yet run with the AI:**
 
 | Where | Change |
@@ -368,6 +376,34 @@ G35 and G37 put back for the run and restored afterwards (checked) → report
 **So the fixes remove exactly the two failures they were made for and change nothing else**; 003, 006 and 007
 fail on the old code too (the small local model — a Gemini run later is still worth doing).
 
+**Committed by the owner's request: `a95689f`** (G37 + `make check` runs the integration tests).
+
+**G39 — fixed (2026-09-30):** `packages/neura-agent-core/src/neura_agent_core/review.py`. SELL cites every product it
+recommended, read live from the shop; Review looked each one up **only in the search index**, and on a shop with no
+index every one read *"may have been deleted"*. Now a product missing from the index is looked up in **our copy of
+the catalogue** (`synced_entities`, one query per page): if it is there, Review shows its **name** and *"Read from
+your shop during this chat. It is still in your catalogue; the exact text the assistant saw is not kept here."*;
+only a product gone from the catalogue too still says *deleted or re-indexed*. Only the title is taken from the
+copy — the copy may have changed since the turn, and the queue shows evidence, not today's product. 3 unit tests.
+**Checked on the real data** (headless Chrome, the owner's sign-in): the gift question now lists *Green Cardamom
+Pods 50g*, *Ceylon Black Tea BOPF 400g*, *Green Tea Loose Leaf 100g*, each *"Read from your shop… still in your
+catalogue"*.
+
+**G40 — fixed (2026-09-30):** `apps/neura-console/src/components/shop/shop-sidebar.tsx` + `readScorecard` in
+`src/lib/api.ts`. The count was read once by the layout, which does not re-render when a nested page navigates or a
+reply is opened (`?turn=`). The menu now re-reads the count on every move — another screen or another reply — and a
+failed re-read keeps the last number. A fresh number from the server (after grading) still wins. **Checked in
+headless Chrome:** with the browser told the server now holds 7 waiting, moving from Review to Conversations
+changed the menu to *Review 7* (before the fix it could not change until a reload). No data was changed for this.
+
+**G43 — found and fixed while checking:** one integration test (`test_jobs_postgres.py`) failed only this time: it
+compares the exact list of tenants with work due, and the suite runs on the **development database**, where the
+Bagisto test shop (*Dispatch Test Shop*) had a real job come due. The test now compares only its own tenants
+(`tn_ijob_…`); the function is still called across every tenant. Found because `make check` now runs these tests.
+
+**Checked (free):** `make check` green — **1368 unit + 445 integration**; `make console-check` — **114 checks
+passed** (a first attempt stopped on a lost browser connection; the re-run passed).
+
 ## What we found
 
 Every problem in our guide, in the order found. **Status** is `open` until the guide is changed.
@@ -412,10 +448,11 @@ Every problem in our guide, in the order found. **Status** is `open` until the g
 | G36 | 6 | **SELL cannot see a short product id, so a true recommendation was blocked.** The gift reply was correct — *"brisk, bright, strong brew from Nuwara Eliya"* is the shop's own description of product 4 — but the fact check failed it and it was handed to a person. Cause: SELL decides which products a reply *cites* with a pattern that needs **3+ characters** (`_CITED` in `sell/evidence.py` and `sell/nodes/respond.py`). This shop's ids are **1 character** (`3`, `4`, `5`), so no product counts as cited, every description is hidden from the fact check, and any claim taken from a description fails. Proven: `4` → not cited, `1303` → cited. The Bagisto shop's 4-digit ids hid it. The same pattern is `respond.py`'s check that a reply cites only shortlisted products — blind for these ids too. | Every small new shop (products 1–99) gets its best recommendations thrown away and handed to a person. Code fix + eval case. | **fixed, 2026-09-30** — unit tests + eval case recommend_005 (passes on Gemini); injection 1.00 |
 | G37 | 6 | **CARE told a shopper about a product the shop has not released.** *"Do you sell cinnamon tea bags?"* → *"We have Cinnamon Tea Bags (25) listed for 750.00 LKR, but they are not currently available."* The product is **not active** in the shop (its own website hides it); the bridge sends it as `draft`, as the step-1 table notes the guide never says what to do with it. NEURA shows it, with its price. Neither the guide nor the specification says whether a bridge should send drafts, or that NEURA will mention them. | A shop preparing a launch finds its new product and price told to shoppers by the chat box before the launch. **The owner's call** whether this is wrong (see *Decisions* when made). | **fixed, 2026-09-30** — eval case product_qa_009 passes (local models) |
 | G38 | 6 | **"Returns go to a person" (the G5 decision) is not what happens.** *"What is your return policy?"* → *"I cannot confirm… I can pass you to a colleague who can help."* — recorded as **Answered**, no handover. The shopper must ask a second time to reach a person. | The owner expects returns questions in the handed-over list; they are not there, and the shopper leaves without an answer. | open |
-| G39 | 6 | **Review says the products were deleted when they were not.** For the gift reply, *What it looked at* shows three cards: *"This source is no longer in the search index — it may have been deleted or re-indexed since this turn ran."* The three products were read from the shop (the search tool) and **were never in a search index** — this shop has none (G21), and search by meaning was off (`cloud-prod`, no embedder). | The owner thinks three of their products vanished. | open — dashboard |
-| G40 | 6 | **The sidebar's Review number goes stale.** The owner saw **Review 5** in the menu while the page said **To review 6**. Loaded fresh, both say 6 — the menu is counted when the page first loads and not again when new replies arrive. | Small: the owner may think they have finished reviewing. | open — dashboard, small |
+| G39 | 6 | **Review says the products were deleted when they were not.** For the gift reply, *What it looked at* shows three cards: *"This source is no longer in the search index — it may have been deleted or re-indexed since this turn ran."* The three products were read from the shop (the search tool) and **were never in a search index** — this shop has none (G21), and search by meaning was off (`cloud-prod`, no embedder). | The owner thinks three of their products vanished. | **fixed, 2026-09-30** |
+| G40 | 6 | **The sidebar's Review number goes stale.** The owner saw **Review 5** in the menu while the page said **To review 6**. Loaded fresh, both say 6 — the menu is counted when the page first loads and not again when new replies arrive. | Small: the owner may think they have finished reviewing. | **fixed, 2026-09-30** |
 | G41 | 7 | **SELL's replies show the shopper our internal product ids.** The reply text itself says *"Enamel Camp Mug 350ml **(Product 4)**"* — and on Ceylon Harvester *"Ceylon Black Tea BOPF 400g **(Product 4)**"*; on the test shop *"(p_socks_1)"*. The compose prompt tells the AI to use the ids when naming products (that is how the fact check and the cards know which product is meant), and nothing removes them before the shopper reads the reply. Found in the G36 test run. | A shopper reads *"(p_socks_1)"* or *"(Product 4)"* — it looks broken, and means nothing to them. Needs a decision on how ids are hidden without breaking G36's citations. | open — to discuss |
 | G42 | 7 | **40 of our integration tests fail on the committed code, and nothing noticed.** Found while checking G34: `tests/integration/test_api_postgres.py` — streaming, review queue, usage, webhooks and more. One cause seen in all the ones read: the tests' **fake AI reply** (`_Response`, line 184) has no `structured_repairs` field, which the real code reads since commit `737532e` (*"count every model call…"*). `make check` runs only the unit tests, so the integration suite is never run by the gate and went stale. | Tests that exist but fail are worse than none: nobody trusts them, and a real break (like one G34 could have caused) hides among the 40. Probably a one-line fix in the fake; the owner decides. | **fixed, 2026-09-30** — 445 of 445 pass (`0082a99`), and `make check` now runs them |
+| G43 | 7 | **The integration tests share the development database with the test shops.** One job test compared the exact list of accounts with work due, and failed when the Bagisto test shop's real job came due. Found the first time `make check` ran the integration suite (G42). | A test that fails on its own when a real shop's job is due trains everyone to ignore red. Fixed in the test; a separate test database would remove the whole class of problem — **not decided**. | fixed in the test, 2026-09-30 |
 
 ### Messages between the shop and NEURA (checked 2026-09-30)
 

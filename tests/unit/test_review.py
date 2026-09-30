@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from neura_agent_core.review import (
+    IN_CATALOGUE,
     SOURCE_GONE,
     TOOL_NOT_RECORDED,
     Evidence,
@@ -89,6 +90,26 @@ class TestEvidenceIsShownOrExplained:
         bug, which is the whole of ADR-0020's argument."""
         [piece] = _evidence_for(turn(citations=[{"type": "faq", "id": "sizing"}]), {})
         assert piece.available is False
+        assert piece.reason == SOURCE_GONE
+
+    def test_a_product_still_in_the_catalogue_is_not_called_deleted(self) -> None:
+        """G39: SELL cites the products it read live from the shop. On a shop with
+        no search index every one of them read "may have been deleted"."""
+        [piece] = _evidence_for(
+            turn(citations=[{"type": "product", "id": "4"}]),
+            {},
+            {"4": "Ceylon Black Tea BOPF 400g"},
+        )
+        assert piece.reason == f"Ceylon Black Tea BOPF 400g — {IN_CATALOGUE}"
+        assert "deleted" not in piece.reason
+        assert piece.available is False, "the text the assistant saw is still not shown"
+
+    def test_a_product_gone_from_the_catalogue_too_is_still_called_gone(self) -> None:
+        [piece] = _evidence_for(turn(citations=[{"type": "product", "id": "9"}]), {}, {"4": "Tea"})
+        assert piece.reason == SOURCE_GONE
+
+    def test_only_products_are_looked_up_in_the_catalogue(self) -> None:
+        [piece] = _evidence_for(turn(citations=[{"type": "policy", "id": "4"}]), {}, {"4": "Tea"})
         assert piece.reason == SOURCE_GONE
 
     def test_every_citation_produces_a_row_even_when_nothing_backs_it(self) -> None:
