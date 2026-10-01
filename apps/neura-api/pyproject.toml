@@ -22,6 +22,7 @@ dependencies = [
     "alembic>=1.14",
     "redis>=5.2",
     "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "mcp>=2.2.0,<3",
 ]
 
 [project.scripts]
