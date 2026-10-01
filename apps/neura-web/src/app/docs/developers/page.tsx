@@ -805,6 +805,121 @@ const VIEW_WORKS: React.ReactNode[] = [
   </>,
 ];
 
+/**
+ * If something doesn't work, by where the developer sees it (G68). The full
+ * check's rows are the first line of `developer_text` for each cause
+ * (jobs/shop_check.py `_CAUSE_LINES`), which the owner copies to the developer.
+ * The chat box's two sentences were seen in a real browser (G55, G56). A
+ * listed address that isn't built reads as "nothing there" (G46). The Sold out
+ * list counts only views recorded `in_stock: false` (console_sold_out.py).
+ */
+const TROUBLE: { where: string; rows: [React.ReactNode, React.ReactNode][] }[] = [
+  {
+    where: "In the full check the shop owner sends you",
+    rows: [
+      [
+        "The bridge refused the shop token",
+        <>
+          The token in your bridge&apos;s settings isn&apos;t the one the shop owner made. Put
+          theirs in exactly, then ask them to press <em>Check again</em>.
+        </>,
+      ],
+      [
+        "Could not reach the address",
+        <>
+          Your bridge isn&apos;t online at that address, or the address isn&apos;t public. NEURA
+          calls only public {c("https://")} addresses (step 3).
+        </>,
+      ],
+      [
+        "There is no bridge at this address",
+        <>
+          The address isn&apos;t your bridge&apos;s (send the one {c("/health")} sits under), or it
+          redirects. NEURA doesn&apos;t follow redirects (step 3).
+        </>,
+      ],
+      [
+        <>
+          Its {c('"status"')} is not {c('"ok"')}
+        </>,
+        <>
+          {c("/health")} must answer {c('"status": "ok"')}, exactly (step 2).
+        </>,
+      ],
+      [
+        <>{c("/health")} passes, everything else fails</>,
+        <>
+          Usually your bridge&apos;s database settings. A {c("/health")} that doesn&apos;t touch
+          the database stays green while every other address fails.
+        </>,
+      ],
+    ],
+  },
+  {
+    where: "In the chat box",
+    rows: [
+      [
+        "The chat button doesn't appear",
+        <>
+          The line isn&apos;t on this page (look in the page&apos;s source), a strict content
+          security policy blocks it (step 5), or the shop still serves an old cached page.
+        </>,
+      ],
+      [
+        <>
+          Every message gets <em>We could not reach the assistant</em>
+        </>,
+        <>
+          The page&apos;s address isn&apos;t on the chat box key: check {c("www.")}, {c("http")} or{" "}
+          {c("https")}, and the test site (step 5).
+        </>,
+      ],
+      [
+        <>
+          <em>A secret key may not be used from a web page</em>
+        </>,
+        <>
+          The line holds a secret key ({c("fn_sk_")}). Put the chat box key ({c("fn_pk_")}) there,
+          and keep secret keys on your server.
+        </>,
+      ],
+    ],
+  },
+  {
+    where: "In the assistant's answers",
+    rows: [
+      [
+        "It says the shop doesn't sell something it does",
+        <>
+          An item listed in {c("/health")} whose address isn&apos;t built: NEURA reads its 404 as
+          &ldquo;nothing there&rdquo; (step 2). Or your search misses the words shoppers use: try
+          them on {c("/products?q=")} yourself.
+        </>,
+      ],
+      [
+        "A sold-out product is called in stock, or a price shows the wrong currency",
+        <>
+          Compare your bridge&apos;s answers with the shop by hand (step 3): {c("in_stock")}, and
+          a three-letter currency code.
+        </>,
+      ],
+    ],
+  },
+  {
+    where: "Product views",
+    rows: [
+      [
+        "The Sold out list stays empty",
+        <>
+          It lists only products opened while they were sold out, so check one was. Then read
+          NEURA&apos;s answer to your request: {c("403 DPA_REQUIRED")} means no agreement yet, and a{" "}
+          {c("400")} names the wrong field. No request at all? The setting is off.
+        </>,
+      ],
+    ],
+  },
+];
+
 export default function DeveloperGuide() {
   return (
     <div className="flex gap-12 px-4 pt-7 pb-12 md:px-14 md:pt-12 md:pb-16">
@@ -1152,44 +1267,22 @@ Content-Type: application/json
         </Section>
 
         <Section id="trouble" title="If something doesn't work">
-          <dl className="m-0 overflow-hidden rounded-[14px] border border-line text-[15px]">
-            {[
-              [
-                <>{c("/health")} answers, everything else fails</>,
-                <>
-                  Usually your bridge&apos;s database settings. A {c("/health")} that doesn&apos;t
-                  touch the database stays green while every other address fails.
-                </>,
-              ],
-              [
-                "Every request is refused",
-                "The shop token in your bridge's settings is empty or different from the one FiveNeurals holds.",
-              ],
-              [
-                "The chat box doesn't appear",
-                "The line isn't on the page, or your shop is still using a cached copy of its settings.",
-              ],
-              [
-                "The chat box appears but is refused",
-                <>
-                  The key was made for a different address: {c("www.")}, or {c("http")} versus{" "}
-                  {c("https")}.
-                </>,
-              ],
-              [
-                "Product views never arrive",
-                "The switch is off, the key is a public one, or nothing on your server is sending the queued events.",
-              ],
-            ].map(([seen, fix], i, all) => (
-              <div
-                key={i}
-                className={`grid gap-1 px-4 py-3.5 md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:px-5 ${i < all.length - 1 ? "border-b border-[#efefef]" : ""}`}
-              >
-                <dt className="font-medium">{seen}</dt>
-                <dd className="m-0 leading-[1.5] text-body">{fix}</dd>
-              </div>
-            ))}
-          </dl>
+          {TROUBLE.map((group) => (
+            <div key={group.where} className="flex flex-col gap-2">
+              <span className="text-[15px] font-semibold">{group.where}</span>
+              <dl className="m-0 overflow-hidden rounded-[14px] border border-line text-[15px]">
+                {group.rows.map(([seen, fix], i) => (
+                  <div
+                    key={i}
+                    className={`grid gap-1 px-4 py-3.5 md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:px-5 ${i < group.rows.length - 1 ? "border-b border-[#efefef]" : ""}`}
+                  >
+                    <dt className="font-medium">{seen}</dt>
+                    <dd className="m-0 leading-[1.5] text-body">{fix}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
         </Section>
 
         <section
