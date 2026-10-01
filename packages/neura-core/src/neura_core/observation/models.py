@@ -81,10 +81,15 @@ class ObservedEvent(BaseModel):
     @model_validator(mode="after")
     def _stock_belongs_to_a_view(self) -> ObservedEvent:
         if self.type is ObservedEventType.PRODUCT_VIEWED and self.in_stock is None:
-            raise ValueError("a product.viewed event must say whether it was in_stock (ADR-0049)")
+            # ADR-0049. The words reach the shop's developer as the 400's
+            # message (G64), so they say what to send, not which ADR asks.
+            raise ValueError(
+                "a product.viewed event must say whether the product was in stock: "
+                "add in_stock, true or false"
+            )
         if self.type is ObservedEventType.CART_ADDED and self.in_stock is not None:
             raise ValueError(
-                "in_stock is not sent on cart.added — an add is in stock by definition"
+                "leave in_stock out of a cart.added event: a product added to the basket was in stock"
             )
         return self
 
@@ -93,7 +98,7 @@ class ObservedEvent(BaseModel):
     def _must_be_aware(cls, value: datetime) -> datetime:
         """A naive time is an instant nobody can place — AGENTS.md's UTC rule."""
         if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("occurred_at must carry a timezone offset")
+            raise ValueError("occurred_at must carry a time zone, for example 2026-10-01T09:30:00Z")
         return value
 
 

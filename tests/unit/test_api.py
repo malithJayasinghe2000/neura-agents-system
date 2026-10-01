@@ -6,9 +6,12 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from neura_api.errors import register_error_handlers
 from neura_api.main import create_app
+from neura_core.observation import ObservedEvent
 
 
 @pytest.fixture
@@ -85,6 +88,75 @@ class TestErrorContract:
     def test_error_request_id_matches_the_header(self, client: TestClient) -> None:
         response = client.get("/v1/does-not-exist")
         assert response.json()["error"]["request_id"] == response.headers["X-Request-Id"]
+
+
+#: A correct product view, for G64's tests.
+_VIEW: dict[str, Any] = {
+    "event_id": "ev_0123456789abcdef",
+    "session_id": "s_0123456789abcdef",
+    "type": "product.viewed",
+    "product_id": "1042",
+    "occurred_at": "2026-10-01T09:30:00Z",
+    "in_stock": False,
+}
+
+
+class TestAWrongFieldIsAlwaysA400:
+    """G64: a check of our own (a pydantic validator) carries the Python
+    exception, and sometimes the date it refused, inside its error. The 400
+    handler put those into the answer as they were, could not turn them into
+    JSON, and the developer got a 500 "internal error" for one wrong field.
+
+    The product view is the case that found it: its model has three such checks.
+    """
+
+    @pytest.fixture
+    def events(self) -> Iterator[TestClient]:
+        app = FastAPI()
+        register_error_handlers(app)
+
+        @app.post("/events")
+        async def record(event: ObservedEvent) -> dict[str, str]:
+            return {"event_id": event.event_id}
+
+        # As a real client sees it: a crash in the handler is a 500, not a
+        # Python exception raised into the test.
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            yield test_client
+
+    def test_a_correct_view_passes(self, events: TestClient) -> None:
+        assert events.post("/events", json=_VIEW).status_code == 200
+
+    @pytest.mark.parametrize(
+        ("body", "field"),
+        [
+            pytest.param(
+                {k: v for k, v in _VIEW.items() if k != "in_stock"},
+                "in_stock",
+                id="a view without in_stock",
+            ),
+            pytest.param(
+                {**_VIEW, "type": "cart.added", "in_stock": True},
+                "in_stock",
+                id="a basket add with in_stock",
+            ),
+            pytest.param(
+                {**_VIEW, "occurred_at": "2026-10-01T09:30:00"},
+                "occurred_at",
+                id="a time with no time zone",
+            ),
+        ],
+    )
+    def test_our_own_checks_answer_400_naming_the_field(
+        self, events: TestClient, body: dict[str, Any], field: str
+    ) -> None:
+        response = events.post("/events", json=body)
+
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "INVALID_REQUEST"
+        problems = error["details"]["errors"]
+        assert any(field in p["msg"] or field in p["loc"] for p in problems)
 
 
 class TestNoSecretKeyInAnAddress:
