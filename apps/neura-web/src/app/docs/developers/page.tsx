@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { NEURA_HOST, OPENAPI_HREF } from "@/lib/site";
 
 /**
@@ -197,6 +198,29 @@ function Rules({ items, ordered }: { items: React.ReactNode[]; ordered?: boolean
         <li key={i}>{item}</li>
       ))}
     </List>
+  );
+}
+
+/**
+ * Names and what each means: step 5's settings, product views' fields. A list
+ * rather than a table: on a phone the long names would squeeze the
+ * explanations to a few words per line.
+ */
+function Defs({ items }: { items: [string, React.ReactNode][] }) {
+  return (
+    <dl className="m-0 overflow-hidden rounded-xl border border-line text-[15px]">
+      {items.map(([name, what], i) => (
+        <div
+          key={name}
+          className={`grid gap-1 px-4 py-3 md:grid-cols-[260px_minmax(0,1fr)] md:gap-4 ${i < items.length - 1 ? "border-b border-[#efefef]" : ""}`}
+        >
+          <dt>
+            <code className="font-mono text-[0.92em]">{name}</code>
+          </dt>
+          <dd className="m-0 leading-[1.5] text-body">{what}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -665,6 +689,122 @@ const PAIRS_RULES: React.ReactNode[] = [
   </>,
 ];
 
+/**
+ * Optional: product views (ADR-0044, ADR-0048, ADR-0049). Part of NEURA-SELL:
+ * the dashboard lists Sold out only for a shop with it (shop-sidebar.tsx). The
+ * switch lives in the shop and governs sending, NEURA has none (0044 §3); the
+ * shoppers' consent is the shop's (0044 §5); the key needs an agreement on
+ * record (ApiKeyRepository.issue). Every answer below was seen on the live API
+ * (CONNECTING_A_NEW_SHOP_LOG.md, G58 to G64). The owner's decision: optional,
+ * and said to be part of NEURA-SELL (G63).
+ */
+const VIEW_STEPS: WhoStep[] = [
+  {
+    title: "The shop owner decides, and signs a data agreement",
+    who: "Shop owner",
+    note: <>With FiveNeurals. Without it, NEURA stores nothing about shoppers.</>,
+  },
+  {
+    title: "FiveNeurals makes your secret key",
+    who: "FiveNeurals",
+    note: (
+      <>
+        It starts with {c("fn_sk_")} and is made for sending product views. It can only be made
+        once the agreement is recorded.
+      </>
+    ),
+  },
+  {
+    title: "Build a setting, off by default, and the sending",
+    who: "You",
+    note: (
+      <>
+        While the setting is off, your server sends nothing. NEURA has no switch of its own:
+        what it receives, it keeps.
+      </>
+    ),
+  },
+  {
+    title: "The shop owner turns the setting on",
+    who: "Shop owner",
+    note: (
+      <>
+        Once the shop asks its shoppers for permission. The agreement makes that the shop&apos;s
+        job, so ask the shop owner how it is done.
+      </>
+    ),
+  },
+];
+
+/** `ObservedEvent` in neura_core/observation/models.py, one row per field. */
+const VIEW_FIELDS: [string, React.ReactNode][] = [
+  [
+    "event_id",
+    <>
+      Your own id for this event, 16 to 64 characters. Send the same one again and it counts
+      once, so a retry is safe
+    </>,
+  ],
+  [
+    "session_id",
+    <>
+      One per shopper visit, 16 to 128 characters, so the list counts visits and not only views.
+      Never the shop&apos;s session cookie itself: make it from the session with a secret only
+      your server holds (a keyed hash)
+    </>,
+  ],
+  [
+    "type",
+    <>
+      <code>product.viewed</code> when a shopper opens a product page. <code>cart.added</code>{" "}
+      when a product goes into the basket, once the add worked
+    </>,
+  ],
+  [
+    "product_id",
+    <>
+      The product&apos;s <code>external_id</code>, the same id your bridge sends
+    </>,
+  ],
+  [
+    "occurred_at",
+    <>
+      When it happened, with a time zone. Not older than 7 days, and not more than 5 minutes
+      ahead
+    </>,
+  ],
+  [
+    "in_stock",
+    <>
+      Views only: could the product be bought at that moment (at least one variant in stock),{" "}
+      <code>true</code> or <code>false</code>. Leave it out of <code>cart.added</code>
+    </>,
+  ],
+];
+
+const VIEW_RULES: React.ReactNode[] = [
+  <>
+    {b("From your server only.")} Never from the shop&apos;s pages: anyone can read a page, and
+    NEURA refuses a secret key sent from one.
+  </>,
+  <>{b("Nothing about who the shopper is.")} No name, email, IP address or browser details.</>,
+  <>{b("Never slow a page down.")} Send in the background, for example from a queue.</>,
+  <>
+    {b("Kept for 7 days, then deleted.")} If the agreement ends, everything is deleted at once.
+  </>,
+];
+
+const VIEW_WORKS: React.ReactNode[] = [
+  <>
+    Each event is answered {c("202")} with {c('"stored": true')}. The same {c("event_id")} again
+    is answered {c('"stored": false')}: it was already counted.
+  </>,
+  <>A wrong or extra field is answered {c("400")}, and the error names the field.</>,
+  <>
+    {c("403")} with {c("DPA_REQUIRED")}: the agreement isn&apos;t recorded yet. Ask the shop owner.
+  </>,
+];
+
 export default function DeveloperGuide() {
   return (
     <div className="flex gap-12 px-4 pt-7 pb-12 md:px-14 md:pt-12 md:pb-16">
@@ -923,21 +1063,7 @@ export default function DeveloperGuide() {
               Each one is an attribute on the same line.
             </span>
           </div>
-          {/* A list rather than a table: on a phone the long names would squeeze
-              the explanations to a few words per line. */}
-          <dl className="m-0 overflow-hidden rounded-xl border border-line text-[15px]">
-            {ATTRIBUTES.map(([name, what], i) => (
-              <div
-                key={name}
-                className={`grid gap-1 px-4 py-3 md:grid-cols-[260px_minmax(0,1fr)] md:gap-4 ${i < ATTRIBUTES.length - 1 ? "border-b border-[#efefef]" : ""}`}
-              >
-                <dt>
-                  <code className="font-mono text-[0.92em]">{name}</code>
-                </dt>
-                <dd className="m-0 leading-[1.5] text-body">{what}</dd>
-              </div>
-            ))}
-          </dl>
+          <Defs items={ATTRIBUTES} />
           <div className="flex flex-col gap-3 rounded-xl border border-line px-[18px] py-4">
             <span className="text-[15px] font-semibold">
               Optional: suggestions on the basket page
@@ -958,33 +1084,45 @@ export default function DeveloperGuide() {
           title={
             <>
               Optional: product views{" "}
-              <span className="font-normal text-quiet">(for NEURA-SELL&apos;s Sold out list)</span>
+              <span className="font-normal text-quiet">(part of NEURA-SELL)</span>
             </>
           }
         >
           <P>
-            If the shop owner wants the Sold out list, your shop&apos;s server tells NEURA when a
-            shopper opens a product or adds one to the basket. FiveNeurals first records a data
-            agreement with the shop, then gives you a {b("secret")} key that can send them.
+            NEURA-SELL can show the shop owner a {b("Sold out list")}: sold-out products that
+            shoppers kept opening in the last 7 days.{" "}
+            <Link
+              href="/sell/#sold-out"
+              className="font-medium text-ink underline underline-offset-2"
+            >
+              See what the owner sees
+            </Link>
           </P>
+          <P>
+            For it, your shop&apos;s server tells NEURA each time a shopper opens a product or adds
+            one to the basket. Build it only if the shop owner wants it.
+          </P>
+          <WhoSteps steps={VIEW_STEPS} />
+          <span className="text-[15px] font-semibold">One request per event</span>
           <Pre>{`POST https://${NEURA_HOST}/v1/observe/events
-Authorization: Bearer fn_sk_…     ← secret, from your server only
+Authorization: Bearer fn_sk_…
+Content-Type: application/json
 
-type: product.viewed (with in_stock) · cart.added`}</Pre>
-          <Rules
-            ordered
-            items={[
-              <>
-                {b("Off by default, and off means nothing is sent.")} Check the switch before the
-                event exists.
-              </>,
-              <>{b("From your server, never from the browser.")} A public key is refused.</>,
-              <>
-                {b("Never send the shopper's cookie.")} Send a session id hashed with a key only you
-                hold, and no name, email or address.
-              </>,
-            ]}
-          />
+{
+  "event_id": "ev_7f3a9c2e1b4d4e8a",
+  "session_id": "s_2c9e41b7d05f4a63",
+  "type": "product.viewed",
+  "product_id": "1042",
+  "occurred_at": "2026-10-01T09:30:00Z",
+  "in_stock": false
+}`}</Pre>
+          <Defs items={VIEW_FIELDS} />
+          <P>Ids use only letters, digits, {c("-")} and {c("_")}. Any other field is refused.</P>
+          <Rules items={VIEW_RULES} />
+          <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">How you&apos;ll know it works</span>
+            <Rules items={VIEW_WORKS} />
+          </div>
         </Section>
 
         <Section id="changes" title="Change messages">

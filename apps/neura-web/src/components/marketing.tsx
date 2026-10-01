@@ -127,8 +127,12 @@ export function HowItWorks({
   );
 }
 
-/** One feature: the words on one side, the picture on the other; `flip` swaps them on wide screens. */
+/**
+ * One feature: the words on one side, the picture on the other; `flip` swaps
+ * them on wide screens. `id` lets a guide link straight to it.
+ */
 export function Feature({
+  id,
   eyebrow,
   tag,
   title,
@@ -136,6 +140,7 @@ export function Feature({
   picture,
   flip,
 }: {
+  id?: string;
   eyebrow: string;
   tag?: string;
   title: string;
@@ -144,7 +149,7 @@ export function Feature({
   flip?: boolean;
 }) {
   return (
-    <div className="grid items-center gap-8 lg:grid-cols-2 lg:gap-20">
+    <div id={id} className="grid scroll-mt-6 items-center gap-8 lg:grid-cols-2 lg:gap-20">
       <div className={`flex flex-col gap-4 ${flip ? "lg:order-2" : ""}`}>
         <Eyebrow tag={tag}>{eyebrow}</Eyebrow>
         <h3 className="m-0 text-[28px] leading-[1.15] font-bold tracking-[-0.02em] lg:text-[38px] lg:leading-[1.12]">

@@ -219,9 +219,10 @@ export default function SellPage() {
 
         <Feature
           flip
+          id="sold-out"
           eyebrow="Sold out"
           tag="Optional · you switch it on"
-          title="Know what to restock — because shoppers already told you."
+          title="Know what to restock, because shoppers already told you."
           picture={
             <Stage>
               <Card>
@@ -257,7 +258,7 @@ export default function SellPage() {
         >
           <FeatureText>
             See which products shoppers opened while you had none, and whether they&apos;re back in
-            stock now. Counts of visits — never who the shopper was, and nobody is ever contacted.
+            stock now. Counts of visits, never who the shopper was, and nobody is ever contacted.
           </FeatureText>
         </Feature>
 
