@@ -31,6 +31,7 @@ from it, so a line here is a promise that a page may repeat.
 | **Dashboard** | The shop owner's console. |
 | **For AI tools** | A connection other AI assistants use to read the shop's catalogue. |
 | **Shop's server** | Something the shop's own server sends to us. Nothing of ours runs in a shopper's browser for it. |
+| **For developers** | Something the shop's developer uses while building the bridge. A shopper never meets it. |
 
 ---
 
@@ -94,6 +95,14 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. | ✅ Built (ADR-0052) |
 | **Help** | *Connecting your shop*, step by step. | ✅ Built |
 | Settings and keys (the owner makes the chat box key) | — | ⬜ Not designed (needs an ADR) |
+
+---
+
+## For the shop's developer
+
+| Feature | What it does | Status | Where | Source |
+|:--|:--|:--|:--|:--|
+| **Help for AI coding tools (MCP)** | The developer adds one NEURA address to their AI coding tool. The tool can then ask what each of the nine addresses must answer, see a working sample for each, and read the rules bridges get wrong, and help write the bridge. It only teaches: it never calls a shop, needs no account and no token, and is limited per visitor. Checking a bridge stays the shop owner's, in the dashboard. | ✅ Built | For developers | `developer_mcp.py`, `generic/teacher.py`, ADR-0053 |
 
 ---
 

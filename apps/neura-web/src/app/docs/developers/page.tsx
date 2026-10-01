@@ -1041,6 +1041,18 @@ export default function DeveloperGuide() {
               Download the OpenAPI file
             </a>
           </div>
+          {/* ADR-0053: the developer MCP server (developer_mcp.py). It only
+              teaches; it never calls a shop and takes no token. Tried with MCP
+              Inspector and a real AI coding tool before this was written. */}
+          <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">Using an AI coding tool?</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              Add this address to it as an MCP server. Your tool can then ask NEURA what each
+              address must answer, see a working sample for each, and read the rules bridges get
+              wrong. It never sees your shop and needs no token.
+            </span>
+            <Pre>{`https://${NEURA_HOST}/v1/developers/mcp`}</Pre>
+          </div>
         </Section>
 
         <Section id="build" title="1 · Build the bridge">
