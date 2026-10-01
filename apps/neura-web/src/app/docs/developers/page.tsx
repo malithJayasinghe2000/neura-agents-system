@@ -5,11 +5,11 @@ import { NEURA_HOST, OPENAPI_HREF } from "@/lib/site";
  * Guide for developers — canvas board 25, approved by the owner 2026-09-30.
  *
  * Built from the board, with what is true in the code where the board marked
- * something as undecided (ADR-0051 §4): the check tool is had by asking
- * FiveNeurals; FiveNeurals gives the shop token and makes the chat box key.
- * The example output uses the check tool's real check names and messages
- * (neura_commerce/conformance.py). Only the OpenAPI file is published: the
- * written specification names commerce platforms (Rule 1).
+ * something as undecided (ADR-0051 §4). Since ADR-0052 the shop owner makes the
+ * shop token and runs the check in their dashboard; a developer cannot run the
+ * check alone (G10). FiveNeurals still makes the chat box key. Only the OpenAPI
+ * file is published: the written specification names commerce platforms
+ * (Rule 1).
  */
 export const metadata: Metadata = {
   title: "Guide for developers",
@@ -82,7 +82,7 @@ const ATTRIBUTES: [string, React.ReactNode][] = [
 const STEPS: [string, string, string][] = [
   ["1", "Build the bridge", "You"],
   ["2", "Say what your shop can do", "You"],
-  ["3", "Check your work", "You and FiveNeurals"],
+  ["3", "Check your work", "You and the shop owner"],
   ["4", "Connect your shop", "FiveNeurals"],
   ["5", "Add the chat box", "You and FiveNeurals"],
 ];
@@ -335,6 +335,96 @@ function CapabilityTable() {
   );
 }
 
+/**
+ * Step 3 as it happens since ADR-0052: the shop owner makes the token and runs
+ * the check in their dashboard; a developer cannot run it alone (G10). The
+ * address must be public and `https://` (G47, addresses.py), is never followed
+ * through a redirect (GenericClient), and is the one that gets connected, which
+ * nothing can change afterwards (G52).
+ */
+const CHECK_STEPS: { title: string; who: string; note: React.ReactNode }[] = [
+  {
+    title: "The shop owner sends you the shop token",
+    who: "Shop owner",
+    note: (
+      <>
+        They make it in their NEURA dashboard. Put it in your bridge&apos;s setting, in place of
+        your test text.
+      </>
+    ),
+  },
+  {
+    title: "Put your bridge online",
+    who: "You",
+    note: (
+      <>
+        At an {c("https://")} address on the public internet. NEURA won&apos;t call{" "}
+        {c("localhost")}, a private network or plain {c("http://")}.
+      </>
+    ),
+  },
+  {
+    title: "Send the shop owner the bridge's address",
+    who: "You",
+    note: (
+      <>
+        The exact address on your live shop, for example{" "}
+        {c("https://yourshop.example/neura/v1")}. NEURA doesn&apos;t follow redirects. The address
+        that passes is the one that gets connected, and it can&apos;t be changed afterwards.
+      </>
+    ),
+  },
+  {
+    title: "The shop owner presses Check",
+    who: "Shop owner",
+    note: (
+      <>
+        If something is wrong, they send you the full check. Fix what it names, then ask them to
+        check again.
+      </>
+    ),
+  },
+];
+
+/**
+ * Real output of the dashboard's check (`developer_text` in
+ * neura_api/jobs/shop_check.py), shortened: a bridge that accepts any token and
+ * whose search ignores the words. Problems come first.
+ */
+const FULL_CHECK_EXAMPLE = `NEURA check · https://yourshop.example/neura/v1 · 2026-10-01 09:30 UTC
+
+✘ auth.rejects_wrong_token     /orders accepted an invalid bearer token (HTTP 200)
+    → The token is being ignored rather than verified.
+⚠ products.search_no_match     search returned results for nonsense text
+    → Over-broad matching floods the agent's context with irrelevant products.
+✔ health                       ok
+✔ products.get_missing         ok
+…
+18 passed · 1 failed · 1 warning(s)`;
+
+/**
+ * What a clean check cannot see (G18): whether the answers are true. Each line
+ * is something a shopper would otherwise be told wrong. A draft is kept from
+ * shoppers everywhere NEURA shows products (G37).
+ */
+const BY_HAND: React.ReactNode[] = [
+  <>
+    {b("Stock.")} A sold-out product says {c('"in_stock": false')}.
+  </>,
+  <>
+    {b("Prices.")} The same as on the shop&apos;s page, with the currency as three capital
+    letters, such as {c("EUR")}.
+  </>,
+  <>
+    {b("Hidden products.")} One the shop doesn&apos;t show yet comes as{" "}
+    {c('"status": "draft"')}. The assistant never mentions a draft.
+  </>,
+  <>
+    {b("Customers.")} If you built {c("/customers/{id}")}, a member of staff&apos;s id answers{" "}
+    {c("404")}.
+  </>,
+];
+
 export default function DeveloperGuide() {
   return (
     <div className="flex gap-12 px-4 pt-7 pb-12 md:px-14 md:pt-12 md:pb-16">
@@ -442,8 +532,9 @@ export default function DeveloperGuide() {
               <>
                 {b("Check the shop token on every address except")} {c("/health")}. NEURA sends{" "}
                 {c("Authorization: Bearer <shop token>")}; refuse a request without it. Read the
-                token from a setting — for example {c("NEURA_SHOP_TOKEN")} — never from code. You
-                get the real token at step 4; until then, put any text in that setting to test.
+                token from a setting, for example {c("NEURA_SHOP_TOKEN")}, never from code. The
+                shop owner makes the real token in their NEURA dashboard and sends it to you; until
+                then, put any text in that setting to test.
               </>,
               <>
                 {b("Pages by cursor, not page number.")} Return an opaque {c("next_cursor")}; NEURA
@@ -525,22 +616,63 @@ export default function DeveloperGuide() {
 
         <Section id="check" title="3 · Check your work">
           <P>
-            One command checks every address against the specification and names anything wrong. Ask
-            FiveNeurals for the check tool. Fix what it names and run it again. When it&apos;s
-            clean, your bridge is done.
+            The shop owner runs the check from their NEURA dashboard, as often as you need. There is
+            no tool to download. It asks your bridge about 20 questions, the way the assistant will,
+            and names anything wrong. Every question is a {c("GET")}, so nothing in the shop
+            changes.
           </P>
-          <Pre>neura-conformance --url https://yourshop.example/neura/v1 --token $SHOP_TOKEN</Pre>
+          <ol className="m-0 flex list-none flex-col gap-0 overflow-hidden rounded-xl border border-line p-0">
+            {CHECK_STEPS.map((step, i) => (
+              <li
+                key={step.title}
+                className={`flex gap-3 px-4 py-3.5 ${i < CHECK_STEPS.length - 1 ? "border-b border-[#efefef]" : ""}`}
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-[1.5px] border-ink text-[13px] font-semibold">
+                  {i + 1}
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 text-[15px] font-medium text-ink">{step.title}</span>
+                    <span className="shrink-0 rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[13px] text-body">
+                      {step.who}
+                    </span>
+                  </div>
+                  <span className="text-[15px] leading-[1.5] text-body">{step.note}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
           <div className="flex flex-col gap-2">
-            <span className="text-[13px] font-medium text-quiet">Example output</span>
-            <Pre>{`  ✔ health                       ok
-  ✔ auth.required                ok
-  ✘ products.search_empty        search_products() raised on an empty query: HTTPStatusError
-  ⚠ sync.updated_since           declares sync.incremental but ignores updated_since`}</Pre>
+            <span className="text-[13px] font-medium text-quiet">
+              Example: the full check the shop owner sends you (shortened)
+            </span>
+            <Pre>{FULL_CHECK_EXAMPLE}</Pre>
           </div>
-          <P>
-            A {b("⚠")} matters as much as a {b("✘")}: your {c("/health")} claims something your
-            addresses don&apos;t do.
-          </P>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[15px] leading-[1.55] text-body">
+            <li className="flex gap-3">
+              <span className="w-4 shrink-0 text-center font-semibold text-ink">✘</span>
+              <span>
+                {b("A problem.")} The shop owner can&apos;t connect while there is one.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span className="w-4 shrink-0 text-center font-semibold text-ink">⚠</span>
+              <span>
+                {b("A warning.")} It doesn&apos;t stop the owner connecting, but each one means a
+                worse answer for a shopper. Fix it anyway.
+              </span>
+            </li>
+          </ul>
+          <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">
+              The check proves the format, not the facts
+            </span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              A clean check means your answers have the right shape, not that they are true. Compare
+              a few products in the shop with what your bridge sends:
+            </span>
+            <Rules items={BY_HAND} />
+          </div>
         </Section>
 
         <Section id="connect" title="4 · Connect your shop">
