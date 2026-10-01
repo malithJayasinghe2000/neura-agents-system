@@ -22,7 +22,7 @@ import pytest
 
 from neura_agent_sell import MANIFEST
 from neura_agent_sell import evidence as evidence_module
-from neura_agent_sell.citations import cited_ids
+from neura_agent_sell.citations import cited_ids, without_ids
 from neura_agent_sell.evals.store import load_store
 from neura_agent_sell.evidence import WITHHELD, hide_uncited_descriptions
 from neura_agent_sell.feed import build, canonical, jsonld, publishable
@@ -1291,6 +1291,22 @@ class TestCardsObeyTheFabricationCheck:
         )
         assert [c["id"] for c in out["cards"]] == ["1315", "1311"]
 
+    async def test_the_shopper_reads_no_id_but_still_gets_the_card(self) -> None:
+        """G41: the id comes out of the reply; the check and the card still used it."""
+        from neura_agent_sell.nodes import respond
+
+        out = await respond(
+            {
+                "draft": "I recommend the Ceylon Black Tea BOPF 400g (Product 4).",
+                "grounded": True,
+                "promises": ["4"],
+                "invocations": [_invocation("search_products", "Product 4: Ceylon Black Tea")],
+            },
+            self._runtime_with({"4": {"id": "4", "title": "Ceylon Black Tea"}}),
+        )
+        assert out["reply"] == "I recommend the Ceylon Black Tea BOPF 400g."
+        assert [c["id"] for c in out["cards"]] == ["4"]
+
     async def test_an_escalated_turn_carries_no_cards(self) -> None:
         """`respond` never runs, so there is nothing to show — which is how a
         withheld or blocked turn ends up with no products, by construction."""
@@ -2036,3 +2052,26 @@ class TestCitedIds:
 
     def test_only_known_ids_are_looked_for(self) -> None:
         assert cited_ids("The Fell jacket is waterproof.", []) == []
+
+
+class TestWithoutIds:
+    """G41: the shopper read "Ceylon Black Tea BOPF 400g (Product 4)"."""
+
+    def test_a_bracketed_id_is_removed(self) -> None:
+        reply = "I recommend the Ceylon Black Tea BOPF 400g (Product 4), which is 1850 LKR."
+        assert without_ids(reply, ["4"]) == (
+            "I recommend the Ceylon Black Tea BOPF 400g, which is 1850 LKR."
+        )
+
+    def test_every_bracket_shape_is_removed(self) -> None:
+        reply = "The **Moor Walking Boot (p_boot_1)**, the mug [4] or the cup (product id 5)."
+        assert without_ids(reply, ["4", "5", "p_boot_1"]) == (
+            "The **Moor Walking Boot**, the mug or the cup."
+        )
+
+    def test_the_shoppers_own_numbers_stay(self) -> None:
+        reply = "Brew 4 cups; size 4 fits (4 pack)."
+        assert without_ids(reply, ["4"]) == reply
+
+    def test_an_unknown_id_in_brackets_stays(self) -> None:
+        assert without_ids("A pack (p_other).", ["4"]) == "A pack (p_other)."

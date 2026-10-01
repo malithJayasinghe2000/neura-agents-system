@@ -40,4 +40,26 @@ def cited_ids(draft: str, known: Iterable[str]) -> list[str]:
     return sorted(first_seen, key=lambda product_id: (first_seen[product_id], product_id))
 
 
-__all__ = ["cited_ids"]
+def without_ids(reply: str, known: Iterable[str]) -> str:
+    """The reply as a shopper should read it: the id citations taken out.
+
+    The compose prompt has the model name each product by its id, because that
+    is how `verify`, the rejected-product check and the cards know which product
+    a sentence means (G36). The shopper then read *"Ceylon Black Tea BOPF 400g
+    (Product 4)"* — an internal number that means nothing to them
+    (CONNECTING_A_NEW_SHOP_LOG.md G41). Only a **bracketed** mention of a known
+    id is removed — ``(4)``, ``(Product 4)``, ``[p_boot_1]`` — never a bare one,
+    because "4 cups" and "size 4" are the shopper's own words. Run on the reply
+    after every check, so nothing it removes was ever evidence.
+    """
+    for product_id in sorted({i for i in known if i}, key=len, reverse=True):
+        reply = re.sub(
+            rf"\s*[(\[]\s*(?:product\s+(?:id\s+)?)?{re.escape(product_id)}\s*[)\]]",
+            "",
+            reply,
+            flags=re.IGNORECASE,
+        )
+    return reply
+
+
+__all__ = ["cited_ids", "without_ids"]

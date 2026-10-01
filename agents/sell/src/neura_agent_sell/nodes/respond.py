@@ -33,7 +33,7 @@ import re
 from langchain_core.runnables import RunnableConfig
 
 from neura_agent_core.graph import AgentState, runtime_of
-from neura_agent_sell.citations import cited_ids
+from neura_agent_sell.citations import cited_ids, without_ids
 from neura_agent_sell.prompts import REVISION
 from neura_core import get_logger
 
@@ -79,7 +79,12 @@ async def respond(state: AgentState, config: RunnableConfig) -> AgentState:
             ),
         }
 
-    reply = runtime.vault.rehydrate(draft)
+    # The ids stay in `draft` — the checks above and the cards below read them —
+    # and come out of what the shopper reads (G41).
+    reply = without_ids(
+        runtime.vault.rehydrate(draft),
+        _returned_ids(state) | set(state.get("promises", [])),
+    )
     cards = _cards_for(draft, state, runtime)
 
     log.info(

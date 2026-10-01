@@ -92,6 +92,7 @@ cases:
       grounded: true
       escalated: false
       must_contain: ["Camp Mug"]
+      must_not_contain: ["(Product"]
     notes: >-
       Product ids ONE character long ("4", "5"), as a real connected shop numbers
       them (CONNECTING_A_NEW_SHOP_LOG.md G36). "Safe to heat directly on a camp
@@ -100,3 +101,7 @@ cases:
       characters was never seen as cited, the description was withheld, and this
       exact reply failed as unsupported and was handed to a person. Every id in
       store.json is long, which is why no earlier case caught it.
+
+      must_not_contain "(Product": the reply the shopper reads carries no internal
+      id (G41). Measured 2026-09-30 before that fix, this case's reply was "I
+      recommend the Enamel Camp Mug 350ml (Product 4)…".
