@@ -54,6 +54,10 @@ const TIERS: { title: string; note: string; rows: [string, string][] }[] = [
   },
 ];
 
+/**
+ * Every setting the chat box reads from its line (`configFrom` in widget.js),
+ * the two the old table missed included (G28).
+ */
 const ATTRIBUTES: [string, React.ReactNode][] = [
   ["data-neura-key", "The chat box key. Required"],
   [
@@ -65,16 +69,30 @@ const ATTRIBUTES: [string, React.ReactNode][] = [
   [
     "data-neura-open",
     <>
-      <code>true</code> starts with the panel open
+      <code>true</code> opens the panel when the page loads
     </>,
   ],
   [
-    "data-neura-products",
-    "NEURA-SELL: the product ids on a basket page, so the panel can suggest what goes with them",
+    "data-neura-agent",
+    <>
+      Usually leave it out: NEURA picks the right assistant for each question.{" "}
+      <code>care</code> (questions about the shop) or <code>sell</code> (help choosing) sends
+      every question on the page to that one
+    </>,
   ],
   [
-    "data-neura-agent",
-    "Only to pin a page to one assistant. Leave it out and NEURA picks the right one per question",
+    "data-neura-api",
+    <>
+      Only if you serve <code>widget.js</code> from somewhere else: NEURA&apos;s address. By
+      default, the address the file came from
+    </>,
+  ],
+  ["data-neura-products", "The products a page shows, for suggestions. See below"],
+  [
+    "data-neura-pairs-auto-open",
+    <>
+      <code>true</code> lets a suggestion open the panel. See below
+    </>,
   ],
 ];
 
@@ -522,6 +540,129 @@ const AFTER_CONNECT: React.ReactNode[] = [
   </>,
 ];
 
+/**
+ * Step 5. FiveNeurals still makes the chat box key (`make key-new … PUBLIC=1
+ * ORIGINS=…`). A public key holds a list of exact addresses (`allowed_origins`),
+ * so one key covers the live shop, www. and a test site (G32, corrected).
+ * Shopper pages only (G25).
+ */
+const CHAT_STEPS: WhoStep[] = [
+  {
+    title: "Send FiveNeurals the shop's web addresses",
+    who: "You",
+    note: (
+      <>
+        Every exact address the chat box will run on, for example{" "}
+        {c("https://yourshop.example")} and {c("https://www.yourshop.example")}, and a test site
+        if you have one. One key can cover them all.
+      </>
+    ),
+  },
+  {
+    title: "FiveNeurals makes the chat box key",
+    who: "FiveNeurals",
+    note: (
+      <>
+        A public key that starts with {c("fn_pk_")}. It works only from the addresses you sent.
+      </>
+    ),
+  },
+  {
+    title: "Add the line to every page shoppers see",
+    who: "You",
+    note: (
+      <>
+        Not your admin pages: staff questions would use AI and mix with real shoppers&apos;
+        chats.
+      </>
+    ),
+  },
+];
+
+/**
+ * The line's rules. A secret key in the page works, quietly (G55), so the
+ * guide must say it. The live connection is a `wss://` socket on NEURA's
+ * address, and styles are constructable stylesheets, which a page's
+ * `style-src` does not block (widget.js).
+ */
+const CHAT_RULES: React.ReactNode[] = [
+  <>
+    {b("The key is public, and that's fine.")} It works only from the addresses it was made
+    for. {c("www.")} and no {c("www.")}, {c("http")} and {c("https")}, are different addresses.
+  </>,
+  <>
+    {b("Never put a secret key in a page.")} Secret keys start with {c("fn_sk_")}, and anyone
+    can read a page&apos;s source.
+  </>,
+  <>
+    {b("Keep the key in the shop's settings,")} like the shop token, not in the template. A new
+    key then needs no code change.
+  </>,
+  <>
+    {b("It won't break your page.")} One file, no dependencies, loaded {c("async")}. It draws
+    itself in its own box, so your styles don&apos;t reach it.
+  </>,
+  <>
+    {b("Strict content security policy?")} Allow our address in {c("script-src")}, and in{" "}
+    {c("connect-src")} with both {c("https://")} and {c("wss://")}. No {c("unsafe-inline")}{" "}
+    needed.
+  </>,
+];
+
+/**
+ * How a developer sees it work. The dashboard tick is the key's
+ * `last_used_at`, set by any request with it; a page load makes none. The
+ * practice-mode note is `WIDGET_WITHHELD_MESSAGE`; the refusal is the server's
+ * own `ORIGIN_NOT_ALLOWED` sentence, which the chat box shows.
+ */
+const CHAT_WORKS: React.ReactNode[] = [
+  <>Open a shop page: the chat button appears at the bottom right.</>,
+  <>
+    Send one test message (it uses AI). The shop owner&apos;s dashboard then shows{" "}
+    <em>The chat box is on your shop</em>.
+  </>,
+  <>
+    In practice mode, every reply is a short <em>your message has been received</em> note. The
+    owner reads the real reply in Review.
+  </>,
+  <>
+    <em>This key is not permitted from that origin</em> means the page&apos;s address isn&apos;t
+    on the key.
+  </>,
+];
+
+/**
+ * Suggestions (ADR-0040, in the chat panel since ADR-0041). The ids are the
+ * bridge's `external_id`s, at most 10 (`MAX_PAIR_IDS`, G26). A product with no
+ * stored pairing queues one model job in the background and the shopper gets
+ * the word path's answer now (ADR-0045, pairing/cache.py; G27). Every failure
+ * is silent by design (`loadPairs`).
+ */
+const PAIRS_RULES: React.ReactNode[] = [
+  <>
+    {b("The ids your bridge sends")} (each product&apos;s {c("external_id")}), separated by
+    commas. At most 10 count.
+  </>,
+  <>
+    {b("Only on the page that shows them,")} usually the basket. The line normally lives in a
+    shared layout: let that page hand the layout its ids, and leave the setting out everywhere
+    else.
+  </>,
+  <>
+    {b("This uses AI.")} The first time a product appears here, NEURA asks an AI model once, in
+    the background, what goes with it, and keeps the answer. The shopper never waits.
+  </>,
+  <>
+    {b("Want the panel to open by itself?")} Add {c('data-neura-pairs-auto-open="true"')}. It
+    opens at most once per visit, and only when there is a suggestion. Off by default.
+  </>,
+  <>
+    {b("Nothing shows?")} Failures here are silent on purpose: the shopper is about to pay. Look
+    at the {c("suggestions")} request in your browser&apos;s Network tab, and ask the shop owner
+    whether their shop has suggestions.
+  </>,
+];
+
 export default function DeveloperGuide() {
   return (
     <div className="flex gap-12 px-4 pt-7 pb-12 md:px-14 md:pt-12 md:pb-16">
@@ -765,29 +906,49 @@ export default function DeveloperGuide() {
         </Section>
 
         <Section id="chat" title="5 · Add the chat box">
-          <P>
-            One line on every page of your shop. FiveNeurals makes the chat box key for your
-            shop&apos;s exact address.
-          </P>
+          <P>One line of HTML puts the chat box on the shop&apos;s pages.</P>
+          <WhoSteps steps={CHAT_STEPS} />
           <Pre>{`<script src="https://${NEURA_HOST}/v1/widget/widget.js" async
         data-neura-key="fn_pk_…"></script>`}</Pre>
-          <Rules
-            items={[
-              <>
-                {b("The key is public, and that's fine.")} It only works from your shop&apos;s
-                address. {c("www.")} and no {c("www.")} are different addresses.
-              </>,
-              <>
-                {b("It can't break your page.")} One file, no dependencies. It draws itself in its
-                own box, so your styles don&apos;t reach it.
-              </>,
-              <>
-                {b("Strict content security policy?")} Allow our address in {c("script-src")} and{" "}
-                {c("connect-src")}. No {c("unsafe-inline")} needed.
-              </>,
-            ]}
-          />
-          <Table head={["Attribute", "What it does"]} rows={ATTRIBUTES} />
+          <Rules items={CHAT_RULES} />
+          <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">How you&apos;ll know it works</span>
+            <Rules items={CHAT_WORKS} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-[15px] font-semibold">Settings</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              Each one is an attribute on the same line.
+            </span>
+          </div>
+          {/* A list rather than a table: on a phone the long names would squeeze
+              the explanations to a few words per line. */}
+          <dl className="m-0 overflow-hidden rounded-xl border border-line text-[15px]">
+            {ATTRIBUTES.map(([name, what], i) => (
+              <div
+                key={name}
+                className={`grid gap-1 px-4 py-3 md:grid-cols-[260px_minmax(0,1fr)] md:gap-4 ${i < ATTRIBUTES.length - 1 ? "border-b border-[#efefef]" : ""}`}
+              >
+                <dt>
+                  <code className="font-mono text-[0.92em]">{name}</code>
+                </dt>
+                <dd className="m-0 leading-[1.5] text-body">{what}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="flex flex-col gap-3 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">
+              Optional: suggestions on the basket page
+            </span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              Tell the chat box which products a page shows, and it suggests what goes with them, in
+              the chat panel.
+            </span>
+            <Pre>{`<script src="https://${NEURA_HOST}/v1/widget/widget.js" async
+        data-neura-key="fn_pk_…"
+        data-neura-products="1042,1077"></script>`}</Pre>
+            <Rules items={PAIRS_RULES} />
+          </div>
         </Section>
 
         <Section
