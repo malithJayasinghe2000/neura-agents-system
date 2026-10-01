@@ -1,8 +1,8 @@
 # ADR-0053 · A Developer's AI Tool May Ask NEURA How To Build A Bridge
 
-**Status:** **Proposed** · the owner's answers in a design session, 2026-10-02 (four questions, in
-[CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, E6 Q1 to Q4); waiting for the
-owner's approval · **Date:** 2026-10-02 · **Related:**
+**Status:** **Accepted** · owner decision, 2026-10-02: the owner's answers in a design session (four questions, in
+[CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, E6 Q1 to Q4), then five
+best-practice changes the owner asked for, then approved the same day · **Date:** 2026-10-02 · **Related:**
 [ADR-0009](0009-generic-commerce-interface.md) (the bridge's format),
 [ADR-0017](0017-rate-limit-subjects.md) (the request limiter),
 [ADR-0023](0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) (SELL's own MCP server, a different thing),
