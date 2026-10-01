@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     #: not for one person, because that is what an IP identifies.
     rate_limit_per_client: int = Field(default=40, alias="RATE_LIMIT_PER_CLIENT")
     rate_limit_per_conversation: int = Field(default=20, alias="RATE_LIMIT_PER_CONVERSATION")
+    #: The developer MCP server answers anyone, with no key (ADR-0053 §3), so a
+    #: client address is the only subject it has. **A guess**, to be set from
+    #: real use (CLAUDE.md §4): an AI tool building a bridge asks a few dozen
+    #: questions, not hundreds a minute.
+    rate_limit_developer_mcp: int = Field(default=60, alias="RATE_LIMIT_DEVELOPER_MCP")
 
     #: How many proxies sit in front of this deployment. **Zero means
     #: ``X-Forwarded-For`` is ignored entirely**, which is the only safe default:

@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from neura_api import developer_mcp
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
 from neura_api.jobs import (
@@ -144,21 +145,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runners=sorted(app.state.runners),
         job_kinds=sorted(app.state.jobs.kinds),
     )
-    try:
-        yield
-    finally:
-        await app.state.jobs.stop()
-        await app.state.drainer.aclose()
-        if app.state.redis is not None:
-            await app.state.redis.aclose()
-        # The connection pool is process-wide and lazily created, so it outlives
-        # any single request. Closing it here means a shutdown returns its
-        # connections rather than leaving PostgreSQL to time them out — and, in
-        # tests, that an event loop does not end with live sockets attached to
-        # it. `get_database` is cached, so a restart simply builds a new pool.
-        await get_database().dispose()
-        get_database.cache_clear()
-        log.info("api_stopped")
+    # The developer MCP server's manager (ADR-0053). A mounted app's own
+    # lifespan never runs, so it is started here, for the life of the process.
+    async with app.state.developer_mcp.session_manager.run():
+        try:
+            yield
+        finally:
+            await _shutdown(app)
+
+
+async def _shutdown(app: FastAPI) -> None:
+    """What the lifespan closes, in order, once the process stops serving."""
+    await app.state.jobs.stop()
+    await app.state.drainer.aclose()
+    if app.state.redis is not None:
+        await app.state.redis.aclose()
+    # The connection pool is process-wide and lazily created, so it outlives
+    # any single request. Closing it here means a shutdown returns its
+    # connections rather than leaving PostgreSQL to time them out — and, in
+    # tests, that an event loop does not end with live sockets attached to
+    # it. `get_database` is cached, so a restart simply builds a new pool.
+    await get_database().dispose()
+    get_database.cache_clear()
+    log.info("api_stopped")
 
 
 def _job_runner(
@@ -297,6 +306,17 @@ def create_app() -> FastAPI:
     # ADR-0044 phase 1. Mounted for every deployment; what gates it is the key's
     # scope and the tenant's agreement, never whether this line is here.
     app.include_router(observe.router, prefix="/v1")
+    # ADR-0053: teaches a developer's AI tool how to build a bridge. Public, no
+    # key; it reads nothing but our own fixed content. The limiter is built in
+    # the lifespan, so it is looked up per request.
+    app.state.developer_mcp = developer_mcp.build_server()
+    app.mount(
+        developer_mcp.MOUNT,
+        developer_mcp.Limited(
+            developer_mcp.build_app(app.state.developer_mcp, settings),
+            lambda: app.state.limiter,
+        ),
+    )
 
     return app
 

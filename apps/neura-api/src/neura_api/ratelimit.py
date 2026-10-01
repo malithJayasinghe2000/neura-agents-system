@@ -120,6 +120,16 @@ def subjects_for(
     return applicable
 
 
+def anonymous_client(kind: str, client: str, limit: int) -> Subject:
+    """The one subject a caller with **no key at all** has: its address.
+
+    For a public surface that holds nothing worth protecting, the developer MCP
+    server (ADR-0053 §3). The address is fingerprinted exactly as a widget
+    client's is, scoped by ``kind`` instead of a key id, so it is never stored.
+    """
+    return Subject(kind, _fingerprint(kind, client), limit)
+
+
 def _fingerprint(key_id: str, client: str) -> str:
     """Hash the client address, keyed with the deployment secret.
 
@@ -242,6 +252,7 @@ __all__ = [
     "RateLimiter",
     "Subject",
     "Verdict",
+    "anonymous_client",
     "enforce",
     "subjects_for",
 ]
