@@ -83,7 +83,7 @@ const STEPS: [string, string, string][] = [
   ["1", "Build the bridge", "You"],
   ["2", "Say what your shop can do", "You"],
   ["3", "Check your work", "You and the shop owner"],
-  ["4", "Connect your shop", "FiveNeurals"],
+  ["4", "Connect your shop", "The shop owner"],
   ["5", "Add the chat box", "You and FiveNeurals"],
 ];
 
@@ -425,6 +425,42 @@ const BY_HAND: React.ReactNode[] = [
   </>,
 ];
 
+/**
+ * Step 4 since ADR-0052 §5: the shop owner connects, after a clean check of the
+ * same address. Connect saves the address and the token NEURA made, then queues
+ * a full copy (console_connect.py). The copy keeps products, categories and
+ * policy pages only (SYNCED_TYPES in neura_commerce/sync/engine.py); the
+ * assistants' tools ask the bridge live. A new token stops NEURA sending the old
+ * one at once, but the bridge accepts the old one until it is changed (G49).
+ */
+const CONNECT_HAPPENS: React.ReactNode[] = [
+  <>NEURA saves your bridge&apos;s address and the shop token.</>,
+  <>
+    NEURA copies the shop&apos;s catalogue: your products, and your categories and policy pages
+    if you built them. Orders and customers are not copied.
+  </>,
+  <>
+    The owner&apos;s dashboard shows <em>Your shop is connected</em> and{" "}
+    <em>Your catalogue is copied</em>, with the number of products.
+  </>,
+];
+
+const AFTER_CONNECT: React.ReactNode[] = [
+  <>
+    {b("Keep the bridge online at that address.")} The assistant asks it questions live while
+    shoppers chat: searches, products, stock.
+  </>,
+  <>
+    {b("The shop token stays secret.")} Never put it in a page, a browser or a public code
+    repository. NEURA keeps it encrypted and never shows it again, not even to the shop owner.
+  </>,
+  <>
+    {b("A new token? Put it in at once.")} If the token leaks, the shop owner makes a new one.
+    Until your bridge has it, the assistant can&apos;t read the shop, and your bridge still
+    accepts the old token. Then ask the owner to press <em>Check again</em>.
+  </>,
+];
+
 export default function DeveloperGuide() {
   return (
     <div className="flex gap-12 px-4 pt-7 pb-12 md:px-14 md:pt-12 md:pb-16">
@@ -676,26 +712,19 @@ export default function DeveloperGuide() {
         </Section>
 
         <Section id="connect" title="4 · Connect your shop">
-          <Rules
-            ordered
-            items={[
-              <>
-                Put the {b("shop token")} FiveNeurals gives you into your bridge&apos;s settings.
-              </>,
-              <>
-                Send FiveNeurals your bridge&apos;s address, for example{" "}
-                {c("https://yourshop.example/neura/v1")}.
-              </>,
-              <>
-                FiveNeurals connects your shop and copies its catalogue. The shop owner sees{" "}
-                <em>Your shop is connected</em> ticked in their dashboard.
-              </>,
-            ]}
-          />
           <P>
-            {b("The shop token is a secret.")} Never put it in a page, a browser or a public code
-            repository. We store it encrypted and never show it, not even to the shop owner.
+            When the check shows no {b("✘")}, the shop owner presses{" "}
+            <em>Connect and copy my catalogue</em> in their dashboard. There is nothing for you to
+            press.
           </P>
+          <div className="flex flex-col gap-2">
+            <span className="text-[15px] font-semibold">What happens then</span>
+            <Rules ordered items={CONNECT_HAPPENS} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-[15px] font-semibold">After that</span>
+            <Rules items={AFTER_CONNECT} />
+          </div>
         </Section>
 
         <Section id="chat" title="5 · Add the chat box">
