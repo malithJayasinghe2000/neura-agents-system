@@ -52,9 +52,16 @@ A remote MCP server inside NEURA's API, `POST /v1/developers/mcp`. The developer
 their AI tool. Every developer gets a rule change the moment it ships, and none of our code is published.
 (Not chosen: a package the developer installs, which can teach an old format and would publish our code.)
 
-It speaks the same MCP revision as SELL's server (`2025-06-18`) over JSON-RPC 2.0. **The JSON-RPC framing moves
-out of `agents/sell` into a shared package below the apps**, so that NEURA's API does not import an agent's code
-(AGENTS.md rule 2) and the two servers cannot drift apart.
+**It is built on the official MCP library** (the MCP project's Python SDK, open source, MIT licence), not on
+hand-made protocol code (the owner's yes, 2026-10-02, after asking what it costs: nothing in money; the cost is
+updating it on purpose, like any library). The library follows each new revision of the MCP standard and does
+the safety checks the standard requires of a server (among them the `Origin` check against DNS rebinding); we
+write only what the teacher says. It runs **stateless, answering in plain JSON**: no session, nothing kept
+between questions, so any copy of NEURA's API can answer any question. The library is added to `neura-api`
+only, at a pinned version, and updated deliberately with the tests of §5. **Fallback:** if the library cannot
+sit with the project's own pinned dependencies, the server uses SELL's hand-made JSON-RPC framing instead,
+moved to a shared package below the apps so that NEURA's API does not import an agent's code (AGENTS.md
+rule 2). SELL's own server is not changed by this ADR; moving it to the library is its own later step.
 
 ### 3. Public: no account, no token, a limit on how often (Q1, Q2)
 
@@ -78,6 +85,14 @@ Four read-only tools:
 | `get_rules` | The rules developers get wrong, among them: the token on every address except `/health`; everything is `GET`; cursors, not page numbers; a missing record is a `404`; the exact `"ok"` and `"1.0"`; customers only, never staff (G7); `"active"` for a product on sale, or NEURA-SELL never recommends it (G69); drafts stay hidden from shoppers (G37); one variant for a product without sizes; a price is text plus a three-letter currency; **do not build webhooks to NEURA yet** (G66); and how to fit a shop's own data (G4) |
 | `get_openapi` | The whole OpenAPI file, for a code generator |
 
+**Marked the MCP way.** Every tool carries the standard's labels: *read only*, *always the same answer for the
+same question*, *changes nothing*, and *reaches nothing outside NEURA*. Every answer is **structured** (with
+its format declared) and also given as plain text, for AI tools that read only text.
+
+**Every answer names the format version it teaches**, today `"1.0"`, the bridge's `spec_version`. The tools take
+an optional version; when a version 2.0 of the bridge's format exists, the teacher teaches both, and a
+developer whose shop is on 1.0 is never taught 2.0 by surprise. This is what lets it grow with the format.
+
 ### 5. It is true because it is built from the code, and tested (Rule 4)
 
 - **The formats come from `build_openapi()`** (`neura_adapters/generic/spec.py`), the same function that makes
@@ -92,6 +107,11 @@ Four read-only tools:
   [E8](../../open-questions.md) asks what replaces them for such a surface; here it is, stated rather than
   improvised: deterministic tests of the content (above) and of the protocol (`initialize`, `tools/list`,
   `tools/call`, the error codes), and of the limit.
+- **Tried with real AI tools before it is announced**: the MCP project's own test tool (*MCP Inspector*, free),
+  and one real AI coding tool. The second uses an AI model, so it runs only with the owner's yes, as every model
+  run does. (Nothing shows that SELL's MCP server was ever tried this way; this one will be.)
+- **Counted, never read**: how many times each tool is called, per format version. Never what was asked, never
+  who asked. That count is how the *Review* below is answered.
 
 **G66 in the same change:** the OpenAPI file's `entityChanged` says *"Not used yet: NEURA has no address that
 receives these. Do not build them."* Otherwise `get_openapi` and `get_rules` would contradict each other. (The
@@ -109,12 +129,14 @@ same placeholder the chat box line does.
 
 ### 7. Order of building
 
-1. Move the JSON-RPC framing to the shared package; SELL's server uses it unchanged (its tests prove it).
+1. The official MCP library in `neura-api`, pinned; first prove it sits with the project's dependencies (or take
+   §2's fallback).
 2. The content: the rules module and the samples, beside `spec.py`, with the tests of §5. Test first.
-3. The route, public, with the limit.
+3. The route, public, stateless, with the limit, the labels and the count.
 4. G66's sentence in the OpenAPI file.
-5. The guide's sentence; FEATURES.md's line, in the same change (CLAUDE.md §6).
-6. The Help mockup, the owner's approval, then Help.
+5. Tried with *MCP Inspector*; then, with the owner's yes, with one real AI coding tool.
+6. The guide's sentence; FEATURES.md's line, in the same change (CLAUDE.md §6).
+7. The Help mockup, the owner's approval, then Help.
 
 ## Consequences
 
@@ -126,8 +148,15 @@ same placeholder the chat box line does.
   §5 make a mismatch fail rather than ship.
 - **It needs NEURA's public address** before it can be announced to anyone real.
 
+- **Growth.** Nothing is kept between questions and the answers are prepared once at start-up, so any number of
+  copies of NEURA's API can answer, sharing only the limiter's counters. If it ever outgrows the one deployable
+  ([ADR-0002](0002-modular-monolith.md)), it can move out alone: it needs no database and no shop.
+- **One more library to keep current** (the MCP SDK), updated on purpose, never by accident.
+
 ## Alternatives considered
 
+- **Hand-made protocol code**, as SELL's server has. Kept only as §2's fallback: every revision of the MCP
+  standard would have to be noticed and followed by hand, and SELL's server is still fixed to `2025-06-18`.
 - **A package the developer installs** (Q2). Works offline, and could later check a bridge on the developer's
   own computer, but teaches whatever version was installed, and publishes our code: the open-source question in
   [blueprint-v2.md §11.5](../../business/blueprint-v2.md) is the owner's to answer first.
@@ -141,7 +170,9 @@ same placeholder the chat box line does.
   the shop owner makes), NEURA calling a typed address (G47's rules), or a package that checks on the
   developer's own computer (the open-source question).
 - **The limit's value**, set from use.
-- **The MCP revision policy** for both servers ([P9](../../open-questions.md)).
+- **The MCP revision policy** for both servers ([P9](../../open-questions.md)); the library narrows it for
+  this one, it does not answer it.
+- **Moving SELL's MCP server to the library.**
 - **NEURA's public address.**
 
 ## Review
