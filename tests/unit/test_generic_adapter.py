@@ -528,6 +528,67 @@ async def test_an_unauthenticated_store_is_not_conformant() -> None:
 
     assert not report.is_conformant
     assert {f.check for f in report.errors} >= {"auth.required", "auth.rejects_wrong_token"}
+    # A shop that lists orders is checked where its customers are.
+    assert all("/orders" in f.message for f in report.errors if f.check.startswith("auth."))
+
+
+#: The guide's first three addresses: /health, /products, /products/{id}.
+PRODUCTS_ONLY = frozenset({Capability.PRODUCT_READ, Capability.PRODUCT_SEARCH})
+
+
+def built_products_only(store: ReferenceStore):
+    """A bridge routed the way many frameworks route: an address that was never
+    built answers 404 before any token check runs (G50)."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path = request.url.path.removeprefix(store.prefix)
+        if path in ("/health", "/products") or path.startswith("/products/"):
+            return store.handle(request)
+        store.requests.append(request)
+        return httpx.Response(404, json={"error": f"no such endpoint: {path}"})
+
+    return handle
+
+
+async def test_a_shop_that_never_built_orders_is_not_failed_for_them() -> None:
+    """G50: the check knocked on /orders anyway, read the 404 as an open door,
+    and two false failures locked the owner's Connect."""
+    store = ReferenceStore(capabilities=PRODUCTS_ONLY)
+    adapter = adapter_for_handler(built_products_only(store))
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    assert report.is_conformant, [f.message for f in report.errors]
+    assert {"auth.required", "auth.rejects_wrong_token", "errors.not_found"} <= set(
+        report.passed_checks
+    )
+    assert not [r for r in store.requests if r.url.path.startswith(f"{store.prefix}/orders")]
+
+
+async def test_a_shop_without_orders_still_has_its_token_checked() -> None:
+    store = ReferenceStore(capabilities=PRODUCTS_ONLY, defects=frozenset({Defect.NO_AUTH}))
+    adapter = adapter_for(store)
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    errors = {f.check: f for f in report.errors}
+    assert {"auth.required", "auth.rejects_wrong_token"} <= errors.keys()
+    assert errors["auth.required"].message.startswith("/products ")
+    assert errors["auth.required"].hint.endswith("can read the store's products.")
+
+
+async def test_a_shop_without_orders_is_asked_for_a_missing_product_instead() -> None:
+    store = ReferenceStore(capabilities=PRODUCTS_ONLY, defects=frozenset({Defect.MISSING_AS_200}))
+    adapter = adapter_for(store)
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    finding = next(f for f in report.errors if f.check == "errors.not_found")
+    assert finding.message.startswith("an unknown product id returned HTTP 200")
+    assert "about a product that does not exist" in finding.hint
 
 
 async def test_running_without_a_token_says_so_rather_than_passing_quietly() -> None:

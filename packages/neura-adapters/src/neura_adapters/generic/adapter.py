@@ -143,7 +143,9 @@ class GenericAdapter:
         # Imported here: http_checks imports this module for its paths.
         from neura_adapters.generic.http_checks import run_http_checks
 
-        await run_http_checks(self._client, report)
+        # What /health listed (the shared suite asked it first), so an address
+        # the shop never built is never knocked on (G50).
+        await run_http_checks(self._client, report, frozenset(self.capabilities))
 
     @property
     def spec_version(self) -> str | None:

@@ -8,6 +8,7 @@ bridge (the reference store) rather than asserted about a dictionary.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from neura_adapters.generic.adapter import GenericAdapter
@@ -28,6 +29,7 @@ from neura_api.jobs.shop_check import (
 from neura_commerce import check_adapter
 from neura_core import ValidationError
 from neura_core.tenancy import SHOP_TOKEN_PREFIX, new_shop_token
+from neura_domain import Capability
 
 
 def adapter_for(store: ReferenceStore, *, token: str | None, base_url: str | None = None):
@@ -166,6 +168,33 @@ class TestOneCheckForTerminalAndDashboard:
         ran = set(report.passed_checks) | {f.check for f in report.findings}
         assert {"auth.required", "auth.rejects_wrong_token", "health.spec_version"} <= ran
         assert {"products.get_missing", "pagination"} <= ran
+
+    async def test_a_shop_with_only_its_products_can_connect(self) -> None:
+        """G50: the guide's first three addresses are enough to connect, even when
+        the bridge answers 404 for an address it never built before checking the
+        token. The owner's Connect used to stay locked by two false failures."""
+        store = ReferenceStore(
+            capabilities=frozenset({Capability.PRODUCT_READ, Capability.PRODUCT_SEARCH})
+        )
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            path = request.url.path.removeprefix(store.prefix)
+            if path in ("/health", "/products") or path.startswith("/products/"):
+                return store.handle(request)
+            return httpx.Response(404, json={"error": f"no such endpoint: {path}"})
+
+        adapter = GenericAdapter(
+            base_url=store.base_url(),
+            tenant_id="tn_unit",
+            token=DEFAULT_TOKEN,
+            transport=httpx.MockTransport(handle),
+        )
+        cause, _ = await diagnose(adapter)
+        report = await check_adapter(adapter)
+        await adapter.aclose()
+
+        result = outcome("https://shop.example/neura/v1", cause=cause, report=report)
+        assert result["conformant"] is True, result["text"]
 
     def test_developer_text_without_a_report_still_says_why(self) -> None:
         assert "Could not reach" in developer_text("https://x.example", "unreachable", None, None)
