@@ -1125,11 +1125,24 @@ Content-Type: application/json
           </div>
         </Section>
 
+        {/* NEURA has no address that receives change messages (tested
+            2026-09-30), though the OpenAPI file describes them (G66). The chat,
+            the suggestions and the AI connection read the bridge live; only
+            NEURA's copy, read by the dashboard and the product feed, waits for
+            Sync now (G67). */}
         <Section id="changes" title="Change messages">
+          <div className="flex flex-col gap-2 rounded-xl bg-[#f5f5f5] px-[18px] py-4">
+            <span className="text-[15px] font-semibold">Don&apos;t build these yet</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              NEURA has no address that receives them. The OpenAPI file already describes them (
+              {c("entityChanged")}, under webhooks): skip that part for now, and leave{" "}
+              {c("events.realtime")} out of your list (step 2).
+            </span>
+          </div>
           <P>
-            Your bridge may tell NEURA when a product or order changes.{" "}
-            {b("NEURA does not use these yet.")} Until it does, the shop owner presses{" "}
-            <em>Sync now</em> in their dashboard after adding products or changing stock.
+            {b("You lose nothing.")} The chat box asks your bridge live, so it sees a new product
+            or a stock change straight away. Only NEURA&apos;s own copy of the catalogue, used by
+            the shop owner&apos;s dashboard, waits until the owner presses <em>Sync now</em>.
           </P>
         </Section>
 
