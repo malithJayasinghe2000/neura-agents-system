@@ -98,6 +98,25 @@ async def test_the_official_client_sees_four_read_only_tools(mode: str) -> None:
         assert tool.output_schema, f"{tool.name} declares no output format"
 
 
+async def test_every_declared_output_field_says_what_it_is() -> None:
+    """MCP Inspector's strict check (step 5) warned that `sample_answer` was
+    declared as "anything": an output format that constrains nothing."""
+    async with _connected() as (client, _):
+        tools = (await client.list_tools()).tools
+
+    def bare(schema: dict[str, Any], at: str) -> list[str]:
+        if not set(schema) - {"title", "description", "default"}:
+            return [at]
+        found: list[str] = []
+        for name, inner in schema.get("properties", {}).items():
+            found += bare(inner, f"{at}.{name}")
+        return found
+
+    for tool in tools:
+        assert tool.output_schema is not None
+        assert bare(tool.output_schema, tool.name) == []
+
+
 @pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
 async def test_it_teaches_the_nine_addresses_with_their_format_version(mode: str) -> None:
     async with _connected(mode) as (client, _):

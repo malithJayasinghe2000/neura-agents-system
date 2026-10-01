@@ -127,7 +127,9 @@ class AddressDetail(BaseModel):
     request: dict[str, Any]
     schemas: dict[str, Any]
     sample_request: str
-    sample_answer: Any
+    #: One object (a product, an order, /health) or a list of them (categories,
+    #: stock, policies): every sample the teacher has is one of the two.
+    sample_answer: dict[str, Any] | list[dict[str, Any]]
     rules: list[RuleText]
 
 
