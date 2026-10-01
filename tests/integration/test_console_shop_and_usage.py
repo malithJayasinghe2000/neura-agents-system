@@ -191,6 +191,10 @@ class TestTheShopScreenReportsWhatWasRecorded:
             "index",
             "sync_asked",
             "notes",
+            # ADR-0052: the last full check (findings, never a token) and *when*
+            # the token was set (never the token).
+            "last_check",
+            "token_set_at",
         }
 
     def test_the_last_sync_is_reported_per_entity_type(self, client: TestClient, shop) -> None:

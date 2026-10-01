@@ -18,22 +18,22 @@ export type HelpStep = { title: string; body: string; check: string; who: Who };
 
 export const STEPS: HelpStep[] = [
   {
-    title: "Install the NEURA bridge in your shop",
-    body: "A small add-on that lets NEURA read your products, stock, orders and policy pages. It cannot change anything.",
-    check: "'Your shop answers' is ticked on Shop connection after you press Check now",
+    title: "Make your shop token",
+    body: "On Shop connection, press Make the token. It is shown once: send it to your developer through a password manager, never in a plain email.",
+    check: "Step 1 of 'Connect your shop' is ticked",
+    who: "You",
+  },
+  {
+    title: "Build the NEURA bridge in your shop",
+    body: "A small add-on that lets NEURA read your products, stock, orders and policy pages. It cannot change anything. Your developer puts the token in its settings and sends you its address.",
+    check: "Your developer sends you the bridge's address",
     who: "Your developer",
   },
   {
-    title: "Connect your shop to NEURA",
-    body: "FiveNeurals enters your shop's address and its secret token.",
-    check: "'Your shop is connected' is ticked",
-    who: "FiveNeurals",
-  },
-  {
-    title: "Copy your catalogue",
-    body: "NEURA reads your products, categories and policy pages once. After that, press Sync now whenever you add products or change stock.",
-    check: "'Your catalogue is copied' is ticked, with the time it was read",
-    who: "FiveNeurals, then you",
+    title: "Check and connect",
+    body: "Type the bridge's address on Shop connection and press Check. When it passes, press Connect: NEURA copies your catalogue. After that, press Sync now whenever you add products or change stock.",
+    check: "'Your shop is connected' and 'Your catalogue is copied' are ticked",
+    who: "You",
   },
   {
     title: "Add the chat box to your shop",
@@ -52,8 +52,12 @@ export const STEPS: HelpStep[] = [
 /** `sell`: a problem only a shop with NEURA-SELL can have — not listed for one without it. */
 export const TROUBLE: { seen: string; fix: string; sell?: true }[] = [
   {
-    seen: "'Your shop answers' fails",
-    fix: "Your shop is down, or the bridge isn't installed at the address FiveNeurals has. Your developer can check the address opens in a browser.",
+    seen: "The check says your shop refused the token",
+    fix: "The token in the bridge's settings is not the one you made. Your developer puts it in again. Lost it? Make a new one on Shop connection.",
+  },
+  {
+    seen: "The check can't reach your shop",
+    fix: "The address is wrong, or the bridge isn't online. Your developer can check the address opens in a browser.",
   },
   {
     seen: "The chat box doesn't appear",

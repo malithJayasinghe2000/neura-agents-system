@@ -9,6 +9,12 @@ own version of this page inside the console: **Help → Connecting your shop**. 
 in plain words, and each step's *"How you'll know"* is a tick on the console's **Shop connection**
 checklist. Keep the two in step.
 
+> **Since 2026-10-01 the owner connects the shop in the dashboard** ([ADR-0052](architecture/adr/0052-the-shop-owner-connects-their-own-shop.md)):
+> on **Shop connection** they make the shop token (shown once), their developer builds the bridge and puts it in,
+> and they press **Check**, then **Connect**. The shop token, the one-off `stores:write` key and the `curl` below
+> are then not needed (G3, G19, G23). FiveNeurals still makes the **account** and the chat box key. The API path
+> below still works, now with the public-address rule in production (G47); this runbook is rewritten in group C.
+
 **This is not a shop installation guide.** It assumes the shop already runs and a NEURA bridge — an
 implementation of the [published specification](spec/generic-commerce-interface-v1.md) — is installed
 in it. Building one is [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md).

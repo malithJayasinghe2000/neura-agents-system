@@ -46,12 +46,57 @@ export type ConnectedStore = {
   index: { products: number; searchable: number };
   sync_asked: SyncAsked | null;
   notes: Note[];
+  /** The newest full check of this connection (ADR-0052 §4), or `null`. */
+  last_check: ShopCheck | null;
+  /** When its token was last set. Never the token. */
+  token_set_at: string | null;
+};
+
+/**
+ * One run of the full check (ADR-0052 §4). `result` holds findings and counts,
+ * never a token; it is `null` while the check is still running.
+ */
+export type ShopCheck = {
+  id: string;
+  store_id: string | null;
+  address: string;
+  status: "pending" | "done" | "failed";
+  result: CheckResult | null;
+  requested_at: string;
+  finished_at: string | null;
+};
+
+export type CheckResult = {
+  /** The one reason everything else failed, when there is one (G48). */
+  cause:
+    | null
+    | "unreachable"
+    | "no_bridge"
+    | "not_ok"
+    | "token_refused"
+    | "address_refused"
+    | "no_token";
+  /** The server's own sentence, for `address_refused`. */
+  message: string | null;
+  passed: number;
+  failed: number;
+  warnings: number;
+  /** Clean enough to connect: the whole check ran, and nothing failed. */
+  conformant: boolean;
+  capabilities: string[];
+  /** The full result as plain text, for the developer. */
+  text: string;
 };
 
 export type ShopView = {
   stores: ConnectedStore[];
   /** Said by the server, not inferred from an empty array. */
   connected: boolean;
+  /**
+   * Before the shop is connected (ADR-0052): when a token was made (never the
+   * token) and the last check of the typed address. `null` once connected.
+   */
+  connect: { token_made_at: string | null; last_check: ShopCheck | null } | null;
   /** Facts about the shop rather than one connection — all read from our own tables. */
   setup?: {
     /** `null` when the shop has no live chat box key at all. */
@@ -61,14 +106,6 @@ export type ShopView = {
     receiving: boolean;
     window_days: number;
   };
-};
-
-export type Health = {
-  id: string;
-  reachable: boolean;
-  /** The adapter's own words when it is not. Never softened. */
-  detail: string;
-  capabilities: string[];
 };
 
 /** What each synced kind is called on screen. */
@@ -189,3 +226,66 @@ export function allowedWords(codes: string[]): Allowed[] {
   for (const code of codes) if (!seen.has(code)) words.push({ what: code });
   return words;
 }
+
+// ── The full check, in plain words (ADR-0052 §4) ─────────────────────────────
+
+/** What a clean check proved, for the owner: seven lines instead of nineteen check names. */
+export const PASSED_WORDS = [
+  "Your shop answers, and says what it can do",
+  "Only your token gets in",
+  "Products can be read and searched",
+  "Orders can be looked up",
+  "Long lists come page by page",
+  "It can send only what changed",
+  "Something missing answers \u201cnot found\u201d",
+] as const;
+
+/**
+ * The one sentence for a check that found a single cause (G48), or for a check
+ * that found problems of its own. The developer gets the full list separately.
+ */
+export function checkWords(result: CheckResult): { title: string; body: string } {
+  switch (result.cause) {
+    case "token_refused":
+      return {
+        title: "Your shop refused the token",
+        body: "Your bridge answers, but not with the token you made. Ask your developer to put it in the bridge's settings, then press Check again.",
+      };
+    case "unreachable":
+      return {
+        title: "We couldn't reach this address",
+        body: "Nothing answered. Check the address for typing mistakes, and ask your developer whether the bridge is online.",
+      };
+    case "no_bridge":
+      return {
+        title: "There is no bridge at this address",
+        body: "Something answered, but not a NEURA bridge. Check the address with your developer: it usually ends in /neura/v1.",
+      };
+    case "not_ok":
+      return {
+        title: "Your bridge says it is not ready",
+        body: "It answered, but not with \u201cok\u201d, so NEURA would treat your shop as down. Your developer can see why in the full check.",
+      };
+    case "address_refused":
+      return {
+        title: "NEURA won't call this address",
+        body: result.message ?? "This address is not allowed.",
+      };
+    case "no_token":
+      return {
+        title: "There is no token to check with",
+        body: "Make the shop token first.",
+      };
+    default:
+      return {
+        title:
+          result.failed === 1
+            ? "Your shop has 1 problem to fix"
+            : `Your shop has ${result.failed} problems to fix`,
+        body: "Send the full check to your developer. It says what is wrong and how to fix it.",
+      };
+  }
+}
+
+/** Where the guide for developers lives (ADR-0051). Live once the website is deployed. */
+export const DEVELOPER_GUIDE_URL = "https://neura.fiveneurals.com/docs/developers/";

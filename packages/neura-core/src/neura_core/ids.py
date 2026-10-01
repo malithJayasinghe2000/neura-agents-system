@@ -46,6 +46,9 @@ WEBHOOK: Final = "whk"
 #: which keeps its ``evt_`` id across every endpoint and every retry because it
 #: is the merchant's dedupe key.
 WEBHOOK_DELIVERY: Final = "whd"
+#: One run of the full check against a shop's bridge (ADR-0052 §4). Not "chk",
+#: which a search-index chunk already uses.
+SHOP_CHECK: Final = "shc"
 
 
 def new_id(prefix: str) -> str:

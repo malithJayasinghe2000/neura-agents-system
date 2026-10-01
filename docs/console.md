@@ -370,6 +370,45 @@ catalogue lacks; Sync now queues one full read, twice is one, shows on the scree
 shop's store, 401 with no session); `test_console_screens.py` +6 (the sentences, singular and plural; variants not
 counted).
 
+#### Connect your shop, from the dashboard: approved and BUILT 2026-10-01 (ADR-0052, canvas row 10, boards 31-35)
+
+**The owner connects their own shop.** Decided by the owner on 2026-10-01 (ideas D2 and D5 in
+[CONNECTING_A_NEW_SHOP_LOG.md](CONNECTING_A_NEW_SHOP_LOG.md)), recorded in
+[ADR-0052](architecture/adr/0052-the-shop-owner-connects-their-own-shop.md), which amends the two decisions above:
+the connect form is now built, and a token is shown **once**, by the response that made it.
+
+| part | what it does |
+|:--|:--|
+| **Connect your shop** (not connected) | Replaces *"No shop connected yet"*. Three steps, each saying who: **1 You** make the shop token (NEURA makes it, shown once with Copy and how to send it safely; after a reload only *when* it was made); **2 Your developer** builds the bridge (*Copy the guide link*); **3 You** type the bridge's address, press **Check**, then **Connect and copy my catalogue** |
+| **The check** | The full check (`neura_commerce.check_adapter`, the terminal tool's own), queued as a `shop.check` job and watched every 3 s, like Sync now. One cause said first (G48): *Your shop refused the token* / *We couldn't reach this address* / *There is no bridge at this address*. *Copy the full check for your developer* gives the technical list, without the private file path (G17). A clean check says *"The check proves the format, not the facts."* |
+| **Connect** | Only after a clean check of the same address, made after the token. Saves the connection, discards the waiting token, queues the full copy, and keeps that clean check as the connection's first |
+| **Your shop passes the check** (connected) | Replaces *Your shop answers*. **Check again** runs the full check; the page opens on the last one, read from our table, so a page load still never asks the shop |
+| **Your shop token** (connected) | *Set {when}*, never the token. **Make a new token** asks first and says what really happens (G49): NEURA stops using the old token at once, **your shop still accepts it until your developer puts the new one in**. The new token is shown once |
+
+**What building it decided, each a correction of the mockup, none a new feature:**
+
+| # | the mockup said | built as | why |
+|:--|:--|:--|:--|
+| 1 | *"ecommerce.test · connected by you on Sep 30"* | the address only | who connected is not stored on the connection; the audit log has it |
+| 2 | the connect card replaces the page | the connect card, then *Get set up* below it; *Help* linked once, from the card | the chat box and Sold out steps still belong on the checklist |
+| 3 | after *Check*, step 1 folds to *"Made today"* | the token stays on screen for the rest of that visit | a reload is what hides it; copying it twice in one visit is no leak |
+| 4 | (not drawn) | after Connect, the page opens on the clean check, not *"Not checked yet"* | found in the browser test; the check is carried over to the connection |
+| 5 | *"the old one stops working at once"* | *"your shop still accepts the old one until your developer puts the new one in"* | G49, fixed in the ADR before the build |
+
+**API, 2026-10-01** (`routes/console_connect.py`): `POST /console/shops/{t}/token` (returned once; 409 when
+connected), `POST /checks` (`{address}` or `{store_id}`; 202; one live check per shop; 409 without a token),
+`GET /checks/{id}`, `POST /connect` (409 `CHECK_FIRST` without a clean check of that address after the token),
+`POST /store/{s}/token` (returned once). `GET /store` gains `connect` (when a token was made, the last check) and,
+per connection, `last_check` and `token_set_at`. Tables `shop_tokens` (sealed like `tenant_stores.credentials`) and
+`shop_checks` (findings, never a token). Each token made, replaced and each connect writes an audit event, with no
+token. **Addresses** (`addresses.py`, G47): in production `https://` and public internet addresses only, checked
+before every call, for `POST /v1/stores` too; outside production a test shop on this machine is allowed. **Open:**
+DNS rebinding (a name re-resolved between the check and the call), stated in ADR-0052 §3.
+
+**Checked:** `make check` (1400 unit, 453 integration: `test_shop_connect.py` 27, `test_console_connect.py` 8);
+`make console-check` 109 of 109; a live run against the API (24 of 24) and a real-Chrome run of the whole flow (25 of
+25), both on throwaway test accounts with a fake bridge (the reference store), never on a real test shop.
+
 ### 3.5 Usage
 
 Conversations, turns, escalations, blocked attacks, tokens, cost — from `tenant_usage`, which has been written since 1.14.
@@ -612,7 +651,7 @@ nothing to look at is not a check* — the same lesson as **E6**, in a third pla
 | **Node and npm enter a pure-Python repo** | Second toolchain in `make check`; two ways to have a stale dependency. |
 | **One role, `owner`** | A merchant who wants to give a support agent read-only access cannot, until somebody asks and it is designed. |
 | **No approval queue** | Every write feature stays blocked. This is by design and is the next thing the console unlocks. |
-| **No connect form (v1)** | A merchant cannot connect their own shop; somebody with API access has to. Deliberate — see §3.4. It blocks self-serve onboarding and nothing else. |
+| ~~**No connect form (v1)**~~ | **Lifted 2026-10-01** ([ADR-0052](architecture/adr/0052-the-shop-owner-connects-their-own-shop.md)): the owner connects their own shop on Shop connection. A new shop's **account** is still made by FiveNeurals. |
 | **Shadow mode must be on to have anything to review** | A merchant who goes live immediately sees an empty Review screen forever. **Done 2026-08-27** — the empty state says exactly that, and distinguishes it from a filter that matched nothing. |
 
 ---

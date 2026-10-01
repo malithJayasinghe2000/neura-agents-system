@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Protocol, runtime_checkable
 
 from neura_commerce.pagination import Cursor
 from neura_commerce.protocol import CommerceAdapter
@@ -70,6 +71,31 @@ class ConformanceReport:
 
     def passed(self, check: str) -> None:
         self.passed_checks.append(check)
+
+
+@runtime_checkable
+class ProtocolChecks(Protocol):
+    """An adapter that can check what the shared suite cannot see.
+
+    The shared suite runs *through* the adapter, so status codes, headers and the
+    token are already absorbed by the time it looks. An adapter that speaks a wire
+    protocol of its own may check those as well. Found by its shape, never by an
+    import: the core must not learn which adapters exist (ADR-0052 §4).
+    """
+
+    async def run_protocol_checks(self, report: ConformanceReport) -> None: ...
+
+
+async def check_adapter(adapter: CommerceAdapter) -> ConformanceReport:
+    """Every check there is for one adapter: the shared suite, then its own.
+
+    The one implementation behind both the terminal tool and the dashboard's
+    *Check* (ADR-0052 §4), so the two can never disagree about a shop.
+    """
+    report = await run_conformance(adapter)
+    if isinstance(adapter, ProtocolChecks):
+        await adapter.run_protocol_checks(report)
+    return report
 
 
 async def run_conformance(adapter: CommerceAdapter) -> ConformanceReport:

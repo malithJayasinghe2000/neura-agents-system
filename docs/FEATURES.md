@@ -91,7 +91,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | **Suggestions** (NEURA-SELL) | See and choose what shows with each product. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Sold out** (NEURA-SELL) | Sold-out products people kept looking at. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Usage and cost** | Chats, AI use and its cost, by assistant. | ✅ Built |
-| **Shop connection** | A setup checklist, **Sync now**, what the shop lets the assistant do. | ✅ Built |
+| **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. | ✅ Built (ADR-0052) |
 | **Help** | *Connecting your shop*, step by step. | ✅ Built |
 | Settings and keys (the owner makes the chat box key) | — | ⬜ Not designed (needs an ADR) |
 

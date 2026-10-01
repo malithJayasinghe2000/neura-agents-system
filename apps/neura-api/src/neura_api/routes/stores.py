@@ -24,10 +24,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from neura_api.addresses import check_shop_address
 from neura_api.dependencies import require
 from neura_api.envelopes import envelope
 from neura_api.jobs import SYNC_STORE, enqueue_sync
-from neura_core import NotFoundError, ServiceUnavailableError, get_logger
+from neura_core import NotFoundError, ServiceUnavailableError, get_logger, get_settings
 from neura_core.jobs import JobQueue, JobStatus
 from neura_core.tenancy import AuthenticatedCaller, StoreConnectionRepository
 
@@ -60,12 +61,15 @@ async def connect(
     body: ConnectStore,
     caller: Annotated[AuthenticatedCaller, Depends(require("stores:write"))],
 ) -> dict[str, Any]:
+    # The same rule as the dashboard's (ADR-0052 §3, G47): two doors, one rule.
+    base_url = await check_shop_address(body.base_url, production=get_settings().is_production)
+
     database = request.app.state.database
     async with database.tenant_session(caller.tenant_id) as session:
         store_id = await StoreConnectionRepository(session).connect(
             caller.tenant_id,
             platform=body.platform,
-            base_url=body.base_url,
+            base_url=base_url,
             credentials=body.credentials,
         )
 
@@ -80,7 +84,7 @@ async def connect(
         platform=body.platform,
     )
     return envelope(
-        {"id": store_id, "platform": body.platform, "base_url": body.base_url, "status": "active"},
+        {"id": store_id, "platform": body.platform, "base_url": base_url, "status": "active"},
         request_id=getattr(request.state, "request_id", None),
     )
 

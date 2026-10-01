@@ -23,10 +23,12 @@ from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
 from neura_api.jobs import (
     RETENTION_SWEEP,
+    SHOP_CHECK,
     SYNC_STORE,
     WEBHOOK_DRAIN,
     JobRunner,
     RetentionSweepHandler,
+    ShopCheckHandler,
     SyncStoreHandler,
     WebhookDrainHandler,
 )
@@ -42,6 +44,7 @@ from neura_api.registry import (
 from neura_api.routes import agent as agent_routes
 from neura_api.routes import (
     console,
+    console_connect,
     console_conversations,
     console_review,
     console_shop,
@@ -183,6 +186,8 @@ def _job_runner(
     # The deletions ADR-0042 §3 requires to *run*. Registered here, not by an
     # agent: conversations and observed events belong to no one agent.
     runner.register(RETENTION_SWEEP, RetentionSweepHandler(get_settings()))
+    # The dashboard's full check of a shop's bridge (ADR-0052 §4).
+    runner.register(SHOP_CHECK, ShopCheckHandler(production=get_settings().is_production))
 
     # ...plus whatever the installed agents own. Discovered rather than named
     # here, for the reason the other four seams are ([ADR-0045]): background
@@ -278,6 +283,7 @@ def create_app() -> FastAPI:
     app.include_router(console_review.router, prefix="/v1")
     app.include_router(console_conversations.router, prefix="/v1")
     app.include_router(console_shop.router, prefix="/v1")
+    app.include_router(console_connect.router, prefix="/v1")
     app.include_router(console_usage.router, prefix="/v1")
     app.include_router(console_sold_out.router, prefix="/v1")
     # Mounted once, and it names no agent — that is the whole point

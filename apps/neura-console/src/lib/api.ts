@@ -27,7 +27,7 @@
 const BASE = "/api";
 
 import type { ReviewTurn, Scorecard, Verdict } from "@/lib/review";
-import type { Health, ShopView, SyncAsked } from "@/lib/shop";
+import type { ShopCheck, ShopView, SyncAsked } from "@/lib/shop";
 
 /** The API's envelope: `{ data, meta }`, on success and on error alike. */
 type Envelope<T> = { data: T; error?: { message?: string } };
@@ -114,16 +114,6 @@ export function gradeTurn(
 // ── Shop connection (console.md §3.4) ────────────────────────────────────────
 
 /**
- * *Check now* — asks the shop, right now, whether it answers and what it
- * allows. Made only when the owner presses the button, never on a page load:
- * it is a request to the merchant's own server. A shop that did not answer is
- * a 200 describing the failure, so this resolves either way.
- */
-export function checkShop(tenantId: string, storeId: string): Promise<Health> {
-  return call(`/shops/${encodeURIComponent(tenantId)}/store/${encodeURIComponent(storeId)}/health`);
-}
-
-/**
  * *Sync now* — queues a fresh read of the shop into **our copy**. Nothing is
  * written to the shop. Pressing it again while one is queued or running
  * returns that one: it is one sync, not two.
@@ -141,6 +131,50 @@ export function syncShop(
  * The Review scorecard, read from the browser — for the side menu's badge. The
  * layout reads it once; this keeps it current as the owner moves around (G40).
  */
+// ── Connecting a shop (ADR-0052) ──────────────────────────────────────────────
+// The browser never sends a token: NEURA makes it and returns it once. The only
+// thing these send is an address.
+
+const shopPath = (tenantId: string) => `/shops/${encodeURIComponent(tenantId)}`;
+
+/** Make the shop token. Returned **once**; nothing reads it back. */
+export function makeShopToken(tenantId: string): Promise<{ token: string; made_at: string }> {
+  return call(`${shopPath(tenantId)}/token`, { method: "POST" });
+}
+
+/** A new token for a connected shop. Returned **once**. */
+export function replaceShopToken(
+  tenantId: string,
+  storeId: string,
+): Promise<{ token: string; made_at: string }> {
+  return call(`${shopPath(tenantId)}/store/${encodeURIComponent(storeId)}/token`, {
+    method: "POST",
+  });
+}
+
+/** Start the full check: of a typed address, or of a connection. Returns at once. */
+export function startShopCheck(
+  tenantId: string,
+  what: { address: string } | { store_id: string },
+): Promise<{ check: ShopCheck }> {
+  return call(`${shopPath(tenantId)}/checks`, { method: "POST", body: JSON.stringify(what) });
+}
+
+export function readShopCheck(tenantId: string, checkId: string): Promise<{ check: ShopCheck }> {
+  return call(`${shopPath(tenantId)}/checks/${encodeURIComponent(checkId)}`);
+}
+
+/** Connect, after a clean check of this address. Queues the full copy. */
+export function connectShop(
+  tenantId: string,
+  address: string,
+): Promise<{ id: string; base_url: string }> {
+  return call(`${shopPath(tenantId)}/connect`, {
+    method: "POST",
+    body: JSON.stringify({ address }),
+  });
+}
+
 export function readScorecard(tenantId: string): Promise<Scorecard> {
   return call(`/shops/${encodeURIComponent(tenantId)}/review/scorecard`);
 }

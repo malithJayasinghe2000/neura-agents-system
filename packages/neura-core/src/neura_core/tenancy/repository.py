@@ -385,6 +385,44 @@ class StoreConnectionRepository:
             for row in rows
         ]
 
+    async def replace_credentials(
+        self, tenant_id: str, store_id: str, credentials: dict[str, str]
+    ) -> bool:
+        """Seal new credentials over an existing connection. ``False`` if no such row.
+
+        *Make a new token* (ADR-0052 §2). Only what NEURA sends changes: the shop's
+        bridge keeps accepting the old token until its developer puts the new one
+        in, because the bridge, not NEURA, checks it (G49).
+        """
+        dek = generate_key()
+        kek = self._require_kek()
+        result = await self._session.execute(
+            update(tenant_stores)
+            .where(tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id)
+            .values(
+                credentials=encrypt(
+                    json.dumps(credentials, sort_keys=True), dek, aad=tenant_id.encode()
+                ),
+                wrapped_dek=wrap_dek(dek, kek, tenant_id=tenant_id),
+                updated_at=func.now(),
+            )
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def credentials_set_at(self, tenant_id: str, store_id: str) -> datetime | None:
+        """When this connection's credentials were last written. Never the credentials.
+
+        ``updated_at``: only ``connect`` and ``replace_credentials`` write it.
+        """
+        value = (
+            await self._session.execute(
+                select(tenant_stores.c.updated_at).where(
+                    tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id
+                )
+            )
+        ).scalar_one_or_none()
+        return value
+
     async def disconnect(self, store_id: str) -> None:
         await self._session.execute(delete(tenant_stores).where(tenant_stores.c.id == store_id))
 

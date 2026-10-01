@@ -6,7 +6,7 @@
  * four parts, in the order an owner needs them:
  *
  * - **Get set up** — a checklist, each step ticked or not yet, and who does it:
- *   connected, answers (*Check now*, still a click), catalogue copied, chat box
+ *   connected, passes the check (*Check now*, still a click), catalogue copied, chat box
  *   on the shop; then, optional and needed for Sold out, the data agreement and
  *   product views arriving. Every tick but *answers* is read from our own
  *   tables.
@@ -14,22 +14,27 @@
  *   syncs by itself yet"*, **Sync now** (writes our copy, never the shop), each
  *   kind's last run, and how much search by meaning covers.
  * - **What your shop lets the assistant do** — the shop's own declaration in
- *   plain words, after *Check now*; and always *Read only*.
+ *   plain words, from the last check; and always *Read only*.
  * - **Connection details** — for a developer or support.
  *
- * **Still read-only towards the shop.** The connect form stays unbuilt (§3.4:
- * a credential form would be the highest-value target in the application), and
- * **no credential is displayed, not even masked** — guaranteed by the query,
- * which never selects those columns, not by this file.
+ * **Since 2026-10-01 the owner connects their own shop here** (ADR-0052, canvas
+ * row 10): *Connect your shop* replaces *"No shop connected yet"*. NEURA makes
+ * the shop token and shows it **once**; the browser never sends one, only the
+ * bridge's address. *Check now* became the **full check**, run in the
+ * background; a connected shop gains *Your shop token* with *Make a new token*.
+ * **No stored credential is displayed, not even masked**: a token appears only
+ * in the response that made it.
  *
- * **Nothing here reaches the shop on a page load.** *Check now* is a button;
- * its answer lives in the page (`HealthChecks`), not in the address, so the
- * page can be re-read after a sync without asking the shop again.
+ * **Nothing here reaches the shop on a page load.** The check is a button; the
+ * page first shows the **last** check, read from our own table (`ShopChecks`),
+ * so it can be re-read after a sync without asking the shop again.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight } from "lucide-react";
-import { AllowedList, AnswersItem, HealthChecks } from "@/components/shop/health-check";
+import { AllowedList, CheckItem, ShopChecks } from "@/components/shop/full-check";
+import { ConnectShop } from "@/components/shop/connect-shop";
+import { ShopToken } from "@/components/shop/shop-token";
 import { SetupItem } from "@/components/shop/setup-item";
 import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { SyncNow } from "@/components/shop/sync-now";
@@ -78,10 +83,25 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
           </AlertDescription>
         </Alert>
       ) : (
-        <HealthChecks tenantId={tenantId}>
+        <ShopChecks tenantId={tenantId} stores={view.data.stores}>
+          {view.data.connected ? null : (
+            <ConnectShop
+              tenantId={tenantId}
+              initial={view.data.connect ?? { token_made_at: null, last_check: null }}
+            />
+          )}
           <GetSetUp tenantId={tenantId} view={view.data} sell={sell} />
           {view.data.connected ? (
             <>
+              {view.data.stores.map((store) => (
+                <ShopToken
+                  key={`token-${store.id}`}
+                  tenantId={tenantId}
+                  storeId={store.id}
+                  setAt={store.token_set_at}
+                  named={view.data.stores.length > 1 ? host(store.base_url) : null}
+                />
+              ))}
               {view.data.stores.map((store) => (
                 <StoreParts
                   key={store.id}
@@ -92,10 +112,8 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
               ))}
               <ConnectionDetails tenantId={tenantId} stores={view.data.stores} />
             </>
-          ) : (
-            <NotConnected />
-          )}
-        </HealthChecks>
+          ) : null}
+        </ShopChecks>
       )}
     </>
   );
@@ -117,12 +135,14 @@ function GetSetUp({ tenantId, view, sell }: { tenantId: string; view: ShopView; 
         <h2 id="get-set-up" className="text-lg font-semibold">
           Get set up
         </h2>
-        <Link
-          href={`/console/${encodeURIComponent(tenantId)}/help`}
-          className="inline-flex items-center gap-1 text-sm font-medium underline-offset-3 hover:underline"
-        >
-          Help: connecting your shop <ArrowRight className="size-3.5" aria-hidden />
-        </Link>
+        {view.connected ? (
+          <Link
+            href={`/console/${encodeURIComponent(tenantId)}/help`}
+            className="inline-flex items-center gap-1 text-sm font-medium underline-offset-3 hover:underline"
+          >
+            Help: connecting your shop <ArrowRight className="size-3.5" aria-hidden />
+          </Link>
+        ) : null}
       </div>
 
       <ul className="divide-y">
@@ -133,7 +153,7 @@ function GetSetUp({ tenantId, view, sell }: { tenantId: string; view: ShopView; 
             item="connected"
             state="not-yet"
             title="Your shop is connected"
-            detail="Not yet · FiveNeurals connects it, with your shop's address and its secret token"
+            detail="Not yet · connect it above, in three steps"
           />
         )}
 
@@ -199,11 +219,11 @@ function StoreSteps({ store, named }: { store: ConnectedStore; named: boolean })
         title="Your shop is connected"
         detail={
           store.status === "active"
-            ? `${host(store.base_url)} · set up by FiveNeurals`
+            ? host(store.base_url)
             : `${host(store.base_url)} · the connection is ${store.status}`
         }
       />
-      <AnswersItem storeId={store.id} />
+      <CheckItem storeId={store.id} />
       <SetupItem
         item="catalogue"
         state={read ? "done" : "not-yet"}
@@ -381,26 +401,5 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
       <dt className="text-muted-foreground">{label}</dt>
       <dd>{children}</dd>
     </div>
-  );
-}
-
-/**
- * The empty state that matters most on this screen: nothing is connected, so
- * nothing anywhere else in the console will ever have data in it.
- */
-function NotConnected() {
-  return (
-    <section className="space-y-2 rounded-2xl border border-dashed p-5 sm:p-7">
-      <h2 className="text-lg font-semibold">No shop connected yet</h2>
-      <p className="leading-relaxed">
-        Until a shop is connected, your assistant has no catalogue to answer from and no orders to
-        look up — every other screen here stays empty.
-      </p>
-      <p className="leading-relaxed text-muted-foreground">
-        Connecting is not done from this screen: it needs your shop&apos;s address and its secret
-        token, and those go in through FiveNeurals rather than through a form in a browser. This
-        page fills in as soon as they have.
-      </p>
-    </section>
   );
 }

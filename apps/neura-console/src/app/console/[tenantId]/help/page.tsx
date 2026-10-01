@@ -49,22 +49,23 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
         </h2>
         <div className="grid gap-3 md:grid-cols-3">
           <Who title="You">
-            Follow the checklist on{" "}
+            Make the shop token and connect your shop on{" "}
             <Link href={`${base}/shops`} className="underline underline-offset-3">
               Shop connection
             </Link>
-            . Read and grade replies in{" "}
+            , then follow its checklist. Read and grade replies in{" "}
             <Link href={`${base}/review`} className="underline underline-offset-3">
               Review
             </Link>{" "}
             while practice mode is on. Decide when to go live.
           </Who>
           <Who title="Your developer">
-            Installs the NEURA bridge in your shop, and adds the chat box to your shop&apos;s pages.
+            Builds the NEURA bridge in your shop, puts your token in it, and adds the chat box to
+            your shop&apos;s pages.
             {sell ? " Switches on product views if you want Sold out." : null}
           </Who>
           <Who title="FiveNeurals" aside="(for now)">
-            Creates your account, connects your shop and copies your catalogue the first time.
+            Creates your account and gives you the chat box key.
             {sell ? " Records a data agreement if you want Sold out." : null}
           </Who>
         </div>

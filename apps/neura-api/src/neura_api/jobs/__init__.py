@@ -20,6 +20,12 @@ from neura_api.jobs.runner import (
     JobRunner,
     UnknownJobKindError,
 )
+from neura_api.jobs.shop_check import (
+    SHOP_CHECK,
+    ShopCheckHandler,
+    enqueue_check,
+    live_check_id,
+)
 from neura_api.jobs.sync import (
     SYNC_STORE,
     SyncJobFailedError,
@@ -36,19 +42,23 @@ __all__ = [
     "CLAIM_LIMIT",
     "POLL_INTERVAL_S",
     "RETENTION_SWEEP",
+    "SHOP_CHECK",
     "SYNC_STORE",
     "WEBHOOK_DRAIN",
     "Handler",
     "JobContext",
     "JobRunner",
     "RetentionSweepHandler",
+    "ShopCheckHandler",
     "SweepResult",
     "SyncJobFailedError",
     "SyncStoreHandler",
     "UnknownJobKindError",
     "WebhookDrainHandler",
+    "enqueue_check",
     "enqueue_drain",
     "enqueue_sweep",
     "enqueue_sync",
+    "live_check_id",
     "sweep",
 ]

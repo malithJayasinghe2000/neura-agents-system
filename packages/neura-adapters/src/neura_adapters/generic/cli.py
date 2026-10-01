@@ -25,10 +25,9 @@ from rich.console import Console
 from neura_adapters.generic import webhooks
 from neura_adapters.generic.adapter import GenericAdapter
 from neura_adapters.generic.client import DEFAULT_TIMEOUT_S
-from neura_adapters.generic.http_checks import run_http_checks
 from neura_adapters.generic.reference import DEFAULT_TOKEN, ReferenceStore
 from neura_adapters.generic.wire import SPEC_VERSION
-from neura_commerce import AdapterError, ConformanceReport, Severity, run_conformance
+from neura_commerce import AdapterError, ConformanceReport, Severity, check_adapter
 from neura_core import configure_logging
 
 console = Console()
@@ -99,16 +98,15 @@ def _build_parser() -> argparse.ArgumentParser:
 # ── Running ──────────────────────────────────────────────────────────────────
 
 
-async def check_store(adapter: GenericAdapter, *, token: str | None) -> ConformanceReport:
+async def check_store(adapter: GenericAdapter) -> ConformanceReport:
     """Both suites, one report.
 
     The shared adapter suite proves the store behaves like a commerce platform;
     the HTTP checks prove it behaves like *this interface*. Neither alone is
-    enough to integrate.
+    enough to integrate. The same function the dashboard's *Check* runs
+    (ADR-0052 §4), with the token the adapter was built with.
     """
-    report = await run_conformance(adapter)
-    await run_http_checks(adapter.client, report, token=token)
-    return report
+    return await check_adapter(adapter)
 
 
 def _print_report(report: ConformanceReport, *, url: str) -> None:
@@ -182,7 +180,7 @@ async def _run_against(
         transport=transport,
     )
     try:
-        return await check_store(adapter, token=token)
+        return await check_store(adapter)
     finally:
         await adapter.aclose()
 

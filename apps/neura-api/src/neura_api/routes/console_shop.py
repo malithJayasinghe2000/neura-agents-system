@@ -79,7 +79,14 @@ from neura_commerce.sync.schema import synced_entities
 from neura_core import NotFoundError, ServiceUnavailableError, get_logger
 from neura_core.jobs import JobQueue
 from neura_core.observation import ObservedEventRepository
-from neura_core.tenancy import ApiKeyKind, TenantRepository, api_keys
+from neura_core.tenancy import (
+    ApiKeyKind,
+    ShopCheckRepository,
+    ShopTokenRepository,
+    StoreConnectionRepository,
+    TenantRepository,
+    api_keys,
+)
 
 log = get_logger(__name__)
 
@@ -135,6 +142,19 @@ async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
             actor.tenant_id, since=now - timedelta(days=VIEWS_WINDOW_DAYS)
         )
         chat_box = await _chat_box(session, actor.tenant_id, now)
+        # ADR-0052: whether a token is waiting (when, never what), and each
+        # connection's last check and when its token was set.
+        token_made_at = await ShopTokenRepository(session).made_at(actor.tenant_id)
+        check_repo = ShopCheckRepository(session)
+        last_checks = {
+            row["id"]: await check_repo.latest(actor.tenant_id, store_id=row["id"]) for row in rows
+        }
+        connect_check = None if rows else await check_repo.latest(actor.tenant_id, store_id=None)
+        connections = StoreConnectionRepository(session)
+        token_set = {
+            row["id"]: await connections.credentials_set_at(actor.tenant_id, row["id"])
+            for row in rows
+        }
 
     by_platform: dict[str, list[dict[str, Any]]] = {}
     for checkpoint in checkpoints:
@@ -160,9 +180,16 @@ async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
                         products=counts[row["id"]][EntityType.PRODUCT.value],
                         searchable=searchable[row["id"]],
                     ),
+                    "last_check": last_checks[row["id"]],
+                    "token_set_at": _iso(token_set[row["id"]]),
                 }
                 for row in rows
             ],
+            # Before the shop is connected: whether a token is waiting (when,
+            # never what) and the last check of the typed address (ADR-0052).
+            "connect": None
+            if rows
+            else {"token_made_at": _iso(token_made_at), "last_check": connect_check},
             # Said plainly rather than left for the screen to infer from an
             # empty list. "No shop connected" and "we could not read your
             # shops" are different sentences and only one of them is true here.
@@ -416,3 +443,7 @@ async def _close(adapter: Any) -> None:
 
 
 __all__ = ["COUNTED", "router"]
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None

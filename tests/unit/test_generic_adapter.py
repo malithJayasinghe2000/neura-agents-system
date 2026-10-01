@@ -69,7 +69,7 @@ async def test_conformant_store_passes_every_check() -> None:
     store = ReferenceStore()
     adapter = adapter_for(store)
 
-    report = await check_store(adapter, token=DEFAULT_TOKEN)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     assert report.is_conformant, [f.message for f in report.errors]
@@ -508,7 +508,7 @@ async def test_each_defect_is_caught_by_its_check(
     store = ReferenceStore(defects=frozenset({defect}))
     adapter = adapter_for(store)
 
-    report = await check_store(adapter, token=DEFAULT_TOKEN)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     finding = next((f for f in report.findings if f.check == check), None)
@@ -523,7 +523,7 @@ async def test_an_unauthenticated_store_is_not_conformant() -> None:
     store = ReferenceStore(defects=frozenset({Defect.NO_AUTH}))
     adapter = adapter_for(store)
 
-    report = await check_store(adapter, token=DEFAULT_TOKEN)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     assert not report.is_conformant
@@ -534,7 +534,7 @@ async def test_running_without_a_token_says_so_rather_than_passing_quietly() -> 
     store = ReferenceStore(token=None)
     adapter = adapter_for(store, token=None)
 
-    report = await check_store(adapter, token=None)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     warning = next(f for f in report.findings if f.check == "auth.required")

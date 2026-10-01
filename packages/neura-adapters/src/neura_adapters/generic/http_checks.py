@@ -44,11 +44,9 @@ _STATUS_FIELDS = {
 }
 
 
-async def run_http_checks(
-    client: GenericClient, report: ConformanceReport, *, token: str | None
-) -> None:
+async def run_http_checks(client: GenericClient, report: ConformanceReport) -> None:
     """Append protocol-level findings to an existing report."""
-    await _check_auth(client, report, token=token)
+    await _check_auth(client, report)
     await _check_health_transport(client, report)
     await _check_not_found(client, report)
     await _check_limit(client, report)
@@ -56,12 +54,10 @@ async def run_http_checks(
     await _check_product_status_vocabulary(client, report)
 
 
-async def _check_auth(
-    client: GenericClient, report: ConformanceReport, *, token: str | None
-) -> None:
+async def _check_auth(client: GenericClient, report: ConformanceReport) -> None:
     check = "auth.required"
 
-    if not token:
+    if not client.has_token:
         report.add(
             check,
             Severity.WARNING,

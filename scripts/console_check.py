@@ -71,7 +71,7 @@ from neura_core.observation import (
     ObservedEventType,
     observed_events,
 )
-from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage
+from neura_core.tenancy.schema import api_keys, shop_checks, tenant_stores, tenant_usage
 from neura_core.tenancy.usage import UsageDelta, UsageMeter, today
 
 GREEN = "\033[32m"
@@ -727,9 +727,11 @@ async def _check_shop_and_usage(
     asserted only against JSON: a screen can perfectly well fetch a safe payload
     and then print `$0.00` under the word "cost".
     """
+    checks_before = await _shop_checks_of(seeded["tenant"])
     await browser.goto(f"{console}/console/{seeded['tenant']}/shops")
     await asyncio.sleep(3)
     shop = await browser.evaluate("document.body.innerText")
+    checks_after_load = await _shop_checks_of(seeded["tenant"])
 
     # The connection has to be *on* the screen, or every assertion below passes
     # against an empty page and proves nothing (open question E6, again).
@@ -769,11 +771,16 @@ async def _check_shop_and_usage(
         else await browser.evaluate("!!document.querySelector('[data-item=chat-box]')"),
         failures,
     )
+    # Since ADR-0052 the page opens on the LAST check, read from our own table,
+    # so a connection checked before shows that result. The claim is about the
+    # shop: loading the page starts no check, and the seeded connection, never
+    # checked, says so.
     _check(
         "the shop is not asked on a page load",
-        await browser.evaluate(
-            "[...document.querySelectorAll('[data-item=answers]')]"
-            ".every(r => r.dataset.step === 'not-yet')"
+        checks_after_load == checks_before
+        and await browser.evaluate(
+            f"(document.querySelector('[data-item=check][data-store=\"{seeded['store']}\"]')"
+            " || {dataset: {}}).dataset.step === 'not-yet'"
         )
         and "Press Check now above to ask your shop." in shop,
         failures,
@@ -789,19 +796,26 @@ async def _check_shop_and_usage(
         failures,
     )
 
-    # Check now, on the seeded connection only: its address is `.invalid`, so
-    # the failure path runs and the owner's real shop is never asked.
+    # Check now, on the seeded connection only: its address is `.invalid` and its
+    # token deliberately unreadable, so the failure path runs and the owner's
+    # real shop is never asked. Since ADR-0052 it is the full check, run in the
+    # background by the worker, so the result takes a few seconds, not one.
     store = seeded["store"]
     await browser.evaluate(
         f"document.querySelector('[data-store=\"{store}\"] [data-check-now]').click() || true"
     )
-    await asyncio.sleep(4)
+    step = ""
+    for _ in range(25):
+        await asyncio.sleep(1)
+        step = await browser.evaluate(
+            f"(document.querySelector('[data-item=check][data-store=\"{store}\"]') || "
+            "{dataset: {}}).dataset.step || ''"
+        )
+        if step == "failed":
+            break
     _check(
         "Check now asks the shop only when pressed, and shows the failure",
-        await browser.evaluate(
-            f"document.querySelector('[data-item=answers][data-store=\"{store}\"]').dataset.step"
-        )
-        == "failed",
+        step == "failed",
         failures,
     )
 
@@ -1399,6 +1413,24 @@ async def _unseed_choice(db: Database, made: dict[str, str]) -> None:
         )
 
 
+async def _shop_checks_of(tenant_id: str) -> int:
+    """How many full checks this shop has: a page load must not add one."""
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(tenant_id) as session:
+            return int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(shop_checks)
+                        .where(shop_checks.c.tenant_id == tenant_id)
+                    )
+                ).scalar_one()
+            )
+    finally:
+        await db.dispose()
+
+
 async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
     """Two shadowed turns, one real conversation, and one policy to cite.
 
@@ -1634,6 +1666,24 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
         )
         await session.execute(delete(conversations).where(conversations.c.id.in_(threads)))
         await session.execute(delete(tenant_stores).where(tenant_stores.c.id == seeded["store"]))
+        # The full check Check now asked for, for the seeded store only (ADR-0052):
+        # its row by the store's id, and its job by that row's id, never "this
+        # tenant's checks", which would take the owner's own with them.
+        seeded_checks = [
+            row.id
+            for row in (
+                await session.execute(
+                    select(shop_checks.c.id).where(shop_checks.c.store_id == seeded["store"])
+                )
+            ).all()
+        ]
+        await session.execute(delete(shop_checks).where(shop_checks.c.id.in_(seeded_checks)))
+        await session.execute(
+            delete(job_queue)
+            .where(job_queue.c.tenant_id == seeded["tenant"])
+            .where(job_queue.c.kind == "shop.check")
+            .where(job_queue.c.payload["check_id"].astext.in_(seeded_checks))
+        )
         # The sync Sync now queued for the seeded store — by that store's id,
         # never "this tenant's jobs", which would take a real sync with it.
         await session.execute(
