@@ -335,6 +335,35 @@ function CapabilityTable() {
   );
 }
 
+type WhoStep = { title: React.ReactNode; who: string; note: React.ReactNode };
+
+/** A few steps in order, each saying who does it: steps 3 and 4. */
+function WhoSteps({ steps }: { steps: WhoStep[] }) {
+  return (
+    <ol className="m-0 flex list-none flex-col gap-0 overflow-hidden rounded-xl border border-line p-0">
+      {steps.map((step, i) => (
+        <li
+          key={i}
+          className={`flex gap-3 px-4 py-3.5 ${i < steps.length - 1 ? "border-b border-[#efefef]" : ""}`}
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-[1.5px] border-ink text-[13px] font-semibold">
+            {i + 1}
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex items-start justify-between gap-3">
+              <span className="min-w-0 text-[15px] font-medium text-ink">{step.title}</span>
+              <span className="shrink-0 rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[13px] text-body">
+                {step.who}
+              </span>
+            </div>
+            <span className="text-[15px] leading-[1.5] text-body">{step.note}</span>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /**
  * Step 3 as it happens since ADR-0052: the shop owner makes the token and runs
  * the check in their dashboard; a developer cannot run it alone (G10). The
@@ -342,7 +371,7 @@ function CapabilityTable() {
  * through a redirect (GenericClient), and is the one that gets connected, which
  * nothing can change afterwards (G52).
  */
-const CHECK_STEPS: { title: string; who: string; note: React.ReactNode }[] = [
+const CHECK_STEPS: WhoStep[] = [
   {
     title: "The shop owner sends you the shop token",
     who: "Shop owner",
@@ -433,31 +462,56 @@ const BY_HAND: React.ReactNode[] = [
  * assistants' tools ask the bridge live. A new token stops NEURA sending the old
  * one at once, but the bridge accepts the old one until it is changed (G49).
  */
-const CONNECT_HAPPENS: React.ReactNode[] = [
-  <>NEURA saves your bridge&apos;s address and the shop token.</>,
-  <>
-    NEURA copies the shop&apos;s catalogue: your products, and your categories and policy pages
-    if you built them. Orders and customers are not copied.
-  </>,
-  <>
-    The owner&apos;s dashboard shows <em>Your shop is connected</em> and{" "}
-    <em>Your catalogue is copied</em>, with the number of products.
-  </>,
+const CONNECT_STEPS: WhoStep[] = [
+  {
+    title: "The shop owner presses Connect",
+    who: "Shop owner",
+    note: (
+      <>
+        In their dashboard: <em>Connect and copy my catalogue</em>. It works only after a check
+        with no problems.
+      </>
+    ),
+  },
+  {
+    title: "NEURA copies the shop's catalogue",
+    who: "NEURA",
+    note: (
+      <>
+        Your products, page by page, and your categories and policy pages if you built them.
+        Orders and customers are not copied.
+      </>
+    ),
+  },
+  {
+    title: (
+      <>
+        The owner sees <em>Your shop is connected</em>
+      </>
+    ),
+    who: "Shop owner",
+    note: (
+      <>
+        Then <em>Your catalogue is copied</em>, with the number of products.
+      </>
+    ),
+  },
 ];
 
 const AFTER_CONNECT: React.ReactNode[] = [
   <>
-    {b("Keep the bridge online at that address.")} The assistant asks it questions live while
-    shoppers chat: searches, products, stock.
+    {b("Keep the bridge online, at the same address.")} The assistant asks it questions live
+    while shoppers chat: searches, products, stock.
   </>,
   <>
-    {b("The shop token stays secret.")} Never put it in a page, a browser or a public code
-    repository. NEURA keeps it encrypted and never shows it again, not even to the shop owner.
+    {b("Keep the shop token secret.")} Never in a web page, the browser or a public code
+    repository. NEURA can&apos;t show it again, not even to the shop owner: if it&apos;s lost,
+    the owner makes a new one.
   </>,
   <>
-    {b("A new token? Put it in at once.")} If the token leaks, the shop owner makes a new one.
-    Until your bridge has it, the assistant can&apos;t read the shop, and your bridge still
-    accepts the old token. Then ask the owner to press <em>Check again</em>.
+    {b("A new token from the owner? Put it in straight away.")} Until you do, the assistant
+    can&apos;t read the shop, and the old token still works for whoever has it. Then ask the
+    owner to press <em>Check again</em>.
   </>,
 ];
 
@@ -657,27 +711,7 @@ export default function DeveloperGuide() {
             and names anything wrong. Every question is a {c("GET")}, so nothing in the shop
             changes.
           </P>
-          <ol className="m-0 flex list-none flex-col gap-0 overflow-hidden rounded-xl border border-line p-0">
-            {CHECK_STEPS.map((step, i) => (
-              <li
-                key={step.title}
-                className={`flex gap-3 px-4 py-3.5 ${i < CHECK_STEPS.length - 1 ? "border-b border-[#efefef]" : ""}`}
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-[1.5px] border-ink text-[13px] font-semibold">
-                  {i + 1}
-                </span>
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="min-w-0 text-[15px] font-medium text-ink">{step.title}</span>
-                    <span className="shrink-0 rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[13px] text-body">
-                      {step.who}
-                    </span>
-                  </div>
-                  <span className="text-[15px] leading-[1.5] text-body">{step.note}</span>
-                </div>
-              </li>
-            ))}
-          </ol>
+          <WhoSteps steps={CHECK_STEPS} />
           <div className="flex flex-col gap-2">
             <span className="text-[13px] font-medium text-quiet">
               Example: the full check the shop owner sends you (shortened)
@@ -713,16 +747,12 @@ export default function DeveloperGuide() {
 
         <Section id="connect" title="4 · Connect your shop">
           <P>
-            When the check shows no {b("✘")}, the shop owner presses{" "}
-            <em>Connect and copy my catalogue</em> in their dashboard. There is nothing for you to
-            press.
+            You have nothing to press here. The shop owner connects the shop in their dashboard, and
+            NEURA reads it for the first time.
           </P>
-          <div className="flex flex-col gap-2">
-            <span className="text-[15px] font-semibold">What happens then</span>
-            <Rules ordered items={CONNECT_HAPPENS} />
-          </div>
-          <div className="flex flex-col gap-2">
-            <span className="text-[15px] font-semibold">After that</span>
+          <WhoSteps steps={CONNECT_STEPS} />
+          <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">Your part after connecting</span>
             <Rules items={AFTER_CONNECT} />
           </div>
         </Section>
