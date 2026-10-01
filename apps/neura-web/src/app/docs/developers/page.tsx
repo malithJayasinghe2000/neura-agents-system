@@ -122,7 +122,7 @@ const ON_THIS_PAGE: [string, string][] = [
   ["connect", "4 · Connect your shop"],
   ["chat", "5 · Add the chat box"],
   ["views", "Optional: product views"],
-  ["changes", "Change messages"],
+  ["changes", "Webhooks to NEURA"],
   ["trouble", "If something doesn't work"],
   ["reference", "The full specification"],
 ];
@@ -1129,8 +1129,13 @@ Content-Type: application/json
             2026-09-30), though the OpenAPI file describes them (G66). The chat,
             the suggestions and the AI connection read the bridge live; only
             NEURA's copy, read by the dashboard and the product feed, waits for
-            Sync now (G67). */}
-        <Section id="changes" title="Change messages">
+            Sync now (G67). The heading is the owner's choice: a developer knows
+            the word "webhook" (2026-10-01). */}
+        <Section id="changes" title="Webhooks to NEURA">
+          <P>
+            Messages your shop&apos;s server sends to tell NEURA that a product or order changed.
+            Step 2 calls them change messages.
+          </P>
           <div className="flex flex-col gap-2 rounded-xl bg-[#f5f5f5] px-[18px] py-4">
             <span className="text-[15px] font-semibold">Don&apos;t build these yet</span>
             <span className="text-[15px] leading-[1.5] text-body">
