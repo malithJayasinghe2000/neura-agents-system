@@ -230,6 +230,52 @@ const note = (text: React.ReactNode) => (
   <span className="mt-0.5 block text-[14px] leading-[1.5] text-quiet">{text}</span>
 );
 
+/** Step 1's one sample answer (G1): one product, two sizes, one sold out. */
+const SAMPLE_PRODUCT = `{
+  "external_id": "1042",
+  "title": "Wool Hiking Socks",
+  "description": "Warm merino socks for long walks.",
+  "status": "active",
+  "url": "https://yourshop.example/products/wool-hiking-socks",
+  "image_urls": ["https://yourshop.example/images/wool-hiking-socks.jpg"],
+  "category_ids": ["12"],
+  "variants": [
+    {
+      "external_id": "1042-m",
+      "title": "M",
+      "options": { "size": "M" },
+      "price": { "amount": "12.00", "currency": "EUR" },
+      "in_stock": true,
+      "stock_quantity": 8
+    },
+    {
+      "external_id": "1042-l",
+      "title": "L",
+      "options": { "size": "L" },
+      "price": { "amount": "12.00", "currency": "EUR" },
+      "in_stock": false,
+      "stock_quantity": 0
+    }
+  ]
+}`;
+
+const SAMPLE_NOTES: React.ReactNode[] = [
+  <>
+    {b("Each size or colour is a variant,")} with its own price and stock. A product with neither
+    still needs one variant: that is where its price and stock go.
+  </>,
+  <>
+    {b(`"in_stock" is true only if it can be bought now.`)} Here size M can, size L can&apos;t.
+  </>,
+  <>
+    {b("A price is text and a three-letter currency:")} {c('"12.00"')} and {c('"EUR"')}.
+  </>,
+  <>
+    {b("The list,")} {c("GET /products")}, sends the same product, many at a time, in{" "}
+    {c('"items"')}.
+  </>,
+];
+
 /**
  * The four fields of /health. The exact values are the part a developer gets
  * wrong (G14): NEURA reads any `status` but "ok" as a shop that is down
@@ -1038,6 +1084,16 @@ export default function DeveloperGuide() {
               <>{b("The exact format")} of every answer is in the OpenAPI file you downloaded.</>,
             ]}
           />
+          {/* G1: no address had a sample answer, here or in the OpenAPI file. One,
+              the owner's choice (2026-10-01). It passes NEURA's own reader
+              (generic/wire.py to_canonical) with no field dropped. */}
+          <div className="flex flex-col gap-3 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">
+              A sample answer: {c("GET /products/1042")}
+            </span>
+            <Pre>{SAMPLE_PRODUCT}</Pre>
+            <Rules items={SAMPLE_NOTES} />
+          </div>
         </Section>
 
         <Section id="health" title="2 · Say what your shop can do">
