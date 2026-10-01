@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -117,3 +118,55 @@ class TestNoSecretKeyInAnAddress:
         with pytest.raises(Exception) as raised:
             asyncio.run(authenticate_request(self._Request(), token=public))  # type: ignore[arg-type]
         assert "Authorization header" not in str(raised.value)
+
+
+class TestNoSecretKeyInAPage:
+    """G55: a browser marks every request a page makes with ``Origin``; a
+    server's HTTP client does not. A secret key arriving with one was put in a
+    web page, where anyone can read it, and it used to work there."""
+
+    class _Request:
+        def __init__(self, key: str, origin: str | None) -> None:
+            self.headers = {"authorization": f"Bearer {key}"}
+            if origin:
+                self.headers["origin"] = origin
+            self.state = type("State", (), {})()
+
+    @staticmethod
+    def _authenticate(request: Any) -> BaseException:
+        import asyncio
+
+        from neura_api.dependencies import authenticate_request
+
+        # No database is configured here, so every call ends in an exception:
+        # the question is only which one.
+        with pytest.raises(Exception) as raised:
+            asyncio.run(authenticate_request(request))
+        return raised.value
+
+    def test_a_secret_key_from_a_web_page_is_refused_before_any_lookup(self) -> None:
+        from neura_api.dependencies import SECRET_KEY_IN_PAGE
+        from neura_core import AuthenticationError
+        from neura_core.tenancy.keys import ApiKeyKind, generate
+
+        request = self._Request(generate(ApiKeyKind.SECRET).token, "https://shop.example")
+        refused = self._authenticate(request)
+        assert isinstance(refused, AuthenticationError)
+        assert refused.code == SECRET_KEY_IN_PAGE
+        # The mark that lets the page read this one refusal (middleware/cors.py).
+        assert request.state.secret_key_in_page is True
+
+    def test_a_secret_key_from_a_server_is_not_refused_for_it(self) -> None:
+        from neura_api.dependencies import SECRET_KEY_IN_PAGE
+        from neura_core.tenancy.keys import ApiKeyKind, generate
+
+        request = self._Request(generate(ApiKeyKind.SECRET).token, None)
+        assert getattr(self._authenticate(request), "code", None) != SECRET_KEY_IN_PAGE
+        assert not hasattr(request.state, "secret_key_in_page")
+
+    def test_a_public_key_from_a_web_page_is_not_refused_for_it(self) -> None:
+        from neura_api.dependencies import SECRET_KEY_IN_PAGE
+        from neura_core.tenancy.keys import ApiKeyKind, generate
+
+        request = self._Request(generate(ApiKeyKind.PUBLIC).token, "https://shop.example")
+        assert getattr(self._authenticate(request), "code", None) != SECRET_KEY_IN_PAGE

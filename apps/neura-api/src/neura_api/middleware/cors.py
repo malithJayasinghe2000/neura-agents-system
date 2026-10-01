@@ -137,9 +137,18 @@ class TenantCorsMiddleware(BaseHTTPMiddleware):
 
         Endpoints with no key to consult — the widget asset, health — fall back
         to the platform list, which is what that setting is now for.
+
+        **One refusal is readable: a secret key sent from a web page** (G55).
+        It is decided from the shape of the string the page itself sent, before
+        any lookup, so reading it tells the page nothing it did not already
+        hold, and it is no oracle for whether the key exists. Unreadable, the
+        chat box could only show the browser's *"Failed to fetch"*, and the
+        developer would never learn that the wrong key is in the page.
         """
         caller = getattr(request.state, "caller", None)
         if caller is not None:
+            return True
+        if getattr(request.state, "secret_key_in_page", False):
             return True
         return origin in get_settings().widget_origins
 

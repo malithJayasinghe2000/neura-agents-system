@@ -580,8 +580,8 @@ const CHAT_STEPS: WhoStep[] = [
 ];
 
 /**
- * The line's rules. A secret key in the page works, quietly (G55), so the
- * guide must say it. The live connection is a `wss://` socket on NEURA's
+ * The line's rules. A secret key in a page is refused with a sentence the chat
+ * box shows (`SECRET_KEY_IN_PAGE`, G55). The live connection is a `wss://` socket on NEURA's
  * address, and styles are constructable stylesheets, which a page's
  * `style-src` does not block (widget.js).
  */
@@ -592,7 +592,7 @@ const CHAT_RULES: React.ReactNode[] = [
   </>,
   <>
     {b("Never put a secret key in a page.")} Secret keys start with {c("fn_sk_")}, and anyone
-    can read a page&apos;s source.
+    can read a page&apos;s source. NEURA refuses one there, and the chat box says why.
   </>,
   <>
     {b("Keep the key in the shop's settings,")} like the shop token, not in the template. A new
@@ -612,8 +612,10 @@ const CHAT_RULES: React.ReactNode[] = [
 /**
  * How a developer sees it work. The dashboard tick is the key's
  * `last_used_at`, set by any request with it; a page load makes none. The
- * practice-mode note is `WIDGET_WITHHELD_MESSAGE`; the refusal is the server's
- * own `ORIGIN_NOT_ALLOWED` sentence, which the chat box shows.
+ * practice-mode note is `WIDGET_WITHHELD_MESSAGE`. A wrong address is
+ * `ORIGIN_NOT_ALLOWED`, which the page may not read (middleware/cors.py), so
+ * the chat box can only say it could not reach the assistant (seen in a real
+ * browser; G56 is the browser's own "Failed to fetch" beside it).
  */
 const CHAT_WORKS: React.ReactNode[] = [
   <>Open a shop page: the chat button appears at the bottom right.</>,
@@ -626,8 +628,8 @@ const CHAT_WORKS: React.ReactNode[] = [
     owner reads the real reply in Review.
   </>,
   <>
-    <em>This key is not permitted from that origin</em> means the page&apos;s address isn&apos;t
-    on the key.
+    Every message gets <em>We could not reach the assistant</em>? The page&apos;s address is
+    probably not on the key: check {c("www.")}, {c("http")} or {c("https")}, and the test site.
   </>,
 ];
 

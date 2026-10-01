@@ -61,6 +61,11 @@ log = get_logger(__name__)
 
 BEARER = "bearer"
 
+#: The refusal of a secret key sent from a web page (G55). Its own code, so the
+#: chat box can say exactly what is wrong, and a test can name it. S105 reads it
+#: as a password; it names a refusal, and no secret is near it.
+SECRET_KEY_IN_PAGE = "SECRET_KEY_IN_PAGE"  # noqa: S105
+
 
 def bearer_token(authorization: str | None) -> str:
     """Pull the token out of an ``Authorization`` header.
@@ -123,6 +128,14 @@ async def authenticate_request(
     server is not a browser and *can* send a header, so a secret key over the
     socket goes in ``Authorization``, as on every REST route. Refused before any
     lookup, and without saying whether the key exists.
+
+    **A secret key never comes from a web page** (G55). A browser marks every
+    request a page makes with ``Origin``; a server's HTTP client does not. A
+    secret key arriving with one has been put in a page, where anyone can read
+    it. Without this rule it worked there, quietly: the chat box's socket refused
+    it in the address, then its plain-request fallback sent it in the header,
+    and a secret key is not tied to any address. Refused on its shape alone,
+    before any lookup, so the page may read why (``SECRET_KEY_IN_PAGE``).
     """
     if token is not None:
         parsed = api_keys.parse(token)
@@ -132,6 +145,22 @@ async def authenticate_request(
                 "Send it in the Authorization header instead."
             )
     presented = token or bearer_token(request.headers.get("authorization"))
+    origin = request.headers.get("origin")
+
+    if origin and presented:
+        parsed = api_keys.parse(presented)
+        if parsed is not None and parsed[0] is ApiKeyKind.SECRET:
+            # Decided from the string the page itself sent, so letting the page
+            # read the refusal tells it nothing new (middleware/cors.py).
+            state = getattr(request, "state", None)
+            if state is not None:
+                state.secret_key_in_page = True
+            raise AuthenticationError(
+                "A secret key may not be used from a web page, where anyone can read it. "
+                "Use the shop's public key (fn_pk_…) in the page, and keep secret keys "
+                "on your server.",
+                code=SECRET_KEY_IN_PAGE,
+            )
 
     caller = await authenticate(
         get_database(),
@@ -139,7 +168,7 @@ async def authenticate_request(
         # Only public keys are origin-locked, and only they consult this. A
         # missing Origin header on an `fn_pk_` request is a refusal, because an
         # empty allowlist permits nothing (ADR-0014 §3).
-        origin=request.headers.get("origin"),
+        origin=origin,
     )
     state = getattr(request, "state", None)
     if state is not None:

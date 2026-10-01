@@ -22,6 +22,7 @@ from neura_api.middleware.cors import is_valid_origin
 from neura_api.turns import TurnResult
 from neura_core import get_settings
 from neura_core.tenancy import TenantConfig, TurnMode
+from neura_core.tenancy.keys import ApiKeyKind, generate
 
 WIDGET_JS = Path(__file__).parents[2] / "apps/neura-api/src/neura_api/widget/widget.js"
 
@@ -326,6 +327,27 @@ class TestPerTenantCors:
         )
         assert response.status_code in {401, 403}
         assert "access-control-allow-origin" not in response.headers
+
+    @pytest.mark.parametrize("path", ["/v1/chat", "/v1/care/chat"])
+    def test_a_secret_key_from_a_web_page_is_refused_and_says_why(
+        self, client: TestClient, path: str
+    ) -> None:
+        """G55: a secret key put in the chat box line used to work, through the
+        plain-request fallback, while anyone could read it in the page. It is
+        now refused on its shape, before any lookup, and this one refusal is
+        readable: the page learns nothing it did not send, and the chat box can
+        say what is wrong instead of the browser's "Failed to fetch"."""
+        secret = generate(ApiKeyKind.SECRET).token
+        response = client.post(
+            path,
+            headers={"Origin": "https://shop.example", "Authorization": f"Bearer {secret}"},
+            json={"message": "hello"},
+        )
+        assert response.status_code == 401
+        error = response.json()["error"]
+        assert error["code"] == "SECRET_KEY_IN_PAGE"
+        assert "fn_pk_" in error["message"]
+        assert response.headers["access-control-allow-origin"] == "https://shop.example"
 
     def test_an_unkeyed_endpoint_falls_back_to_the_platform_list(self, client: TestClient) -> None:
         allowed = get_settings().widget_origins[0]

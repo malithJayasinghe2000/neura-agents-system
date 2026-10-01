@@ -414,6 +414,24 @@ class TestAuthenticationIsWired:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
 
+    async def test_a_secret_key_from_a_web_page_is_refused(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """G55: a real secret key with chat rights, sent the way the chat box's
+        fallback sends it, from a page. It used to answer, so nobody noticed the
+        secret was in the page. From a server, with no ``Origin``, it still works."""
+        token = await _provision(db, TENANT_A)
+        refused = client.post(
+            "/v1/care/chat",
+            json={"message": "hi"},
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+        assert refused.status_code == 401
+        assert refused.json()["error"]["code"] == "SECRET_KEY_IN_PAGE"
+
+        accepted = client.post("/v1/care/chat", json={"message": "hi"}, headers=_auth(token))
+        assert accepted.status_code == 200
+
 
 # ── A turn, end to end ───────────────────────────────────────────────────────
 

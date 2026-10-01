@@ -157,7 +157,7 @@ Merchant store credentials are the highest-value asset we hold — they are keys
 - A database dump alone is useless without the KEK.
 - Credentials are **never logged, never traced, never placed in LLM context.** A redacting log filter enforces this rather than relying on discipline.
 
-**Our own API keys:** `fn_sk_…` (secret, server-side) and `fn_pk_…` (public, widget, tightly scoped). Stored as hashes — we can verify a key, we can never display one after issue. Scoped, expirable, revocable, with `last_used_at` for stale-key detection.
+**Our own API keys:** `fn_sk_…` (secret, server-side) and `fn_pk_…` (public, widget, tightly scoped). Stored as hashes — we can verify a key, we can never display one after issue. Scoped, expirable, revocable, with `last_used_at` for stale-key detection. **A secret key never works from a web page** (2026-10-01, G55 in `docs/CONNECTING_A_NEW_SHOP_LOG.md`): a request that carries a browser's `Origin` header and a secret key is refused on the key's shape, before any lookup (`SECRET_KEY_IN_PAGE`, `neura_api/dependencies.py`), and that refusal is the one a page may read, so the chat box can say why. Before, a secret key pasted into the chat box line worked through the widget's plain-request fallback while sitting in every page's source. Nor may a secret key travel in an address (G34).
 
 ---
 
