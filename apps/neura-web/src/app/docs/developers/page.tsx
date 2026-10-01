@@ -78,7 +78,14 @@ const ATTRIBUTES: [string, React.ReactNode][] = [
   ],
 ];
 
-/** The five steps at a glance — and who does each one. */
+/**
+ * The five steps at a glance — and who does each one.
+ *
+ * "The shop owner" (here, CHECK_STEPS and CONNECT_STEPS) is true only while a
+ * developer has no dashboard account. When the developer role (D3) is built and
+ * a developer can press Check and Connect, these say "You" (the owner's decision,
+ * CONNECTING_A_NEW_SHOP_LOG.md).
+ */
 const STEPS: [string, string, string][] = [
   ["1", "Build the bridge", "You"],
   ["2", "Say what your shop can do", "You"],
