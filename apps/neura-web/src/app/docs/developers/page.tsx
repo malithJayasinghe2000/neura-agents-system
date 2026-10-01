@@ -17,29 +17,41 @@ export const metadata: Metadata = {
     "Connect a shop to NEURA: build the bridge, say what your shop can do, check your work, connect, and add the chat box.",
 };
 
-const ADDRESSES: [string, string][] = [
-  ["GET /health", "What your shop can do — step 2"],
-  ["GET /products", "A page of products"],
-  ["GET /products/{id}", "One product"],
-  ["GET /categories", "Your category tree"],
-  ["GET /inventory?variant_ids=", "Stock levels"],
-  ["GET /orders", "A page of orders"],
-  ["GET /orders/{id}", "One order"],
-  ["GET /customers/{id}", "One customer"],
-  ["GET /policies", "Returns, shipping and warranty pages"],
-];
-
-const CAPABILITIES: [string, string][] = [
-  ["product.read", "list and fetch products"],
-  ["product.search", "search products by text"],
-  ["category.read", "list categories"],
-  ["inventory.read", "stock levels"],
-  ["order.read", "list and fetch orders"],
-  ["order.search", "search orders"],
-  ["customer.read", "fetch a customer by id"],
-  ["policy.read", "policy pages"],
-  ["sync.incremental", "updated_since really filters"],
-  ["events.realtime", "you send change messages"],
+/**
+ * The addresses, in the order a developer should build them. A first-time
+ * developer does not know the assistants' names, so this is by what each address
+ * gives, not by assistant (A1 review, CONNECTING_A_NEW_SHOP_LOG.md). A missing
+ * address never breaks an assistant: it cannot do that one thing and hands those
+ * questions to the shop's team.
+ */
+const TIERS: { title: string; note: string; rows: [string, string][] }[] = [
+  {
+    title: "Start with these three",
+    note: "Enough to connect. The assistant can find products and talk about them.",
+    rows: [
+      ["GET /health", "What your shop can do — step 2"],
+      ["GET /products", "A page of products, and search"],
+      ["GET /products/{id}", "One product"],
+    ],
+  },
+  {
+    title: "Add these for better answers",
+    note: "Each one you add, the assistant can do one more thing.",
+    rows: [
+      ["GET /inventory", "Stock — whether something can be bought now"],
+      ["GET /policies", "Returns, shipping and warranty pages"],
+      ["GET /categories", "Your categories — what you do sell when nothing fits"],
+    ],
+  },
+  {
+    title: "Only for order questions",
+    note: "For a shop that wants the assistant to look up orders.",
+    rows: [
+      ["GET /orders", "A page of orders, and search by email or order number"],
+      ["GET /orders/{id}", "One order"],
+      ["GET /customers/{id}", "One customer — never a member of staff"],
+    ],
+  },
 ];
 
 const ATTRIBUTES: [string, React.ReactNode][] = [
@@ -66,8 +78,18 @@ const ATTRIBUTES: [string, React.ReactNode][] = [
   ],
 ];
 
+/** The five steps at a glance — and who does each one. */
+const STEPS: [string, string, string][] = [
+  ["1", "Build the bridge", "You"],
+  ["2", "Say what your shop can do", "You"],
+  ["3", "Check your work", "You and FiveNeurals"],
+  ["4", "Connect your shop", "FiveNeurals"],
+  ["5", "Add the chat box", "You and FiveNeurals"],
+];
+
 const ON_THIS_PAGE: [string, string][] = [
   ["overview", "Overview"],
+  ["start", "Before you start"],
   ["build", "1 · Build the bridge"],
   ["health", "2 · Say what your shop can do"],
   ["check", "3 · Check your work"],
@@ -114,8 +136,12 @@ function Table({ head, rows }: { head: [string, string]; rows: [string, React.Re
       <table className="w-full border-collapse text-left text-[15px]">
         <thead className="bg-[#fafafa]">
           <tr>
-            {head.map((h) => (
-              <th key={h} scope="col" className="px-3 py-2.5 text-[13px] font-medium text-quiet">
+            {head.map((h, i) => (
+              <th
+                key={h}
+                scope="col"
+                className={`px-3 py-2.5 text-[13px] font-medium text-quiet ${i === 0 ? "md:w-[300px]" : ""}`}
+              >
                 {h}
               </th>
             ))}
@@ -124,10 +150,10 @@ function Table({ head, rows }: { head: [string, string]; rows: [string, React.Re
         <tbody>
           {rows.map(([name, what], i) => (
             <tr key={name} className={i < rows.length - 1 ? "border-b border-[#efefef]" : ""}>
-              <td className="px-3 py-2.5 whitespace-nowrap">
+              <td className="px-3 py-2.5 align-top whitespace-nowrap">
                 <code className="font-mono text-[0.92em]">{name}</code>
               </td>
-              <td className="px-3 py-2.5 text-body">{what}</td>
+              <td className="px-3 py-2.5 align-top text-body">{what}</td>
             </tr>
           ))}
         </tbody>
@@ -151,6 +177,163 @@ function Rules({ items, ordered }: { items: React.ReactNode[]; ordered?: boolean
 
 const b = (text: string) => <strong className="font-semibold text-ink">{text}</strong>;
 const c = (text: string) => <code className="font-mono text-[0.92em]">{text}</code>;
+const note = (text: React.ReactNode) => (
+  <span className="mt-0.5 block text-[14px] leading-[1.5] text-quiet">{text}</span>
+);
+
+/**
+ * The four fields of /health. The exact values are the part a developer gets
+ * wrong (G14): NEURA reads any `status` but "ok" as a shop that is down
+ * (wire.py parse_health, stores.py _negotiate), and the check tool fails a
+ * missing `spec_version` (http_checks.py).
+ */
+const HEALTH_FIELDS: [string, React.ReactNode][] = [
+  [
+    "status",
+    <>
+      Exactly {c('"ok"')}.
+      {note(<>Anything else, even {c('"healthy"')}, and NEURA treats your shop as down.</>)}
+    </>,
+  ],
+  [
+    "spec_version",
+    <>
+      {c('"1.0"')}, the version of this format.
+      {note("The check tool fails without it.")}
+    </>,
+  ],
+  ["platform", "Your shop system's name, in any words. For information only."],
+  ["capabilities", "What your bridge can do: the table below."],
+];
+
+/**
+ * What to write in `capabilities`, starting from what the developer built: they
+ * think "I built this, what do I write?" (the owner's A2 review). In step 1's
+ * groups, so group 1 shows all three addresses, /health included, which is the
+ * list itself and has no word. Each word is checked against the tools'
+ * `requires=` and the generic adapter (CONNECTING_A_NEW_SHOP_LOG.md, A2).
+ * Change messages get no word yet: NEURA has no address that receives them (G13).
+ * A no-break space keeps "GET" with its path on a phone.
+ */
+const CAPABILITY_GROUPS: {
+  title: string;
+  rows: { built: React.ReactNode; word: React.ReactNode }[];
+}[] = [
+  {
+    title: "1. Start with these three",
+    rows: [
+      {
+        built: c("GET\u00a0/health"),
+        word: <>nothing{note("This address is the list itself.")}</>,
+      },
+      {
+        built: (
+          <>
+            {c("GET\u00a0/products")}
+            <br />
+            {c("GET\u00a0/products/{id}")}
+          </>
+        ),
+        word: c("product.read"),
+      },
+      { built: <>Search: {c("GET\u00a0/products?q=…")}</>, word: c("product.search") },
+    ],
+  },
+  {
+    title: "2. Add these for better answers",
+    rows: [
+      { built: c("GET\u00a0/inventory?variant_ids=…"), word: c("inventory.read") },
+      { built: c("GET\u00a0/policies"), word: c("policy.read") },
+      { built: c("GET\u00a0/categories"), word: c("category.read") },
+    ],
+  },
+  {
+    title: "3. Only for order questions",
+    rows: [
+      { built: c("GET\u00a0/orders/{id}"), word: c("order.read") },
+      {
+        built: (
+          <>
+            Search: {c("GET\u00a0/orders?email=…")}
+            {note(
+              <>
+                Also by {c("phone")}, {c("customer_id")} and {c("order_number")}.
+              </>,
+            )}
+          </>
+        ),
+        word: c("order.search"),
+      },
+      { built: c("GET\u00a0/customers/{id}"), word: c("customer.read") },
+    ],
+  },
+  {
+    title: "Extras",
+    rows: [
+      {
+        built: (
+          <>
+            {c("GET\u00a0/products?updated_since=…")}
+            {note("Returns only what changed since then.")}
+          </>
+        ),
+        word: (
+          <>
+            {c("sync.incremental")}
+            {note("Optional. Without it, NEURA reads every product each time.")}
+          </>
+        ),
+      },
+      {
+        built: <>Change messages{note("Your shop tells NEURA when something changes.")}</>,
+        word: (
+          <>
+            nothing yet
+            {note(<>NEURA can&apos;t receive them yet. Leave out {c("events.realtime")}.</>)}
+          </>
+        ),
+      },
+    ],
+  },
+];
+
+function CapabilityTable() {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-line">
+      <table className="w-full border-collapse text-left text-[15px]">
+        <thead className="bg-[#fafafa]">
+          <tr>
+            <th scope="col" className="px-3 py-2.5 text-[13px] font-medium text-quiet md:w-[300px]">
+              You built
+            </th>
+            <th scope="col" className="px-3 py-2.5 text-[13px] font-medium text-quiet">
+              Write this word
+            </th>
+          </tr>
+        </thead>
+        {CAPABILITY_GROUPS.map((group) => (
+          <tbody key={group.title} className="border-t border-line">
+            <tr>
+              <th
+                scope="colgroup"
+                colSpan={2}
+                className="px-3 pt-3.5 pb-1.5 text-[13px] font-semibold text-ink"
+              >
+                {group.title}
+              </th>
+            </tr>
+            {group.rows.map((row, i) => (
+              <tr key={i} className="border-t border-[#efefef]">
+                <td className="px-3 py-2.5 align-top text-body">{row.built}</td>
+                <td className="px-3 py-2.5 align-top text-body">{row.word}</td>
+              </tr>
+            ))}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}
 
 export default function DeveloperGuide() {
   return (
@@ -171,75 +354,172 @@ export default function DeveloperGuide() {
       </aside>
 
       <div className="flex max-w-[820px] min-w-0 flex-1 flex-col gap-12">
-        <section id="overview" className="flex flex-col gap-4">
+        <section id="overview" className="flex flex-col gap-5">
           <p className="m-0 text-[13px] font-medium text-quiet">For developers</p>
           <h1 className="m-0 text-[30px] leading-[1.15] font-semibold tracking-[-0.02em] md:text-[40px]">
             Connect a shop to NEURA
           </h1>
           <P>
-            A shop connects through a {b("bridge")}: a small add-on that answers nine read-only
-            addresses from our published specification. NEURA calls them. Nothing in NEURA knows
-            which platform your shop runs on, so any shop can connect, including one you built
+            NEURA&apos;s assistants answer shoppers from the shop&apos;s own data. You do two
+            things: build a small {b("bridge")} so NEURA can read the shop, and add {b("one line")}{" "}
+            to the shop&apos;s pages for the chat box. Any shop can connect, including one you built
             yourself.
           </P>
-          <div className="flex flex-col gap-2 rounded-xl bg-[#f5f5f5] px-[18px] py-4">
-            <span className="text-[15px] font-semibold">
-              You&apos;ll get two keys from FiveNeurals
-            </span>
+          <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">NEURA only reads</span>
             <span className="text-[15px] leading-[1.5] text-body">
-              {b("Shop token")} — secret. NEURA sends it to your bridge. It stays on your
-              shop&apos;s server.
-            </span>
-            <span className="text-[15px] leading-[1.5] text-body">
-              {b("Chat box key")} — public. It sits in your pages and only works from your
-              shop&apos;s address.
+              It never changes anything in the shop — no orders, no prices, no stock. Every address
+              you build is a {c("GET")}.
             </span>
           </div>
+          <ol className="m-0 flex list-none flex-col gap-0 overflow-hidden rounded-xl border border-line p-0">
+            {STEPS.map(([n, step, who], i) => (
+              <li
+                key={n}
+                className={`flex items-center gap-3 px-4 py-3 ${i < STEPS.length - 1 ? "border-b border-[#efefef]" : ""}`}
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-[13px] font-semibold text-white">
+                  {n}
+                </span>
+                <a
+                  href={`#${["build", "health", "check", "connect", "chat"][i]}`}
+                  className="flex-1 text-[15px] font-medium text-ink no-underline hover:underline"
+                >
+                  {step}
+                </a>
+                <span className="shrink-0 rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[13px] text-body">
+                  {who}
+                </span>
+              </li>
+            ))}
+          </ol>
         </section>
+
+        <Section id="start" title="Before you start">
+          <div className="flex flex-col gap-2 rounded-xl bg-[#f5f5f5] px-[18px] py-4">
+            <span className="text-[15px] font-semibold">Download the OpenAPI file</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              It describes every address and every field. Keep it open while you build — or point a
+              code generator at it.
+            </span>
+            <a
+              href={OPENAPI_HREF}
+              download
+              className="mt-1 flex h-10 w-fit items-center rounded-lg bg-ink px-4 text-[14px] font-medium text-white no-underline"
+            >
+              Download the OpenAPI file
+            </a>
+          </div>
+        </Section>
 
         <Section id="build" title="1 · Build the bridge">
           <P>
-            Ask FiveNeurals whether a ready-made bridge exists for your shop&apos;s system. If it
-            does, install it like any other add-on and go to step 2. If not, build these nine
-            addresses. Mount them under any prefix; {c("/neura/v1")} is the convention.
+            First ask FiveNeurals whether a ready-made bridge exists for the shop&apos;s system. If
+            it does, install it like any other add-on and go to step 2. If not, build the addresses
+            below. Put them under any prefix — {c("/neura/v1")} is the usual one.
           </P>
-          <Table head={["Address", "Returns"]} rows={ADDRESSES} />
+          <div className="flex flex-col gap-4">
+            {TIERS.map((tier, n) => (
+              <div key={tier.title} className="flex flex-col gap-2">
+                <span className="text-[15px] font-semibold">
+                  {n + 1}. {tier.title}
+                </span>
+                <span className="text-[15px] leading-[1.5] text-body">{tier.note}</span>
+                <Table head={["Address", "Gives the assistant"]} rows={tier.rows} />
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-col gap-1 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">Not sure what the shop needs?</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              Build the first three, connect, and add the rest later. Nothing breaks: what the
+              assistant can&apos;t answer, it hands to the shop&apos;s team.
+            </span>
+          </div>
           <Rules
             items={[
-              <>{b("Everything is GET.")} No address changes anything in your shop.</>,
+              <>{b("Everything is GET.")} No address changes anything in the shop.</>,
               <>
-                {b("One header:")} {c("Authorization: Bearer <shop token>")} on every address except{" "}
-                {c("/health")}. Refuse a request without it.
+                {b("Check the shop token on every address except")} {c("/health")}. NEURA sends{" "}
+                {c("Authorization: Bearer <shop token>")}; refuse a request without it. Read the
+                token from a setting — for example {c("NEURA_SHOP_TOKEN")} — never from code. You
+                get the real token at step 4; until then, put any text in that setting to test.
               </>,
               <>
-                {b("Pages by cursor, not page number.")} Return an opaque {c("next_cursor")}; we
-                send it back unchanged.
+                {b("Pages by cursor, not page number.")} Return an opaque {c("next_cursor")}; NEURA
+                sends it back unchanged.
               </>,
-              <>
-                {b("No format to learn.")} The JSON you return is published as an{" "}
-                <a href={OPENAPI_HREF}>OpenAPI file</a>. Point your code generator at it.
-              </>,
+              <>{b("The exact format")} of every answer is in the OpenAPI file you downloaded.</>,
             ]}
           />
         </Section>
 
         <Section id="health" title="2 · Say what your shop can do">
           <P>
-            {c("/health")} is not a ping. It lists what your shop can do, and that list decides what
-            the assistant is allowed to try.
+            {c("/health")} tells NEURA what your bridge can do. The assistant gets only what is on
+            this list, so it is the one answer to get exactly right.
           </P>
-          <Pre>{`{
+          <div className="flex flex-col gap-2">
+            <span className="text-[13px] font-medium text-quiet">
+              Example: a bridge with groups 1 and 2 from step 1
+            </span>
+            <Pre>{`{
   "status": "ok",
   "spec_version": "1.0",
-  "platform": "my-shop",
-  "capabilities": ["product.read", "product.search", "category.read",
-                   "inventory.read", "order.read", "policy.read"]
+  "platform": "yourshop",
+  "capabilities": [
+    "product.read",
+    "product.search",
+    "inventory.read",
+    "policy.read",
+    "category.read"
+  ]
 }`}</Pre>
-          <Table head={["Capability", "Means"]} rows={CAPABILITIES} />
+          </div>
+          <Table head={["Field", "What to write"]} rows={HEALTH_FIELDS} />
+          <div className="flex flex-col gap-2">
+            <span className="text-[15px] font-semibold">What to list</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              Find each address you built in step 1, and write its word in the list.
+            </span>
+          </div>
+          <CapabilityTable />
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="flex flex-col gap-1 rounded-xl border border-line px-[18px] py-4">
+              <span className="flex items-center gap-2 text-[15px] font-semibold">
+                <span
+                  aria-hidden
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#f0f0f0] text-[13px]"
+                >
+                  ✓
+                </span>
+                Leave one out: that&apos;s safe
+              </span>
+              <span className="text-[15px] leading-[1.5] text-body">
+                The assistant isn&apos;t given that job, so it never tries it. Build it later, add
+                it to the list, and NEURA sees the change within a minute. Nothing to reconnect.
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 rounded-xl border border-ink px-[18px] py-4">
+              <span className="flex items-center gap-2 text-[15px] font-semibold">
+                <span
+                  aria-hidden
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-[13px] text-white"
+                >
+                  ✗
+                </span>
+                List one you didn&apos;t build: it fails quietly
+              </span>
+              <span className="text-[15px] leading-[1.5] text-body">
+                NEURA reads a missing address as <em>nothing there</em>. List {c("product.search")}{" "}
+                while your search still finds nothing, and the assistant tells shoppers you
+                don&apos;t sell things you do. The check tool in step 3 can&apos;t tell either.
+              </span>
+            </div>
+          </div>
           <P>
-            {b("List only what you built.")} Leave something out and the assistant simply
-            doesn&apos;t try it. List something you didn&apos;t build and a shopper&apos;s
-            conversation breaks.
+            {b("No token on this one.")} {c("/health")} is the only address anyone may open, so you
+            can check your bridge from a browser. Put no shop data in it.
           </P>
         </Section>
 
