@@ -29,7 +29,7 @@ const TIERS: { title: string; note: string; rows: [string, string][] }[] = [
     title: "Start with these three",
     note: "Enough to connect. The assistant can find products and talk about them.",
     rows: [
-      ["GET /health", "What your shop can do — step 2"],
+      ["GET /health", "What your shop can do (step 2)"],
       ["GET /products", "A page of products, and search"],
       ["GET /products/{id}", "One product"],
     ],
@@ -38,9 +38,9 @@ const TIERS: { title: string; note: string; rows: [string, string][] }[] = [
     title: "Add these for better answers",
     note: "Each one you add, the assistant can do one more thing.",
     rows: [
-      ["GET /inventory", "Stock — whether something can be bought now"],
+      ["GET /inventory", "Stock: whether something can be bought now"],
       ["GET /policies", "Returns, shipping and warranty pages"],
-      ["GET /categories", "Your categories — what you do sell when nothing fits"],
+      ["GET /categories", "Your categories: what you do sell when nothing fits"],
     ],
   },
   {
@@ -49,7 +49,7 @@ const TIERS: { title: string; note: string; rows: [string, string][] }[] = [
     rows: [
       ["GET /orders", "A page of orders, and search by email or order number"],
       ["GET /orders/{id}", "One order"],
-      ["GET /customers/{id}", "One customer — never a member of staff"],
+      ["GET /customers/{id}", "One customer, never a member of staff"],
     ],
   },
 ];
@@ -458,7 +458,7 @@ export default function DeveloperGuide() {
           <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
             <span className="text-[15px] font-semibold">NEURA only reads</span>
             <span className="text-[15px] leading-[1.5] text-body">
-              It never changes anything in the shop — no orders, no prices, no stock. Every address
+              It never changes anything in the shop: no orders, no prices, no stock. Every address
               you build is a {c("GET")}.
             </span>
           </div>
@@ -489,7 +489,7 @@ export default function DeveloperGuide() {
           <div className="flex flex-col gap-2 rounded-xl bg-[#f5f5f5] px-[18px] py-4">
             <span className="text-[15px] font-semibold">Download the OpenAPI file</span>
             <span className="text-[15px] leading-[1.5] text-body">
-              It describes every address and every field. Keep it open while you build — or point a
+              It describes every address and every field. Keep it open while you build, or point a
               code generator at it.
             </span>
             <a
@@ -506,7 +506,7 @@ export default function DeveloperGuide() {
           <P>
             First ask FiveNeurals whether a ready-made bridge exists for the shop&apos;s system. If
             it does, install it like any other add-on and go to step 2. If not, build the addresses
-            below. Put them under any prefix — {c("/neura/v1")} is the usual one.
+            below. Put them under any prefix, usually {c("/neura/v1")}.
           </P>
           <div className="flex flex-col gap-4">
             {TIERS.map((tier, n) => (
