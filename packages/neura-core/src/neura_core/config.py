@@ -9,11 +9,13 @@ Mirrors ``.env.example``; keep the two in step.
 
 from __future__ import annotations
 
+import ipaddress
 from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, PostgresDsn, RedisDsn, field_validator
+from pydantic import Field, PostgresDsn, RedisDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from neura_core.errors import ConfigurationError
@@ -159,11 +161,14 @@ class Settings(BaseSettings):
     widget_allowed_origins: str = Field(
         default="http://localhost:3000", alias="WIDGET_ALLOWED_ORIGINS"
     )
-    #: How this API is reachable from a merchant's page. Used to build the embed
-    #: snippet, and only for that: nothing authenticates against it. It cannot be
-    #: derived from an incoming request, because the request that asks for the
-    #: snippet is usually not the one a shopper's browser will make.
-    public_base_url: str = Field(default="http://localhost:8000", alias="PUBLIC_BASE_URL")
+    #: How this API is reachable from a merchant's page. It builds the chat box
+    #: line and the developer AI tool address (ADR-0053), and that tool accepts
+    #: requests for this host only. It cannot be derived from an incoming
+    #: request, because the request that asks for the snippet is usually not the
+    #: one a shopper's browser will make. **Empty in development means this
+    #: machine at `NEURA_API_PORT`; outside development it must be set** (G24):
+    #: a default there is never right, and nothing would say so.
+    public_base_url: str = Field(default="", alias="PUBLIC_BASE_URL")
 
     # ── Email (ADR-0026, open question K1) ────────────────────────────────────
     #
@@ -184,7 +189,8 @@ class Settings(BaseSettings):
 
     #: Where sign-in links point. **Must** match where the console is actually
     #: served or every link 404s — and a login link that 404s is indistinguishable
-    #: from a broken product to the person holding it.
+    #: from a broken product to the person holding it. The default is for
+    #: development only; outside it, it must be set (G77).
     console_base_url: str = Field(default="http://localhost:3000", alias="CONSOLE_BASE_URL")
     #: What a shopper is shown when the reply is withheld and the tenant has
     #: configured no wording of its own (ADR-0020). **It promises nothing**: a
@@ -220,11 +226,20 @@ class Settings(BaseSettings):
             raise ValueError("BUDGET_DAILY_COST_USD_HARD must be >= ..._SOFT")
         return v
 
+    @model_validator(mode="after")
+    def _public_address(self) -> Settings:
+        # Every use appends a path, so a trailing slash would double it.
+        self.public_base_url = self.public_base_url.strip().rstrip("/")
+        if not self.public_base_url and self.env is Environment.DEVELOPMENT:
+            self.public_base_url = f"http://localhost:{self.api_port}"
+        return self
+
     def validate_for_runtime(self) -> None:
         """Reject configurations that are unsafe to serve real traffic with.
 
-        Placeholder secrets are tolerated in development so the stack boots from a
-        fresh clone, and rejected everywhere else.
+        Placeholder secrets and this machine's addresses are tolerated in
+        development so the stack boots from a fresh clone, and rejected
+        everywhere else. Every problem is named at once, not one per restart.
         """
         if self.env is Environment.DEVELOPMENT:
             return
@@ -234,12 +249,46 @@ class Settings(BaseSettings):
             for name, value in (("NEURA_SECRET_KEY", self.secret_key), ("NEURA_KEK", self.kek))
             if value == _PLACEHOLDER
         ]
-        if placeholders:
+        problems = [f"{name} is still set to the placeholder value" for name in placeholders]
+        fields = list(placeholders)
+
+        # The two addresses NEURA hands to other people (G24, G77). A wrong one
+        # fails for them, silently: a chat box line, a developer AI tool address
+        # or a sign-in link that leads to the machine NEURA runs on.
+        for name, field, value in (
+            ("PUBLIC_BASE_URL", "public_base_url", self.public_base_url),
+            ("CONSOLE_BASE_URL", "console_base_url", self.console_base_url),
+        ):
+            if field not in self.model_fields_set or not value.strip():
+                problems.append(f"{name} is not set")
+            elif self.is_production and (reason := _not_public_https(value)):
+                problems.append(f"{name} {reason}")
+            else:
+                continue
+            fields.append(name)
+
+        if problems:
             raise ConfigurationError(
-                f"Refusing to start in {self.env}: {', '.join(placeholders)} "
-                "still set to the placeholder value.",
-                details={"fields": placeholders},
+                f"Refusing to start in {self.env}: {'; '.join(problems)}.",
+                details={"fields": fields},
             )
+
+
+def _not_public_https(address: str) -> str | None:
+    """Why an address may not be given to shops and owners in production, or ``None``."""
+    parts = urlsplit(address.strip())
+    if parts.scheme != "https":
+        return "must start with https://"
+    host = parts.hostname
+    if not host:
+        return "has no host"
+    if host == "localhost" or host.endswith(".localhost"):
+        return "points at this machine"
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None  # a name: whether it is public is the DNS's to say
+    return None if ip.is_global else "is not a public internet address"
 
 
 @lru_cache(maxsize=1)

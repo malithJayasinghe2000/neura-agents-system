@@ -159,9 +159,10 @@ the console's Help page:
         data-neura-key="fn_pk_…"></script>
 ```
 
-The address in that line comes from the API's **`PUBLIC_BASE_URL`** setting. It defaults to
-`http://localhost:8000`, which is wrong on the development machine: set `PUBLIC_BASE_URL` to the
-address shoppers' browsers reach NEURA at (`http://localhost:8010` there).
+The address in that line comes from the API's **`PUBLIC_BASE_URL`** setting: the address shoppers'
+browsers reach NEURA at. On a development machine, left empty, it is that machine at `NEURA_API_PORT`.
+On a server it **must** be set: staging and production refuse to start without it, and production
+only with a public `https://` address (G24).
 
 **The reference bridge** takes the same three things as settings rather than a pasted line, and
 mounts the chat box into the shop's layout itself, so no theme file is edited:

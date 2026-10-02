@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 import pytest
 
@@ -121,6 +122,91 @@ class TestSettings:
         with pytest.raises(ConfigurationError) as exc:
             settings.validate_for_runtime()
         assert "NEURA_SECRET_KEY" in str(exc.value)
+
+    # ── The two addresses NEURA hands to other people (G24, G77) ─────────────
+    #
+    # `_env_file=None`: these are about the defaults, not this machine's `.env`.
+
+    REAL_SECRETS: ClassVar[dict[str, str]] = {
+        "NEURA_SECRET_KEY": "a-real-secret",
+        "NEURA_KEK": "a-real-kek",
+    }
+
+    @pytest.fixture(autouse=True)
+    def _nothing_from_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Other tests load this machine's `.env` into the process environment.
+        for name in (
+            "PUBLIC_BASE_URL",
+            "CONSOLE_BASE_URL",
+            "NEURA_API_PORT",
+            "NEURA_ENV",
+            "NEURA_SECRET_KEY",
+            "NEURA_KEK",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_in_development_the_public_address_follows_the_api_port(self) -> None:
+        """G24: it was a fixed localhost:8000, the wrong port on every machine here."""
+        settings = Settings(_env_file=None, NEURA_API_PORT=8010)
+        assert settings.public_base_url == "http://localhost:8010"
+
+    def test_an_address_that_is_set_is_kept(self) -> None:
+        settings = Settings(_env_file=None, PUBLIC_BASE_URL="https://api.shop.example/")
+        assert settings.public_base_url == "https://api.shop.example"
+
+    @pytest.mark.parametrize("env", ["staging", "production"])
+    def test_outside_development_neither_address_may_be_left_unset(self, env: str) -> None:
+        """A default is never right on a server: the chat box line, the developer AI tool
+        address and every sign-in link would point at the machine NEURA runs on."""
+        settings = Settings(_env_file=None, NEURA_ENV=env, **self.REAL_SECRETS)
+        with pytest.raises(ConfigurationError) as exc:
+            settings.validate_for_runtime()
+        assert "PUBLIC_BASE_URL" in str(exc.value)
+        assert "CONSOLE_BASE_URL" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "http://api.shop.example",
+            "https://localhost:8010",
+            "https://127.0.0.1",
+            "https://[::1]:8010",
+            "api.shop.example",
+            "https://",
+        ],
+    )
+    def test_production_wants_a_public_https_address(self, address: str) -> None:
+        settings = Settings(
+            _env_file=None,
+            NEURA_ENV="production",
+            PUBLIC_BASE_URL=address,
+            CONSOLE_BASE_URL="https://console.shop.example",
+            **self.REAL_SECRETS,
+        )
+        with pytest.raises(ConfigurationError) as exc:
+            settings.validate_for_runtime()
+        assert "PUBLIC_BASE_URL" in str(exc.value)
+        assert "CONSOLE_BASE_URL" not in str(exc.value)
+
+    def test_production_starts_with_both_addresses_set(self) -> None:
+        Settings(
+            _env_file=None,
+            NEURA_ENV="production",
+            PUBLIC_BASE_URL="https://api.shop.example",
+            CONSOLE_BASE_URL="https://console.shop.example",
+            **self.REAL_SECRETS,
+        ).validate_for_runtime()
+
+    def test_every_problem_is_named_at_once(self) -> None:
+        """One failed start names everything to fix, not one thing per restart."""
+        settings = Settings(_env_file=None, NEURA_ENV="production")
+        with pytest.raises(ConfigurationError) as exc:
+            settings.validate_for_runtime()
+        message = str(exc.value)
+        assert all(
+            name in message
+            for name in ("NEURA_SECRET_KEY", "NEURA_KEK", "PUBLIC_BASE_URL", "CONSOLE_BASE_URL")
+        )
 
     def test_widget_origins_are_parsed(self) -> None:
         settings = Settings(WIDGET_ALLOWED_ORIGINS="https://a.com, https://b.com")

@@ -356,8 +356,9 @@ finished…"*. It stops watching after a few minutes and says the sync has not f
 shop: pressed, *"Asked your shop for a fresh copy…"*, the time changed by itself, *"Finished."*
 
 **Help's chat box line** is fetched from `GET /v1/widget/snippet` — exactly the API's `SNIPPET` — so its address is
-the API's `PUBLIC_BASE_URL`, which **defaults to `http://localhost:8000`**. On this machine that shows the wrong
-port until `.env` sets `PUBLIC_BASE_URL=http://localhost:8010`.
+the API's `PUBLIC_BASE_URL`. **Since 2026-10-03 (G24)**: left empty in development it is this machine at
+`NEURA_API_PORT` (it was a fixed `http://localhost:8000`, the wrong port here); staging and production refuse to
+start without it, and production only with a public `https://` address.
 
 **Help's *For your developer*, 2026-10-02** (canvas row 11, boards 36-37, approved by the owner; ADR-0053 §6 step 7,
 G71). The box now reads in building order: *"The bridge answers nine read-only addresses… The guide for developers
