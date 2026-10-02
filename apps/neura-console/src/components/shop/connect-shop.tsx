@@ -23,7 +23,7 @@ import { useRouter } from "next/navigation";
 import { Check, CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 import Link from "next/link";
 import { connectShop, makeShopToken } from "@/lib/api";
-import { CopyButton, useShopCheck } from "@/components/shop/full-check";
+import { CheckWarnings, CopyButton, useShopCheck } from "@/components/shop/full-check";
 import { When } from "@/components/when";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -242,7 +242,7 @@ export function ConnectShop({
           ) : null}
 
           {result && !result.conformant ? <Problem result={result} /> : null}
-          {result?.conformant ? <Passed text={result.text} total={result.passed} /> : null}
+          {result?.conformant ? <Passed result={result} /> : null}
 
           {hasToken && !connected ? (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -361,16 +361,18 @@ function Problem({ result }: { result: NonNullable<ShopCheck["result"]> }) {
   );
 }
 
-function Passed({ text, total }: { text: string; total: number }) {
+function Passed({ result }: { result: NonNullable<ShopCheck["result"]> }) {
   return (
     <div role="status" data-check-result="passed" className="space-y-3 rounded-xl border p-3.5">
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 font-semibold">
         <CheckCircle2 className="size-5.5 shrink-0" aria-hidden />
         Your shop passed the check
         <span className="font-normal text-muted-foreground">
-          {total} of {total}
+          {/* A warning is counted, not passed (G75). */}
+          {result.passed} of {result.passed + result.warnings}
         </span>
       </p>
+      <CheckWarnings result={result} />
       <ul className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
         {PASSED_WORDS.map((line) => (
           <li key={line} className="flex items-start gap-2">
@@ -385,7 +387,7 @@ function Passed({ text, total }: { text: string; total: number }) {
         few products by hand.
       </p>
       <CopyButton
-        text={text}
+        text={result.text}
         label="Copy the full check for your developer"
         className="w-full sm:w-fit"
       />

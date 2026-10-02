@@ -289,33 +289,55 @@ def _json(response: httpx.Response) -> Any:
         return None
 
 
+#: A sample, one request: enough to catch a bridge that maps statuses wrongly.
+_PRODUCT_SAMPLE = 20
+
+#: Read as "unknown" by the adapter, so never recommended.
+_NO_STATUS = "no status"
+
+
 async def _check_product_status_vocabulary(
     client: GenericClient, report: ConformanceReport
 ) -> None:
-    """Same check for the catalogue. Separate because it is a different endpoint."""
+    """Statuses in the raw catalogue, before the client maps them.
+
+    A missing status, ``"unknown"`` and any word the format does not know all
+    end as ``unknown``, and NEURA-SELL, the suggestions and the product feed
+    keep only ``active`` products (G69). The format allows a missing status, so
+    this warns rather than fails: answering questions still works without it.
+    ``draft`` and ``archived`` are not warned about: a shop hides those on purpose.
+    """
     check = "products.status_vocabulary"
-    response = await client.request(PATH_PRODUCTS, params={"limit": 5})
+    response = await client.request(PATH_PRODUCTS, params={"limit": _PRODUCT_SAMPLE})
     if response.status_code != httpx.codes.OK:
         return
 
     payload = _json(response)
     items = payload.get("items", []) if isinstance(payload, dict) else []
+    products = [item for item in items if isinstance(item, dict)]
 
-    valid = {member.value for member in ProductStatus}
-    unmapped = {
-        str(item.get("status"))
-        for item in items
-        if isinstance(item, dict)
-        and isinstance(item.get("status"), str)
-        and item["status"] not in valid
-    }
+    usable = {member.value for member in ProductStatus} - {ProductStatus.UNKNOWN.value}
+    unusable: dict[str, int] = {}
+    for product in products:
+        status = product.get("status")
+        if isinstance(status, str) and status in usable:
+            continue
+        label = f'"{status}"' if isinstance(status, str) else _NO_STATUS
+        unusable[label] = unusable.get(label, 0) + 1
 
-    if unmapped:
+    if unusable:
+        named = ", ".join(
+            f"{label} ({count})"
+            for label, count in sorted(unusable.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
         report.add(
             check,
             Severity.WARNING,
-            f"non-canonical product status values: {sorted(unmapped)}",
-            "Map to ProductStatus; unmappable values become 'unknown'.",
+            f"{sum(unusable.values())} of {len(products)} products read have no usable status: "
+            f"{named}",
+            'Send "status": "active" for each product shoppers can buy now, and "draft" or '
+            '"archived" for the rest. Any other word, or none, is read as "unknown", and '
+            'NEURA-SELL never recommends a product that is not "active".',
         )
         return
 

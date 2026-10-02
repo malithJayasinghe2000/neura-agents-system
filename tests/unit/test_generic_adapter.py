@@ -500,6 +500,7 @@ async def test_a_float_price_is_refused() -> None:
         (Defect.IGNORES_UPDATED_SINCE, "sync.updated_since", Severity.WARNING),
         (Defect.PLATFORM_STATUS, "orders.status_vocabulary", Severity.WARNING),
         (Defect.IGNORES_LIMIT, "pagination.limit", Severity.WARNING),
+        (Defect.NO_PRODUCT_STATUS, "products.status_vocabulary", Severity.WARNING),
     ],
 )
 async def test_each_defect_is_caught_by_its_check(
@@ -589,6 +590,74 @@ async def test_a_shop_without_orders_is_asked_for_a_missing_product_instead() ->
     finding = next(f for f in report.errors if f.check == "errors.not_found")
     assert finding.message.startswith("an unknown product id returned HTTP 200")
     assert "about a product that does not exist" in finding.hint
+
+
+def with_product_statuses(store: ReferenceStore, statuses: list[str | None]):
+    """The store's products, each given the next status in turn; ``None`` leaves it out."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        response = store.handle(request)
+        if request.url.path != f"{store.prefix}/products" or response.status_code != 200:
+            return response
+        payload = response.json()
+        for item, status in zip(payload["items"], statuses, strict=False):
+            if status is None:
+                item.pop("status", None)
+            else:
+                item["status"] = status
+        return httpx.Response(200, json=payload)
+
+    return handle
+
+
+async def test_products_without_a_status_are_warned_about_not_failed() -> None:
+    """G69: a missing status reads as "unknown", and NEURA-SELL recommends only
+    "active" products, so a shop that leaves it out gets nothing recommended
+    while the check stayed green. The format allows it, so it warns and Connect
+    stays open."""
+    store = ReferenceStore(defects=frozenset({Defect.NO_PRODUCT_STATUS}))
+    adapter = adapter_for(store)
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    assert report.is_conformant, [f.message for f in report.errors]
+    finding = next(f for f in report.findings if f.check == "products.status_vocabulary")
+    assert finding.severity is Severity.WARNING
+    assert finding.message == "5 of 5 products read have no usable status: no status (5)"
+    assert '"status": "active"' in finding.hint
+    assert 'never recommends a product that is not "active"' in finding.hint
+
+
+async def test_each_unusable_product_status_is_named_with_its_count() -> None:
+    """The format has the word "unknown", but it means the same as none; a word the
+    format does not know is read as "unknown" too. Our own names stay out of it (G53)."""
+    store = ReferenceStore()
+    adapter = adapter_for_handler(
+        with_product_statuses(store, ["active", None, "enabled", "unknown", "enabled"])
+    )
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    finding = next(f for f in report.findings if f.check == "products.status_vocabulary")
+    assert finding.message == (
+        '4 of 5 products read have no usable status: "enabled" (2), "unknown" (1), no status (1)'
+    )
+    assert "ProductStatus" not in finding.hint
+
+
+async def test_draft_and_archived_products_are_not_a_status_problem() -> None:
+    """A shop may hide products on purpose; only a missing or unknown word is warned about."""
+    store = ReferenceStore()
+    adapter = adapter_for_handler(
+        with_product_statuses(store, ["active", "draft", "archived", "active", "active"])
+    )
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    assert "products.status_vocabulary" in report.passed_checks
 
 
 async def test_running_without_a_token_says_so_rather_than_passing_quietly() -> None:

@@ -15,9 +15,15 @@
  * *Check now*'s answer did.
  */
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Copy, RefreshCw } from "lucide-react";
 import { readShopCheck, startShopCheck } from "@/lib/api";
-import { allowedWords, checkWords, type ShopCheck } from "@/lib/shop";
+import {
+  allowedWords,
+  checkWords,
+  warningWords,
+  type CheckResult,
+  type ShopCheck,
+} from "@/lib/shop";
 import { SetupItem } from "@/components/shop/setup-item";
 import { When } from "@/components/when";
 import { Button } from "@/components/ui/button";
@@ -147,7 +153,8 @@ function useStoreCheck(storeId: string) {
 export function CheckItem({ storeId }: { storeId: string }) {
   const { check, busy, error, start } = useStoreCheck(storeId);
   const result = check?.status === "done" ? check.result : null;
-  const total = result ? result.passed + result.failed : 0;
+  // A warning is a check that did not pass cleanly, so it is counted, not passed (G75).
+  const total = result ? result.passed + result.failed + result.warnings : 0;
 
   const button = (
     <Button
@@ -220,10 +227,53 @@ export function CheckItem({ storeId }: { storeId: string }) {
         <>
           {result.passed} of {total} · checked{" "}
           {check.finished_at ? <When iso={check.finished_at} inline /> : "just now"}
+          {result.warnings > 0 ? (
+            <>
+              <CheckWarnings result={result} className="mt-2.5" />
+              <span className="mt-2.5 block">
+                <CopyButton text={result.text} label="Copy the full check for your developer" />
+              </span>
+            </>
+          ) : null}
         </>
       }
       action={button}
     />
+  );
+}
+
+/**
+ * A clean check's warnings, in the owner's words (G75). They do not stop
+ * Connect, but some change what shoppers get, so the owner reads them here and
+ * not only in the copy for the developer. Spans, so it fits inside a row's text.
+ */
+export function CheckWarnings({
+  result,
+  className = "",
+}: {
+  result: CheckResult;
+  className?: string;
+}) {
+  const lines = warningWords(result);
+  if (lines.length === 0) return null;
+  return (
+    <span
+      data-check-warnings
+      className={`block space-y-1.5 rounded-lg border px-3.5 py-3 text-sm leading-relaxed text-foreground ${className}`}
+    >
+      <span className="block font-semibold">
+        {result.warnings === 1 ? "1 thing to look at" : `${result.warnings} things to look at`}
+      </span>
+      {lines.map((line) => (
+        <span key={line} className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+          {line}
+        </span>
+      ))}
+      <span className="block text-muted-foreground">
+        Your developer sees the details in the full check.
+      </span>
+    </span>
   );
 }
 

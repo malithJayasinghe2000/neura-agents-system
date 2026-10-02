@@ -97,6 +97,9 @@ class Defect(StrEnum):
     IGNORES_LIMIT = "ignores_limit"
     """Returns the whole collection regardless of ``limit``."""
 
+    NO_PRODUCT_STATUS = "no_product_status"
+    """Sends products without a status, so NEURA-SELL never recommends one (G69)."""
+
 
 class ReferenceStore:
     """An in-memory store that implements the Generic Commerce Interface."""
@@ -194,7 +197,12 @@ class ReferenceStore:
         if params.get("in_stock_only") == "true":
             items = [p for p in items if any(v.in_stock for v in p.variants)]
 
-        return self._paginate(items, params)
+        payloads = [to_wire(p) for p in items]
+        if Defect.NO_PRODUCT_STATUS in self.defects:
+            for payload in payloads:
+                payload.pop("status", None)
+
+        return self._paginate_payloads(payloads, params, updated=[p.updated_at for p in items])
 
     def _orders(self, params: dict[str, str]) -> httpx.Response:
         items = list(self.orders)
@@ -235,13 +243,6 @@ class ReferenceStore:
         return _json(404, {"error": f"no such entity: {external_id}"})
 
     # ── Pagination ───────────────────────────────────────────────────────────
-
-    def _paginate(self, items: list[Any], params: dict[str, str]) -> httpx.Response:
-        return self._paginate_payloads(
-            [to_wire(item) for item in items],
-            params,
-            updated=[getattr(item, "updated_at", None) for item in items],
-        )
 
     def _paginate_payloads(
         self,

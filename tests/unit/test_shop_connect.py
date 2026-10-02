@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from neura_adapters.generic.adapter import GenericAdapter
-from neura_adapters.generic.reference import DEFAULT_TOKEN, ReferenceStore
+from neura_adapters.generic.reference import DEFAULT_TOKEN, Defect, ReferenceStore
 from neura_api.addresses import (
     ADDRESS_INVALID,
     ADDRESS_NOT_HTTPS,
@@ -195,6 +195,20 @@ class TestOneCheckForTerminalAndDashboard:
 
         result = outcome("https://shop.example/neura/v1", cause=cause, report=report)
         assert result["conformant"] is True, result["text"]
+
+    async def test_products_without_a_status_warn_and_still_connect(self) -> None:
+        """G69: a warning, not a failure, and it travels with the result the owner's
+        screen reads (G75), not only in the developer's copy."""
+        store = ReferenceStore(defects=frozenset({Defect.NO_PRODUCT_STATUS}))
+        adapter = adapter_for(store, token=DEFAULT_TOKEN)
+        report = await check_adapter(adapter)
+        await adapter.aclose()
+
+        result = outcome("https://shop.example/neura/v1", cause=None, report=report)
+        assert result["conformant"] is True, result["text"]
+        assert result["warnings"] == 1
+        assert [f["check"] for f in result["findings"]] == ["products.status_vocabulary"]
+        assert "⚠ products.status_vocabulary" in result["text"]
 
     def test_developer_text_without_a_report_still_says_why(self) -> None:
         assert "Could not reach" in developer_text("https://x.example", "unreachable", None, None)

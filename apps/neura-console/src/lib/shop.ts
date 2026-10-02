@@ -84,8 +84,17 @@ export type CheckResult = {
   /** Clean enough to connect: the whole check ran, and nothing failed. */
   conformant: boolean;
   capabilities: string[];
+  /** Every ✘ and ⚠, in the developer's words. The owner's words: `warningWords`. */
+  findings: CheckFinding[];
   /** The full result as plain text, for the developer. */
   text: string;
+};
+
+export type CheckFinding = {
+  check: string;
+  severity: "error" | "warning";
+  message: string;
+  hint: string | null;
 };
 
 export type ShopView = {
@@ -285,6 +294,38 @@ export function checkWords(result: CheckResult): { title: string; body: string }
         body: "Send the full check to your developer. It says what is wrong and how to fix it.",
       };
   }
+}
+
+/**
+ * What a warning means for the shop, in the owner's words (G75). A warning
+ * does not stop Connect, but these change what shoppers get, so the owner reads
+ * them, not only the developer. Any other warning is counted as a technical
+ * detail; the full check has it.
+ */
+const WARNING_WORDS: Record<string, string> = {
+  "products.status_vocabulary":
+    "Some products don't say they are on sale, so NEURA never recommends them.",
+  "orders.status_vocabulary":
+    "Some orders use status words NEURA doesn't know, so the assistant can't tell a shopper how those orders are doing.",
+  policies:
+    "Your policy pages are missing or empty, so the assistant can't answer returns or shipping questions from them.",
+  "products.search_no_match":
+    "A search for words that match nothing still finds products, so the assistant is given products that don't fit the question.",
+};
+
+/** A check's warnings, one plain line each; the technical ones counted together. */
+export function warningWords(result: CheckResult): string[] {
+  const warnings = (result.findings ?? []).filter((f) => f.severity === "warning");
+  const lines = warnings.flatMap((f) => (WARNING_WORDS[f.check] ? [WARNING_WORDS[f.check]] : []));
+  const technical = warnings.length - lines.length;
+  if (technical > 0) {
+    lines.push(
+      technical === 1
+        ? "1 technical detail for your developer."
+        : `${technical} technical details for your developer.`,
+    );
+  }
+  return lines;
 }
 
 /** Where the guide for developers lives (ADR-0051). Live once the website is deployed. */

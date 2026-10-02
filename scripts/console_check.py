@@ -838,6 +838,40 @@ async def _check_shop_and_usage(
         failures,
     )
 
+    # G75: a clean check's warnings reach the owner in their own words, not
+    # only the developer's copy. Stored as the seeded connection's newest check,
+    # and removed with the seed by its store's id.
+    await _seed_passed_check(seeded)
+    await browser.goto(f"{console}/console/{seeded['tenant']}/shops")
+    await asyncio.sleep(3)
+    row = await browser.evaluate(
+        f"(document.querySelector('[data-item=check][data-store=\"{store}\"]') || {{}})"
+        ".innerText || ''"
+    )
+    counted = re.search(r"(\d+) of (\d+) ·", row)
+    _check(
+        "a clean check shows the owner its warnings, in plain words (G75)",
+        "Your shop passes the check" in row
+        and "2 things to look at" in row
+        and "Some products don't say they are on sale, so NEURA never recommends them." in row
+        and "1 technical detail for your developer." in row
+        and await browser.evaluate(
+            f'!!document.querySelector(\'[data-item=check][data-store="{store}"] '
+            "[data-check-warnings]')"
+        ),
+        failures,
+    )
+    _check(
+        "a warning is not counted as passed",
+        counted is not None and int(counted.group(2)) - int(counted.group(1)) == 2,
+        failures,
+    )
+    _check(
+        "the owner can copy that check for their developer",
+        "Copy the full check for your developer" in row,
+        failures,
+    )
+
     # `console.md §3.4`: never a stored credential, not even masked, because a
     # field that can be revealed is a field that gets revealed in a screen-share.
     # This is only a real check because the row above genuinely contains it.
@@ -1725,6 +1759,50 @@ async def _unseed_choice(db: Database, made: dict[str, str]) -> None:
             .where(synced_entities.c.tenant_id == made["tenant"])
             .where(synced_entities.c.platform == SEEDED_PLATFORM)
         )
+
+
+async def _seed_passed_check(seeded: dict[str, str]) -> None:
+    """The seeded connection's newest check: clean, with two warnings (G75).
+
+    Made by the real check against the built-in test shop, given two mistakes
+    that warn and do not fail, so the screen is tested on what the worker
+    stores rather than on a result written by hand.
+    """
+    from neura_adapters.generic.adapter import GenericAdapter
+    from neura_adapters.generic.reference import DEFAULT_TOKEN, Defect, ReferenceStore
+    from neura_api.jobs.shop_check import outcome
+    from neura_commerce import check_adapter
+    from neura_core.tenancy import ShopCheckRepository
+
+    shop = ReferenceStore(defects=frozenset({Defect.NO_PRODUCT_STATUS, Defect.IGNORES_LIMIT}))
+    adapter = GenericAdapter(
+        base_url=shop.base_url(),
+        tenant_id=seeded["tenant"],
+        token=DEFAULT_TOKEN,
+        transport=shop.transport(),
+    )
+    try:
+        report = await check_adapter(adapter)
+    finally:
+        await adapter.aclose()
+    address = "https://console-check.invalid/neura/v1"
+    result = outcome(address, cause=None, report=report)
+    if not result["conformant"] or result["warnings"] != 2:
+        raise RuntimeError(f"the seeded check is not clean with two warnings:\n{result['text']}")
+
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(seeded["tenant"]) as session:
+            checks = ShopCheckRepository(session)
+            made = await checks.create(
+                seeded["tenant"],
+                address=address,
+                store_id=seeded["store"],
+                requested_by="console-check",
+            )
+            await checks.finish(made, result=result)
+    finally:
+        await db.dispose()
 
 
 async def _shop_checks_of(tenant_id: str) -> int:
