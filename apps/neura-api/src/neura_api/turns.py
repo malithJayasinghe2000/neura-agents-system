@@ -32,7 +32,7 @@ in ``audit.py``.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any
 
@@ -59,6 +59,7 @@ from neura_core.tenancy import (
     TurnMode,
     UsageDelta,
     UsageMeter,
+    handover_message,
     resolve_runtime_policy,
     resolve_turn_mode,
 )
@@ -280,6 +281,12 @@ class TurnService:
                 shadow_intents=config.shadow_intents,
                 intent=outcome.intent,
             )
+            # A handover says how to reach the shop, in the shop's own contact
+            # details, and promises no person (ADR-0055, G44). Put on here, the
+            # one place every reply is released, for both assistants and both
+            # transports; a handover is fixed text, sent whole, never streamed.
+            if outcome.escalated:
+                outcome = replace(outcome, reply=handover_message(config))
 
             if mode is TurnMode.SHADOW:
                 # The shopper's words are history; the agent's are not. The

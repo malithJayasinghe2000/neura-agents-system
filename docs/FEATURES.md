@@ -44,7 +44,7 @@ The shopper asks, CARE answers from the shop's own data, and hands to a person w
 | **Order status** | Tells a shopper where their order is: status, items, tracking. It first checks the order is **theirs**; for any other number the reply is the same *"no order with that reference"*, so nobody can guess real order numbers. | 🟡 Built, with a limit (L1) | Chat box | `agents/care/tools/orders.py` |
 | **Product questions** | Answers questions about products — what it is, sizes, materials, whether it is in stock — from the shop's catalogue. | ✅ Built | Chat box | `agents/care/tools/catalogue.py` |
 | **Returns and shipping questions** | Answers from the shop's own policy pages — returns, shipping, refunds, warranty, payment, privacy. Chosen by plain matching in code, no AI guessing which page applies. | ✅ Built | Chat box | `agents/care/tools/policies.py` |
-| **Hand to a person** | Passes the chat to the shop's team when the shopper asks, when they want something changed or refunded, or when CARE cannot answer from the shop's data. The team gets the whole story: the question, what was looked up, and a draft reply that was **not** sent. | 🟡 Built, with a limit (L2) | Chat box → Dashboard | `graph/nodes/escalate.py` |
+| **Hand to a person** | Passes the chat to the shop's team when the shopper asks, when they want something changed or refunded, or when CARE cannot answer from the shop's data. The team gets the whole story: the question, what was looked up, and a draft reply that was **not** sent. **The shopper is told to contact the store, with the shop's own email or phone** (set on Shop connection), and is never promised a person. | 🟡 Built, with a limit (L2) | Chat box → Dashboard | `graph/nodes/escalate.py`, ADR-0055 |
 
 ## NEURA-SELL — helps the shopper choose
 
@@ -92,7 +92,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | **Suggestions** (NEURA-SELL) | See and choose what shows with each product. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Sold out** (NEURA-SELL) | Sold-out products people kept looking at. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Usage and cost** | Chats, AI use and its cost, by assistant. | ✅ Built |
-| **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. | ✅ Built (ADR-0052) |
+| **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. **The shop's contact details** (email, phone), named to a shopper the assistant cannot help, with the exact sentence they read. | ✅ Built (ADR-0052, ADR-0055) |
 | **Help** | *Connecting your shop*, step by step, and what to send your developer: the guide for developers, the address for an AI coding tool, and the chat box line. | ✅ Built |
 | Settings and keys (the owner makes the chat box key) | — | ⬜ Not designed (needs an ADR) |
 

@@ -30,6 +30,7 @@ from neura_core.tenancy.budget import (
     RuntimePolicy,
     resolve_runtime_policy,
 )
+from neura_core.tenancy.handover import HANDOVER_WITHOUT_DETAILS, handover_message
 from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
 from neura_core.tenancy.models import (
     ApiKey,
@@ -61,6 +62,7 @@ from neura_core.tenancy.shop_setup import (
 from neura_core.tenancy.usage import UsageDelta, UsageMeter, UsageTotals
 
 __all__ = [
+    "HANDOVER_WITHOUT_DETAILS",
     "SHOP_TOKEN_PREFIX",
     "Admission",
     "ApiKey",
@@ -84,6 +86,7 @@ __all__ = [
     "UsageTotals",
     "api_keys",
     "authenticate",
+    "handover_message",
     "new_shop_token",
     "require_agent",
     "require_scopes",

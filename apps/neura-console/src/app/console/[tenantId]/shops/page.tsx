@@ -10,6 +10,9 @@
  *   on the shop; then, optional and needed for Sold out, the data agreement and
  *   product views arriving. Every tick but *answers* is read from our own
  *   tables.
+ * - **Your shop's contact details** (2026-10-02, ADR-0055, G44): an email and a
+ *   phone, both optional, named to a shopper the assistant hands over; under the
+ *   form, the server's own sentence a shopper reads.
  * - **Our copy of your catalogue** — counts, when it was last read, *"nothing
  *   syncs by itself yet"*, **Sync now** (writes our copy, never the shop), each
  *   kind's last run, and how much search by meaning covers.
@@ -34,11 +37,13 @@ import { redirect } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { AllowedList, CheckItem, ShopChecks } from "@/components/shop/full-check";
 import { ConnectShop } from "@/components/shop/connect-shop";
+import { ShopContact } from "@/components/shop/shop-contact";
 import { ShopToken } from "@/components/shop/shop-token";
 import { SetupItem } from "@/components/shop/setup-item";
 import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { SyncNow } from "@/components/shop/sync-now";
 import { When } from "@/components/when";
+import type { ShopContactView } from "@/lib/api";
 import { fromApi, hasSession } from "@/lib/server-api";
 import {
   ENTITY_LABELS,
@@ -56,9 +61,10 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
-  const [view, assistants] = await Promise.all([
+  const [view, assistants, contact] = await Promise.all([
     fromApi<ShopView>(`/shops/${encodeURIComponent(tenantId)}/store`),
     shopAssistants(tenantId),
+    fromApi<ShopContactView>(`/shops/${encodeURIComponent(tenantId)}/contact`),
   ]);
   const sell = hasSell(assistants);
 
@@ -91,6 +97,7 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
             />
           )}
           <GetSetUp tenantId={tenantId} view={view.data} sell={sell} />
+          <ShopContact tenantId={tenantId} initial={contact.ok ? contact.data : null} />
           {view.data.connected ? (
             <>
               {view.data.stores.map((store) => (

@@ -113,6 +113,22 @@ class TenantRepository:
         )
         return await self.require(tenant_id)
 
+    async def set_contact(self, tenant_id: str, *, email: str | None, phone: str | None) -> Tenant:
+        """The shop's own contact details, named in every handover (ADR-0055).
+
+        Merged like :meth:`set_mode`, two keys and nothing else. ``None`` is
+        written as JSON ``null``: the owner cleared the field.
+        """
+        patch = bindparam(
+            "contact_patch", {"contact_email": email, "contact_phone": phone}, type_=JSONB
+        )
+        await self._session.execute(
+            update(tenants)
+            .where(tenants.c.tenant_id == tenant_id)
+            .values(config=tenants.c.config.op("||")(patch), updated_at=func.now())
+        )
+        return await self.require(tenant_id)
+
     async def set_enabled_agents(self, tenant_id: str, agents: Sequence[str]) -> Tenant:
         """The upgrade path from tenancy-and-packaging.md §3.2: a row, not a deploy."""
         await self._session.execute(

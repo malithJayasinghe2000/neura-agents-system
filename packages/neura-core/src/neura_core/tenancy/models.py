@@ -87,6 +87,22 @@ class TenantConfig(BaseModel):
             "half of §6 — live for order status, watched for returns policy."
         ),
     )
+    contact_email: str | None = Field(
+        default=None,
+        max_length=254,
+        description=(
+            "The shop's own email address, named to a shopper the assistant hands over "
+            "(ADR-0055). Typed by the owner on Shop connection; checked there."
+        ),
+    )
+    contact_phone: str | None = Field(
+        default=None,
+        max_length=40,
+        description=(
+            "The shop's own phone number, named to a shopper the assistant hands over "
+            "(ADR-0055). Typed by the owner on Shop connection; checked there."
+        ),
+    )
     withheld_message: str | None = Field(
         default=None,
         max_length=500,

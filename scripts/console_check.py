@@ -219,6 +219,7 @@ async def main() -> int:
 
                 print(f"\n  {BOLD}shop and usage — connection, and honest numbers{OFF}")
                 await _check_shop_and_usage(browser, console, seeded, failures)
+                await _check_contact(browser, console, seeded, failures)
 
                 print(f"\n  {BOLD}help — connecting your shop{OFF}")
                 await _check_help(browser, console, seeded, failures)
@@ -854,10 +855,15 @@ async def _check_shop_and_usage(
         failures,
     )
 
-    # The write this screen deliberately does not have. A connect form is
-    # designed (§3.4) and not built, so there must be no field asking for one.
+    # The write this screen deliberately does not have: nothing on a connected
+    # shop's screen asks for a credential (NEURA makes the token, ADR-0052 §1).
+    # Since ADR-0055 it has one form, the shop's own public contact details,
+    # which is not a credential; any other field, or any secret-looking one,
+    # still fails.
     token_fields = await browser.evaluate(
-        "document.querySelectorAll('input[type=password], form input').length"
+        "document.querySelectorAll('input[type=password], "
+        "form:not([data-contact-form]) input, "
+        "input[name*=token i], input[name*=secret i], input[name*=key i]').length"
     )
     _check("no credential form exists on the shop screen", token_fields == 0, failures)
 
@@ -1045,6 +1051,116 @@ async def _check_for_your_developer(browser: Chrome, snippet: str, failures: lis
         failures,
     )
     _check("no long dash in the copied steps", "—" not in copied, failures)
+
+
+async def _check_contact(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """*Your shop's contact details* on Shop connection (ADR-0055, G44).
+
+    Typed the way a person types (the input's own setter, then an input event, so
+    React sees it), saved with the button, and held to the database. The test
+    shop's details are put back afterwards, whatever they were.
+    """
+    from neura_core.tenancy import TenantRepository
+
+    tenant = seeded["tenant"]
+
+    async def details() -> tuple[str | None, str | None]:
+        db = Database.from_settings()
+        try:
+            async with db.tenant_session(tenant) as session:
+                config = (await TenantRepository(session).require(tenant)).config
+                return config.contact_email, config.contact_phone
+        finally:
+            await db.dispose()
+
+    async def put_back(email: str | None, phone: str | None) -> None:
+        db = Database.from_settings()
+        try:
+            async with db.tenant_session(tenant) as session:
+                await TenantRepository(session).set_contact(tenant, email=email, phone=phone)
+        finally:
+            await db.dispose()
+
+    async def type_into(selector: str, value: str) -> None:
+        await browser.evaluate(
+            f"""(() => {{
+              const el = document.querySelector('{selector}');
+              const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              set.call(el, {value!r});
+              el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              return true;
+            }})()"""
+        )
+
+    original = await details()
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=1280,
+        height=900,
+        deviceScaleFactor=1,
+        mobile=False,
+    )
+    try:
+        await browser.goto(f"{console}/console/{tenant}/shops")
+        await asyncio.sleep(3)
+        page = await browser.evaluate("document.body.innerText")
+        _check(
+            "Shop connection asks for the shop's contact details",
+            "Your shop's contact details" in page
+            and await browser.evaluate("!!document.querySelector('[data-contact-form]')"),
+            failures,
+        )
+
+        await type_into("#contact-email", "not an email")
+        await type_into("#contact-phone", "")
+        await browser.evaluate("document.querySelector('[data-save-contact]').click() || true")
+        await asyncio.sleep(2)
+        said = await browser.evaluate(
+            "(document.querySelector('[data-contact-error]') || {}).innerText || ''"
+        )
+        _check(
+            "a wrong email is refused in plain words, and nothing is saved",
+            said.startswith("Email:") and await details() == original,
+            failures,
+        )
+
+        await type_into("#contact-email", "hello@yourshop.example")
+        await type_into("#contact-phone", "+94 11 234 5678")
+        await browser.evaluate("document.querySelector('[data-save-contact]').click() || true")
+        await asyncio.sleep(2)
+        sentence = await browser.evaluate(
+            "(document.querySelector('[data-handover]') || {}).innerText || ''"
+        )
+        _check(
+            "saved details are in the shop's settings",
+            await details() == ("hello@yourshop.example", "+94 11 234 5678"),
+            failures,
+        )
+        _check(
+            "the screen shows the sentence a handed-over shopper reads, with them",
+            sentence == "I can't help with this here. Please contact our store: "
+            "hello@yourshop.example, +94 11 234 5678.",
+            failures,
+        )
+
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390,
+            height=844,
+            deviceScaleFactor=1,
+            mobile=True,
+        )
+        await asyncio.sleep(1)
+        _check(
+            "on a phone the contact details do not scroll sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+    finally:
+        await put_back(*original)
+        await browser.call("Emulation.clearDeviceMetricsOverride")
 
 
 async def _check_mode_switch(

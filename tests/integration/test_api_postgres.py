@@ -1115,6 +1115,82 @@ class TestIsolation:
 # ── The WebSocket transport (ADR-0016) ───────────────────────────────────────
 
 
+class NeedsPersonLLM(StubLLM):
+    """A router that calls every message one a person must act on, which CARE
+    always hands over (`nodes/route.py`)."""
+
+    async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
+        result = await super().chat_structured(role, request, schema)
+        if schema.__name__ == "Route":
+            result.value = schema(intent="needs_person", confidence=0.95, search_query="")
+        return result
+
+
+class TestHandover:
+    """ADR-0055, G44. A handed-over shopper is told how to reach the shop, in the
+    shop's own words, and never that a person is coming."""
+
+    CONTACT = TenantConfig(contact_email="hello@yourshop.example", contact_phone="+94 11 234 5678")
+    WITH_CONTACT = (
+        "I can't help with this here. Please contact our store: "
+        "hello@yourshop.example, +94 11 234 5678."
+    )
+
+    @staticmethod
+    def _handing_over(client: TestClient) -> None:
+        from neura_api.turns import TurnService
+
+        app = client.app
+        app.state.turns = TurnService(app.state.database, NeedsPersonLLM(), app.state.stores)  # type: ignore[attr-defined]
+
+    async def test_a_handover_names_the_shops_contact_details(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+
+        body = client.post(
+            "/v1/care/chat", json={"message": "please cancel my order"}, headers=_auth(token)
+        ).json()["data"]
+
+        assert body["state"] == ConversationState.ESCALATED.value
+        assert body["reply"] == self.WITH_CONTACT
+        async with db.tenant_session(TENANT_A) as session:
+            messages = await ConversationRepository(session).messages(
+                TENANT_A, body["conversation_id"]
+            )
+        # The transcript holds what the shopper read, not the old promise.
+        assert messages[-1].content == self.WITH_CONTACT
+
+    async def test_with_no_details_it_promises_nothing(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A)
+        self._handing_over(client)
+
+        body = client.post(
+            "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
+        ).json()["data"]
+
+        assert body["state"] == ConversationState.ESCALATED.value
+        assert body["reply"] == "I can't help with this here. Please contact our store."
+
+    async def test_the_live_connection_says_the_same(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
+            socket.send_json({"type": "message", "content": "what is your returns policy?"})
+            frames = _drain(socket)
+
+        assert frames[-1]["state"] == ConversationState.ESCALATED.value
+        assert frames[-1]["reply"] == self.WITH_CONTACT
+        # A handover is fixed text, sent whole: no `token` frame carries the old words.
+        assert not [f for f in frames if f["type"] == "token"]
+
+
 class TestShadowMode:
     """Milestone 1.15. The turn runs in full and the shopper is shown nothing.
 

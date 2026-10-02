@@ -141,6 +141,41 @@ export function setMode(
   });
 }
 
+/** The shop's contact details, and the sentence a handed-over shopper reads (ADR-0055). */
+export type ShopContactView = { email: string | null; phone: string | null; handover: string };
+
+/**
+ * Save the shop's contact details. A refused field comes back as one plain
+ * sentence naming it (*"Email: this doesn't look like an email address…"*),
+ * read from the API's 400, rather than *"Request validation failed."*
+ */
+export async function saveContact(
+  tenantId: string,
+  contact: { email: string; phone: string },
+): Promise<ShopContactView> {
+  const response = await fetch(`${BASE}/v1/console/shops/${encodeURIComponent(tenantId)}/contact`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(contact),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    data?: ShopContactView;
+    error?: { message?: string; details?: { errors?: { loc?: unknown[]; msg?: string }[] } };
+  } | null;
+  if (!response.ok) {
+    const first = body?.error?.details?.errors?.[0];
+    const field = first?.loc?.at(-1);
+    if (first?.msg && (field === "email" || field === "phone")) {
+      const said = first.msg.replace(/^Value error, /, "");
+      throw new Error(`${field === "email" ? "Email" : "Phone"}: ${said}.`);
+    }
+    throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
+  }
+  if (!body?.data) throw new Error("The server sent a response we could not read.");
+  return body.data;
+}
+
 /**
  * The Review scorecard, read from the browser — for the side menu's badge. The
  * layout reads it once; this keeps it current as the owner moves around (G40).
