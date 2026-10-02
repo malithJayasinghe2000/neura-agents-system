@@ -18,7 +18,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import bindparam, delete, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +31,7 @@ from neura_core.observation.models import OBSERVE_WRITE
 from neura_core.tenancy import keys
 from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
 from neura_core.tenancy.models import ApiKey, Tenant, TenantConfig, TenantStatus
+from neura_core.tenancy.modes import TurnMode
 from neura_core.tenancy.schema import api_keys, tenant_stores, tenants
 
 
@@ -92,6 +94,22 @@ class TenantRepository:
             update(tenants)
             .where(tenants.c.tenant_id == tenant_id)
             .values(config=_config_to_jsonb(config), updated_at=func.now())
+        )
+        return await self.require(tenant_id)
+
+    async def set_mode(self, tenant_id: str, mode: TurnMode) -> Tenant:
+        """Practice mode on or off, and nothing else (ADR-0054 §5).
+
+        One key merged into the stored settings rather than the whole settings
+        written back: ``TenantConfig`` drops keys it does not know, on purpose
+        (``modes.py``), so a read-modify-write here could erase a setting a
+        newer deployment wrote. ``shadow_intents`` is left as it is.
+        """
+        patch = bindparam("mode_patch", {"mode": mode.value}, type_=JSONB)
+        await self._session.execute(
+            update(tenants)
+            .where(tenants.c.tenant_id == tenant_id)
+            .values(config=tenants.c.config.op("||")(patch), updated_at=func.now())
         )
         return await self.require(tenant_id)
 

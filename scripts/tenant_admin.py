@@ -46,7 +46,9 @@ from neura_core.observation import OBSERVE_WRITE, ObservedEventRepository
 from neura_core.tenancy import (
     ApiKeyKind,
     ApiKeyRepository,
+    TenantConfig,
     TenantRepository,
+    TurnMode,
     UsageMeter,
 )
 
@@ -58,14 +60,22 @@ OFF = "\033[0m"
 
 
 async def create_tenant(db: Database, name: str, agents: list[str]) -> int:
+    """A new shop starts in practice mode (ADR-0054 §4): no shopper reads a reply
+    until the owner presses *Go live* on Home. Written into this shop's settings
+    rather than made the model's default, which also decides the mode of a shop
+    whose settings never named one."""
     tenant_id = new_id(TENANT)
     async with db.tenant_session(tenant_id) as session:
         tenant = await TenantRepository(session).create(
-            tenant_id=tenant_id, name=name, enabled_agents=agents
+            tenant_id=tenant_id,
+            name=name,
+            enabled_agents=agents,
+            config=TenantConfig(mode=TurnMode.SHADOW),
         )
 
     print(f"\n  {BOLD}{tenant.tenant_id}{OFF}  {tenant.name}")
-    print(f"  {DIM}agents: {', '.join(sorted(tenant.enabled_agents)) or '(none)'}{OFF}\n")
+    print(f"  {DIM}agents: {', '.join(sorted(tenant.enabled_agents)) or '(none)'}{OFF}")
+    print(f"  {DIM}practice mode: no shopper sees a reply until the owner presses Go live{OFF}\n")
     return 0
 
 

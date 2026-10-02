@@ -45,7 +45,7 @@ export const STEPS: HelpStep[] = [
   },
   {
     title: "Check replies in practice mode",
-    body: "While practice mode is on, your assistant writes replies to shoppers' questions but no shopper sees them. Grade them in Review, then decide when to go live.",
+    body: "A new shop starts in practice mode: your assistant writes replies to shoppers' questions but no shopper sees them. Grade them in Review, then press Go live on Home when you are ready.",
     check: "Replies appear in Review",
     who: "You",
   },

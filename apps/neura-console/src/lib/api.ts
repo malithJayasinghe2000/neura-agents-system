@@ -128,6 +128,20 @@ export function syncShop(
 }
 
 /**
+ * *Go live* (`live`) or *Back to practice mode* (`shadow`) on Home (ADR-0054).
+ * Only the mode changes; the API records who switched it.
+ */
+export function setMode(
+  tenantId: string,
+  mode: "live" | "shadow",
+): Promise<{ mode: "live" | "shadow"; withheld: boolean; changed: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/mode`, {
+    method: "PUT",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+/**
  * The Review scorecard, read from the browser — for the side menu's badge. The
  * layout reads it once; this keeps it current as the owner moves around (G40).
  */

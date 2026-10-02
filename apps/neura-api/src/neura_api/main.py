@@ -47,6 +47,7 @@ from neura_api.routes import (
     console,
     console_connect,
     console_conversations,
+    console_mode,
     console_review,
     console_shop,
     console_sold_out,
@@ -294,6 +295,7 @@ def create_app() -> FastAPI:
     app.include_router(console_shop.router, prefix="/v1")
     app.include_router(console_connect.router, prefix="/v1")
     app.include_router(console_usage.router, prefix="/v1")
+    app.include_router(console_mode.router, prefix="/v1")
     app.include_router(console_sold_out.router, prefix="/v1")
     # Mounted once, and it names no agent — that is the whole point
     # ([ADR-0031]). It sits beside the per-agent routes rather than

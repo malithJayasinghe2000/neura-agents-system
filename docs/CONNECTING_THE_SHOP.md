@@ -105,9 +105,11 @@ make sync-check URL="$SHOP_URL" TOKEN="$SHOP_TOKEN" TENANT=tn_…
 
 - `AGENTS` is an entitlement, not a hint: an assistant left out returns **403**, which reads like a
   bug and is not one. `care` is NEURA-CARE, `sell` is NEURA-SELL.
-- **A new shop starts live, not in practice mode.** Practice mode is the tenant's
-  `config.mode = shadow`; there is no `make` command for it yet (`TenantRepository.set_config`).
-  `make tenant-show TENANT=tn_…` prints what is set.
+- **A new shop starts in practice mode** (since 2026-10-02, [ADR-0054](architecture/adr/0054-the-shop-owner-switches-practice-mode-and-a-new-shop-starts-in-it.md)):
+  `make tenant-new` writes `config.mode = shadow`. The owner presses **Go live** on Home when ready,
+  and **Back to practice mode** at any time; there is no `make` command, on purpose (going live is the
+  owner's decision). Shops made before that date keep their mode. `make tenant-show TENANT=tn_…`
+  prints what is set.
 - `POST /v1/stores` stores the shop's address and token (the token encrypted, and never returned by
   any endpoint). Without it every chat returns **404 `NO_STORE_CONNECTED`**. There is no `make`
   command for it yet. `platform` is `generic` for any shop that serves the NEURA spec.
@@ -182,8 +184,11 @@ works from; never the key.
 While the tenant is in practice mode, every question is answered in the background and **no shopper
 sees the reply** — they see an honest *"no automated answer"* message instead
 ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)). The owner grades the held replies in
-**Review**, then decides when to go live. Going live is a process, not a switch
-([INTEGRATION_GUIDE.md §9](INTEGRATION_GUIDE.md)).
+**Review**, then presses **Go live** on Home when ready: it first shows how many replies they checked
+(good, not good, harmful) and how many wait, and sets no threshold
+([ADR-0054](architecture/adr/0054-the-shop-owner-switches-practice-mode-and-a-new-shop-starts-in-it.md)).
+**Back to practice mode** is one press. Deciding to go live is still a process
+([INTEGRATION_GUIDE.md §9](INTEGRATION_GUIDE.md)); the button is only its last step.
 
 **How you'll know:** replies appear in Review.
 

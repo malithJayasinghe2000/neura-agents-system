@@ -55,6 +55,7 @@ from neura_core.tenancy import (
     Admission,
     AuthenticatedCaller,
     RuntimePolicy,
+    TenantRepository,
     TurnMode,
     UsageDelta,
     UsageMeter,
@@ -255,21 +256,30 @@ class TurnService:
             await _close(store.adapter)
         latency_ms = int((time.perf_counter() - turn_started) * 1000)
 
-        # Shadow mode is resolved *after* the turn, because it is per-intent and
-        # the intent is something the turn produces (agent-runtime.md §6). That
-        # ordering is also what makes a shadow turn worth anything: the whole
-        # graph has already run, on the same models with the same tools, so what
-        # a human grades is the answer the shopper would have received rather
-        # than a cheaper approximation of it.
-        mode = resolve_turn_mode(
-            tenant_mode=turn.caller.tenant.config.mode,
-            shadow_intents=turn.caller.tenant.config.shadow_intents,
-            intent=outcome.intent,
-        )
-
         # ── After the turn: one transaction, everything or nothing ───────────
         async with self._db.tenant_session(tenant_id) as session:
             conversations_repo = ConversationRepository(session)
+
+            # Shadow mode is resolved *after* the turn, because it is per-intent
+            # and the intent is something the turn produces (agent-runtime.md
+            # §6). That ordering is also what makes a shadow turn worth
+            # anything: the whole graph has already run, on the same models with
+            # the same tools, so what a human grades is the answer the shopper
+            # would have received rather than a cheaper approximation of it.
+            #
+            # Read from the shop's row **now**, in the transaction that releases
+            # the reply, not from what the caller held when it was authenticated
+            # (G72, ADR-0054 §6): a chat's live connection is authenticated once
+            # and can stay open for as long as the shopper keeps talking, and the
+            # owner's *Back to practice mode* must reach its very next reply. A
+            # row that has gone falls back to what the caller held.
+            current = await TenantRepository(session).get(tenant_id)
+            config = (current or turn.caller.tenant).config
+            mode = resolve_turn_mode(
+                tenant_mode=config.mode,
+                shadow_intents=config.shadow_intents,
+                intent=outcome.intent,
+            )
 
             if mode is TurnMode.SHADOW:
                 # The shopper's words are history; the agent's are not. The

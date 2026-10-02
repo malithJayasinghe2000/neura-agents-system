@@ -1229,6 +1229,35 @@ class TestShadowMode:
         assert frames[-1]["reply"] == ""
         assert frames[-1]["state"] == ConversationState.SHADOWED.value
 
+    async def test_a_switch_reaches_a_chat_that_is_already_open(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """G72, ADR-0054 §6. The mode is read when the reply is released, not
+        when the chat opened: a shop switched to practice mode withholds the
+        very next reply of a shopper who is still talking, and switched back,
+        shows the one after."""
+        token = await _provision(db, TENANT_A)
+
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
+            socket.send_json({"type": "message", "content": "what is your returns policy?"})
+            live = _drain(socket)
+
+            async with db.tenant_session(TENANT_A) as session:
+                await TenantRepository(session).set_config(TENANT_A, TenantConfig(mode="shadow"))
+            socket.send_json({"type": "message", "content": "and for sale items?"})
+            practice = _drain(socket)
+
+            async with db.tenant_session(TENANT_A) as session:
+                await TenantRepository(session).set_config(TENANT_A, TenantConfig(mode="live"))
+            socket.send_json({"type": "message", "content": "thanks, and shipping?"})
+            live_again = _drain(socket)
+
+        assert live[-1]["state"] != ConversationState.SHADOWED.value
+        assert practice[-1]["state"] == ConversationState.SHADOWED.value
+        assert practice[-1]["reply"] == ""
+        assert not [f for f in practice if f["type"] == "token"]
+        assert live_again[-1]["state"] != ConversationState.SHADOWED.value
+
     async def test_a_shadow_row_is_invisible_to_another_tenant(
         self, client: TestClient, db: Database
     ) -> None:

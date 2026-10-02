@@ -209,6 +209,7 @@ async def main() -> int:
             if seeded:
                 print(f"\n  {BOLD}home — what needs the owner, said first{OFF}")
                 await _check_home(browser, console, seeded, failures)
+                await _check_mode_switch(browser, console, seeded, failures)
 
                 print(f"\n  {BOLD}review — grading what the agent would have said{OFF}")
                 await _check_review(browser, console, seeded, failures)
@@ -1044,6 +1045,135 @@ async def _check_for_your_developer(browser: Chrome, snippet: str, failures: lis
         failures,
     )
     _check("no long dash in the copied steps", "—" not in copied, failures)
+
+
+async def _check_mode_switch(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """*Go live* and *Back to practice mode* on Home (ADR-0054), pressed for real.
+
+    Starts the shop in practice mode, whatever it was, and puts it back after.
+    The confirm's numbers are held to the database: a sentence that says
+    *"you checked 6"* has to be about the same 6 Review would show.
+    """
+    from neura_core.tenancy import TenantRepository, TurnMode
+
+    tenant = seeded["tenant"]
+
+    async def mode_now() -> str:
+        db = Database.from_settings()
+        try:
+            async with db.tenant_session(tenant) as session:
+                row = await TenantRepository(session).require(tenant)
+                return row.config.mode.value
+        finally:
+            await db.dispose()
+
+    async def set_mode(mode: TurnMode) -> None:
+        db = Database.from_settings()
+        try:
+            async with db.tenant_session(tenant) as session:
+                await TenantRepository(session).set_mode(tenant, mode)
+        finally:
+            await db.dispose()
+
+    async def press(selector: str, wait: float = 1.0) -> None:
+        await browser.evaluate(f"document.querySelector('{selector}')?.click() || true")
+        await asyncio.sleep(wait)
+
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(tenant) as session:
+            verdicts = (
+                await session.execute(
+                    select(shadow_turns.c.verdict).where(shadow_turns.c.tenant_id == tenant)
+                )
+            ).all()
+    finally:
+        await db.dispose()
+    checked = sum(1 for row in verdicts if row.verdict)
+    waiting = sum(1 for row in verdicts if not row.verdict)
+
+    original = TurnMode(await mode_now())
+    await set_mode(TurnMode.SHADOW)
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=1280,
+        height=900,
+        deviceScaleFactor=1,
+        mobile=False,
+    )
+    try:
+        await browser.goto(f"{console}/console/{tenant}")
+        await asyncio.sleep(3)
+        _check(
+            "in practice mode, Home offers Go live",
+            await browser.evaluate("!!document.querySelector('[data-go-live]')"),
+            failures,
+        )
+
+        await press("[data-go-live]")
+        confirm = await browser.evaluate(
+            "(document.querySelector('[data-go-live-confirm]') || {}).innerText || ''"
+        )
+        said = (
+            f"You checked {checked} " if checked else "You haven't checked any replies"
+        ) in confirm
+        _check(
+            "Go live asks first, with what Review holds",
+            "Go live?" in confirm and said and (not waiting or f"{waiting} " in confirm),
+            failures,
+        )
+        _check("asking changed nothing yet", await mode_now() == "shadow", failures)
+
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390,
+            height=844,
+            deviceScaleFactor=1,
+            mobile=True,
+        )
+        await asyncio.sleep(1)
+        _check(
+            "on a phone the Go live question does not scroll sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=1280,
+            height=900,
+            deviceScaleFactor=1,
+            mobile=False,
+        )
+
+        await press("[data-stay-practice]")
+        _check(
+            "Stay in practice mode closes the question and changes nothing",
+            not await browser.evaluate("!!document.querySelector('[data-go-live-confirm]')")
+            and await mode_now() == "shadow",
+            failures,
+        )
+
+        await press("[data-go-live]")
+        await press("[data-confirm-go-live]", wait=4)
+        page = await browser.evaluate("document.body.innerText")
+        _check(
+            "Go live makes the shop live, and Home says so",
+            await mode_now() == "live" and "Your assistant is live" in page,
+            failures,
+        )
+
+        await press("[data-back-to-practice]", wait=4)
+        page = await browser.evaluate("document.body.innerText")
+        _check(
+            "Back to practice mode is one press, and Home says so",
+            await mode_now() == "shadow" and "Practice mode is on" in page,
+            failures,
+        )
+    finally:
+        await set_mode(original)
+        await browser.call("Emulation.clearDeviceMetricsOverride")
 
 
 async def _store_count(tenant_id: str) -> int:

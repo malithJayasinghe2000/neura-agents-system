@@ -8,7 +8,7 @@
  *
  * | section     | read from                                   |
  * |:--|:--|
- * | the mode    | `/usage` — `withheld`                        |
+ * | the mode    | `/usage` — `withheld`; the switch writes `PUT /mode` (ADR-0054) |
  * | Needs you   | `/review/scorecard` — replies not yet graded; `/usage` — handed to a person |
  * | Last 7 days | `/usage?period=7d` — counts, and the server's caveat for them **by key** |
  * | Your setup  | `/store`, SELL's `/suggestions`, `/sold-out` |
@@ -21,7 +21,8 @@
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, Eye, EyeOff, Info } from "lucide-react";
+import { ArrowRight, Info } from "lucide-react";
+import { ModeSwitch } from "@/components/home/mode-switch";
 import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
@@ -72,7 +73,22 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
         </Alert>
       ) : (
         <>
-          <Mode practice={usage.data.withheld} reviewHref={`${base}/review`} />
+          <ModeSwitch
+            tenantId={tenantId}
+            practice={usage.data.withheld}
+            reviewHref={`${base}/review`}
+            facts={
+              card.ok
+                ? {
+                    checked: card.data.graded,
+                    good: card.data.verdicts.agree,
+                    notGood: card.data.verdicts.disagree,
+                    harmful: card.data.verdicts.would_have_harmed,
+                    waiting: card.data.ungraded,
+                  }
+                : null
+            }
+          />
 
           <NeedsYou
             base={base}
@@ -105,40 +121,6 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
         </>
       )}
     </>
-  );
-}
-
-/** Said before any figure — see the module docstring. */
-function Mode({ practice, reviewHref }: { practice: boolean; reviewHref: string }) {
-  const Icon = practice ? EyeOff : Eye;
-  return (
-    <section
-      aria-label="Assistant mode"
-      className="flex items-start gap-3.5 rounded-xl border bg-muted/40 px-4 py-4 sm:px-5"
-    >
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg border bg-background">
-        <Icon className="size-4.5" aria-hidden />
-      </span>
-      <div className="space-y-1">
-        <p className="font-semibold">
-          {practice ? "Practice mode is on" : "Your assistant is live"}
-        </p>
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          {practice ? (
-            <>
-              Your assistant writes a reply to every shopper, but no shopper sees it yet. Each reply
-              waits in{" "}
-              <Link className="text-foreground underline underline-offset-3" href={reviewHref}>
-                Review
-              </Link>{" "}
-              until you check it.
-            </>
-          ) : (
-            "Shoppers see your assistant's replies as soon as it writes them."
-          )}
-        </p>
-      </div>
-    </section>
   );
 }
 
