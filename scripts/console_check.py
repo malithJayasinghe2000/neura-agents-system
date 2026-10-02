@@ -935,6 +935,7 @@ async def _check_help(
         "/v1/widget/widget.js" in snippet and "data-neura-key" in snippet,
         failures,
     )
+    await _check_for_your_developer(browser, snippet, failures)
     _check(
         "no commerce platform is named on the help page",
         not any(name in lowered for name in ("bagisto", "shopify", "woocommerce", "magento")),
@@ -976,6 +977,73 @@ async def _check_help(
         )
     finally:
         await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _check_for_your_developer(browser: Chrome, snippet: str, failures: list[str]) -> None:
+    """Help's *For your developer* box (ADR-0053 §6, G71; canvas boards 36-37).
+
+    It links the guide for developers, names the address a developer's AI tool
+    uses (NEURA's own, from the same public address as the chat box line, and
+    one that really answers as an MCP server), and the steps it copies carry
+    both. No long dash in the box or in what it copies (the owner's rule).
+    """
+    box = "document.querySelector('section[aria-labelledby=dev]')"
+    _check(
+        "For your developer links the guide for developers",
+        await browser.evaluate(f"!!{box}?.querySelector('a[href$=\"/docs/developers/\"]')"),
+        failures,
+    )
+    origin = re.search(r'src="([^"]+)/v1/widget/widget\.js"', snippet)
+    mcp = await browser.evaluate(
+        "(document.querySelector('[data-developer-mcp]') || {}).innerText || ''"
+    )
+    _check(
+        "it shows the AI coding tool address, on the chat box line's address",
+        bool(origin) and mcp.strip() == f"{origin.group(1) if origin else ''}/v1/developers/mcp",
+        failures,
+    )
+    answers = False
+    if mcp.strip():
+        async with httpx.AsyncClient(timeout=10) as http:
+            response = await http.post(
+                mcp.strip(),
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "MCP-Protocol-Version": "2025-06-18",
+                },
+            )
+            answers = response.status_code == 200 and bool(
+                response.json().get("result", {}).get("tools")
+            )
+    _check("that address answers as an MCP server", answers, failures)
+    _check(
+        "no long dash in For your developer",
+        "—" not in (await browser.evaluate(f"{box}?.innerText || ''")),
+        failures,
+    )
+    # What *Copy these steps for your developer* hands over, read by standing
+    # in for the clipboard: a headless browser may refuse the real one.
+    clipboard = await browser.call(
+        "Runtime.evaluate",
+        returnByValue=True,
+        awaitPromise=True,
+        expression="""new Promise((resolve) => {
+          Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText: (text) => { resolve(text); return Promise.resolve(); } },
+          });
+          document.querySelector('[data-copy-steps]').click();
+          setTimeout(() => resolve(''), 3000);
+        })""",
+    )
+    copied = str(clipboard.get("result", {}).get("value") or "")
+    _check(
+        "the copied steps carry the guide link and the AI coding tool address",
+        "/docs/developers/" in copied and bool(mcp.strip()) and mcp.strip() in copied,
+        failures,
+    )
+    _check("no long dash in the copied steps", "—" not in copied, failures)
 
 
 async def _store_count(tenant_id: str) -> int:

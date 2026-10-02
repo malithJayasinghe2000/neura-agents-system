@@ -8,7 +8,7 @@ reaches every merchant on the next cache expiry instead of on the next re-paste.
 
     GET /v1/widget/widget.js     the element itself
     GET /v1/widget/pairs.js      ADR-0040's paired-suggestion block
-    GET /v1/widget/snippet       the two lines a merchant pastes
+    GET /v1/widget/snippet       the lines a merchant pastes, and the developer MCP's address
     GET /v1/widget/demo          a local harness, non-production only
 
 **No authentication on any of them, on purpose.** The asset is public code — it
@@ -24,6 +24,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
 
+from neura_api.developer_mcp import ENDPOINT as DEVELOPER_MCP_ENDPOINT
+from neura_api.developer_mcp import MOUNT as DEVELOPER_MCP_MOUNT
 from neura_api.widget import DEMO_HTML, PAIRS_JS, WIDGET_JS
 from neura_core import NotFoundError, get_settings
 
@@ -119,6 +121,9 @@ async def snippet(
         # fields keep their names and their meaning.
         "pairs_snippet": PAIRS_SNIPPET.format(base=origin, key=shown_key),
         "pairs_url": f"{origin}/v1/widget/pairs.js",
+        # What a developer's AI coding tool is given (ADR-0053 §6), made from
+        # the same public address, so Help never builds an address of its own.
+        "developer_mcp_url": f"{origin}{DEVELOPER_MCP_MOUNT}{DEVELOPER_MCP_ENDPOINT}",
     }
 
 

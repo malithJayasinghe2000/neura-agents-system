@@ -357,6 +357,25 @@ shop: pressed, *"Asked your shop for a fresh copy…"*, the time changed by itse
 the API's `PUBLIC_BASE_URL`, which **defaults to `http://localhost:8000`**. On this machine that shows the wrong
 port until `.env` sets `PUBLIC_BASE_URL=http://localhost:8010`.
 
+**Help's *For your developer*, 2026-10-02** (canvas row 11, boards 36-37, approved by the owner; ADR-0053 §6 step 7,
+G71). The box now reads in building order: *"The bridge answers nine read-only addresses… The guide for developers
+explains each one"* and **Open the guide for developers** (`DEVELOPER_GUIDE_URL`, the address Shop connection
+already copies, ADR-0051's, online once the website is deployed; it opens in a new tab); then **Does your developer
+use an AI coding tool?**, the developer MCP's address and one sentence (*their tool learns from NEURA how to build
+the bridge; it never sees your shop and needs no token*); then the chat box line; then the two keys. *Copy these
+steps for your developer* ends with the guide's address and *"Using an AI coding tool? Add this address to it as an
+MCP server: …"*. On a phone the copy button is full width. No long dash in the box or in what it copies; the page's
+first paragraph and one *If something doesn't work* row keep theirs for now (G71 c, with G71 a, *Sync now*: the rest
+of Help, later). **Words only: no setting, no switch; Shop connection is unchanged** (the owner's choice: its guide
+link already leads to the address). **What building decided:** the address is the API's, never built by the
+console: `GET /v1/widget/snippet` gains `developer_mcp_url`, made from the same public address as the chat box line
+(`PUBLIC_BASE_URL`, or `base=`) and the MCP server's own mount, so Help shows NEURA's real address where the
+public guide shows a placeholder (ADR-0053 §6 expected a placeholder in both; the dashboard has the address, the
+website does not). When the API can't be reached the AI tool block is left out and the copy has no such line.
+`make console-check` adds six checks: the guide link; the address equals the chat box line's address plus
+`/v1/developers/mcp`; **that address answers `tools/list`**; no long dash in the box; the copied text carries both
+addresses; no long dash in it (all six failed on the old page, then passed).
+
 **API, 2026-09-28.** `GET /console/shops/{t}/store` gains, per connection, `index` (`products`, `searchable`),
 `sync_asked` (`status`, `queued_at` of a sync still queued or running — nothing else of the job) and `notes`
 (`{key, text}`: `no_schedule` always, `index` when there are products), and at the top a `setup` block —

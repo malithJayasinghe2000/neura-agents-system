@@ -9,8 +9,10 @@
  * is the one line the API serves.
  *
  * **No time estimates and no numbers** — nothing about setting a shop up has
- * been measured.
+ * been measured. **No long dash** in anything the owner reads or copies (the
+ * owner's rule, 2026-10-01).
  */
+import { DEVELOPER_GUIDE_URL } from "@/lib/shop";
 
 export type Who = "You" | "Your developer" | "FiveNeurals" | "FiveNeurals, then you" | string;
 
@@ -79,10 +81,14 @@ export const TROUBLE: { seen: string; fix: string; sell?: true }[] = [
 ];
 
 export const TWO_KEYS =
-  "Two keys, two directions: the shop token is a secret that lets NEURA read your shop — it stays on your shop's server. The chat box key is public, sits in your pages, and only works from your shop's address.";
+  "Two keys, two directions: the shop token is a secret that lets NEURA read your shop. It stays on your shop's server. The chat box key is public, sits in your pages, and only works from your shop's address.";
 
-/** What *Copy these steps for your developer* puts on the clipboard. */
-export function stepsAsText(snippet: string | null): string {
+/**
+ * What *Copy these steps for your developer* puts on the clipboard. Ends with
+ * the guide for developers and, when the API named it, the address a
+ * developer's AI coding tool uses (ADR-0053 §6; canvas board 36).
+ */
+export function stepsAsText(snippet: string | null, developerMcpUrl: string | null): string {
   const steps = STEPS.map(
     (step, i) =>
       `${i + 1}. ${step.title} (${step.who})\n   ${step.body}\n   How you'll know: ${step.check}`,
@@ -92,10 +98,15 @@ export function stepsAsText(snippet: string | null): string {
     "",
     steps,
     "",
-    "The chat box — one line on the shop's pages:",
+    "The chat box, one line on the shop's pages:",
     snippet ?? "(ask FiveNeurals for the line)",
     "Replace the key in it with the chat box key FiveNeurals gives you.",
     "",
     TWO_KEYS,
+    "",
+    `The guide for developers: ${DEVELOPER_GUIDE_URL}`,
+    ...(developerMcpUrl
+      ? [`Using an AI coding tool? Add this address to it as an MCP server: ${developerMcpUrl}`]
+      : []),
   ].join("\n");
 }

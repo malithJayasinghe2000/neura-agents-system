@@ -100,16 +100,28 @@ export async function hasSession(): Promise<boolean> {
 }
 
 /**
- * The chat box's embed lines, exactly as the API serves them (`GET
- * /v1/widget/snippet`) — so the Help page can never show a different line from
- * the one a developer would be given. A public endpoint: no cookie, no key.
- * The key in it is the API's own placeholder; FiveNeurals gives the real one.
+ * What Help hands a developer, exactly as the API serves it (`GET
+ * /v1/widget/snippet`): the chat box's embed line, so the Help page can never
+ * show a different line from the one a developer would be given, and the
+ * address a developer's AI coding tool uses (ADR-0053 §6), made by the API from
+ * the same public address. A public endpoint: no cookie, no key. The key in the
+ * line is the API's own placeholder; FiveNeurals gives the real one.
  */
-export async function widgetSnippet(): Promise<string | null> {
+export async function forYourDeveloper(): Promise<{
+  snippet: string | null;
+  developerMcpUrl: string | null;
+}> {
   const response = await fetch(`${API_BASE}/v1/widget/snippet`, { cache: "no-store" }).catch(
     () => null,
   );
-  if (!response?.ok) return null;
-  const body = (await response.json().catch(() => null)) as { snippet?: string } | null;
-  return body?.snippet?.trim() || null;
+  const body = response?.ok
+    ? ((await response.json().catch(() => null)) as {
+        snippet?: string;
+        developer_mcp_url?: string;
+      } | null)
+    : null;
+  return {
+    snippet: body?.snippet?.trim() || null,
+    developerMcpUrl: body?.developer_mcp_url?.trim() || null,
+  };
 }

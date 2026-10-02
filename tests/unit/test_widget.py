@@ -214,6 +214,22 @@ class TestWidgetHosting:
         assert "fn_pk_test_abc" in body["pairs_snippet"]
         assert "neura-pairs" not in body["snippet"]
 
+    def test_the_snippet_names_the_developer_mcp_on_the_same_address(
+        self, client: TestClient
+    ) -> None:
+        """ADR-0053 §6: Help names the address a developer's AI tool uses. It is
+        made where the chat box line's is, from the API's own public address, so
+        the dashboard never builds an address of its own, and it is the address
+        the developer MCP is really mounted at."""
+        from neura_api.developer_mcp import ENDPOINT, MOUNT
+
+        body = client.get("/v1/widget/snippet").json()
+        origin = body["widget_url"].removesuffix("/v1/widget/widget.js")
+        assert body["developer_mcp_url"] == f"{origin}{MOUNT}{ENDPOINT}"
+
+        given = client.get("/v1/widget/snippet?base=https://neura.example/").json()
+        assert given["developer_mcp_url"] == "https://neura.example/v1/developers/mcp"
+
     def test_the_pairing_snippet_asks_for_product_ids_and_not_a_cart(
         self, client: TestClient
     ) -> None:

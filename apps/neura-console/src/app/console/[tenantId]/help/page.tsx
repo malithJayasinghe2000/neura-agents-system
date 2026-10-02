@@ -10,23 +10,32 @@
  * developer, and what to do when something doesn't work.
  *
  * **Nothing here is about one shop's data**, so it reads nothing but the chat
- * box line — from the API, exactly as the API serves it, so this page cannot
- * show a line a developer would not be given. No platform's name, settings or
- * commands (AGENTS.md rule 1), no time estimates and no numbers.
+ * box line and the AI coding tool address — from the API, exactly as the API
+ * serves them, so this page cannot show a line or an address a developer would
+ * not be given. No platform's name, settings or commands (AGENTS.md rule 1), no
+ * time estimates and no numbers.
+ *
+ * **For your developer** (2026-10-02, canvas boards 36-37, ADR-0053 §6, G71):
+ * building the bridge first (the guide for developers, then the address for an
+ * AI coding tool), then the chat box, then the two keys. No long dash in it.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CopySteps } from "@/components/help/copy-steps";
 import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { STEPS, TROUBLE, TWO_KEYS } from "@/lib/help";
-import { hasSession, widgetSnippet } from "@/lib/server-api";
+import { forYourDeveloper, hasSession } from "@/lib/server-api";
+import { DEVELOPER_GUIDE_URL } from "@/lib/shop";
 
 export default async function HelpPage({ params }: { params: Promise<{ tenantId: string }> }) {
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
   const base = `/console/${encodeURIComponent(tenantId)}`;
-  const [snippet, assistants] = await Promise.all([widgetSnippet(), shopAssistants(tenantId)]);
+  const [{ snippet, developerMcpUrl }, assistants] = await Promise.all([
+    forYourDeveloper(),
+    shopAssistants(tenantId),
+  ]);
   // Sold out is NEURA-SELL's; a shop without it is not told how to set it up.
   const sell = hasSell(assistants);
 
@@ -108,37 +117,64 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
         </ol>
       </section>
 
-      <section aria-labelledby="dev" className="space-y-3 rounded-2xl border p-4 sm:p-5">
+      <section aria-labelledby="dev" className="space-y-4 rounded-2xl border p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="dev" className="text-lg font-semibold">
             For your developer
           </h2>
-          <CopySteps snippet={snippet} />
+          <CopySteps snippet={snippet} developerMcpUrl={developerMcpUrl} />
         </div>
-        <p className="text-sm leading-relaxed text-foreground/80">
-          The bridge answers nine read-only addresses that NEURA calls with a secret token. The chat
-          box is one line on your shop&apos;s pages, with a public key that only works from your
-          shop&apos;s own address:
-        </p>
-        {snippet ? (
-          <pre
-            data-snippet
-            className="overflow-x-auto rounded-xl bg-foreground px-4 py-3.5 font-mono text-[13px] leading-relaxed break-all whitespace-pre-wrap text-background"
-          >
-            {snippet}
-          </pre>
-        ) : (
-          <p className="rounded-xl border border-dashed p-3.5 text-sm text-muted-foreground">
-            The chat box line couldn&apos;t be loaded just now. FiveNeurals can send it.
+        <div className="space-y-2">
+          <p className="text-sm leading-relaxed text-foreground/80">
+            The bridge answers nine read-only addresses that NEURA calls with a secret token. The
+            guide for developers explains each one.
           </p>
-        )}
-        <p className="text-sm text-muted-foreground">
-          The key in it is a placeholder — FiveNeurals gives you the chat box key for your shop.
-        </p>
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          {TWO_KEYS} The full technical guide covers the nine addresses, change messages and product
-          views.
-        </p>
+          <a
+            href={DEVELOPER_GUIDE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center text-sm font-medium underline underline-offset-3 sm:min-h-0"
+          >
+            Open the guide for developers
+          </a>
+        </div>
+        {developerMcpUrl ? (
+          <div className="space-y-2 rounded-xl border p-3.5 sm:p-4">
+            <p className="font-semibold">Does your developer use an AI coding tool?</p>
+            <p className="text-sm leading-relaxed text-foreground/80">
+              They can add this address to it. Their tool then learns from NEURA how to build the
+              bridge. It never sees your shop and needs no token.
+            </p>
+            <pre
+              data-developer-mcp
+              className="overflow-x-auto rounded-xl bg-foreground px-4 py-3 font-mono text-[13px] leading-relaxed break-all whitespace-pre-wrap text-background"
+            >
+              {developerMcpUrl}
+            </pre>
+          </div>
+        ) : null}
+        <div className="space-y-2">
+          <p className="text-sm leading-relaxed text-foreground/80">
+            The chat box is one line on your shop&apos;s pages, with a public key that only works
+            from your shop&apos;s own address:
+          </p>
+          {snippet ? (
+            <pre
+              data-snippet
+              className="overflow-x-auto rounded-xl bg-foreground px-4 py-3.5 font-mono text-[13px] leading-relaxed break-all whitespace-pre-wrap text-background"
+            >
+              {snippet}
+            </pre>
+          ) : (
+            <p className="rounded-xl border border-dashed p-3.5 text-sm text-muted-foreground">
+              The chat box line couldn&apos;t be loaded just now. FiveNeurals can send it.
+            </p>
+          )}
+          <p className="text-sm text-muted-foreground">
+            The key in it is a placeholder. FiveNeurals gives you the chat box key for your shop.
+          </p>
+        </div>
+        <p className="text-sm leading-relaxed text-muted-foreground">{TWO_KEYS}</p>
       </section>
 
       <section aria-labelledby="trouble" className="space-y-3">

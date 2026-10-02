@@ -93,7 +93,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | **Sold out** (NEURA-SELL) | Sold-out products people kept looking at. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Usage and cost** | Chats, AI use and its cost, by assistant. | ✅ Built |
 | **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. | ✅ Built (ADR-0052) |
-| **Help** | *Connecting your shop*, step by step. | ✅ Built |
+| **Help** | *Connecting your shop*, step by step, and what to send your developer: the guide for developers, the address for an AI coding tool, and the chat box line. | ✅ Built |
 | Settings and keys (the owner makes the chat box key) | — | ⬜ Not designed (needs an ADR) |
 
 ---
@@ -102,7 +102,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 
 | Feature | What it does | Status | Where | Source |
 |:--|:--|:--|:--|:--|
-| **Help for AI coding tools (MCP)** | The developer adds one NEURA address to their AI coding tool. The tool can then ask what each of the nine addresses must answer, see a working sample for each, and read the rules bridges get wrong, and help write the bridge. It only teaches: it never calls a shop, needs no account and no token, and is limited per visitor. Checking a bridge stays the shop owner's, in the dashboard. | ✅ Built | For developers | `developer_mcp.py`, `generic/teacher.py`, ADR-0053 |
+| **Help for AI coding tools (MCP)** | The developer adds one NEURA address to their AI coding tool. The tool can then ask what each of the nine addresses must answer, see a working sample for each, and read the rules bridges get wrong, and help write the bridge. It only teaches: it never calls a shop, needs no account and no token, and is limited per visitor. Checking a bridge stays the shop owner's, in the dashboard. The address is in the developer guide, and on the shop owner's Help, which copies it for the developer. | ✅ Built | For developers | `developer_mcp.py`, `generic/teacher.py`, ADR-0053 |
 
 ---
 
