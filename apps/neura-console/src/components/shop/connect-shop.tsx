@@ -30,8 +30,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   DEVELOPER_GUIDE_URL,
-  PASSED_WORDS,
   checkWords,
+  passedWords,
   type ShopCheck,
   type ShopView,
 } from "@/lib/shop";
@@ -374,7 +374,7 @@ function Passed({ result }: { result: NonNullable<ShopCheck["result"]> }) {
       </p>
       <CheckWarnings result={result} />
       <ul className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
-        {PASSED_WORDS.map((line) => (
+        {passedWords(result).map((line) => (
           <li key={line} className="flex items-start gap-2">
             <Check className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
             {line}

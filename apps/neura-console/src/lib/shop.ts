@@ -86,6 +86,8 @@ export type CheckResult = {
   capabilities: string[];
   /** Every ✘ and ⚠, in the developer's words. The owner's words: `warningWords`. */
   findings: CheckFinding[];
+  /** The names of the checks that passed. The owner's words: `passedWords`. */
+  passed_checks: string[];
   /** The full result as plain text, for the developer. */
   text: string;
 };
@@ -238,16 +240,31 @@ export function allowedWords(codes: string[]): Allowed[] {
 
 // ── The full check, in plain words (ADR-0052 §4) ─────────────────────────────
 
-/** What a clean check proved, for the owner: seven lines instead of nineteen check names. */
-export const PASSED_WORDS = [
-  "Your shop answers, and says what it can do",
-  "Only your token gets in",
-  "Products can be read and searched",
-  "Orders can be looked up",
-  "Long lists come page by page",
-  "It can send only what changed",
-  "Something missing answers \u201cnot found\u201d",
-] as const;
+/**
+ * What a clean check proved, for the owner, in a few lines instead of about
+ * twenty check names. **Only what this check tested and passed** (G51): the check
+ * skips what a shop does not list, so a shop without orders is never told
+ * *"Orders can be looked up"*. A line needs every check it names to have passed.
+ */
+const PASSED_LINES: { line: string; checks: string[] }[] = [
+  { line: "Your shop answers, and says what it can do", checks: ["health"] },
+  { line: "Only your token gets in", checks: ["auth.required", "auth.rejects_wrong_token"] },
+  { line: "Products can be read", checks: ["products.get_missing"] },
+  { line: "Products can be searched", checks: ["products.search_empty"] },
+  { line: "Orders can be looked up", checks: ["orders.get_missing"] },
+  { line: "Customers can be looked up", checks: ["customers.get_missing"] },
+  { line: "Policy pages can be read", checks: ["policies"] },
+  { line: "Long lists come page by page", checks: ["pagination"] },
+  { line: "It can send only what changed", checks: ["sync.updated_since"] },
+  { line: "Something missing answers \u201cnot found\u201d", checks: ["errors.not_found"] },
+];
+
+export function passedWords(result: CheckResult): string[] {
+  const passed = new Set(result.passed_checks ?? []);
+  return PASSED_LINES.filter(({ checks }) => checks.every((c) => passed.has(c))).map(
+    ({ line }) => line,
+  );
+}
 
 /**
  * The one sentence for a check that found a single cause (G48), or for a check

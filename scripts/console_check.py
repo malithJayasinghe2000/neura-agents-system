@@ -224,6 +224,9 @@ async def main() -> int:
                 print(f"\n  {BOLD}help — connecting your shop{OFF}")
                 await _check_help(browser, console, seeded, failures)
 
+                print(f"\n  {BOLD}a shop not connected yet — Home and a passed check{OFF}")
+                await _check_before_connecting(browser, console, minted.user_id, failures)
+
                 if sell_seeded:
                     print(f"\n  {BOLD}sold out — demand, counted, never who{OFF}")
                     await _check_sold_out(browser, console, sell_seeded, failures)
@@ -988,6 +991,16 @@ async def _check_help(
         failures,
     )
     _check("no secret key on the help page", "fn_sk_" not in page, failures)
+    # G71 (a): the chat box asks the shop live, so Sync now is not needed after a
+    # stock change; only NEURA's copy, used by the dashboard's lists, waits for it.
+    _check(
+        "Help does not send the owner to Sync now after every stock change (G71)",
+        "whenever you add products or change stock" not in page
+        and "Your assistant asks your shop live" in page,
+        failures,
+    )
+    # The owner's rule, 2026-10-01: no long dash in anything they read (G71 c).
+    _check("no long dash on the help page (G71)", "\u2014" not in page, failures)
 
     await browser.call(
         "Emulation.setDeviceMetricsOverride",
@@ -1762,24 +1775,32 @@ async def _unseed_choice(db: Database, made: dict[str, str]) -> None:
 
 
 async def _seed_passed_check(seeded: dict[str, str]) -> None:
-    """The seeded connection's newest check: clean, with two warnings (G75).
+    """The seeded connection's newest check: clean, with two warnings (G75)."""
+    from neura_adapters.generic.reference import Defect, ReferenceStore
 
-    Made by the real check against the built-in test shop, given two mistakes
-    that warn and do not fail, so the screen is tested on what the worker
-    stores rather than on a result written by hand.
+    await _seed_check(
+        seeded["tenant"],
+        store_id=seeded["store"],
+        shop=ReferenceStore(defects=frozenset({Defect.NO_PRODUCT_STATUS, Defect.IGNORES_LIMIT})),
+        warnings=2,
+    )
+
+
+async def _seed_check(tenant: str, *, store_id: str | None, shop: Any, warnings: int) -> str:
+    """A clean check stored as the shop's newest, with ``warnings`` warnings.
+
+    Made by the real check against the built-in test shop, so the screen is
+    tested on what the worker stores rather than on a result written by hand.
+    Removed by the caller, by the id returned.
     """
     from neura_adapters.generic.adapter import GenericAdapter
-    from neura_adapters.generic.reference import DEFAULT_TOKEN, Defect, ReferenceStore
+    from neura_adapters.generic.reference import DEFAULT_TOKEN
     from neura_api.jobs.shop_check import outcome
     from neura_commerce import check_adapter
     from neura_core.tenancy import ShopCheckRepository
 
-    shop = ReferenceStore(defects=frozenset({Defect.NO_PRODUCT_STATUS, Defect.IGNORES_LIMIT}))
     adapter = GenericAdapter(
-        base_url=shop.base_url(),
-        tenant_id=seeded["tenant"],
-        token=DEFAULT_TOKEN,
-        transport=shop.transport(),
+        base_url=shop.base_url(), tenant_id=tenant, token=DEFAULT_TOKEN, transport=shop.transport()
     )
     try:
         report = await check_adapter(adapter)
@@ -1787,21 +1808,109 @@ async def _seed_passed_check(seeded: dict[str, str]) -> None:
         await adapter.aclose()
     address = "https://console-check.invalid/neura/v1"
     result = outcome(address, cause=None, report=report)
-    if not result["conformant"] or result["warnings"] != 2:
-        raise RuntimeError(f"the seeded check is not clean with two warnings:\n{result['text']}")
+    if not result["conformant"] or result["warnings"] != warnings:
+        raise RuntimeError(
+            f"the seeded check is not clean with {warnings} warning(s):\n{result['text']}"
+        )
 
     db = Database.from_settings()
     try:
-        async with db.tenant_session(seeded["tenant"]) as session:
+        async with db.tenant_session(tenant) as session:
             checks = ShopCheckRepository(session)
             made = await checks.create(
-                seeded["tenant"],
-                address=address,
-                store_id=seeded["store"],
-                requested_by="console-check",
+                tenant, address=address, store_id=store_id, requested_by="console-check"
             )
             await checks.finish(made, result=result)
+        return made
     finally:
+        await db.dispose()
+
+
+async def _check_before_connecting(
+    browser: Chrome, console: str, user_id: str, failures: list[str]
+) -> None:
+    """A shop not connected yet: Home's first item (G54) and a passed check (G51, G75).
+
+    Every shop this account holds may already be connected, so a throwaway one
+    is made, with a membership for this person, and removed afterwards **by id**:
+    never `make tenant-drop`, which misses tables (G76), and never by tenant.
+    """
+    from neura_adapters.generic.reference import Defect, ReferenceStore
+    from neura_core.identity.schema import memberships
+    from neura_core.tenancy.schema import tenants
+    from neura_domain import Capability
+
+    tenant = ids.new_id(ids.TENANT)
+    membership = ids.new_id(ids.MEMBERSHIP)
+    check_id: str | None = None
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(tenant) as session:
+            await session.execute(
+                tenants.insert().values(
+                    tenant_id=tenant, name="Console check, not connected", enabled_agents=["care"]
+                )
+            )
+            await session.execute(
+                memberships.insert().values(
+                    id=membership, tenant_id=tenant, user_id=user_id, role="owner"
+                )
+            )
+        # The guide's first three addresses only, and products with no status.
+        check_id = await _seed_check(
+            tenant,
+            store_id=None,
+            shop=ReferenceStore(
+                capabilities=frozenset({Capability.PRODUCT_READ, Capability.PRODUCT_SEARCH}),
+                defects=frozenset({Defect.NO_PRODUCT_STATUS}),
+            ),
+            warnings=1,
+        )
+
+        await browser.goto(f"{console}/console/{tenant}")
+        await asyncio.sleep(3)
+        home = await browser.evaluate("document.body.innerText")
+        _check(
+            "Home says the owner connects the shop on Shop connection (G54)",
+            "Your online shop isn't connected yet" in home
+            and "outside the console" not in home
+            and "Connect it on Shop connection" in home,
+            failures,
+        )
+
+        await browser.goto(f"{console}/console/{tenant}/shops")
+        await asyncio.sleep(4)
+        lines = await browser.evaluate(
+            "[...document.querySelectorAll('[data-check-result=passed] li')].map(li => li.innerText)"
+        )
+        box = await browser.evaluate(
+            "(document.querySelector('[data-check-result=passed]') || {}).innerText || ''"
+        )
+        _check(
+            "a passed check lists only what the check tested (G51)",
+            lines
+            == [
+                "Your shop answers, and says what it can do",
+                "Only your token gets in",
+                "Products can be read",
+                "Products can be searched",
+                "Long lists come page by page",
+                "Something missing answers \u201cnot found\u201d",
+            ],
+            failures,
+        )
+        _check(
+            "before connecting, the owner sees the check's warning (G75)",
+            "1 thing to look at" in box
+            and "Some products don't say they are on sale, so NEURA never recommends them." in box,
+            failures,
+        )
+    finally:
+        async with db.tenant_session(tenant) as session:
+            if check_id:
+                await session.execute(delete(shop_checks).where(shop_checks.c.id == check_id))
+            await session.execute(delete(memberships).where(memberships.c.id == membership))
+            await session.execute(delete(tenants).where(tenants.c.tenant_id == tenant))
         await db.dispose()
 
 
