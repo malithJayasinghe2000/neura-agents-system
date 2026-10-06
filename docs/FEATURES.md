@@ -27,7 +27,6 @@ from it, so a line here is a promise that a page may repeat.
 | Where it runs | What that is |
 |:--|:--|
 | **Chat box** | The assistant a shopper talks to, on the shop's pages. |
-| **Shop page** | A block on the shop's own product or basket page — not a chat. |
 | **Dashboard** | The shop owner's console. |
 | **For AI tools** | A connection other AI assistants use to read the shop's catalogue. |
 | **Shop's server** | Something the shop's own server sends to us. Nothing of ours runs in a shopper's browser for it. |
@@ -55,7 +54,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | **Recommend** | A shopper describes what they need; SELL shows products from the shop that fit, as product cards (picture, price, in stock or not, link). | ✅ Built | Chat box | `agents/sell/nodes/`, ADR-0023, ADR-0030 |
 | **Compare** | A shopper names two or more products; SELL compares them from the shop's own descriptions. | ✅ Built | Chat box | `nodes/route.py` |
 | **Honest "we don't carry that"** | When nothing fits, SELL says so, lists the shop's categories, and never pretends a near-miss fits. If the shopper's own budget ruled everything out, it says how many were found and at what price. | ✅ Built | Chat box | `nodes/no_match.py`, ADR-0027 |
-| **Suggestions that go with it** | On a product or basket page, up to **two** products from the shop that go with what the shopper is looking at. Chosen from the products' own words — **never** from what other people bought. Shows nothing rather than something silly. | ✅ Built | Shop page | `pairing/`, ADR-0040, ADR-0045 |
+| **Suggestions that go with it** | On a product or basket page, the chat box shows up to **two** products from the shop that go with what the shopper is looking at, in its own panel (it may open itself once per visit, if the shop switches that on). Chosen from the products' own words — **never** from what other people bought. Shows nothing rather than something silly. | ✅ Built | Chat box | `pairing/`, ADR-0040, ADR-0041, ADR-0045 |
 | **The owner chooses suggestions** | The shop owner picks a product's suggestions (or *show nothing*) in the dashboard. Their choice wins over the automatic one, is the same for every shopper, and is how the owner upsells. | ✅ Built | Dashboard | `pairing/choices.py`, ADR-0050 |
 | **Sold out — people still looking** | Lists the shop's sold-out products that shoppers kept viewing in the last 7 days, and says whether each is still sold out right now. Counts only — never who looked. | ✅ Built, off by default (stage 1; L3) | Dashboard | `console_sold_out.py`, ADR-0046 |
 | **Product feed** | A private address that serves the shop's catalogue in a format machines read. Exists only after the shop turns it on; the address can be replaced or switched off. | ✅ Built, off by default | For AI tools | `feed/`, `routes.py` |
@@ -74,7 +73,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | **Answers only from the shop's data** | Replies are checked against what was looked up; an answer that cannot be backed up is not sent. | ✅ Built | Chat box | `verify` node |
 | **Protection from tricks** | Blocks known prompt tricks, and hides shoppers' emails and phone numbers from the AI. Rules in code, not a prompt. | ✅ Built | Chat box | ADR-0011 |
 | **Practice mode** | The assistant works on real questions but the shopper does not get its reply; the owner reads and grades each one first. Shoppers see *"your message has been received"*. **A new shop starts in practice mode.** The owner presses **Go live** on Home when ready (it first shows what they checked in Review), and **Back to practice mode** at any time; a switch reaches chats already open. | ✅ Built | Chat box + Dashboard | ADR-0026, ADR-0054 |
-| **Search by meaning** | Finds products by what the shopper means, not only matching words. Covers the products that have been indexed. | 🟡 Built, with a limit (L5) | Chat box, Shop page | `neura-agent-core/rag`, ADR-0047 |
+| **Search by meaning** | Finds products by what the shopper means, not only matching words. Covers the products that have been indexed. | 🟡 Built, with a limit (L5) | Chat box | `neura-agent-core/rag`, ADR-0047 |
 | **A copy of the catalogue** | We keep a copy of the shop's products to answer fast; **Sync now** refreshes it. | 🟡 Built, with a limit (L4) | Dashboard | `console_shop.py` |
 | **Daily spending limit** | Near the limit the assistant does less; at the limit every chat passes to a person. | ✅ Built | — | ADR-0015 |
 | **Product views** | The shop's server may tell us which products shoppers viewed and added to basket. **Off unless the shop switches it on**, needs a signed data agreement, and is deleted after 7 days. Feeds *Sold out*. | ✅ Built, off by default | Shop's server | ADR-0044, ADR-0048 |
