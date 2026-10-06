@@ -1300,7 +1300,11 @@ Content-Type: application/json
   "in_stock": false
 }`}</Pre>
           <Defs items={VIEW_FIELDS} />
-          <P>Ids use only letters, digits, {c("-")} and {c("_")}. Any other field is refused.</P>
+          <P>
+            {c("event_id")} and {c("session_id")} use only letters, digits, {c("-")} and {c("_")}.{" "}
+            {c("product_id")} may be any id your bridge sends, up to 128 characters. Any other field
+            is refused.
+          </P>
           <Rules items={VIEW_RULES} />
           <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
             <span className="text-[15px] font-semibold">How you&apos;ll know it works</span>

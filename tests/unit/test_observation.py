@@ -90,6 +90,21 @@ class TestWhatAShopMaySend:
         with pytest.raises(ValidationError):
             ObservedEvent.model_validate(_event(session_id=session_id))
 
+    @pytest.mark.parametrize(
+        "product_id", ["TEA.400G", "gid://shop/Product/1", "SKU 12", "Th\u00e9-vert/250g", "1042"]
+    )
+    def test_a_product_id_is_any_id_the_bridge_format_allows(self, product_id: str) -> None:
+        """G59: the format lets a product's `external_id` be any text, and the session
+        id's opaque-token rule had been reused for it, so a shop whose ids carry a
+        dot, a slash or a space got a 400 for every view and an empty Sold out list."""
+        event = ObservedEvent.model_validate(_event(product_id=product_id))
+        assert event.product_id == product_id
+
+    @pytest.mark.parametrize("product_id", ["", "   ", "line\nbreak", "tab\there", "a" * 129])
+    def test_a_product_id_still_has_to_be_an_id(self, product_id: str) -> None:
+        with pytest.raises(ValidationError):
+            ObservedEvent.model_validate(_event(product_id=product_id))
+
     def test_a_time_without_a_zone_is_refused(self) -> None:
         with pytest.raises(ValidationError):
             ObservedEvent.model_validate(_event(occurred_at="2026-09-26T12:00:00"))

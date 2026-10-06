@@ -39,6 +39,11 @@ CLOCK_SKEW = timedelta(minutes=5)
 #: spaces, so an email address or a name cannot pass as an identifier.
 _OPAQUE = r"^[A-Za-z0-9_-]+$"
 
+#: A product id is the shop's own, as its bridge sends it, and the format lets
+#: that be any text (`Product.external_id`), so a dot, a slash or a space is
+#: allowed (G59). Not blank, and no control characters.
+_PRODUCT_ID = r"^[^\x00-\x1f\x7f]*[^\s\x00-\x1f\x7f][^\x00-\x1f\x7f]*$"
+
 
 class ObservedEventType(StrEnum):
     """The two things phase 1 records. Owner decision, 2026-09-26.
@@ -69,8 +74,9 @@ class ObservedEvent(BaseModel):
     #: would hand anyone who read this table a way into a shopper's session.
     session_id: str = Field(min_length=16, max_length=128, pattern=_OPAQUE)
     type: ObservedEventType
-    #: The merchant's own product id, as the nine endpoints report it.
-    product_id: str = Field(min_length=1, max_length=128, pattern=_OPAQUE)
+    #: The merchant's own product id, as the nine endpoints report it: matched
+    #: against our copy of the catalogue, so it must be exactly that string.
+    product_id: str = Field(min_length=1, max_length=128, pattern=_PRODUCT_ID)
     occurred_at: datetime
     #: Could the product be bought at the moment of the view? ADR-0049: the
     #: canonical model's word, meaning *at least one variant is in stock*.
