@@ -68,6 +68,22 @@
     "We could not reach the assistant. Please check your connection and try again.";
 
   /**
+   * What a shopper reads when a message could not be answered (G56).
+   *
+   * Only NEURA's own words, from a refusal the page could read (`fromServer`,
+   * set by `RestTransport`), are shown as they are: they were written for a
+   * person. Anything else is the browser's or a parser's text ("Failed to
+   * fetch", "Unexpected token '<'"), in the browser's language and meaningless
+   * to a shopper, so it becomes the one plain sentence above.
+   */
+  function errorTextFor(err) {
+    if (err && err.fromServer && err.message) {
+      return err.message;
+    }
+    return TRANSPORT_ERROR_MESSAGE;
+  }
+
+  /**
    * Widget copy for the graph's progress frames.
    *
    * These are OUR words about which node is running, not claims about the
@@ -334,9 +350,15 @@
         return;
       }
       var settled = false;
+      // Whether it ever opened. A socket refused at the handshake fires `error`
+      // and then `close`; that `close` is the same refusal, not a dropped chat.
+      // Read as one, it drew a second error and threw away the switch to REST
+      // the refusal had just made (G56).
+      var opened = false;
 
       socket.onopen = function () {
         settled = true;
+        opened = true;
         self.socket = socket;
         resolve(socket);
       };
@@ -360,12 +382,14 @@
       };
       socket.onclose = function () {
         self.socket = null;
-        if (!settled) {
-          settled = true;
-          reject(new Error("socket_closed"));
-        } else {
-          handlers.onClose();
+        if (!opened) {
+          if (!settled) {
+            settled = true;
+            reject(new Error("socket_closed"));
+          }
+          return;
         }
+        handlers.onClose();
       };
     });
   };
@@ -418,7 +442,11 @@
       return response.json().then(function (json) {
         if (!response.ok) {
           var detail = (json && json.error && json.error.message) || "";
-          throw new Error(detail || "request_failed");
+          var refused = new Error(detail || "request_failed");
+          // NEURA's own sentence, written for a person: the only error text a
+          // shopper is ever shown as it is (`errorTextFor`).
+          refused.fromServer = Boolean(detail);
+          throw refused;
         }
         return (json && json.data) || {};
       });
@@ -821,11 +849,7 @@
           self.complete(data);
         },
         function (err) {
-          self.render({
-            role: "error",
-            text: (err && err.message) || TRANSPORT_ERROR_MESSAGE,
-            disclosure: "",
-          });
+          self.render({ role: "error", text: errorTextFor(err), disclosure: "" });
           self.setBusy(false);
         }
       );
@@ -1025,8 +1049,10 @@
     module.exports = {
       EMPTY_TURN_MESSAGE: EMPTY_TURN_MESSAGE,
       STEP_FALLBACK: STEP_FALLBACK,
+      TRANSPORT_ERROR_MESSAGE: TRANSPORT_ERROR_MESSAGE,
       configFrom: configFrom,
       endpointFor: endpointFor,
+      errorTextFor: errorTextFor,
       labelForStep: labelForStep,
       messagesForTurn: messagesForTurn,
       pairsFor: pairsFor,

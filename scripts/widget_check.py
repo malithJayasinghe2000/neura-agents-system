@@ -45,7 +45,7 @@ from typing import Any
 import httpx
 import websockets
 from fastapi import FastAPI, Request, Response, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 ROOT = Path(__file__).resolve().parents[1]
 WIDGET_JS = ROOT / "apps/neura-api/src/neura_api/widget/widget.js"
@@ -118,6 +118,10 @@ class Scenario:
     #: A second message on the SAME page, sent after the first turn finished.
     #: The only way to exercise what a socket does between turns.
     follow_up: str | None = None
+    #: The page cannot reach NEURA at all: a shopper offline (G56).
+    unreachable: bool = False
+    #: A failure case: every message must get exactly this one error row (G56).
+    expect_error: str | None = None
     why: str = ""
 
 
@@ -227,7 +231,7 @@ def build_stub() -> Any:
         script = _script_from(websocket.query_params.get("token", ""))
         # "refuse" never accepts the handshake, so the widget must notice the
         # socket is unusable and fall back to REST on its own.
-        if script == "refuse":
+        if script in REFUSING:
             await websocket.close(code=1011)
             return
         await websocket.accept()
@@ -261,10 +265,22 @@ def build_stub() -> Any:
 
     @app.post("/v1/chat")
     @app.post("/v1/care/chat")
-    async def chat(request: Request) -> dict[str, Any]:
+    async def chat(request: Request) -> Any:
         served["transport"] = "rest"
         bearer = request.headers.get("authorization", "").removeprefix("Bearer ")
-        done = _done(_script_from(bearer))
+        script = _script_from(bearer)
+        if script == "refused_key":
+            # NEURA's own refusal, readable by the page (G55): its words are shown.
+            return JSONResponse(
+                {"error": {"code": "SECRET_KEY_IN_PAGE", "message": REFUSAL_SENTENCE}},
+                status_code=401,
+            )
+        if script == "html_error":
+            # A proxy's error page: not JSON, so nothing in it is for a shopper.
+            return Response(
+                "<html><body>502 Bad Gateway</body></html>", status_code=502, media_type="text/html"
+            )
+        done = _done(script)
         done.pop("type")
         return {"data": done, "meta": {}}
 
@@ -387,6 +403,18 @@ class Chrome:
 
 # ── The scenarios ────────────────────────────────────────────────────────────
 
+#: The widget's own words when a message could not be answered.
+TRANSPORT_ERROR = "We could not reach the assistant. Please check your connection and try again."
+#: The API's sentence for a secret key used from a page (G55).
+REFUSAL_SENTENCE = (
+    "A secret key may not be used from a web page, where anyone can read it. Use the "
+    "shop's public key (fn_pk_…) in the page, and keep secret keys on your server."
+)
+#: Scripts whose socket is refused at the handshake, so REST is tried.
+REFUSING = frozenset({"refuse", "refused_key", "html_error"})
+#: A browser's or a parser's own words, which must never reach a shopper (G56).
+RAW_WORDS = ("Failed to fetch", "Load failed", "NetworkError", "Unexpected token", "request_failed")
+
 STUB_SCENARIOS = (
     Scenario(
         name="an answered turn draws the reply",
@@ -420,6 +448,32 @@ STUB_SCENARIOS = (
         transport="rest",
         why="the fallback ADR-0019 §4 accepts the cost of, and the path most likely to rot",
     ),
+    Scenario(
+        name="an offline shopper gets one plain error per message, never the browser's words",
+        message="hello?",
+        follow_up="are you there?",
+        unreachable=True,
+        transport="none",
+        expect_error=TRANSPORT_ERROR,
+        why="G56: it showed our sentence AND the browser's 'Failed to fetch'",
+    ),
+    Scenario(
+        name="NEURA's readable refusal is shown once per message, in its own words",
+        message="hello?",
+        follow_up="hello again?",
+        script="refused_key",
+        transport="rest",
+        expect_error=REFUSAL_SENTENCE,
+        why="G55/G56: one sentence that says why, not a second error before it",
+    ),
+    Scenario(
+        name="an error page that is not JSON is one plain error",
+        message="hello?",
+        script="html_error",
+        transport="rest",
+        expect_error=TRANSPORT_ERROR,
+        why="G56: a parser's 'Unexpected token' is not for a shopper",
+    ),
 )
 
 
@@ -451,6 +505,9 @@ def check(scenario: Scenario, state: dict[str, Any], transport: str | None = Non
             return Result(scenario.name, False, "the second message was never echoed", rows)
         if len(answers) < 2:
             return Result(scenario.name, False, "the second message got no reply at all", rows)
+
+    if scenario.expect_error is not None:
+        return _check_failure(scenario, rows, shopper, answers)
 
     reply = answers[-1]
     # The invariant, stated once: whatever the outcome, the bubble has words in
@@ -488,6 +545,28 @@ def check(scenario: Scenario, state: dict[str, Any], transport: str | None = Non
     return Result(scenario.name, True, f"`{reply['role']}`: {reply['text'][:70]}{served}", rows)
 
 
+def _check_failure(
+    scenario: Scenario,
+    rows: list[dict[str, Any]],
+    shopper: list[dict[str, Any]],
+    answers: list[dict[str, Any]],
+) -> Result:
+    """A message that could not be answered: one error row per message, in words a
+    shopper can read (G56)."""
+    raw = [r["text"] for r in rows if any(words in r["text"] for words in RAW_WORDS)]
+    if raw:
+        return Result(scenario.name, False, f"the shopper read {raw[0]!r}", rows)
+    errors = [r["text"] for r in answers if r["role"] == "error"]
+    if len(answers) != len(errors) or errors != [scenario.expect_error] * len(shopper):
+        return Result(
+            scenario.name,
+            False,
+            f"{len(shopper)} message(s) drew {len(errors)} error(s): {errors}",
+            rows,
+        )
+    return Result(scenario.name, True, f"one error per message: {errors[0][:70]}", rows)
+
+
 # ── Runs ─────────────────────────────────────────────────────────────────────
 
 
@@ -509,9 +588,15 @@ async def run_stub(chrome_binary: str) -> list[Result]:
                 # The scenario travels inside the key, which is the one value
                 # the widget already sends on both transports.
                 await chrome.goto(f"http://127.0.0.1:{port}/harness")
+                # An offline shopper: NEURA's address on a port nobody listens on.
+                base = (
+                    f" e.config.base = 'http://127.0.0.1:{free_port()}';"
+                    if scenario.unreachable
+                    else ""
+                )
                 await chrome.evaluate(
                     "(() => { const e = document.querySelector('neura-chat');"
-                    f" e.config.key = 'fn_pk_test_harness:{scenario.script}';"
+                    f" e.config.key = 'fn_pk_test_harness:{scenario.script}';{base}"
                     " return 'ok'; })()"
                 )
                 await chrome.send_message(scenario.message)

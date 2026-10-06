@@ -362,3 +362,29 @@ test("the panel opens once, then never again this tab", () => {
   // Once is a suggestion; every visit is nagging.
   assert.strictEqual(widget.shouldAutoOpenPairs(config, block, true), false);
 });
+
+// ── What a shopper reads when a message could not be answered (G56) ──────────
+
+test("a network failure reads as one plain sentence, never the browser's own words", () => {
+  // What fetch throws when the shopper is offline, or when a refusal is not
+  // readable by the page (CORS): the browser's words, in the browser's language.
+  for (const err of [new TypeError("Failed to fetch"), new TypeError("Load failed")]) {
+    assert.strictEqual(widget.errorTextFor(err), widget.TRANSPORT_ERROR_MESSAGE);
+  }
+});
+
+test("a server page that is not JSON reads as the same plain sentence", () => {
+  const err = new SyntaxError("Unexpected token '<', \"<html><bod\"... is not valid JSON");
+  assert.strictEqual(widget.errorTextFor(err), widget.TRANSPORT_ERROR_MESSAGE);
+});
+
+test("NEURA's own readable refusal is shown in its own words", () => {
+  const err = new Error("A secret key may not be used from a web page.");
+  err.fromServer = true;
+  assert.strictEqual(widget.errorTextFor(err), "A secret key may not be used from a web page.");
+});
+
+test("a refusal with no words of its own, or nothing at all, reads as the plain sentence", () => {
+  assert.strictEqual(widget.errorTextFor(new Error("request_failed")), widget.TRANSPORT_ERROR_MESSAGE);
+  assert.strictEqual(widget.errorTextFor(undefined), widget.TRANSPORT_ERROR_MESSAGE);
+});

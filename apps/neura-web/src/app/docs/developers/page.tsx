@@ -685,7 +685,7 @@ const CHAT_RULES: React.ReactNode[] = [
  * practice-mode note is `WIDGET_WITHHELD_MESSAGE`. A wrong address is
  * `ORIGIN_NOT_ALLOWED`, which the page may not read (middleware/cors.py), so
  * the chat box can only say it could not reach the assistant (seen in a real
- * browser; G56 is the browser's own "Failed to fetch" beside it).
+ * browser; since G56, 2026-10-06, that is the only line, once per message).
  */
 const CHAT_WORKS: React.ReactNode[] = [
   <>Open a shop page: the chat button appears at the bottom right.</>,
