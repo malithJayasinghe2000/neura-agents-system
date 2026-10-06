@@ -23,6 +23,12 @@ dependencies = [
     "redis>=5.2",
     "opentelemetry-instrumentation-fastapi>=0.50b0",
     "mcp>=2.2.0,<3",
+    # Calling a shop's bridge and its webhooks only at checked public addresses
+    # (addresses.py, G47/G78): the guarded connection is built from httpcore's
+    # network backend, inside httpx's own transport.
+    "httpx>=0.28",
+    "httpcore>=1.0,<2",
+    "anyio>=4",
 ]
 
 [project.scripts]

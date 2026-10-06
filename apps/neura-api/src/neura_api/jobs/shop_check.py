@@ -30,7 +30,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from neura_api.addresses import check_shop_address
+from neura_api.addresses import adapter_transport, check_shop_address
 from neura_api.jobs.runner import JobContext
 from neura_commerce import (
     AdapterAuthError,
@@ -163,7 +163,15 @@ class ShopCheckHandler:
         except ValidationError as refused:
             return outcome(address, cause=ADDRESS_REFUSED, message=refused.message)
 
-        adapter = registry.create(platform, base_url=address, tenant_id=tenant_id, **credentials)
+        adapter = registry.create(
+            platform,
+            base_url=address,
+            tenant_id=tenant_id,
+            # The address was just checked; the connection checks it again as it
+            # connects, so a name that changes its answer in between is refused.
+            **adapter_transport(production=self._production),
+            **credentials,
+        )
         try:
             cause, capabilities = await diagnose(adapter)
             report = None

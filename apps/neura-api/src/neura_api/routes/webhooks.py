@@ -19,10 +19,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from neura_api.addresses import check_webhook_address
 from neura_api.dependencies import require
 from neura_api.envelopes import envelope
 from neura_api.jobs.webhooks import enqueue_drain
-from neura_core import ValidationError, get_logger
+from neura_core import ValidationError, get_logger, get_settings
 from neura_core.tenancy import AuthenticatedCaller
 from neura_core.webhooks import (
     DeliveryStatus,
@@ -57,6 +58,7 @@ async def register(
     body: RegisterWebhook,
     caller: Annotated[AuthenticatedCaller, Depends(require("webhooks:write"))],
 ) -> dict[str, Any]:
+    await check_webhook_address(body.url, production=get_settings().is_production)
     database = request.app.state.database
     async with database.tenant_session(caller.tenant_id) as session:
         endpoint, secret = await WebhookRepository(session).register(

@@ -426,8 +426,9 @@ connected), `POST /checks` (`{address}` or `{store_id}`; 202; one live check per
 per connection, `last_check` and `token_set_at`. Tables `shop_tokens` (sealed like `tenant_stores.credentials`) and
 `shop_checks` (findings, never a token). Each token made, replaced and each connect writes an audit event, with no
 token. **Addresses** (`addresses.py`, G47): in production `https://` and public internet addresses only, checked
-before every call, for `POST /v1/stores` too; outside production a test shop on this machine is allowed. **Open:**
-DNS rebinding (a name re-resolved between the check and the call), stated in ADR-0052 §3.
+before every call, for `POST /v1/stores` too; outside production a test shop on this machine is allowed. **DNS
+rebinding, ADR-0052 §3's known limit, closed 2026-10-03** (G47, G78): in production every call to a shop and every
+webhook connects through `outbound_transport`, which checks the address as it connects (security-model.md §8).
 
 **Checked:** `make check` (1400 unit, 453 integration: `test_shop_connect.py` 27, `test_console_connect.py` 8);
 `make console-check` 109 of 109; a live run against the API (24 of 24) and a real-Chrome run of the whole flow (25 of

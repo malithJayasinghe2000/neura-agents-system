@@ -253,6 +253,8 @@ Every limit **degrades to escalate-only** rather than erroring. An attacker gets
 
 **Outbound** (us → merchant): signed identically, exponential-backoff retry (1s → 2s → 4s … 6 attempts), dead-letter queue after exhaustion, delivery log visible to the merchant, and HTTPS-only with no redirect following.
 
+**Where our server connects (server-side request forgery, 2026-10-03, G47 and G78 in `docs/CONNECTING_A_NEW_SHOP_LOG.md`).** A shop gives us two kinds of address: its bridge and its webhook endpoints. In production our server connects to either **only through one guarded connection** (`neura_api/addresses.py` `outbound_transport`): it looks the name up once, refuses it unless every answer is a public internet address (never loopback, private, link-local, shared, multicast or reserved, nor an IPv4 address dressed as IPv6), and connects to exactly the address it checked, while TLS still verifies the certificate against the name. So a name that answers a public address to a check and one of ours a moment later (DNS rebinding) or the next day is refused at the moment of connecting, on every call: the check, every chat turn, Sync now, the suggestions, the AI connection and every webhook. No redirects are followed and no proxy is used (a proxy would look the name up again). Before an address is stored, `check_shop_address` and `check_webhook_address` say in plain words why one is refused. Outside production the test shops on the developer's machine are allowed.
+
 ---
 
 ## 9. Authorisation for Actions (T9)
