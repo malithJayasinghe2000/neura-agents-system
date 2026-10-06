@@ -21,7 +21,7 @@ from neura_api.main import create_app
 from neura_api.middleware.cors import is_valid_origin
 from neura_api.turns import TurnResult
 from neura_core import get_settings
-from neura_core.tenancy import TenantConfig, TurnMode
+from neura_core.tenancy import TenantConfig, TurnMode, new_shop_token
 from neura_core.tenancy.keys import ApiKeyKind, generate
 
 WIDGET_JS = Path(__file__).parents[2] / "apps/neura-api/src/neura_api/widget/widget.js"
@@ -370,6 +370,29 @@ class TestPerTenantCors:
         assert response.status_code == 401
         error = response.json()["error"]
         assert error["code"] == "SECRET_KEY_IN_PAGE"
+        assert "fn_pk_" in error["message"]
+        assert response.headers["access-control-allow-origin"] == "https://shop.example"
+
+    @pytest.mark.parametrize("path", ["/v1/chat", "/v1/care/chat"])
+    def test_a_shop_token_from_a_web_page_is_refused_and_says_why(
+        self, client: TestClient, path: str
+    ) -> None:
+        """G57: the shop token pasted into the chat box line was refused as an
+        unknown key the page could not read, so the chat box could not say that
+        the bridge's password was sitting in the page. Refused on its shape, and
+        readable, as G55."""
+        response = client.post(
+            path,
+            headers={
+                "Origin": "https://shop.example",
+                "Authorization": f"Bearer {new_shop_token()}",
+            },
+            json={"message": "hello"},
+        )
+        assert response.status_code == 401
+        error = response.json()["error"]
+        assert error["code"] == "SHOP_TOKEN_IN_PAGE"
+        assert "shop token" in error["message"]
         assert "fn_pk_" in error["message"]
         assert response.headers["access-control-allow-origin"] == "https://shop.example"
 

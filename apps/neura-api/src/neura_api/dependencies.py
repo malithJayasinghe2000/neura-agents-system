@@ -49,6 +49,7 @@ from neura_core import (
 from neura_core.identity import COOKIE_NAME, memberships_for
 from neura_core.identity import verify as verify_session
 from neura_core.tenancy import (
+    SHOP_TOKEN_PREFIX,
     ApiKeyKind,
     AuthenticatedCaller,
     authenticate,
@@ -65,6 +66,11 @@ BEARER = "bearer"
 #: chat box can say exactly what is wrong, and a test can name it. S105 reads it
 #: as a password; it names a refusal, and no secret is near it.
 SECRET_KEY_IN_PAGE = "SECRET_KEY_IN_PAGE"  # noqa: S105
+
+#: The refusal of the shop token sent from a web page (G57). The shop token is
+#: the bridge's password, never a key for NEURA, so it fails anyway; its own code
+#: lets the chat box say that it is in the page, where anyone can copy it.
+SHOP_TOKEN_IN_PAGE = "SHOP_TOKEN_IN_PAGE"  # noqa: S105
 
 
 def bearer_token(authorization: str | None) -> str:
@@ -136,6 +142,12 @@ async def authenticate_request(
     it in the address, then its plain-request fallback sent it in the header,
     and a secret key is not tied to any address. Refused on its shape alone,
     before any lookup, so the page may read why (``SECRET_KEY_IN_PAGE``).
+
+    **Nor does the shop token** (G57). It is the bridge's password (``fn_st_``),
+    which NEURA sends to the shop and never accepts, so it would fail as an
+    unknown key; but that refusal is unreadable, and the chat box could only say
+    it could not reach the assistant while the token sat in the page. Refused on
+    its shape too, readable, with its own code.
     """
     if token is not None:
         parsed = api_keys.parse(token)
@@ -148,19 +160,7 @@ async def authenticate_request(
     origin = request.headers.get("origin")
 
     if origin and presented:
-        parsed = api_keys.parse(presented)
-        if parsed is not None and parsed[0] is ApiKeyKind.SECRET:
-            # Decided from the string the page itself sent, so letting the page
-            # read the refusal tells it nothing new (middleware/cors.py).
-            state = getattr(request, "state", None)
-            if state is not None:
-                state.secret_key_in_page = True
-            raise AuthenticationError(
-                "A secret key may not be used from a web page, where anyone can read it. "
-                "Use the shop's public key (fn_pk_…) in the page, and keep secret keys "
-                "on your server.",
-                code=SECRET_KEY_IN_PAGE,
-            )
+        _refuse_a_secret_in_a_page(request, presented)
 
     caller = await authenticate(
         get_database(),
@@ -174,6 +174,36 @@ async def authenticate_request(
     if state is not None:
         state.caller = caller
     return caller
+
+
+def _refuse_a_secret_in_a_page(request: Request | WebSocket, presented: str) -> None:
+    """Refuse a secret key or the shop token that came from a web page.
+
+    Decided from the string the page itself sent, before any lookup, so letting
+    the page read the refusal tells it nothing new (middleware/cors.py).
+    """
+    parsed = api_keys.parse(presented)
+    if parsed is not None and parsed[0] is ApiKeyKind.SECRET:
+        refusal = AuthenticationError(
+            "A secret key may not be used from a web page, where anyone can read it. "
+            "Use the shop's public key (fn_pk_…) in the page, and keep secret keys "
+            "on your server.",
+            code=SECRET_KEY_IN_PAGE,
+        )
+    elif presented.strip().startswith(SHOP_TOKEN_PREFIX):
+        refusal = AuthenticationError(
+            "This is the shop token. It belongs in your bridge's settings, never in a "
+            "web page, where anyone can read it. Use the shop's public key (fn_pk_…) "
+            "in the page. If this page was public, ask the shop owner to make a new "
+            "shop token.",
+            code=SHOP_TOKEN_IN_PAGE,
+        )
+    else:
+        return
+    state = getattr(request, "state", None)
+    if state is not None:
+        state.secret_key_in_page = True
+    raise refusal
 
 
 async def caller(request: Request) -> AuthenticatedCaller:

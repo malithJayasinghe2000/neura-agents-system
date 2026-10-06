@@ -253,3 +253,47 @@ class TestNoSecretKeyInAPage:
 
         request = self._Request(generate(ApiKeyKind.PUBLIC).token, "https://shop.example")
         assert getattr(self._authenticate(request), "code", None) != SECRET_KEY_IN_PAGE
+
+
+class TestNoShopTokenInAPage:
+    """G57: the shop token (``fn_st_``) is the bridge's password. Pasted into the
+    chat box line by mistake it was refused as an unknown key the page could not
+    read, so the chat box could only say it could not reach the assistant, while
+    the token sat in the page for anyone to copy."""
+
+    _Request = TestNoSecretKeyInAPage._Request
+    _authenticate = staticmethod(TestNoSecretKeyInAPage._authenticate)
+
+    def test_a_shop_token_from_a_web_page_is_refused_before_any_lookup(self) -> None:
+        from neura_api.dependencies import SHOP_TOKEN_IN_PAGE
+        from neura_core import AuthenticationError
+        from neura_core.tenancy import new_shop_token
+
+        request = self._Request(new_shop_token(), "https://shop.example")
+        refused = self._authenticate(request)
+        assert isinstance(refused, AuthenticationError)
+        assert refused.code == SHOP_TOKEN_IN_PAGE
+        assert "shop token" in str(refused)
+        assert "fn_pk_" in str(refused)
+        # The same mark as G55: the page may read this refusal (middleware/cors.py).
+        assert request.state.secret_key_in_page is True
+
+    def test_a_shop_token_in_the_chat_sockets_address_is_refused_the_same_way(self) -> None:
+        import asyncio
+
+        from neura_api.dependencies import SHOP_TOKEN_IN_PAGE, authenticate_request
+        from neura_core.tenancy import new_shop_token
+
+        request = self._Request("", "https://shop.example")
+        request.headers.pop("authorization")
+        with pytest.raises(Exception) as raised:
+            asyncio.run(authenticate_request(request, token=new_shop_token()))
+        assert getattr(raised.value, "code", None) == SHOP_TOKEN_IN_PAGE
+
+    def test_a_shop_token_from_a_server_is_not_refused_for_it(self) -> None:
+        from neura_api.dependencies import SHOP_TOKEN_IN_PAGE
+        from neura_core.tenancy import new_shop_token
+
+        request = self._Request(new_shop_token(), None)
+        assert getattr(self._authenticate(request), "code", None) != SHOP_TOKEN_IN_PAGE
+        assert not hasattr(request.state, "secret_key_in_page")
