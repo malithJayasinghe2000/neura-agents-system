@@ -68,7 +68,13 @@ export default function OwnerGuide() {
           <li>
             <strong className="font-semibold text-ink">A developer</strong> who can add an add-on
             and one line to your shop. It&apos;s needed once, for steps 1 and 4. Send them the{" "}
-            <Link href="/docs/developers/">developer guide</Link>.
+            <Link
+              href="/docs/developers/"
+              className="font-medium text-ink underline underline-offset-2"
+            >
+              developer guide
+            </Link>
+            .
           </li>
           <li>
             <strong className="font-semibold text-ink">Your shop&apos;s web address.</strong>
