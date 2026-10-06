@@ -147,7 +147,7 @@ function NeedsYou({
       figure: null,
       title: "Your online shop isn't connected yet",
       detail:
-        "Until it is, your assistant has no products or orders to read. Connecting is done outside the console for now — Shop connection says how.",
+        "Until it is, your assistant has no products or orders to read. Connect it on Shop connection, in three steps with your developer.",
       action: "Shop connection",
       href: `${base}/shops`,
       primary: true,
