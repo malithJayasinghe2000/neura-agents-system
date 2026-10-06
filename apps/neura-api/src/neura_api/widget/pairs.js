@@ -8,7 +8,7 @@
  * Embedded as two lines on the page that knows what it is displaying:
  *
  *     <script src="https://api.example.com/v1/widget/pairs.js" async></script>
- *     <neura-pairs data-neura-key="fn_pk_live_..."
+ *     <neura-pairs data-neura-key="fn_pk_..."
  *                  data-products="1315,1332"></neura-pairs>
  *
  * Four rules this file exists to keep, each decided in ADR-0040 rather than

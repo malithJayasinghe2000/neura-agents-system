@@ -205,6 +205,14 @@ class TestWidgetHosting:
         assert "fn_pk_test_abc" in body["snippet"]
         assert body["widget_url"].endswith("/v1/widget/widget.js")
 
+    def test_without_a_key_the_line_shows_a_plain_placeholder(self, client: TestClient) -> None:
+        """G30: `fn_pk_live_…` told an owner the key is a live one, and a real key made
+        on a test copy of NEURA starts `fn_pk_test_`, which reads like practice mode.
+        The placeholder says only what every public key starts with."""
+        body = client.get("/v1/widget/snippet").json()
+        assert 'data-neura-key="fn_pk_\u2026"' in body["snippet"]
+        assert "live" not in body["snippet"] and "_test" not in body["snippet"]
+
     def test_the_snippet_offers_both_surfaces_separately(self, client: TestClient) -> None:
         """A merchant who wants suggestions and no chat box must be able to see
         that these are two pastes, rather than learning it from support."""

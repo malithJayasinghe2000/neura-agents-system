@@ -633,7 +633,9 @@ const CHAT_STEPS: WhoStep[] = [
     who: "FiveNeurals",
     note: (
       <>
-        A public key that starts with {c("fn_pk_")}. It works only from the addresses you sent.
+        A public key that starts with {c("fn_pk_")}. It works only from the addresses you sent. A
+        key from a NEURA test system starts with {c("fn_pk_test_")}. It works the same way, and
+        &ldquo;test&rdquo; has nothing to do with practice mode.
       </>
     ),
   },

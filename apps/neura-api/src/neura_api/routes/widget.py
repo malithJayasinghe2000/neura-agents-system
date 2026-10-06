@@ -111,7 +111,9 @@ async def snippet(
     """
     settings = get_settings()
     origin = (base or settings.public_base_url).rstrip("/")
-    shown_key = key or "fn_pk_live_…"
+    # What every public key starts with, and nothing more (G30): `live` or
+    # `test` in a placeholder read as a claim about the shop.
+    shown_key = key or "fn_pk_…"
     return {
         "snippet": SNIPPET.format(base=origin, key=shown_key),
         "widget_url": f"{origin}/v1/widget/widget.js",

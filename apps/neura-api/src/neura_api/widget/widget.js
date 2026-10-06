@@ -9,7 +9,7 @@
  * Embedded as two lines, which is the whole integration:
  *
  *     <script src="https://api.example.com/v1/widget/widget.js" async
- *             data-neura-key="fn_pk_live_..."></script>
+ *             data-neura-key="fn_pk_..."></script>
  *
  * Four rules this file exists to keep, each decided elsewhere:
  *
