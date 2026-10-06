@@ -47,8 +47,8 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
         <p className="leading-relaxed text-foreground/80">
           Your shop and NEURA talk through a small add-on in your shop, called the{" "}
           <strong className="font-semibold text-foreground">NEURA bridge</strong>. It only lets
-          NEURA read — products, stock, orders and policy pages — and never change anything. Here is
-          who does what, and in which order.
+          NEURA read your products, stock, orders and policy pages, and never change anything. Here
+          is who does what, and in which order.
         </p>
       </div>
 

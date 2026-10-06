@@ -33,7 +33,7 @@ export const STEPS: HelpStep[] = [
   },
   {
     title: "Check and connect",
-    body: "Type the bridge's address on Shop connection and press Check. When it passes, press Connect: NEURA copies your catalogue. After that, press Sync now whenever you add products or change stock.",
+    body: "Type the bridge's address on Shop connection and press Check. When it passes, press Connect: NEURA copies your catalogue. Your assistant asks your shop live, so new products and stock changes reach shoppers straight away.",
     check: "'Your shop is connected' and 'Your catalogue is copied' are ticked",
     who: "You",
   },
@@ -67,11 +67,15 @@ export const TROUBLE: { seen: string; fix: string; sell?: true }[] = [
   },
   {
     seen: "The chat box appears but refuses to answer",
-    fix: "The key is used from a different address than the one it was made for — for example www. versus no www. FiveNeurals can make a new one.",
+    fix: "The key is used from a different address than the one it was made for, for example www. versus no www. FiveNeurals can make a new one.",
   },
   {
-    seen: "A new product or stock change is missing",
-    fix: "Our copy is older than the change. Press Sync now on Shop connection.",
+    seen: "A new product is missing from your dashboard's lists",
+    fix: "Suggestions, Sold out and Review use NEURA's copy of your catalogue, which doesn't update by itself. Press Sync now on Shop connection. Your assistant asks your shop live, so it can already find the product.",
+  },
+  {
+    seen: "Your assistant doesn't know a new product",
+    fix: "It asks your shop live, so your shop isn't sending it yet. Your developer can check the bridge.",
   },
   {
     seen: "Sold out stays empty",
