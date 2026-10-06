@@ -45,7 +45,7 @@ class NeuraError(Exception):
             payload["details"] = self.details
         if request_id:
             payload["request_id"] = request_id
-        payload["docs_url"] = f"https://docs.fiveneurals.com/errors/{self.code}"
+        # No `docs_url` until a page exists to link to (G62, ADR-0056).
         return {"error": payload}
 
 

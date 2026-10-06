@@ -63,13 +63,12 @@ Stored hashed — verifiable, never retrievable. Scoped (`care:chat:write`, `car
     "message": "No order matching that reference and email.",
     "type": "not_found",
     "details": { "field": "order_ref" },
-    "request_id": "req_01J8XYZ",
-    "docs_url": "https://docs.fiveneurals.com/errors/ORDER_NOT_FOUND"
+    "request_id": "req_01J8XYZ"
   }
 }
 ```
 
-`code` is a stable machine-readable string — clients branch on it, so it is part of the contract and never changes. `message` is human-facing and may be reworded. `docs_url` is what turns a 400 into a self-service fix.
+`code` is a stable machine-readable string — clients branch on it, so it is part of the contract and never changes. `message` is human-facing and may be reworded. **No `docs_url` until error pages exist** ([ADR-0056](adr/0056-an-error-links-to-a-page-only-when-the-page-exists.md), 2026-10-06): every error used to link to a site with no address (G62).
 
 `request_id` is the OpenTelemetry trace ID. A customer quoting it lets us retrieve the exact agent run.
 
@@ -291,7 +290,7 @@ The five-minute target is a design constraint, not an aspiration.
 - **Auto-generated SDKs** from the OpenAPI spec rather than hand-written ones, so they cannot drift. Phase 2.
 - **A published Postman/Bruno collection.**
 - **A sandbox tenant** with seeded data — a developer must be able to try the API before connecting a real store.
-- **Copy-pasteable errors.** Every `docs_url` resolves to a page explaining the cause and the fix.
+- **Copy-pasteable errors** (postponed, [ADR-0056](adr/0056-an-error-links-to-a-page-only-when-the-page-exists.md)). A page per error code explaining the cause and the fix; `docs_url` comes back with the pages, and a test that every code has one.
 
 ---
 

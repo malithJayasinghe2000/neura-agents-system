@@ -59,7 +59,6 @@ def register_error_handlers(app: FastAPI) -> None:
                         "errors": jsonable_encoder(exc.errors(), custom_encoder={Exception: str})
                     },
                     "request_id": _request_id(request),
-                    "docs_url": "https://docs.fiveneurals.com/errors/INVALID_REQUEST",
                 }
             },
         )
@@ -75,7 +74,6 @@ def register_error_handlers(app: FastAPI) -> None:
                     "message": str(exc.detail),
                     "type": "invalid_request" if exc.status_code < 500 else "api_error",
                     "request_id": _request_id(request),
-                    "docs_url": f"https://docs.fiveneurals.com/errors/{code}",
                 }
             },
         )
@@ -93,7 +91,6 @@ def register_error_handlers(app: FastAPI) -> None:
                     "message": "An internal error occurred.",
                     "type": "api_error",
                     "request_id": _request_id(request),
-                    "docs_url": "https://docs.fiveneurals.com/errors/INTERNAL_ERROR",
                 }
             },
         )

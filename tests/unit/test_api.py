@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -82,8 +83,18 @@ class TestErrorContract:
         assert error["code"] == "NOT_FOUND"
         assert error["type"] == "invalid_request"
         assert error["request_id"]
-        # docs_url is what turns a 404 into a self-service fix.
-        assert error["docs_url"].endswith("/NOT_FOUND")
+        # G62, ADR-0056: no link until a page exists to link to. Every error
+        # pointed at docs.fiveneurals.com, which has no address at all.
+        assert "docs_url" not in error
+
+    def test_no_error_links_to_a_page_that_does_not_exist(self) -> None:
+        """Every builder of an error: our own errors, and the 400 and 500 handlers."""
+        from neura_core import NotFoundError
+
+        assert "docs_url" not in NotFoundError("gone").to_dict(request_id="req_1")["error"]
+        root = Path(__file__).resolve().parents[2]
+        source = (root / "apps/neura-api/src/neura_api/errors.py").read_text()
+        assert "docs.fiveneurals.com" not in source
 
     def test_error_request_id_matches_the_header(self, client: TestClient) -> None:
         response = client.get("/v1/does-not-exist")
