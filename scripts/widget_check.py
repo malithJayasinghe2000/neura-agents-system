@@ -743,47 +743,76 @@ async def deprovision(tenant_id: str) -> None:
     """
     from sqlalchemy import delete
 
+    from neura_core import Database
+
+    db = Database.from_settings()
+    async with db.tenant_session(tenant_id) as session:
+        for table in tenant_tables():
+            await session.execute(delete(table))
+    await db.dispose()
+
+
+def tenant_tables() -> list[Any]:
+    """Every table that holds a tenant's rows, in an order they can be deleted in.
+
+    **`audit_log` is absent on purpose** (see `deprovision`). A test compares
+    this list with the database's own (`tests/integration/test_tenant_drop_postgres.py`),
+    because the list fell behind once already: the shop token, the full check,
+    the pairings, the owner's choices and practice-mode evidence were all added
+    after it, and their rows outlived every dropped tenant (G76).
+    """
     from neura_agent_core.conversations import conversation_messages, conversations
     from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
     from neura_agent_core.rag.schema import document_chunks
     from neura_agent_core.shadow import shadow_turns
+    from neura_agent_core.shadow_evidence import shadow_evidence
     from neura_agent_sell.feed.schema import sell_feeds
+    from neura_agent_sell.pairing.schema import sell_pairing_choices, sell_pairings
     from neura_commerce.sync.schema import sync_checkpoints, synced_entities
-    from neura_core import Database
     from neura_core.idempotency import idempotency_keys
     from neura_core.identity.schema import memberships
     from neura_core.jobs.schema import job_queue
     from neura_core.observation.schema import observed_events
-    from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
+    from neura_core.tenancy.schema import (
+        api_keys,
+        shop_checks,
+        shop_tokens,
+        tenant_stores,
+        tenant_usage,
+        tenants,
+    )
     from neura_core.webhooks.schema import webhook_deliveries, webhook_endpoints
 
-    db = Database.from_settings()
-    async with db.tenant_session(tenant_id) as session:
-        for table in (
-            # A shopper's events first: a dropped tenant must not leave the one
-            # table that holds observed personal data behind (ADR-0044 §7).
-            observed_events,
-            shadow_turns,
-            sell_feeds,
-            conversation_messages,
-            conversations,
-            agent_checkpoint_writes,
-            agent_checkpoints,
-            document_chunks,
-            synced_entities,
-            sync_checkpoints,
-            job_queue,
-            webhook_deliveries,
-            webhook_endpoints,
-            memberships,
-            idempotency_keys,
-            tenant_usage,
-            tenant_stores,
-            api_keys,
-            tenants,
-        ):
-            await session.execute(delete(table))
-    await db.dispose()
+    return [
+        # A shopper's events first: a dropped tenant must not leave the one
+        # table that holds observed personal data behind (ADR-0044 §7).
+        observed_events,
+        # Before the turns it points at: the one foreign key among these tables.
+        shadow_evidence,
+        shadow_turns,
+        sell_feeds,
+        sell_pairing_choices,
+        sell_pairings,
+        conversation_messages,
+        conversations,
+        agent_checkpoint_writes,
+        agent_checkpoints,
+        document_chunks,
+        synced_entities,
+        sync_checkpoints,
+        job_queue,
+        webhook_deliveries,
+        webhook_endpoints,
+        memberships,
+        idempotency_keys,
+        tenant_usage,
+        shop_checks,
+        # The shop token, sealed: no shop should leave one behind.
+        shop_tokens,
+        tenant_stores,
+        api_keys,
+        tenants,
+    ]
 
 
 async def run_live(
