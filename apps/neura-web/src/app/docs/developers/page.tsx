@@ -787,16 +787,17 @@ const VIEW_FIELDS: [string, React.ReactNode][] = [
   [
     "event_id",
     <>
-      Your own id for this event, 16 to 64 characters. Send the same one again and it counts
-      once, so a retry is safe
+      Your own id for this event: 16 to 64 characters, using only a to z, A to Z, 0 to 9,
+      hyphens (-) and underscores (_). Send the same one again and it counts once, so a retry is
+      safe
     </>,
   ],
   [
     "session_id",
     <>
-      One per shopper visit, 16 to 128 characters, so the list counts visits and not only views.
-      Never the shop&apos;s session cookie itself: make it from the session with a secret only
-      your server holds (a keyed hash)
+      One per shopper visit, so the list counts visits and not only views: 16 to 128 characters,
+      the same kinds as <code>event_id</code>. Never the shop&apos;s session cookie itself: make
+      it from the session with a secret only your server holds (a keyed hash)
     </>,
   ],
   [
@@ -809,7 +810,8 @@ const VIEW_FIELDS: [string, React.ReactNode][] = [
   [
     "product_id",
     <>
-      The product&apos;s <code>external_id</code>, the same id your bridge sends
+      The product&apos;s <code>external_id</code>, exactly as your bridge sends it, up to 128
+      characters. Dots, slashes and spaces are fine
     </>,
   ],
   [
@@ -1301,9 +1303,8 @@ Content-Type: application/json
 }`}</Pre>
           <Defs items={VIEW_FIELDS} />
           <P>
-            {c("event_id")} and {c("session_id")} use only letters, digits, {c("-")} and {c("_")}.{" "}
-            {c("product_id")} may be any id your bridge sends, up to 128 characters. Any other field
-            is refused.
+            Send these six fields and nothing else. NEURA refuses a request with any other field, so
+            nothing more about a shopper can be sent by mistake.
           </P>
           <Rules items={VIEW_RULES} />
           <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
