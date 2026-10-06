@@ -202,7 +202,9 @@ async def _check_not_found(
         return
 
     if response.status_code in _REJECTING_STATUSES:
-        report.add(check, Severity.ERROR, "authentication failed — check the token")
+        report.add(
+            check, Severity.ERROR, "the shop token was refused, so this could not be checked"
+        )
         return
 
     report.add(
@@ -233,8 +235,8 @@ async def _check_limit(client: GenericClient, report: ConformanceReport) -> None
             check,
             Severity.WARNING,
             f"?limit=2 returned {len(payload['items'])} items",
-            "Ignoring limit means one request can pull an entire catalogue into "
-            "memory — on your server as much as ours.",
+            "Ignoring limit means one request can pull the whole catalogue into "
+            "memory, on your server as much as ours.",
         )
         return
 
@@ -274,8 +276,8 @@ async def _check_status_vocabulary(client: GenericClient, report: ConformanceRep
             check,
             Severity.WARNING,
             f"non-canonical status values: {sorted(unmapped)}",
-            "Map your platform's vocabulary to the enums in the spec. Unrecognised "
-            "values are read as 'unknown', which the agent cannot explain to a customer.",
+            "Use the status words the OpenAPI file lists. Any other word is read as "
+            '"unknown", which the assistant cannot explain to a shopper.',
         )
         return
 

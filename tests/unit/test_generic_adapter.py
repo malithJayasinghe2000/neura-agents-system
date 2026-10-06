@@ -12,6 +12,7 @@ platform-neutral, or the abstraction is quietly undone by its own test suite.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -658,6 +659,34 @@ async def test_draft_and_archived_products_are_not_a_status_problem() -> None:
     await adapter.aclose()
 
     assert "products.status_vocabulary" in report.passed_checks
+
+
+def _store_without_policies() -> ReferenceStore:
+    store = ReferenceStore()
+    store.policies = []
+    return store
+
+
+@pytest.mark.parametrize(
+    "store",
+    [
+        *(ReferenceStore(defects=frozenset({defect})) for defect in Defect),
+        _store_without_policies(),
+    ],
+    ids=[*(defect.value for defect in Defect), "no_policies"],
+)
+async def test_the_full_check_speaks_to_the_bridges_developer(store: ReferenceStore) -> None:
+    """G53: since the owner copies the full check to the developer, its words are
+    the developer's. Not our function names, not our type names, not a file they
+    cannot get, and no number nobody measured (CLAUDE.md §4)."""
+    adapter = adapter_for(store)
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    words = " ".join(f"{f.message} {f.hint}" for f in report.findings)
+    assert report.findings, "this broken store was not reported at all"
+    for ours in (r"\w+\(\)", r"ProductStatus", r"enums in the spec", r"support volume", "\u2014"):
+        assert not re.search(ours, words), f"{ours!r} in: {words}"
 
 
 async def test_running_without_a_token_says_so_rather_than_passing_quietly() -> None:
