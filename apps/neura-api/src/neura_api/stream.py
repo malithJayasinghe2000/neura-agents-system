@@ -203,6 +203,10 @@ async def run_streamed_turn(
                 body = ChatRequest(
                     message=str(raw.get("content", "")),
                     conversation_id=raw.get("conversation_id"),
+                    # In the message, never the address: a pass in an address
+                    # is written into logs (G34), and it is checked on every
+                    # message because a connection outlives a pass (G72).
+                    customer_pass=raw.get("customer_pass"),
                     external_ref=raw.get("external_ref"),
                     channel=str(raw.get("channel", "web")),
                     locale=str(raw.get("locale", "en")),
@@ -298,6 +302,7 @@ async def run_streamed_turn(
                     "state": result.state.value,
                     "escalated": outcome.escalated,
                     "blocked": outcome.blocked,
+                    "customer_pass": result.customer_pass.value if result.customer_pass else None,
                     "citations": [c.as_dict() for c in outcome.citations],
                     "ai_disclosure": AI_DISCLOSURE,
                     # Which service answered. Constant on a named socket and

@@ -54,11 +54,14 @@ from neura_core.ids import CONVERSATION
 from neura_core.tenancy import (
     Admission,
     AuthenticatedCaller,
+    CustomerSecretRepository,
+    PassStatus,
     RuntimePolicy,
     TenantRepository,
     TurnMode,
     UsageDelta,
     UsageMeter,
+    check_customer_pass,
     handover_message,
     resolve_runtime_policy,
     resolve_turn_mode,
@@ -83,6 +86,9 @@ class TurnInput:
     #: customer id, and a session that could would make every order in the shop
     #: readable by anyone who guessed a number.
     customer_external_id: str | None = None
+    #: A signed-in customer's pass from the page (ADR-0057). Checked by the
+    #: turn service against the shop's secret; a valid one names the customer.
+    customer_pass: str | None = None
     external_ref: str | None = None
     channel: str = "web"
     locale: str = "en"
@@ -106,6 +112,9 @@ class TurnResult:
     #: rule "a withheld reply is never empty-handed" lives in one object with
     #: the withholding itself.
     withheld_message: str = ""
+    #: What became of the customer pass the message carried, or ``None`` when
+    #: it carried none (ADR-0057 §5). Never the pass itself.
+    customer_pass: PassStatus | None = None
 
     @property
     def is_shadowed(self) -> bool:
@@ -169,6 +178,28 @@ class TurnService:
         async with self._db.tenant_session(tenant_id) as session:
             spend = await UsageMeter(session).spend_today(tenant_id)
             conversations = ConversationRepository(session)
+            # Who the shopper is, decided here, in code, on every message
+            # (ADR-0057 §4, Rule 3): a server's secret key names a customer
+            # (`_turn_input` allows that on a secret key only), or the page
+            # carries a pass the shop's server signed. A pass that fails makes
+            # the message *not signed in*; it never breaks the chat (§5).
+            customer_external_id = turn.customer_external_id
+            pass_status: PassStatus | None = None
+            if turn.customer_pass is not None:
+                checked = check_customer_pass(
+                    turn.customer_pass,
+                    await CustomerSecretRepository(session).secret(tenant_id),
+                )
+                pass_status = checked.status
+                customer_external_id = checked.customer_external_id
+                if checked.status is not PassStatus.VALID:
+                    # The reason, for the developer; never the pass.
+                    log.info(
+                        "customer_pass_refused",
+                        tenant_id=tenant_id,
+                        status=checked.status.value,
+                        reason=checked.reason,
+                    )
             # One conversation, one customer (G79, ADR-0057 §6). A conversation
             # keeps the customer of its first message, and its history goes to
             # the model on every later turn; a turn that names anyone else, or
@@ -178,10 +209,7 @@ class TurnService:
             # frame has already named the old one; `done` names this one).
             if turn.conversation_id is not None:
                 existing = await conversations.get(tenant_id, conversation_id)
-                if (
-                    existing is not None
-                    and existing.customer_external_id != turn.customer_external_id
-                ):
+                if existing is not None and existing.customer_external_id != customer_external_id:
                     log.info(
                         "conversation_customer_changed",
                         tenant_id=tenant_id,
@@ -193,7 +221,7 @@ class TurnService:
                 conversation_id=conversation_id,
                 agent_key=turn.agent_key,
                 external_ref=turn.external_ref,
-                customer_external_id=turn.customer_external_id,
+                customer_external_id=customer_external_id,
                 channel=turn.channel,
                 locale=turn.locale,
             )
@@ -261,7 +289,7 @@ class TurnService:
                     # fewer scopes than the agent declares must be able to do
                     # less, or scoping a key would be decorative.
                     scopes=turn.caller.scopes,
-                    identity=SessionIdentity(customer_external_id=turn.customer_external_id),
+                    identity=SessionIdentity(customer_external_id=customer_external_id),
                     history=history,
                     retriever=retriever,
                     audit=TenantAuditLog(self._db, tenant_id),
@@ -430,6 +458,7 @@ class TurnService:
             withheld_message=(
                 turn.caller.tenant.config.withheld_message or settings.widget_withheld_message
             ),
+            customer_pass=pass_status,
         )
 
     def _retriever(self, tenant_id: str, llm: object) -> Retriever | None:
