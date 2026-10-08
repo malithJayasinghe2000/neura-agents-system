@@ -169,6 +169,25 @@ class TurnService:
         async with self._db.tenant_session(tenant_id) as session:
             spend = await UsageMeter(session).spend_today(tenant_id)
             conversations = ConversationRepository(session)
+            # One conversation, one customer (G79, ADR-0057 §6). A conversation
+            # keeps the customer of its first message, and its history goes to
+            # the model on every later turn; a turn that names anyone else, or
+            # nobody, would read the first person's replies, orders included.
+            # So it starts a new conversation and carries nothing over. The
+            # caller learns the new id from the reply (the socket's `accepted`
+            # frame has already named the old one; `done` names this one).
+            if turn.conversation_id is not None:
+                existing = await conversations.get(tenant_id, conversation_id)
+                if (
+                    existing is not None
+                    and existing.customer_external_id != turn.customer_external_id
+                ):
+                    log.info(
+                        "conversation_customer_changed",
+                        tenant_id=tenant_id,
+                        previous_conversation_id=conversation_id,
+                    )
+                    conversation_id = new_id(CONVERSATION)
             started = await conversations.start(
                 tenant_id,
                 conversation_id=conversation_id,

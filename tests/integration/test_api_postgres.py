@@ -532,6 +532,67 @@ class TestAChatTurn:
         assert [h["role"] for h in history[:2]] == ["shopper", "agent"]
         assert history[0]["content"] == "do you ship to France?"
 
+    @pytest.mark.parametrize(
+        ("first", "then"),
+        [("385", "386"), ("385", None), (None, "385")],
+        ids=["another-customer", "signed-out", "signed-in"],
+    )
+    async def test_a_conversation_belongs_to_the_customer_it_started_with(
+        self, client: TestClient, db: Database, first: str | None, then: str | None
+    ) -> None:
+        """G79, ADR-0057 §6: a conversation took its customer from its first
+        message and never checked it again, so a message naming another
+        customer, or none, went on with the first one's history, orders and
+        all. Now it starts a new conversation and carries nothing over."""
+        token = await _provision(db, TENANT_A)
+
+        def say(message: str, customer: str | None, conversation_id: str | None = None) -> str:
+            body: dict[str, Any] = {"message": message}
+            if customer is not None:
+                body["customer"] = {"external_id": customer}
+            if conversation_id is not None:
+                body["conversation_id"] = conversation_id
+            response = client.post("/v1/care/chat", json=body, headers=_auth(token))
+            assert response.status_code == 200
+            return str(response.json()["data"]["conversation_id"])
+
+        started = say("where is my order 1001?", first)
+        continued = say("and what did you tell me before?", then, started)
+
+        assert continued != started
+        async with db.tenant_session(TENANT_A) as session:
+            repository = ConversationRepository(session)
+            old = await repository.get(TENANT_A, started)
+            new = await repository.get(TENANT_A, continued)
+            old_messages = await repository.messages(TENANT_A, started)
+            new_messages = await repository.messages(TENANT_A, continued)
+        assert old is not None and old.customer_external_id == first
+        assert new is not None and new.customer_external_id == then
+        # Nothing of the first person's conversation reached the second.
+        assert [m.content for m in old_messages if m.role.value == "shopper"] == [
+            "where is my order 1001?"
+        ]
+        assert [m.content for m in new_messages if m.role.value == "shopper"] == [
+            "and what did you tell me before?"
+        ]
+
+    async def test_the_same_customer_continues_their_conversation(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A)
+        customer = {"external_id": "385"}
+        first = client.post(
+            "/v1/care/chat",
+            json={"message": "where is my order 1001?", "customer": customer},
+            headers=_auth(token),
+        ).json()["data"]["conversation_id"]
+        second = client.post(
+            "/v1/care/chat",
+            json={"message": "thanks", "customer": customer, "conversation_id": first},
+            headers=_auth(token),
+        ).json()["data"]["conversation_id"]
+        assert second == first
+
     async def test_a_client_supplied_conversation_id_is_refused(
         self, client: TestClient, db: Database
     ) -> None:
