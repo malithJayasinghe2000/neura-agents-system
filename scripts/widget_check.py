@@ -775,6 +775,7 @@ def tenant_tables() -> list[Any]:
     from neura_core.observation.schema import observed_events
     from neura_core.tenancy.schema import (
         api_keys,
+        customer_secrets,
         shop_checks,
         shop_tokens,
         tenant_stores,
@@ -809,6 +810,8 @@ def tenant_tables() -> list[Any]:
         shop_checks,
         # The shop token, sealed: no shop should leave one behind.
         shop_tokens,
+        # The customer sign-in secret, sealed, likewise (ADR-0057).
+        customer_secrets,
         tenant_stores,
         api_keys,
         tenants,
