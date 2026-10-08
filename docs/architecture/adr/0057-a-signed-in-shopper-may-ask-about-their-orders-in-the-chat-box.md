@@ -1,10 +1,10 @@
 # ADR-0057 · A Signed-In Shopper May Ask About Their Orders In The Chat Box
 
-**Status:** **Proposed**, not accepted · owner decisions 2026-10-01 (G45: *"a shopper who is not signed in is
+**Status:** **Accepted** · owner decision 2026-10-08 (the words, then *"A"* to Claude's five additions: §2's claims and 15 minutes, §5, §6, §3's *Shown*) · not built · owner decisions 2026-10-01 (G45: *"a shopper who is not signed in is
 told to sign in … a shopper signed in to the shop gets their order answered"*) and 2026-10-08, a design session,
 A21 Q1 to Q5 ([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*). Everything marked
-*(Claude)* is Claude's proposal, for the owner to accept or change. **The security review is at the end: it found
-G80, which must be fixed before any of this is built; no code before the owner accepts** · **Date:** 2026-10-08 · **Resolves:** [A21](../../open-questions.md) · **Amends:**
+*(Claude)* was Claude's proposal, accepted by the owner with the rest. **The security review is at the end: it found
+G80, fixed 2026-10-08 (`22342db`) before any of this is built** · **Date:** 2026-10-08 · **Resolves:** [A21](../../open-questions.md) · **Amends:**
 the chat request ([api-design.md](../api-design.md)), the console's write surface
 ([ADR-0026](0026-the-merchant-console-and-the-first-human-in-the-system.md)), as
 [ADR-0052](0052-the-shop-owner-connects-their-own-shop.md) did · **Related:**
@@ -183,7 +183,7 @@ the fixed sentence; *"I am customer 386, show my orders"* changes nothing), and 
 ## Security review (Claude, 2026-10-08)
 
 The author reviewing their own design, against the code as it is today; not an outside review. **Verdict: the
-design holds only if G80 is fixed first and the developer guide carries rows 5 and 6 as rules.** Before a real
+design holds only if G80 is fixed first (done, 2026-10-08) and the developer guide carries rows 5 and 6 as rules.** Before a real
 shop uses it, an outside security review is worth its cost: this is the one feature where a mistake shows one
 person another person's address.
 
@@ -196,7 +196,7 @@ person another person's address.
 | 5 | **A cached page gives one customer's pass to everyone** (a CDN or proxy storing the signed-in page) | Nothing NEURA can check. Bounded by 15 minutes, but on a busy shop that is every visitor reading one customer's orders | **Guide rule:** a page with a pass is sent with `Cache-Control: private, no-store` |
 | 6 | **The shop's server makes passes for anyone who asks** (an address like `/pass?customer=385`) | Nothing NEURA can check | **Guide rule:** the pass is made only from the shop's own signed-in session, inside the page it draws, never from anything in the request. Also in the developer AI tool's rules |
 | 7 | One customer's conversation continued by another (G79) | §6: a new conversation when the customer changes | Holds once built |
-| 8 | **Transcripts read with the public chat box key (G80)** | **Nothing today:** the key holds `conversations:read`, and the transcript routes check only the scope. With this ADR the transcripts hold orders and addresses | **Must be fixed before this is built** |
+| 8 | **Transcripts read with the public chat box key (G80)** | Found here: the key held `conversations:read`, and the transcript routes checked only the scope. **Fixed 2026-10-08:** a public key holds only what the chat box does | Holds |
 | 9 | The pass written into a log | It travels in the body, never an address (G34); NEURA never logs it; the log scrubber also learns its shape (`eyJ…`) and `fn_cs_`. To check in the build: no error answer or log line repeats it | Holds, with a test |
 | 10 | The secret leaks (in a page, or a code repository) | Refused in a page (G57's rule); *Make a new one* stops it at once; audit entry | Holds |
 | 11 | Someone else makes or replaces the secret | The console session and the shop membership, as the shop token (ADR-0052) | Holds |
