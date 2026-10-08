@@ -1934,6 +1934,7 @@ class TestCustomerPass:
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["customer_pass"] == "valid"
+        assert data["customer_pass_reason"] == ""
         assert await self._customer_of(db, data["conversation_id"]) == "385"
 
     @pytest.mark.parametrize(
@@ -1964,6 +1965,9 @@ class TestCustomerPass:
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["customer_pass"] == expected
+        # The developer is told why, in words that never repeat the pass.
+        assert data["customer_pass_reason"]
+        assert customer_pass not in data["customer_pass_reason"]
         assert await self._customer_of(db, data["conversation_id"]) is None
 
     async def test_a_replaced_secret_stops_the_old_passes_at_once(

@@ -144,6 +144,9 @@ class ChatData(BaseModel):
     #: Tells the page about its own pass only, so it says nothing new; the chat
     #: box shows the developer a warning for ``invalid``.
     customer_pass: str | None = None
+    #: Why the pass was not accepted, in words for the developer; empty when it
+    #: was, or when there was none. Never repeats the pass.
+    customer_pass_reason: str = ""
 
 
 def build_router(agent_key: str) -> APIRouter:
@@ -505,6 +508,7 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
             # empty for it because `respond` never ran ([ADR-0030], ADR-0020).
             products=outcome.cards,
             customer_pass=result.customer_pass.value if result.customer_pass else None,
+            customer_pass_reason=result.customer_pass_reason,
         ).model_dump(mode="json"),
         request_id=str(getattr(getattr(request, "state", None), "request_id", "") or ""),
     )

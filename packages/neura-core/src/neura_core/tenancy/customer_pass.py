@@ -93,6 +93,12 @@ def check_customer_pass(
         return _invalid("this shop has no customer sign-in secret yet")
     if not token or len(token) > MAX_PASS_CHARS:
         return _invalid("not a customer pass")
+    if token.strip().startswith(CUSTOMER_SECRET_PREFIX):
+        return _invalid(
+            "this is the customer sign-in secret itself, not a pass. It must never be in a "
+            "web page: make the pass with it on your server, and ask the shop owner to make "
+            "a new secret, because this one is now public"
+        )
     moment = now or datetime.now(UTC)
 
     try:

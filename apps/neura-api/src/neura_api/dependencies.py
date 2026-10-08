@@ -49,6 +49,7 @@ from neura_core import (
 from neura_core.identity import COOKIE_NAME, memberships_for
 from neura_core.identity import verify as verify_session
 from neura_core.tenancy import (
+    CUSTOMER_SECRET_PREFIX,
     SHOP_TOKEN_PREFIX,
     ApiKeyKind,
     AuthenticatedCaller,
@@ -71,6 +72,10 @@ SECRET_KEY_IN_PAGE = "SECRET_KEY_IN_PAGE"  # noqa: S105
 #: the bridge's password, never a key for NEURA, so it fails anyway; its own code
 #: lets the chat box say that it is in the page, where anyone can copy it.
 SHOP_TOKEN_IN_PAGE = "SHOP_TOKEN_IN_PAGE"  # noqa: S105
+
+#: The refusal of the customer sign-in secret sent from a web page (ADR-0057 §3),
+#: for the same reason: it signs customer passes on the shop's server.
+CUSTOMER_SECRET_IN_PAGE = "CUSTOMER_SECRET_IN_PAGE"  # noqa: S105
 
 
 def bearer_token(authorization: str | None) -> str:
@@ -197,6 +202,14 @@ def _refuse_a_secret_in_a_page(request: Request | WebSocket, presented: str) -> 
             "in the page. If this page was public, ask the shop owner to make a new "
             "shop token.",
             code=SHOP_TOKEN_IN_PAGE,
+        )
+    elif presented.strip().startswith(CUSTOMER_SECRET_PREFIX):
+        refusal = AuthenticationError(
+            "This is the customer sign-in secret. It belongs on your shop's server, where it "
+            "signs customer passes, never in a web page, where anyone can read it. Use the "
+            "shop's public key (fn_pk_…) in the page. If this page was public, ask the shop "
+            "owner to make a new customer sign-in secret.",
+            code=CUSTOMER_SECRET_IN_PAGE,
         )
     else:
         return

@@ -115,6 +115,8 @@ class TurnResult:
     #: What became of the customer pass the message carried, or ``None`` when
     #: it carried none (ADR-0057 §5). Never the pass itself.
     customer_pass: PassStatus | None = None
+    #: Why a pass was not accepted, for the developer. Never the pass.
+    customer_pass_reason: str = ""
 
     @property
     def is_shadowed(self) -> bool:
@@ -185,12 +187,14 @@ class TurnService:
             # the message *not signed in*; it never breaks the chat (§5).
             customer_external_id = turn.customer_external_id
             pass_status: PassStatus | None = None
+            pass_reason = ""
             if turn.customer_pass is not None:
                 checked = check_customer_pass(
                     turn.customer_pass,
                     await CustomerSecretRepository(session).secret(tenant_id),
                 )
                 pass_status = checked.status
+                pass_reason = checked.reason
                 customer_external_id = checked.customer_external_id
                 if checked.status is not PassStatus.VALID:
                     # The reason, for the developer; never the pass.
@@ -459,6 +463,7 @@ class TurnService:
                 turn.caller.tenant.config.withheld_message or settings.widget_withheld_message
             ),
             customer_pass=pass_status,
+            customer_pass_reason=pass_reason,
         )
 
     def _retriever(self, tenant_id: str, llm: object) -> Retriever | None:

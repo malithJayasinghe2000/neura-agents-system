@@ -21,7 +21,7 @@ from neura_api.main import create_app
 from neura_api.middleware.cors import is_valid_origin
 from neura_api.turns import TurnResult
 from neura_core import get_settings
-from neura_core.tenancy import TenantConfig, TurnMode, new_shop_token
+from neura_core.tenancy import TenantConfig, TurnMode, new_customer_secret, new_shop_token
 from neura_core.tenancy.keys import ApiKeyKind, generate
 
 WIDGET_JS = Path(__file__).parents[2] / "apps/neura-api/src/neura_api/widget/widget.js"
@@ -394,6 +394,26 @@ class TestPerTenantCors:
         assert error["code"] == "SHOP_TOKEN_IN_PAGE"
         assert "shop token" in error["message"]
         assert "fn_pk_" in error["message"]
+        assert response.headers["access-control-allow-origin"] == "https://shop.example"
+
+    @pytest.mark.parametrize("path", ["/v1/chat", "/v1/care/chat"])
+    def test_the_customer_secret_from_a_web_page_is_refused_and_says_why(
+        self, client: TestClient, path: str
+    ) -> None:
+        """ADR-0057 §3: the secret that signs customer passes, pasted where the
+        chat box key goes. Refused on its shape and readable, as G57."""
+        response = client.post(
+            path,
+            headers={
+                "Origin": "https://shop.example",
+                "Authorization": f"Bearer {new_customer_secret()}",
+            },
+            json={"message": "hello"},
+        )
+        assert response.status_code == 401
+        error = response.json()["error"]
+        assert error["code"] == "CUSTOMER_SECRET_IN_PAGE"
+        assert "server" in error["message"]
         assert response.headers["access-control-allow-origin"] == "https://shop.example"
 
     def test_an_unkeyed_endpoint_falls_back_to_the_platform_list(self, client: TestClient) -> None:

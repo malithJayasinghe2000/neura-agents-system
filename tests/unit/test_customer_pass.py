@@ -136,6 +136,15 @@ class TestRefused:
     def test_anything_that_is_not_a_pass(self, text: str) -> None:
         assert check_customer_pass(text, SECRET, now=NOW).status is PassStatus.INVALID
 
+    def test_the_secret_itself_sent_as_a_pass(self) -> None:
+        """A developer who puts the secret in the page instead of a pass made
+        with it. Refused, and told plainly, because the secret is now public."""
+        result = check_customer_pass(SECRET, SECRET, now=NOW)
+        assert result.status is PassStatus.INVALID
+        assert "secret" in result.reason
+        assert "new" in result.reason
+        assert SECRET not in result.reason
+
     def test_no_secret_made_yet(self) -> None:
         """A shop whose owner never made the secret has no signed-in shoppers."""
         assert check_customer_pass(_pass(), None, now=NOW).status is PassStatus.INVALID
