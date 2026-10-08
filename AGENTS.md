@@ -55,10 +55,23 @@ packages/                   LIBRARIES — shared, no product identity
 
 agents/                     PRODUCTS — one folder per sellable agent
   care/                     ✅ designed and built
-  sell/                     ✅ DESIGNED, not built — docs/agents/sell.md +
+  sell/                     ✅ designed and built — docs/agents/sell.md +
                             ADR-0023. Read-only, 2 intents, 5 tools, and
-                            3 surfaces of which only one has a graph.
-                            Scaffold within that scope, not beyond it
+                            6 surfaces of which only one has a graph.
+                            FIVE are built. The fifth, since 2026-09-27, is
+                            the sold-out demand list's STAGE 1 (ADR-0046) —
+                            a console screen, not code in this folder, because
+                            neura-api may not learn an agent's name. The
+                            recovery list (ADR-0043) is accepted, NOT built
+                            and NOT scheduled. Ask before starting it.
+                            Build within that scope, not beyond it.
+                            The shop owner may choose any product's paired
+                            suggestions in the console, and that choice wins
+                            (ADR-0050) — it is also how upsell happens.
+                            ONE of them has a model in it (ADR-0045):
+                            the paired suggestion computes what KINDS go with
+                            a product, in the background, on the job queue.
+                            Nothing runs between a shopper and an answer
   mind/ grow/ guard/        ⬜ NOT DESIGNED — see docs/agents/README.md
 
 apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
@@ -67,8 +80,11 @@ apps/neura-api/             DEPLOYABLE — FastAPI app + worker entrypoint
   jobs/                     the worker loop and its handlers. Finds work through
                             neura_due_tenants() — the ONE read in this system
                             that crosses a tenant boundary (ADR-0022)
-  widget/                   the embeddable chat element. THE ONLY JAVASCRIPT
-                            IN THIS REPOSITORY — one file, no build step, no
+  widget/                   the embeddable chat element, plus pairs.js for the
+                            paired suggestion (ADR-0040/0045) — a separate asset on
+                            purpose, so a merchant who wants suggestions and no
+                            chat box ships no chat box. THE ONLY JAVASCRIPT IN
+                            THIS REPOSITORY — two files, no build step, no
                             package.json anywhere (ADR-0019). A test fails if
                             one appears
 
@@ -92,10 +108,25 @@ make test           # unit + the widget's JS logic
 make test-widget    # `node --test` — Node ships the runner, so no npm and no install
 make widget-check   # drive the REAL widget in REAL headless Chrome. No models, no cost —
                     # the browser half is not reachable from pytest or from node --test
-make console-check EMAIL=…   # ALL FIVE console screens in REAL headless Chrome: sign in
+make pairs-check    # the same, for the paired suggestion (ADR-0040). Stub mode needs NO
+                    # database, shop or model — the surface HAS a model since ADR-0045, but
+                    # it runs in a worker and never on this path, so the browser half still
+                    # costs nothing. 8 scenarios, three of them hostile: markup in a product
+                    # title, a javascript: link, a data: image
+make pairs-coverage URL=… TOKEN=… [MODEL=1 ROLE_MAP=…]   # ADR-0045 §9's falsification
+                    # test: how many of a real shop's products produce a suggestion, on the
+                    # word path and on the model path. A MEASUREMENT, not a check — it exits
+                    # 0 whatever it finds, because "the model path is worse" is a result that
+                    # ADR plans for. The words arm costs nothing; the model arm is one call
+                    # per product and stores nothing
+make pairs-check LIVE=1 URL=… SHOP=… TOKEN=…   # …and the half a stub cannot reach: the
+                    # page is on a DIFFERENT ORIGIN from the API, as a merchant's page
+                    # always is, so the per-key CORS decision and the key's origin lock
+                    # are exercised for real
+make console-check EMAIL=…   # ALL SEVEN console screens in REAL headless Chrome: sign in
                              # through a real link, read the evidence, grade a withheld turn,
                              # open a transcript, and check no credential or invented number
-                             # reaches a page. 33 checks. No models, no cost — __Host-,
+                             # reaches a page. 43 checks. No models, no cost — __Host-,
                              # HttpOnly and "did the screen actually render it" are browser
                              # facts and nothing else can assert them (docs/console.md §6).
                              # It seeds its own rows and removes exactly those
@@ -118,6 +149,11 @@ make judge-check [ROLE_MAP=cloud-prod]   # is the judge reachable, does it catch
 make migrate        # alembic upgrade head
 make tenant-new NAME="Acme Store" AGENTS=care   # create a tenant
 make key-new TENANT=tn_… SCOPES=care:chat:write # issue a key — printed ONCE
+make tenant-dpa TENANT=tn_… [WITHDRAW=1]        # record a data-processing agreement (ADR-0042 §2).
+                    # An observe:write key cannot be issued without one. WITHDRAW=1
+                    # clears it AND deletes the tenant's observed events, same transaction
+make retention-sweep TENANT=tn_…                # the daily deletion pass (ADR-0048), run now:
+                    # observed events past 7 days, conversations untouched for 90
 make tenant-show TENANT=tn_…                    # tenant, keys, usage
 make tenant-usage TENANT=tn_…                  # what a tenant actually spent today
 make webhook-drain TENANT=tn_…                 # send queued webhooks now (open question P7)
@@ -141,7 +177,7 @@ make api-check URL=… TOKEN=…   # the whole request path against a real shop:
                                # authenticating, a store decrypted from the database, a
                                # usage row written, an audit entry for a blocked turn,
                                # and the same turn over REST and over a WebSocket
-make check          # everything CI runs
+make check          # everything CI runs — including the integration tests, so `make up` first
 ```
 
 **Two database URLs, on purpose.** `DATABASE_URL` is the unprivileged app role;
@@ -214,7 +250,7 @@ The policy engine, capability filtering, audit logging and budget accounting com
 
 ### Add an agent
 
-> **First check [`docs/agents/README.md`](docs/agents/README.md).** CARE and SELL are designed; MIND, GROW and GUARD are not. If the agent has no design document, stop and propose a design session — do not invent one. If it *has* one, build inside it: SELL's excluded scope (checkout, cart recovery, behavioural ranking) is excluded by [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) and reopening it is a superseding ADR, not a pull request.
+> **First check [`docs/agents/README.md`](docs/agents/README.md).** CARE and SELL are designed; MIND, GROW and GUARD are not. If the agent has no design document, stop and propose a design session — do not invent one. If it *has* one, build inside it: SELL's excluded scope is excluded by [ADR-0023](docs/architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md), and reopening any of it is an ADR, not a pull request. **Checkout writes and behavioural ranking are still excluded. Cart recovery was reopened on 2026-09-25 — narrowly — by [ADR-0043](docs/architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md)**, which is what "a superseding ADR, not a pull request" looks like when it happens: merchant-facing, export-only, nothing sent to a shopper, nobody watched.
 
 Once designed, create `agents/<name>/` with the standard five parts:
 
@@ -237,6 +273,15 @@ rather than imported by name:
 [project.entry-points."neura.agent_runners"]
 <name> = "neura_agent_<name>.serving:build_runner"  # a request becomes a turn
 ```
+
+**Two more exist and SELL is the only agent that needs either**, both added for
+a surface that is not a conversation: `neura.agent_routes` for an agent's own
+HTTP endpoints (ADR-0024 §8) and `neura.job_handlers` for background work on
+ADR-0022's queue ([ADR-0045](docs/architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md)).
+The second is keyed by **job kind** rather than by agent key, because that is
+what `JobRunner.register` dispatches on — and a kind claimed by two agents is
+refused, since which handler ran would otherwise depend on entry-point
+iteration order.
 
 **Three groups, all discovered rather than imported by name, for one reason.**
 `neura-api` must not learn that an agent called "care" exists, or adding agent #2
@@ -302,6 +347,8 @@ await retire_namespace(store, tenant_id=..., embedding_model="old", live=promote
 | An API key that exists authenticates as nobody | The lookup runs on `Database.credential_session`, not `tenant_session` — the tenant is not known yet. Any other session sees no `api_keys` row at all ([ADR-0014](docs/architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)) |
 | A tenant's agent suddenly calls no tools | It is over its **hard** daily budget, so its tool allowlist is empty and every turn escalates. By design — check `make tenant-usage TENANT=…`, not the graph |
 | A `fn_pk_` key is refused from the merchant's own site | A public key with an empty origin allowlist permits *nothing*. Issue it with `PUBLIC=1 ORIGINS=https://…` |
+| `make key-new SCOPES=observe:write` is refused | No data-processing agreement on record (`make tenant-dpa TENANT=…` first), or `PUBLIC=1` — a browser key may never send shopper events ([ADR-0048](docs/architecture/adr/0048-observation-phase-1-what-the-build-decided.md) §1–2) |
+| The shop is switched on and no product views arrive | A full-page cache serves the page without rendering it, so a render hook never fires. The Bagisto bridge counts cache hits through `ProductViewMarker`; a new bridge must too. Also check a queue worker is listening on `NEURA_OBSERVE_QUEUE` |
 | A key was issued and the token is gone | There is no command to show it again — only the hash is stored. Issue a new one and revoke the old |
 | New agent not mounted at startup | Missing `[project.entry-points."neura.agents"]`, or not installed in the workspace |
 | `GraphContractError: guard is reachable but the entry node is …` | A guard that runs after routing has already shown the raw message to a model. Make `guard` the entry, or do not route to it |

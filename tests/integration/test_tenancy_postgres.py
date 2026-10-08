@@ -303,6 +303,24 @@ class TestAuthentication:
             async with db.tenant_session(TENANT_A) as session:
                 await ApiKeyRepository(session).issue(TENANT_A, kind=ApiKeyKind.PUBLIC)
 
+    async def test_a_public_key_cannot_be_issued_with_more_than_the_chat_box_uses(
+        self, db: Database
+    ) -> None:
+        """G80: refused when the key is made, where it is a typo, not found
+        later in a page where anyone can copy it."""
+        from neura_core.errors import ConfigurationError
+
+        await _make_tenant(db, TENANT_A)
+        with pytest.raises(ConfigurationError) as exc:
+            async with db.tenant_session(TENANT_A) as session:
+                await ApiKeyRepository(session).issue(
+                    TENANT_A,
+                    kind=ApiKeyKind.PUBLIC,
+                    allowed_origins=["https://shop.example"],
+                    scopes=["care:chat:write", "care:conversations:read"],
+                )
+        assert "care:conversations:read" in str(exc.value)
+
 
 class TestUsageMetering:
     async def test_recording_accumulates_into_one_row_per_day(self, db: Database) -> None:

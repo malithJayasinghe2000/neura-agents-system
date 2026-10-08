@@ -31,6 +31,7 @@ from neura_adapters.generic.client import DEFAULT_TIMEOUT_S, GenericClient
 from neura_adapters.generic.wire import parse_health, to_canonical
 from neura_commerce import (
     AdapterMappingError,
+    ConformanceReport,
     Cursor,
     EntityKey,
     EntityMap,
@@ -131,6 +132,20 @@ class GenericAdapter:
         should reach for this.
         """
         return self._client
+
+    async def run_protocol_checks(self, report: ConformanceReport) -> None:
+        """The checks only the wire can show: status codes, headers, the token.
+
+        Found by ``neura_commerce.check_adapter`` through its shape, so the
+        dashboard runs exactly what the terminal tool runs without learning that
+        this adapter exists (ADR-0052 §4).
+        """
+        # Imported here: http_checks imports this module for its paths.
+        from neura_adapters.generic.http_checks import run_http_checks
+
+        # What /health listed (the shared suite asked it first), so an address
+        # the shop never built is never knocked on (G50).
+        await run_http_checks(self._client, report, frozenset(self.capabilities))
 
     @property
     def spec_version(self) -> str | None:

@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "Two products whose ids are ONE character long, laid over store.json by a case",
+    "that names this file in `fixtures:`.",
+    "",
+    "A real connected shop numbers its products 1, 2, 3... and SELL once could not",
+    "see a citation shorter than three characters: a correct recommendation of",
+    "product 4 had its description withheld from verify and was handed to a person",
+    "(CONNECTING_A_NEW_SHOP_LOG.md G36). Every id in store.json is long, which is",
+    "why no case caught it. The one fact the case relies on - safe on a camp stove -",
+    "is in product 4's description and nowhere else."
+  ],
+  "products": [
+    {
+      "external_id": "4",
+      "title": "Enamel Camp Mug 350ml",
+      "description": "Enamelled steel mug that holds 350 ml. Safe to heat directly on a camp stove.",
+      "status": "active",
+      "category_ids": ["c_acc"],
+      "url": "https://example-store.test/products/enamel-camp-mug",
+      "price_range_min": { "amount": "12.00", "currency": "GBP" },
+      "price_range_max": { "amount": "12.00", "currency": "GBP" },
+      "variants": [
+        {
+          "external_id": "4",
+          "sku": "ECM-350",
+          "title": "350ml",
+          "options": {},
+          "price": { "amount": "12.00", "currency": "GBP" },
+          "in_stock": true,
+          "stock_quantity": 30
+        }
+      ]
+    },
+    {
+      "external_id": "5",
+      "title": "Collapsible Silicone Cup",
+      "description": "Folds flat to 2 cm. Not for use over a flame.",
+      "status": "active",
+      "category_ids": ["c_acc"],
+      "url": "https://example-store.test/products/collapsible-cup",
+      "price_range_min": { "amount": "9.00", "currency": "GBP" },
+      "price_range_max": { "amount": "9.00", "currency": "GBP" },
+      "variants": [
+        {
+          "external_id": "5",
+          "sku": "CSC-1",
+          "title": "One size",
+          "options": {},
+          "price": { "amount": "9.00", "currency": "GBP" },
+          "in_stock": true,
+          "stock_quantity": 25
+        }
+      ]
+    }
+  ]
+}

@@ -34,11 +34,13 @@ import neura_agent_core.shadow_evidence  # noqa: F401
 # the table, which is the gotcha AGENTS.md records. An agent that owns a table
 # must be imported here; discovery by entry point would be cleverer and would
 # fail silently in exactly this way.
-import neura_agent_sell.feed.schema  # noqa: F401
+import neura_agent_sell.feed.schema
+import neura_agent_sell.pairing.schema  # noqa: F401
 import neura_commerce.sync.schema  # noqa: F401
 import neura_core.idempotency
 import neura_core.identity.schema
 import neura_core.jobs.schema
+import neura_core.observation.schema
 import neura_core.tenancy.schema
 import neura_core.webhooks.schema  # noqa: F401
 from neura_core import get_settings, load_env, metadata

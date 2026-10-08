@@ -22,8 +22,9 @@ members = ["packages/*", "apps/*", "agents/*", "evals"]
 # The merchant console is a Next.js application (ADR-0026), so it lives under
 # `apps/` beside the API it talks to and has no `pyproject.toml`. Without this
 # exclusion the `apps/*` glob matches it and **every uv command in the
-# repository fails** — including `make check` and the API itself.
-exclude = ["apps/neura-console"]
+# repository fails** — including `make check` and the API itself. The public
+# website (ADR-0051) is the same case.
+exclude = ["apps/neura-console", "apps/neura-web"]
 
 [tool.uv.sources]
 neura-core = { workspace = true }

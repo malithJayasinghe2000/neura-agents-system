@@ -40,7 +40,17 @@ type Envelope<T> = { data: T; meta?: PageMeta; error?: { message?: string } };
  * turns and silently withholds the rest — which is sampling, arrived at by
  * accident, in the one screen whose design says not to sample.
  */
-export type PageMeta = { next_cursor?: string | null; has_more?: boolean };
+export type PageMeta = {
+  next_cursor?: string | null;
+  has_more?: boolean;
+  /** How many match in all — for the words "26–50 of 55". Not every list sends it. */
+  total?: number;
+  /** How many matching rows come before this page. Counted, never used to fetch. */
+  offset?: number;
+  has_previous?: boolean;
+  /** `null` with `has_previous` true: the page before is the first page. */
+  previous_cursor?: string | null;
+};
 
 export type ServerResult<T> =
   { ok: true; data: T; meta: PageMeta } | { ok: false; status: number; message: string };
@@ -53,12 +63,14 @@ export type ServerResult<T> =
  * screens, and a `try`/`catch` around a throw tends to collapse them into one
  * apologetic blank.
  */
-export async function fromApi<T>(path: string): Promise<ServerResult<T>> {
+export async function fromApi<T>(path: string, prefix = "/v1/console"): Promise<ServerResult<T>> {
   const jar = await cookies();
   const session = jar.get(SESSION_COOKIE);
   if (!session) return { ok: false, status: 401, message: "Not signed in." };
 
-  const response = await fetch(`${API_BASE}/v1/console${path}`, {
+  // `prefix` is `/v1/console` for every screen the API serves itself, and an
+  // agent's own prefix for a screen an agent serves (ADR-0050's Suggestions).
+  const response = await fetch(`${API_BASE}${prefix}${path}`, {
     headers: { Cookie: `${session.name}=${session.value}` },
     // Never cached. This is one person's view of one merchant's data, and a
     // cache key that missed either of those would serve it to the wrong reader.
@@ -85,4 +97,31 @@ export async function fromApi<T>(path: string): Promise<ServerResult<T>> {
 export async function hasSession(): Promise<boolean> {
   const jar = await cookies();
   return jar.get(SESSION_COOKIE) !== undefined;
+}
+
+/**
+ * What Help hands a developer, exactly as the API serves it (`GET
+ * /v1/widget/snippet`): the chat box's embed line, so the Help page can never
+ * show a different line from the one a developer would be given, and the
+ * address a developer's AI coding tool uses (ADR-0053 §6), made by the API from
+ * the same public address. A public endpoint: no cookie, no key. The key in the
+ * line is the API's own placeholder; FiveNeurals gives the real one.
+ */
+export async function forYourDeveloper(): Promise<{
+  snippet: string | null;
+  developerMcpUrl: string | null;
+}> {
+  const response = await fetch(`${API_BASE}/v1/widget/snippet`, { cache: "no-store" }).catch(
+    () => null,
+  );
+  const body = response?.ok
+    ? ((await response.json().catch(() => null)) as {
+        snippet?: string;
+        developer_mcp_url?: string;
+      } | null)
+    : null;
+  return {
+    snippet: body?.snippet?.trim() || null,
+    developerMcpUrl: body?.developer_mcp_url?.trim() || null,
+  };
 }

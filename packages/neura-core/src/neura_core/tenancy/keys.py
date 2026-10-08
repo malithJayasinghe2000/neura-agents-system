@@ -52,8 +52,34 @@ class ApiKeyKind(StrEnum):
     """Server-to-server. Holds whatever scopes it was issued with."""
 
     PUBLIC = "pk"
-    """Shipped to a browser, so treated as public knowledge: chat scopes only,
-    and locked to an origin allowlist (api-design.md §2)."""
+    """Shipped to a browser, so treated as public knowledge: only what the chat
+    box does (:func:`public_key_may_hold`), and locked to an origin allowlist
+    (api-design.md §2)."""
+
+
+#: What a public key may do: exactly what the chat box does, and nothing a shop
+#: owner reads (G80). The part of a scope after its agent's name, so shared code
+#: names no agent: chatting, handing over, the tools a chat turn calls, and the
+#: suggestions. Not transcripts, the review queue, the feed, the AI connection,
+#: stores, webhooks or product views. A public key sits in every page's source
+#: and its origin lock stops other web pages, not scripts, which may send any
+#: ``Origin``; so what it holds is what anyone holds.
+PUBLIC_KEY_ACTIONS = frozenset(
+    {
+        "chat:write",
+        "escalate",
+        "catalogue:read",
+        "order:read",
+        "policies:read",
+        "suggest:read",
+    }
+)
+
+
+def public_key_may_hold(scope: str) -> bool:
+    """Whether a public key may hold this scope (G80)."""
+    _, _, action = scope.partition(":")
+    return action in PUBLIC_KEY_ACTIONS
 
 
 class KeyEnvironment(StrEnum):

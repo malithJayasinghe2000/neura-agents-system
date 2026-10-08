@@ -18,7 +18,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import bindparam, delete, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,9 +27,11 @@ from neura_core.config import get_settings
 from neura_core.crypto import decrypt, encrypt, generate_key, unwrap_dek, wrap_dek
 from neura_core.errors import ConfigurationError, NotFoundError
 from neura_core.ids import API_KEY, STORE, TENANT, new_id
+from neura_core.observation.models import OBSERVE_WRITE
 from neura_core.tenancy import keys
-from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
+from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment, public_key_may_hold
 from neura_core.tenancy.models import ApiKey, Tenant, TenantConfig, TenantStatus
+from neura_core.tenancy.modes import TurnMode
 from neura_core.tenancy.schema import api_keys, tenant_stores, tenants
 
 
@@ -94,6 +97,38 @@ class TenantRepository:
         )
         return await self.require(tenant_id)
 
+    async def set_mode(self, tenant_id: str, mode: TurnMode) -> Tenant:
+        """Practice mode on or off, and nothing else (ADR-0054 §5).
+
+        One key merged into the stored settings rather than the whole settings
+        written back: ``TenantConfig`` drops keys it does not know, on purpose
+        (``modes.py``), so a read-modify-write here could erase a setting a
+        newer deployment wrote. ``shadow_intents`` is left as it is.
+        """
+        patch = bindparam("mode_patch", {"mode": mode.value}, type_=JSONB)
+        await self._session.execute(
+            update(tenants)
+            .where(tenants.c.tenant_id == tenant_id)
+            .values(config=tenants.c.config.op("||")(patch), updated_at=func.now())
+        )
+        return await self.require(tenant_id)
+
+    async def set_contact(self, tenant_id: str, *, email: str | None, phone: str | None) -> Tenant:
+        """The shop's own contact details, named in every handover (ADR-0055).
+
+        Merged like :meth:`set_mode`, two keys and nothing else. ``None`` is
+        written as JSON ``null``: the owner cleared the field.
+        """
+        patch = bindparam(
+            "contact_patch", {"contact_email": email, "contact_phone": phone}, type_=JSONB
+        )
+        await self._session.execute(
+            update(tenants)
+            .where(tenants.c.tenant_id == tenant_id)
+            .values(config=tenants.c.config.op("||")(patch), updated_at=func.now())
+        )
+        return await self.require(tenant_id)
+
     async def set_enabled_agents(self, tenant_id: str, agents: Sequence[str]) -> Tenant:
         """The upgrade path from tenancy-and-packaging.md §3.2: a row, not a deploy."""
         await self._session.execute(
@@ -108,6 +143,22 @@ class TenantRepository:
             update(tenants)
             .where(tenants.c.tenant_id == tenant_id)
             .values(status=status.value, updated_at=func.now())
+        )
+        return await self.require(tenant_id)
+
+    async def set_dpa_signed_at(self, tenant_id: str, signed_at: datetime | None) -> Tenant:
+        """Record a data-processing agreement, or ``None`` to withdraw it.
+
+        **Withdrawing does not delete anything by itself.** Whoever withdraws
+        must also remove what the agreement permitted — ``tenant_admin.py dpa
+        --withdraw`` does both in one transaction — and the retention sweep
+        deletes every observed event of a tenant with no agreement, so a path
+        that forgets is corrected within a day rather than never.
+        """
+        await self._session.execute(
+            update(tenants)
+            .where(tenants.c.tenant_id == tenant_id)
+            .values(dpa_signed_at=signed_at, updated_at=func.now())
         )
         return await self.require(tenant_id)
 
@@ -146,6 +197,20 @@ class ApiKeyRepository:
                 "origin — it is served to browsers and is not a secret.",
             )
 
+        if kind is ApiKeyKind.PUBLIC:
+            # G80: a public key is in every page's source. Refused here, where
+            # it is a typo, rather than found in a page where anyone can copy it.
+            refused = sorted(s for s in set(scopes) if not public_key_may_hold(s))
+            if refused:
+                raise ConfigurationError(
+                    "a public (fn_pk_) key may hold only what the chat box uses, because "
+                    f"anyone can read it in the page; not {', '.join(refused)}. Use a "
+                    "secret key on a server for these.",
+                )
+
+        if OBSERVE_WRITE in scopes:
+            await self._check_observer(tenant_id, kind)
+
         env = environment or _environment_for_deployment()
         issued = keys.generate(kind, env)
         record_id = new_id(API_KEY)
@@ -171,6 +236,32 @@ class ApiKeyRepository:
                 "scoped to a different tenant than the key."
             )
         return stored, issued
+
+    async def _check_observer(self, tenant_id: str, kind: ApiKeyKind) -> None:
+        """Two refusals at issue time, where each is a typo rather than an incident.
+
+        **A browser key may never send events** (ADR-0044 §2): *"no script of
+        ours runs in a shopper's browser"*, and an ``fn_pk_`` key is served to
+        browsers by design. **And no key may send them for a tenant without a
+        data-processing agreement** (ADR-0042 §2), so a shop that has none has no
+        credential to send with — the events never leave it.
+
+        The route checks both again: an agreement can be withdrawn after a key
+        was issued.
+        """
+        if kind is not ApiKeyKind.SECRET:
+            raise ConfigurationError(
+                f"`{OBSERVE_WRITE}` may be held only by a secret (fn_sk_) key — events "
+                "come from the shop's server, never from a shopper's browser (ADR-0044 §2).",
+            )
+        signed_at = await self._session.scalar(
+            select(tenants.c.dpa_signed_at).where(tenants.c.tenant_id == tenant_id)
+        )
+        if signed_at is None:
+            raise ConfigurationError(
+                f"`{OBSERVE_WRITE}` needs a data-processing agreement on record for this "
+                "tenant (ADR-0042 §2). Record one with `make tenant-dpa TENANT=...` first.",
+            )
 
     async def get(self, key_id: str) -> ApiKey | None:
         row = (await self._session.execute(select(api_keys).where(api_keys.c.id == key_id))).first()
@@ -339,6 +430,44 @@ class StoreConnectionRepository:
             for row in rows
         ]
 
+    async def replace_credentials(
+        self, tenant_id: str, store_id: str, credentials: dict[str, str]
+    ) -> bool:
+        """Seal new credentials over an existing connection. ``False`` if no such row.
+
+        *Make a new token* (ADR-0052 §2). Only what NEURA sends changes: the shop's
+        bridge keeps accepting the old token until its developer puts the new one
+        in, because the bridge, not NEURA, checks it (G49).
+        """
+        dek = generate_key()
+        kek = self._require_kek()
+        result = await self._session.execute(
+            update(tenant_stores)
+            .where(tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id)
+            .values(
+                credentials=encrypt(
+                    json.dumps(credentials, sort_keys=True), dek, aad=tenant_id.encode()
+                ),
+                wrapped_dek=wrap_dek(dek, kek, tenant_id=tenant_id),
+                updated_at=func.now(),
+            )
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def credentials_set_at(self, tenant_id: str, store_id: str) -> datetime | None:
+        """When this connection's credentials were last written. Never the credentials.
+
+        ``updated_at``: only ``connect`` and ``replace_credentials`` write it.
+        """
+        value = (
+            await self._session.execute(
+                select(tenant_stores.c.updated_at).where(
+                    tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id
+                )
+            )
+        ).scalar_one_or_none()
+        return value
+
     async def disconnect(self, store_id: str) -> None:
         await self._session.execute(delete(tenant_stores).where(tenant_stores.c.id == store_id))
 
@@ -378,6 +507,7 @@ def _tenant_from_row(row: Any) -> Tenant:
         status=TenantStatus(row.status),
         enabled_agents=frozenset(row.enabled_agents or ()),
         config=TenantConfig.model_validate(row.config or {}),
+        dpa_signed_at=row.dpa_signed_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

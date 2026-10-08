@@ -13,7 +13,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from neura_core.tenancy.keys import ApiKeyKind
+from neura_core.tenancy.keys import ApiKeyKind, public_key_may_hold
 from neura_core.tenancy.modes import TurnMode, coerce_mode
 
 
@@ -87,6 +87,22 @@ class TenantConfig(BaseModel):
             "half of §6 — live for order status, watched for returns policy."
         ),
     )
+    contact_email: str | None = Field(
+        default=None,
+        max_length=254,
+        description=(
+            "The shop's own email address, named to a shopper the assistant hands over "
+            "(ADR-0055). Typed by the owner on Shop connection; checked there."
+        ),
+    )
+    contact_phone: str | None = Field(
+        default=None,
+        max_length=40,
+        description=(
+            "The shop's own phone number, named to a shopper the assistant hands over "
+            "(ADR-0055). Typed by the owner on Shop connection; checked there."
+        ),
+    )
     withheld_message: str | None = Field(
         default=None,
         max_length=500,
@@ -123,12 +139,24 @@ class Tenant(BaseModel):
     #: disabled, not shown locked: absent.
     enabled_agents: frozenset[str] = frozenset()
     config: TenantConfig = TenantConfig()
+    #: When a data-processing agreement was recorded; ``None`` means none
+    #: exists (ADR-0042 §2).
+    dpa_signed_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     @property
     def is_servable(self) -> bool:
         return self.status is TenantStatus.ACTIVE
+
+    @property
+    def may_hold_personal_data(self) -> bool:
+        """ADR-0042 §2's precondition: an agreement is recorded.
+
+        Necessary, never sufficient — a feature that stores personal data still
+        needs its own ADR and its own switch.
+        """
+        return self.dpa_signed_at is not None
 
     def may_use(self, agent_key: str) -> bool:
         """Has this tenant bought this agent?
@@ -197,6 +225,12 @@ class AuthenticatedCaller(BaseModel):
 
     @property
     def scopes(self) -> frozenset[str]:
+        """What this caller may do. **A public key never holds more than the
+        chat box does** (G80), whatever it was issued with: keys made before
+        the rule held ``conversations:read``, and lose it here, at the one place
+        every route and the policy engine read scopes from."""
+        if self.api_key.kind is ApiKeyKind.PUBLIC:
+            return frozenset(s for s in self.api_key.scopes if public_key_may_hold(s))
         return self.api_key.scopes
 
     def may_use(self, agent_key: str) -> bool:

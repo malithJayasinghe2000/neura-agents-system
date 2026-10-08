@@ -2,7 +2,8 @@
 
 > ## ⛔ Read before doing anything with agents 3–5
 >
-> **NEURA-CARE and NEURA-SELL are both designed and built** — SELL's three surfaces all exist
+> **NEURA-CARE and NEURA-SELL are both designed and built** — SELL's **four** surfaces all exist
+> (the fourth added 2026-09-21 by [ADR-0040](../architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md))
 > ([`sell.md`](sell.md), [ADR-0023](../architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md),
 > designed and built 2026-08-26). Built is not the same as shippable: SELL's release gate is
 > unmet at escalation precision 0.43 (**A14**), and the table below is the current position.
@@ -38,7 +39,7 @@
 Folder structure, manifests, entitlements and how agents are sold individually: [tenancy-and-packaging.md](../architecture/tenancy-and-packaging.md). Only `agents/care/` exists. `agents/sell/` is now permitted and has simply not been created yet; `mind/`, `grow/` and `guard/` are not, because creating them would imply a design that does not exist.
 
 **SELL is designed against CARE, and the design says where it departs and why.** It supplies
-seven nodes, five tools and two intents — and two of its three surfaces have no graph at all,
+seven nodes, five tools and two intents — and **three of its four** surfaces have no graph at all,
 which is stated plainly in [`sell.md §1.1`](sell.md) rather than smoothed over.
 
 **CARE is the worked example of what the five parts cost.** It supplies a graph, five nodes, seven tools, five prompt files and a golden dataset — and inherits the policy engine, audit log, checkpointer, capability filtering and ownership enforcement without writing any of them. Read `agents/care/` before designing agent #2; the shape of the work is more useful than any description of it.

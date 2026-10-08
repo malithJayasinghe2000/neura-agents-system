@@ -21,7 +21,8 @@ from neura_api.main import create_app
 from neura_api.middleware.cors import is_valid_origin
 from neura_api.turns import TurnResult
 from neura_core import get_settings
-from neura_core.tenancy import TenantConfig, TurnMode
+from neura_core.tenancy import TenantConfig, TurnMode, new_shop_token
+from neura_core.tenancy.keys import ApiKeyKind, generate
 
 WIDGET_JS = Path(__file__).parents[2] / "apps/neura-api/src/neura_api/widget/widget.js"
 
@@ -165,10 +166,86 @@ class TestWidgetHosting:
         assert headers["x-content-type-options"] == "nosniff"
         assert "max-age=300" in headers["cache-control"]
 
+    def test_the_pairing_block_is_served_the_same_way(self, client: TestClient) -> None:
+        """ADR-0040's client half, hosted exactly as the widget is.
+
+        **A separate asset rather than more of `widget.js`**: a merchant who
+        wants suggestions on a cart page and no chat box must not be made to
+        ship a chat widget, and a shopper on that page must not download one.
+        """
+        response = client.get("/v1/widget/pairs.js")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/javascript")
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert "neura-pairs" in response.text
+
+    def test_the_two_assets_are_genuinely_separate(self, client: TestClient) -> None:
+        """A chat box must not arrive with a suggestion block."""
+        assert "neura-chat" not in client.get("/v1/widget/pairs.js").text
+
+    def test_the_pairing_block_never_claims_behaviour(self, client: TestClient) -> None:
+        """ADR-0040 §3 rules these out by name, and the shipped file is the
+        artefact — there is no build step between this and a shopper's screen,
+        so the published bytes are the right thing to assert against.
+
+        Checked outside comments, because this file argues at length about
+        exactly the phrases it must never render.
+        """
+        import re
+
+        source = client.get("/v1/widget/pairs.js").text
+        code = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+        code = re.sub(r"^\s*//.*$", "", code, flags=re.MULTILINE)
+
+        for claim in ("bought together", "customers also", "trending", "popular"):
+            assert claim not in code.lower()
+
     def test_the_snippet_names_the_key_and_the_hosted_url(self, client: TestClient) -> None:
         body = client.get("/v1/widget/snippet?key=fn_pk_test_abc").json()
         assert "fn_pk_test_abc" in body["snippet"]
         assert body["widget_url"].endswith("/v1/widget/widget.js")
+
+    def test_without_a_key_the_line_shows_a_plain_placeholder(self, client: TestClient) -> None:
+        """G30: `fn_pk_live_…` told an owner the key is a live one, and a real key made
+        on a test copy of NEURA starts `fn_pk_test_`, which reads like practice mode.
+        The placeholder says only what every public key starts with."""
+        body = client.get("/v1/widget/snippet").json()
+        assert 'data-neura-key="fn_pk_\u2026"' in body["snippet"]
+        assert "live" not in body["snippet"] and "_test" not in body["snippet"]
+
+    def test_the_snippet_offers_both_surfaces_separately(self, client: TestClient) -> None:
+        """A merchant who wants suggestions and no chat box must be able to see
+        that these are two pastes, rather than learning it from support."""
+        body = client.get("/v1/widget/snippet?key=fn_pk_test_abc").json()
+        assert body["pairs_url"].endswith("/v1/widget/pairs.js")
+        assert "neura-pairs" in body["pairs_snippet"]
+        assert "fn_pk_test_abc" in body["pairs_snippet"]
+        assert "neura-pairs" not in body["snippet"]
+
+    def test_the_snippet_names_the_developer_mcp_on_the_same_address(
+        self, client: TestClient
+    ) -> None:
+        """ADR-0053 §6: Help names the address a developer's AI tool uses. It is
+        made where the chat box line's is, from the API's own public address, so
+        the dashboard never builds an address of its own, and it is the address
+        the developer MCP is really mounted at."""
+        from neura_api.developer_mcp import ENDPOINT, MOUNT
+
+        body = client.get("/v1/widget/snippet").json()
+        origin = body["widget_url"].removesuffix("/v1/widget/widget.js")
+        assert body["developer_mcp_url"] == f"{origin}{MOUNT}{ENDPOINT}"
+
+        given = client.get("/v1/widget/snippet?base=https://neura.example/").json()
+        assert given["developer_mcp_url"] == "https://neura.example/v1/developers/mcp"
+
+    def test_the_pairing_snippet_asks_for_product_ids_and_not_a_cart(
+        self, client: TestClient
+    ) -> None:
+        """ADR-0040 §2. The attribute is named for what it holds; a snippet
+        saying `data-cart` would make the tenth endpoint feel natural."""
+        snippet = client.get("/v1/widget/snippet?key=fn_pk_test_abc").json()["pairs_snippet"]
+        assert "data-products" in snippet
+        assert "cart" not in snippet.lower()
 
     def test_the_demo_page_strips_anything_but_a_key(self, client: TestClient) -> None:
         """The key lands in an attribute value on a page whose job is to load a
@@ -198,15 +275,21 @@ class TestTheWidgetShipsAsItsOwnSource:
         reviews (ADR-0019 §1). The console is served by us, to a merchant, and
         carries none of that argument.
 
-        The exclusion is a single named directory rather than a pattern, so the
-        next `package.json` to appear anywhere else still fails this test.
+        The exclusion is a list of named directories rather than a pattern, so
+        the next `package.json` to appear anywhere else still fails this test.
+        **The second, 2026-09-30:** the public website, `apps/neura-web`
+        ([ADR-0051](../../docs/architecture/adr/0051-the-public-website-is-its-own-app-and-says-only-what-the-code-does.md)).
+        Served by us as static pages, never pasted into a merchant's page — the
+        console's argument, not the widget's.
         """
         root = Path(__file__).parents[2]
-        console = root / "apps" / "neura-console"
+        allowed = (root / "apps" / "neura-console", root / "apps" / "neura-web")
         stray = [
             p
             for p in root.rglob("package.json")
-            if ".venv" not in p.parts and "node_modules" not in p.parts and console not in p.parents
+            if ".venv" not in p.parts
+            and "node_modules" not in p.parts
+            and not any(app in p.parents for app in allowed)
         ]
         assert stray == [], f"a JS toolchain appeared without an ADR: {stray}"
 
@@ -268,6 +351,50 @@ class TestPerTenantCors:
         )
         assert response.status_code in {401, 403}
         assert "access-control-allow-origin" not in response.headers
+
+    @pytest.mark.parametrize("path", ["/v1/chat", "/v1/care/chat"])
+    def test_a_secret_key_from_a_web_page_is_refused_and_says_why(
+        self, client: TestClient, path: str
+    ) -> None:
+        """G55: a secret key put in the chat box line used to work, through the
+        plain-request fallback, while anyone could read it in the page. It is
+        now refused on its shape, before any lookup, and this one refusal is
+        readable: the page learns nothing it did not send, and the chat box can
+        say what is wrong instead of the browser's "Failed to fetch"."""
+        secret = generate(ApiKeyKind.SECRET).token
+        response = client.post(
+            path,
+            headers={"Origin": "https://shop.example", "Authorization": f"Bearer {secret}"},
+            json={"message": "hello"},
+        )
+        assert response.status_code == 401
+        error = response.json()["error"]
+        assert error["code"] == "SECRET_KEY_IN_PAGE"
+        assert "fn_pk_" in error["message"]
+        assert response.headers["access-control-allow-origin"] == "https://shop.example"
+
+    @pytest.mark.parametrize("path", ["/v1/chat", "/v1/care/chat"])
+    def test_a_shop_token_from_a_web_page_is_refused_and_says_why(
+        self, client: TestClient, path: str
+    ) -> None:
+        """G57: the shop token pasted into the chat box line was refused as an
+        unknown key the page could not read, so the chat box could not say that
+        the bridge's password was sitting in the page. Refused on its shape, and
+        readable, as G55."""
+        response = client.post(
+            path,
+            headers={
+                "Origin": "https://shop.example",
+                "Authorization": f"Bearer {new_shop_token()}",
+            },
+            json={"message": "hello"},
+        )
+        assert response.status_code == 401
+        error = response.json()["error"]
+        assert error["code"] == "SHOP_TOKEN_IN_PAGE"
+        assert "shop token" in error["message"]
+        assert "fn_pk_" in error["message"]
+        assert response.headers["access-control-allow-origin"] == "https://shop.example"
 
     def test_an_unkeyed_endpoint_falls_back_to_the_platform_list(self, client: TestClient) -> None:
         allowed = get_settings().widget_origins[0]

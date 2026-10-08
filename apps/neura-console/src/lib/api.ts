@@ -26,7 +26,8 @@
  */
 const BASE = "/api";
 
-import type { ReviewTurn, Verdict } from "@/lib/review";
+import type { ReviewTurn, Scorecard, Verdict } from "@/lib/review";
+import type { ShopCheck, ShopView, SyncAsked } from "@/lib/shop";
 
 /** The API's envelope: `{ data, meta }`, on success and on error alike. */
 type Envelope<T> = { data: T; error?: { message?: string } };
@@ -39,8 +40,8 @@ export type Me = {
   memberships: Membership[];
 };
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}/v1/console${path}`, {
+async function call<T>(path: string, init?: RequestInit, prefix = "/v1/console"): Promise<T> {
+  const response = await fetch(`${BASE}${prefix}${path}`, {
     ...init,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -108,4 +109,167 @@ export function gradeTurn(
     method: "POST",
     body: JSON.stringify({ verdict, note }),
   });
+}
+
+// ── Shop connection (console.md §3.4) ────────────────────────────────────────
+
+/**
+ * *Sync now* — queues a fresh read of the shop into **our copy**. Nothing is
+ * written to the shop. Pressing it again while one is queued or running
+ * returns that one: it is one sync, not two.
+ */
+export function syncShop(
+  tenantId: string,
+  storeId: string,
+): Promise<{ id: string; sync_asked: SyncAsked | null }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/store/${encodeURIComponent(storeId)}/sync`, {
+    method: "POST",
+  });
+}
+
+/**
+ * *Go live* (`live`) or *Back to practice mode* (`shadow`) on Home (ADR-0054).
+ * Only the mode changes; the API records who switched it.
+ */
+export function setMode(
+  tenantId: string,
+  mode: "live" | "shadow",
+): Promise<{ mode: "live" | "shadow"; withheld: boolean; changed: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/mode`, {
+    method: "PUT",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+/** The shop's contact details, and the sentence a handed-over shopper reads (ADR-0055). */
+export type ShopContactView = { email: string | null; phone: string | null; handover: string };
+
+/**
+ * Save the shop's contact details. A refused field comes back as one plain
+ * sentence naming it (*"Email: this doesn't look like an email address…"*),
+ * read from the API's 400, rather than *"Request validation failed."*
+ */
+export async function saveContact(
+  tenantId: string,
+  contact: { email: string; phone: string },
+): Promise<ShopContactView> {
+  const response = await fetch(`${BASE}/v1/console/shops/${encodeURIComponent(tenantId)}/contact`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(contact),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    data?: ShopContactView;
+    error?: { message?: string; details?: { errors?: { loc?: unknown[]; msg?: string }[] } };
+  } | null;
+  if (!response.ok) {
+    const first = body?.error?.details?.errors?.[0];
+    const field = first?.loc?.at(-1);
+    if (first?.msg && (field === "email" || field === "phone")) {
+      const said = first.msg.replace(/^Value error, /, "");
+      throw new Error(`${field === "email" ? "Email" : "Phone"}: ${said}.`);
+    }
+    throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
+  }
+  if (!body?.data) throw new Error("The server sent a response we could not read.");
+  return body.data;
+}
+
+/**
+ * The Review scorecard, read from the browser — for the side menu's badge. The
+ * layout reads it once; this keeps it current as the owner moves around (G40).
+ */
+// ── Connecting a shop (ADR-0052) ──────────────────────────────────────────────
+// The browser never sends a token: NEURA makes it and returns it once. The only
+// thing these send is an address.
+
+const shopPath = (tenantId: string) => `/shops/${encodeURIComponent(tenantId)}`;
+
+/** Make the shop token. Returned **once**; nothing reads it back. */
+export function makeShopToken(tenantId: string): Promise<{ token: string; made_at: string }> {
+  return call(`${shopPath(tenantId)}/token`, { method: "POST" });
+}
+
+/** A new token for a connected shop. Returned **once**. */
+export function replaceShopToken(
+  tenantId: string,
+  storeId: string,
+): Promise<{ token: string; made_at: string }> {
+  return call(`${shopPath(tenantId)}/store/${encodeURIComponent(storeId)}/token`, {
+    method: "POST",
+  });
+}
+
+/** Start the full check: of a typed address, or of a connection. Returns at once. */
+export function startShopCheck(
+  tenantId: string,
+  what: { address: string } | { store_id: string },
+): Promise<{ check: ShopCheck }> {
+  return call(`${shopPath(tenantId)}/checks`, { method: "POST", body: JSON.stringify(what) });
+}
+
+export function readShopCheck(tenantId: string, checkId: string): Promise<{ check: ShopCheck }> {
+  return call(`${shopPath(tenantId)}/checks/${encodeURIComponent(checkId)}`);
+}
+
+/** Connect, after a clean check of this address. Queues the full copy. */
+export function connectShop(
+  tenantId: string,
+  address: string,
+): Promise<{ id: string; base_url: string }> {
+  return call(`${shopPath(tenantId)}/connect`, {
+    method: "POST",
+    body: JSON.stringify({ address }),
+  });
+}
+
+export function readScorecard(tenantId: string): Promise<Scorecard> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/review/scorecard`);
+}
+
+/** The screen's own read, again — used to notice when an asked-for sync finishes. */
+export function readShop(tenantId: string): Promise<ShopView> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/store`);
+}
+
+// ── Suggestions (ADR-0050) ───────────────────────────────────────────────────
+// Served by SELL's own routes, under its prefix, so the API that mounts them
+// never learns an agent's name. Same cookie, same membership check.
+
+const SELL = "/v1/sell/console";
+
+export type PickedProduct = {
+  product_id: string;
+  title: string | null;
+  /** From the synced catalogue; absent on a product the editor already held. */
+  price?: { amount: string; currency: string } | null;
+};
+
+export function chooseSuggestions(
+  tenantId: string,
+  productId: string,
+  productIds: string[],
+): Promise<unknown> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/suggestions/${encodeURIComponent(productId)}`,
+    { method: "PUT", body: JSON.stringify({ product_ids: productIds }) },
+    SELL,
+  );
+}
+
+export function resetSuggestions(tenantId: string, productId: string): Promise<unknown> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/suggestions/${encodeURIComponent(productId)}`,
+    { method: "DELETE" },
+    SELL,
+  );
+}
+
+export function findProducts(tenantId: string, query: string): Promise<PickedProduct[]> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/suggestions/catalogue?q=${encodeURIComponent(query)}`,
+    undefined,
+    SELL,
+  );
 }

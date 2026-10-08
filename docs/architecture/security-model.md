@@ -157,7 +157,7 @@ Merchant store credentials are the highest-value asset we hold — they are keys
 - A database dump alone is useless without the KEK.
 - Credentials are **never logged, never traced, never placed in LLM context.** A redacting log filter enforces this rather than relying on discipline.
 
-**Our own API keys:** `fn_sk_…` (secret, server-side) and `fn_pk_…` (public, widget, tightly scoped). Stored as hashes — we can verify a key, we can never display one after issue. Scoped, expirable, revocable, with `last_used_at` for stale-key detection.
+**Our own API keys:** `fn_sk_…` (secret, server-side) and `fn_pk_…` (public, widget, tightly scoped). **A public key holds only what the chat box does** (2026-10-08, G80): chatting, handing over, the tools a chat turn calls and the suggestions (`PUBLIC_KEY_ACTIONS`, `neura_core/tenancy/keys.py`). It is refused at issue with anything else, and a key issued before the rule loses the rest when it is used (`AuthenticatedCaller.scopes`). Before, the runbook issued it with `conversations:read`, and since the origin lock stops other web pages but not scripts (which may send any `Origin`), anyone who copied it from a page could read every transcript of that shop. Stored as hashes — we can verify a key, we can never display one after issue. Scoped, expirable, revocable, with `last_used_at` for stale-key detection. **A secret key never works from a web page** (2026-10-01, G55 in `docs/CONNECTING_A_NEW_SHOP_LOG.md`): a request that carries a browser's `Origin` header and a secret key is refused on the key's shape, before any lookup (`SECRET_KEY_IN_PAGE`, `neura_api/dependencies.py`), and that refusal is the one a page may read, so the chat box can say why. Before, a secret key pasted into the chat box line worked through the widget's plain-request fallback while sitting in every page's source. **Nor does the shop token** (`fn_st_…`, the bridge's password, 2026-10-07, G57): from a page it is refused on its shape too (`SHOP_TOKEN_IN_PAGE`), readable, so the chat box says it belongs in the bridge's settings and that a token that sat on a public page should be replaced; before, it failed as an unknown key the page could not read. NEURA cannot stop the leak itself: the bridge, not NEURA, checks the shop token (ADR-0052 §2). Nor may a secret key travel in an address (G34).
 
 ---
 
@@ -199,14 +199,15 @@ In the `guard` node, before anything reaches a model — critical when `REASONER
 
 ### 6.2 Retention and deletion
 
-| Data | Default retention | Notes |
-|:--|:--|:--|
-| Conversation transcripts | 90 days | Tenant-configurable |
-| Redaction token maps | Session + 24h | Never persisted long-term |
-| Audit log | 2 years | Append-only; compliance evidence |
-| Synced commerce data | While the tenant is active | Purged on offboarding |
-| Vector chunks | Until re-sync | Deleted with the source |
-| LLM traces (Langfuse) | 30 days | PII-redacted before storage |
+| Data | Default retention | Enforced? | Notes |
+|:--|:--|:--|:--|
+| Conversation transcripts | 90 days | ✅ **since 2026-09-26** — `retention.sweep`, daily ([ADR-0048](adr/0048-observation-phase-1-what-the-build-decided.md) §4) | Messages and checkpointed state go with the row. Platform-wide today; per-tenant is not built. `shadow_turns` are kept |
+| Observed shopper events | 7 days | ✅ **since 2026-09-26**, same job | All of a tenant's go at once if its data-processing agreement is withdrawn ([ADR-0044](adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)) |
+| Redaction token maps | Session + 24h | ✅ by construction (§6.1) | Never persisted long-term |
+| Audit log | 2 years | ❌ **not enforced** ([ADR-0048](adr/0048-observation-phase-1-what-the-build-decided.md) §5) | Append-only; compliance evidence. The app role cannot delete from it, and pruning a hash chain needs its own ADR |
+| Synced commerce data | While the tenant is active | not checked when this column was added | Purged on offboarding |
+| Vector chunks | Until re-sync | not checked when this column was added | Deleted with the source |
+| LLM traces (Langfuse) | 30 days | ❌ **not ours to enforce** | We hold none: OTel goes to an outside collector and Langfuse is off. That system's setting |
 
 **Deletion must propagate**, and this is where naive implementations fail: a DSAR that clears Postgres but leaves the customer's data embedded in a pgvector chunk, a Redis session, or an observability trace has not deleted anything. Deletion is implemented as a fan-out across all six stores above, and it is tested.
 
@@ -251,6 +252,8 @@ Every limit **degrades to escalate-only** rather than erroring. An attacker gets
 **Inbound** (store → us): HMAC-SHA256 over the raw body with a per-tenant secret; a timestamp header with a 5-minute tolerance; constant-time comparison; replay protection via a seen-ID cache; **and the payload is treated as a hint, not as truth** — we re-fetch the entity from the adapter rather than trusting pushed data. That last point removes data-poisoning from the threat surface entirely.
 
 **Outbound** (us → merchant): signed identically, exponential-backoff retry (1s → 2s → 4s … 6 attempts), dead-letter queue after exhaustion, delivery log visible to the merchant, and HTTPS-only with no redirect following.
+
+**Where our server connects (server-side request forgery, 2026-10-03, G47 and G78 in `docs/CONNECTING_A_NEW_SHOP_LOG.md`).** A shop gives us two kinds of address: its bridge and its webhook endpoints. In production our server connects to either **only through one guarded connection** (`neura_api/addresses.py` `outbound_transport`): it looks the name up once, refuses it unless every answer is a public internet address (never loopback, private, link-local, shared, multicast or reserved, nor an IPv4 address dressed as IPv6), and connects to exactly the address it checked, while TLS still verifies the certificate against the name. So a name that answers a public address to a check and one of ours a moment later (DNS rebinding) or the next day is refused at the moment of connecting, on every call: the check, every chat turn, Sync now, the suggestions, the AI connection and every webhook. No redirects are followed and no proxy is used (a proxy would look the name up again). Before an address is stored, `check_shop_address` and `check_webhook_address` say in plain words why one is refused. Outside production the test shops on the developer's machine are allowed.
 
 ---
 

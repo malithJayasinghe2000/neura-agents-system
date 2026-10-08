@@ -19,28 +19,43 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from neura_api import developer_mcp
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
 from neura_api.jobs import (
+    RETENTION_SWEEP,
+    SHOP_CHECK,
     SYNC_STORE,
     WEBHOOK_DRAIN,
     JobRunner,
+    RetentionSweepHandler,
+    ShopCheckHandler,
     SyncStoreHandler,
     WebhookDrainHandler,
 )
 from neura_api.middleware.cors import TenantCorsMiddleware
 from neura_api.middleware.request_context import RequestContextMiddleware
 from neura_api.ratelimit import RateLimiter
-from neura_api.registry import discover_agent_routes, discover_agents, discover_runners
+from neura_api.registry import (
+    discover_agent_routes,
+    discover_agents,
+    discover_job_handlers,
+    discover_runners,
+)
 from neura_api.routes import agent as agent_routes
 from neura_api.routes import (
     console,
+    console_connect,
+    console_contact,
     console_conversations,
+    console_mode,
     console_review,
     console_shop,
+    console_sold_out,
     console_usage,
     dispatch,
     health,
+    observe,
     stores,
     webhooks,
     widget,
@@ -106,12 +121,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.idempotency = Idempotency(database)
     app.state.stores = StoreDirectory(database)
     app.state.drainer = WebhookDrainer(database)
-    app.state.jobs = _job_runner(database, app.state.stores, app.state.drainer)
     # One client, shared. The dispatcher ([ADR-0031]) calls a model *before* any
     # turn exists, so it cannot borrow the per-turn `MeteredLLM` the turn
     # service wraps around this — and building a second client would open a
     # second HTTP connection pool per process for one extra call per message.
+    #
+    # Built before the job runner, which is new: a background handler may need a
+    # model too ([ADR-0045]), and a second client for the worker would double
+    # the connection pools to save moving one line.
     app.state.llm = _llm()
+    app.state.jobs = _job_runner(database, app.state.stores, app.state.drainer, app.state.llm)
     app.state.turns = TurnService(database, app.state.llm, app.state.stores)
 
     # Agents are mounted here rather than in `create_app`, because discovery is
@@ -128,24 +147,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runners=sorted(app.state.runners),
         job_kinds=sorted(app.state.jobs.kinds),
     )
-    try:
-        yield
-    finally:
-        await app.state.jobs.stop()
-        await app.state.drainer.aclose()
-        if app.state.redis is not None:
-            await app.state.redis.aclose()
-        # The connection pool is process-wide and lazily created, so it outlives
-        # any single request. Closing it here means a shutdown returns its
-        # connections rather than leaving PostgreSQL to time them out — and, in
-        # tests, that an event loop does not end with live sockets attached to
-        # it. `get_database` is cached, so a restart simply builds a new pool.
-        await get_database().dispose()
-        get_database.cache_clear()
-        log.info("api_stopped")
+    # The developer MCP server's manager (ADR-0053). A mounted app's own
+    # lifespan never runs, so it is started here, for the life of the process.
+    async with app.state.developer_mcp.session_manager.run():
+        try:
+            yield
+        finally:
+            await _shutdown(app)
 
 
-def _job_runner(database: Database, stores: StoreDirectory, drainer: WebhookDrainer) -> JobRunner:
+async def _shutdown(app: FastAPI) -> None:
+    """What the lifespan closes, in order, once the process stops serving."""
+    await app.state.jobs.stop()
+    await app.state.drainer.aclose()
+    if app.state.redis is not None:
+        await app.state.redis.aclose()
+    # The connection pool is process-wide and lazily created, so it outlives
+    # any single request. Closing it here means a shutdown returns its
+    # connections rather than leaving PostgreSQL to time them out — and, in
+    # tests, that an event loop does not end with live sockets attached to
+    # it. `get_database` is cached, so a restart simply builds a new pool.
+    await get_database().dispose()
+    get_database.cache_clear()
+    log.info("api_stopped")
+
+
+def _job_runner(
+    database: Database, stores: StoreDirectory, drainer: WebhookDrainer, llm: Any
+) -> JobRunner:
     """The worker loop, with its handlers attached.
 
     Handlers are registered here rather than discovered, because the queue must
@@ -165,6 +194,19 @@ def _job_runner(database: Database, stores: StoreDirectory, drainer: WebhookDrai
     runner = JobRunner(database)
     runner.register(SYNC_STORE, SyncStoreHandler(stores))
     runner.register(WEBHOOK_DRAIN, WebhookDrainHandler(drainer))
+    # The deletions ADR-0042 §3 requires to *run*. Registered here, not by an
+    # agent: conversations and observed events belong to no one agent.
+    runner.register(RETENTION_SWEEP, RetentionSweepHandler(get_settings()))
+    # The dashboard's full check of a shop's bridge (ADR-0052 §4).
+    runner.register(SHOP_CHECK, ShopCheckHandler(production=get_settings().is_production))
+
+    # ...plus whatever the installed agents own. Discovered rather than named
+    # here, for the reason the other four seams are ([ADR-0045]): background
+    # work belongs to the agent that needs it, and this file must not learn
+    # which agents exist in order to run theirs.
+    for kind, handler in discover_job_handlers(db=database, stores=stores, llm=llm).items():
+        runner.register(kind, handler)
+
     return runner
 
 
@@ -252,7 +294,11 @@ def create_app() -> FastAPI:
     app.include_router(console_review.router, prefix="/v1")
     app.include_router(console_conversations.router, prefix="/v1")
     app.include_router(console_shop.router, prefix="/v1")
+    app.include_router(console_connect.router, prefix="/v1")
     app.include_router(console_usage.router, prefix="/v1")
+    app.include_router(console_mode.router, prefix="/v1")
+    app.include_router(console_contact.router, prefix="/v1")
+    app.include_router(console_sold_out.router, prefix="/v1")
     # Mounted once, and it names no agent — that is the whole point
     # ([ADR-0031]). It sits beside the per-agent routes rather than
     # replacing them: `/v1/care/chat` is still CARE's own declared prefix.
@@ -261,6 +307,20 @@ def create_app() -> FastAPI:
     app.include_router(widget.router, prefix="/v1")
     app.include_router(stores.router, prefix="/v1")
     app.include_router(webhooks.router, prefix="/v1")
+    # ADR-0044 phase 1. Mounted for every deployment; what gates it is the key's
+    # scope and the tenant's agreement, never whether this line is here.
+    app.include_router(observe.router, prefix="/v1")
+    # ADR-0053: teaches a developer's AI tool how to build a bridge. Public, no
+    # key; it reads nothing but our own fixed content. The limiter is built in
+    # the lifespan, so it is looked up per request.
+    app.state.developer_mcp = developer_mcp.build_server()
+    app.mount(
+        developer_mcp.MOUNT,
+        developer_mcp.Limited(
+            developer_mcp.build_app(app.state.developer_mcp, settings),
+            lambda: app.state.limiter,
+        ),
+    )
 
     return app
 

@@ -7,6 +7,8 @@
     make key-revoke  TENANT=tn_01J8... KEY=key_01J8...
     make tenant-usage TENANT=tn_01J8...
     make webhook-drain TENANT=tn_01J8...
+    make tenant-dpa  TENANT=tn_01J8... [WITHDRAW=1]
+    make retention-sweep TENANT=tn_01J8...
 
 The operator tool for milestone 1.13. Until the merchant console exists this is
 how a tenant comes into being, so it is a real command rather than a paragraph
@@ -31,12 +33,22 @@ import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 
-from neura_core import Database, configure_logging, load_env, new_id
+from neura_core import (
+    ConfigurationError,
+    Database,
+    configure_logging,
+    get_settings,
+    load_env,
+    new_id,
+)
 from neura_core.ids import TENANT
+from neura_core.observation import OBSERVE_WRITE, ObservedEventRepository
 from neura_core.tenancy import (
     ApiKeyKind,
     ApiKeyRepository,
+    TenantConfig,
     TenantRepository,
+    TurnMode,
     UsageMeter,
 )
 
@@ -48,14 +60,22 @@ OFF = "\033[0m"
 
 
 async def create_tenant(db: Database, name: str, agents: list[str]) -> int:
+    """A new shop starts in practice mode (ADR-0054 §4): no shopper reads a reply
+    until the owner presses *Go live* on Home. Written into this shop's settings
+    rather than made the model's default, which also decides the mode of a shop
+    whose settings never named one."""
     tenant_id = new_id(TENANT)
     async with db.tenant_session(tenant_id) as session:
         tenant = await TenantRepository(session).create(
-            tenant_id=tenant_id, name=name, enabled_agents=agents
+            tenant_id=tenant_id,
+            name=name,
+            enabled_agents=agents,
+            config=TenantConfig(mode=TurnMode.SHADOW),
         )
 
     print(f"\n  {BOLD}{tenant.tenant_id}{OFF}  {tenant.name}")
-    print(f"  {DIM}agents: {', '.join(sorted(tenant.enabled_agents)) or '(none)'}{OFF}\n")
+    print(f"  {DIM}agents: {', '.join(sorted(tenant.enabled_agents)) or '(none)'}{OFF}")
+    print(f"  {DIM}practice mode: no shopper sees a reply until the owner presses Go live{OFF}\n")
     return 0
 
 
@@ -67,11 +87,19 @@ async def show_tenant(db: Database, tenant_id: str) -> int:
             return 1
         api_keys = await ApiKeyRepository(session).list_for(tenant_id)
         totals = await UsageMeter(session).totals(tenant_id)
+        held = await ObservedEventRepository(session).count_for(tenant_id)
 
     print(f"\n  {BOLD}{tenant.name}{OFF}  {DIM}{tenant.tenant_id}{OFF}")
     print(f"  status  {tenant.status.value}")
     print(f"  agents  {', '.join(sorted(tenant.enabled_agents)) or '(none)'}")
     print(f"  config  {tenant.config.model_dump(exclude_none=True)}")
+    agreement = (
+        f"recorded {tenant.dpa_signed_at:%Y-%m-%d}"
+        if tenant.dpa_signed_at
+        else "none — nothing about its shoppers may be stored"
+    )
+    print(f"  dpa     {agreement}")
+    print(f"  observed events held  {held}")
     print(f"\n  {BOLD}keys{OFF}")
     for key in api_keys:
         state = "revoked" if key.revoked_at else "active"
@@ -104,14 +132,18 @@ async def issue_key(
         if await TenantRepository(session).get(tenant_id) is None:
             print(f"{RED}no such tenant{OFF}")
             return 1
-        record, issued = await ApiKeyRepository(session).issue(
-            tenant_id,
-            kind=kind,
-            scopes=scopes,
-            name=name,
-            allowed_origins=origins,
-            expires_at=expires_at,
-        )
+        try:
+            record, issued = await ApiKeyRepository(session).issue(
+                tenant_id,
+                kind=kind,
+                scopes=scopes,
+                name=name,
+                allowed_origins=origins,
+                expires_at=expires_at,
+            )
+        except ConfigurationError as refused:
+            print(f"{RED}refused: {refused.message}{OFF}")
+            return 1
 
     print(f"\n  {BOLD}{issued.token}{OFF}")
     print(f"  {YELLOW}Copy it now — only its hash is stored, so it cannot be shown again.{OFF}")
@@ -174,6 +206,59 @@ async def drain_webhooks(tenant_id: str) -> int:
     return 0
 
 
+async def record_dpa(db: Database, tenant_id: str, *, withdraw: bool) -> int:
+    """Record a data-processing agreement, or withdraw one (ADR-0042 §2).
+
+    **Withdrawing deletes, in the same transaction.** Without an agreement there
+    is no reason to hold a shopper's events, so they go now rather than at the
+    end of their retention period — ADR-0042 §3's *removal on resolution*. The
+    key that sent them keeps its scope, and the route refuses it from this
+    moment, because the route checks the agreement on every request.
+    """
+    async with db.tenant_session(tenant_id) as session:
+        tenants = TenantRepository(session)
+        if await tenants.get(tenant_id) is None:
+            print(f"{RED}no such tenant{OFF}")
+            return 1
+        tenant = await tenants.set_dpa_signed_at(tenant_id, None if withdraw else datetime.now(UTC))
+        deleted = await ObservedEventRepository(session).delete_all(tenant_id) if withdraw else 0
+
+    if withdraw:
+        print(f"\n  agreement withdrawn for {tenant_id}")
+        print(f"  deleted {deleted} observed event(s) — nothing about its shoppers is held\n")
+    else:
+        print(
+            f"\n  agreement recorded for {tenant_id} at {tenant.dpa_signed_at:%Y-%m-%d %H:%M} UTC"
+        )
+        print(
+            f"  {DIM}an `{OBSERVE_WRITE}` key may now be issued: make key-new TENANT={tenant_id} "
+        )
+        print(f"  SCOPES={OBSERVE_WRITE} NAME=observe{OFF}\n")
+    return 0
+
+
+async def retention_sweep(db: Database, tenant_id: str) -> int:
+    """Run one retention pass for a tenant now, and make sure the next is booked.
+
+    The same function the ``retention.sweep`` job runs. Useful for two things:
+    proving deletion works without waiting a day, and booking a sweep for a
+    tenant whose data predates the job — every *new* write books one, but rows
+    written before 2026-09-26 had nothing to book it.
+    """
+    from neura_api.jobs.retention import enqueue_sweep, sweep
+
+    async with db.tenant_session(tenant_id) as session:
+        result = await sweep(session, tenant_id, now=datetime.now(UTC), settings=get_settings())
+        if result.remaining:
+            job = await enqueue_sweep(session, tenant_id)
+
+    print(f"\n  {result.summary()}")
+    if result.remaining:
+        print(f"  {DIM}next sweep {job.id} at {job.run_after:%Y-%m-%d %H:%M} UTC{OFF}")
+    print()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -202,6 +287,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     drain = commands.add_parser("drain-webhooks")
     drain.add_argument("--tenant-id", required=True)
+
+    dpa = commands.add_parser("dpa")
+    dpa.add_argument("--tenant-id", required=True)
+    dpa.add_argument("--withdraw", action="store_true")
+
+    sweep = commands.add_parser("sweep")
+    sweep.add_argument("--tenant-id", required=True)
 
     return parser
 
@@ -243,6 +335,10 @@ async def main() -> int:
                 return await show_usage(db, args.tenant_id)
             case "drain-webhooks":
                 return await drain_webhooks(args.tenant_id)
+            case "dpa":
+                return await record_dpa(db, args.tenant_id, withdraw=args.withdraw)
+            case "sweep":
+                return await retention_sweep(db, args.tenant_id)
             case _:  # pragma: no cover — argparse rejects anything else
                 return 2
     finally:

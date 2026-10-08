@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/*
+ * Colours and fonts are PLACEHOLDERS: branding is not decided (ADR-0051 §4).
+ * They are the console's, so the two look like one product until it is.
+ * The accent is the one value a brand decision would change — one variable.
+ */
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-ink: #0a0a0a;
+  --color-body: #404040;
+  --color-quiet: #6b6b6b;
+  --color-line: #e5e5e5;
+  --color-hush: #f4f4f2;
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+}
+
+:root {
+  --accent: #3355d6;
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, white);
+}
+
+html {
+  @apply font-sans text-ink antialiased;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #ffffff;
+}
+
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+summary {
+  cursor: pointer;
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}

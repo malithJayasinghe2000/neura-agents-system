@@ -43,15 +43,20 @@ def page(
     *,
     next_cursor: str | None,
     request_id: str | None = None,
+    **extra_meta: Any,
 ) -> dict[str, Any]:
     """A cursor-paginated page.
 
     ``has_more`` is derived from the cursor rather than passed separately: two
     fields that must agree are two fields that will eventually disagree.
+    ``extra_meta`` is for what a particular list can also say about itself — a
+    total, a position — and never overrides those two.
     """
     return {
         "data": items,
-        "meta": meta(request_id, next_cursor=next_cursor, has_more=next_cursor is not None),
+        "meta": meta(
+            request_id, **extra_meta, next_cursor=next_cursor, has_more=next_cursor is not None
+        ),
     }
 
 

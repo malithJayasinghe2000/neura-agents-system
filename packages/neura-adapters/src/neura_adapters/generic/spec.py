@@ -71,8 +71,8 @@ Three rules worth reading before implementing:
   platform's. An unrecognised value is read as `unknown`, which is a worse
   answer for your customers than a mapped one.
 
-Run `neura-conformance --url <your endpoint> --token <token>` to check an
-implementation. It reports exactly what is wrong and where.
+The shop owner checks an implementation in their NEURA dashboard and sends you
+the full result. It reports exactly what is wrong and where.
 """.strip()
 
 
@@ -452,6 +452,9 @@ def _webhooks() -> dict[str, Any]:
                 "operationId": "entityChanged",
                 "summary": "Tell us something changed (capability events.realtime)",
                 "description": (
+                    # G66 (ADR-0053 §5): described for later, received by nothing yet.
+                    "Not used yet: NEURA has no address that receives these. Do not build "
+                    "them; leave `events.realtime` out of `/health`.\n\n"
                     "Send the notification, not the data — we fetch the entity ourselves. "
                     "A notification carrying no customer data cannot leak one if it is "
                     "mis-delivered, and we always read the current state rather than a "

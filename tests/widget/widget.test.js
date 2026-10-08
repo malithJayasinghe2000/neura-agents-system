@@ -273,3 +273,118 @@ test("an unpaired asterisk is left alone", () => {
   assert.strictEqual(widget.withoutEmphasis("2 * 3 = 6"), "2 * 3 = 6");
   assert.strictEqual(widget.withoutEmphasis("**"), "**");
 });
+
+// ── Paired suggestions in the panel (ADR-0040) ──────────────────────────────
+//
+// The surface has no model in it on either side, so what is worth testing is
+// what the widget *refuses* to show and when it refuses to interrupt.
+
+test("product ids come off the script tag, commas and spaces tolerated", () => {
+  // A theme building this attribute in a template loop produces exactly this.
+  assert.deepStrictEqual(widget.productIdsFrom(" 1315, 1320, "), ["1315", "1320"]);
+});
+
+test("a repeated id is sent once", () => {
+  assert.deepStrictEqual(widget.productIdsFrom("1315,1315"), ["1315"]);
+});
+
+test("a page with no ids asks for nothing", () => {
+  assert.deepStrictEqual(widget.productIdsFrom(""), []);
+  assert.deepStrictEqual(widget.productIdsFrom(undefined), []);
+});
+
+test("a long page is capped rather than refused", () => {
+  const many = Array.from({ length: 40 }, (_, n) => `id_${n}`).join(",");
+  assert.strictEqual(widget.productIdsFrom(many).length, 10);
+});
+
+test("the config carries the ids and leaves auto-open OFF by default", () => {
+  const config = widget.configFrom(
+    { dataset: { neuraKey: "fn_pk_x", neuraProducts: "1315" }, src: "https://api.example.com/v1/widget/widget.js" },
+    null
+  );
+  assert.deepStrictEqual(config.productIds, ["1315"]);
+  // A panel that opens over the page a shopper is about to pay on is opted
+  // into, never inherited.
+  assert.strictEqual(config.pairsAutoOpen, false);
+});
+
+test("auto-open is on only when the merchant asked for it", () => {
+  const config = widget.configFrom(
+    { dataset: { neuraKey: "k", neuraProducts: "1315", neuraPairsAutoOpen: "true" }, src: "" },
+    { origin: "https://shop.example.com" }
+  );
+  assert.strictEqual(config.pairsAutoOpen, true);
+});
+
+test("no suggestions shows nothing", () => {
+  assert.strictEqual(widget.pairsFor({ heading: "Goes well with your Loafer", suggestions: [] }), null);
+});
+
+test("suggestions with no heading show nothing", () => {
+  // An unattributed "goes well with" names nothing a shopper can judge or
+  // reject (ADR-0040 §3).
+  assert.strictEqual(widget.pairsFor({ suggestions: [{ id: "1", title: "A boot" }] }), null);
+});
+
+test("the heading is the server's words, never composed here", () => {
+  const block = widget.pairsFor({
+    heading: "Goes well with your Leather Loafer",
+    suggestions: [{ id: "1", title: "Suede Desert Boot" }],
+  });
+  assert.strictEqual(block.heading, "Goes well with your Leather Loafer");
+  assert.strictEqual(block.products.length, 1);
+});
+
+test("a suggested product with a javascript: url keeps no link", () => {
+  const block = widget.pairsFor({
+    heading: "Goes well with your Loafer",
+    suggestions: [{ id: "1", title: "A boot", url: "javascript:alert(1)" }],
+  });
+  assert.strictEqual(block.products[0].url, "");
+});
+
+test("the panel does not open when there is nothing to show", () => {
+  assert.strictEqual(widget.shouldAutoOpenPairs({ pairsAutoOpen: true }, null, false), false);
+});
+
+test("the panel does not open when the merchant did not ask", () => {
+  assert.strictEqual(
+    widget.shouldAutoOpenPairs({ pairsAutoOpen: false }, { heading: "x" }, false),
+    false
+  );
+});
+
+test("the panel opens once, then never again this tab", () => {
+  const config = { pairsAutoOpen: true };
+  const block = { heading: "Goes well with your Loafer" };
+  assert.strictEqual(widget.shouldAutoOpenPairs(config, block, false), true);
+  // Once is a suggestion; every visit is nagging.
+  assert.strictEqual(widget.shouldAutoOpenPairs(config, block, true), false);
+});
+
+// ── What a shopper reads when a message could not be answered (G56) ──────────
+
+test("a network failure reads as one plain sentence, never the browser's own words", () => {
+  // What fetch throws when the shopper is offline, or when a refusal is not
+  // readable by the page (CORS): the browser's words, in the browser's language.
+  for (const err of [new TypeError("Failed to fetch"), new TypeError("Load failed")]) {
+    assert.strictEqual(widget.errorTextFor(err), widget.TRANSPORT_ERROR_MESSAGE);
+  }
+});
+
+test("a server page that is not JSON reads as the same plain sentence", () => {
+  const err = new SyntaxError("Unexpected token '<', \"<html><bod\"... is not valid JSON");
+  assert.strictEqual(widget.errorTextFor(err), widget.TRANSPORT_ERROR_MESSAGE);
+});
+
+test("NEURA's own readable refusal is shown in its own words", () => {
+  const err = new Error("A secret key may not be used from a web page.");
+  err.fromServer = true;
+  assert.strictEqual(widget.errorTextFor(err), "A secret key may not be used from a web page.");
+});
+
+test("a refusal with no words of its own, or nothing at all, reads as the plain sentence", () => {
+  assert.strictEqual(widget.errorTextFor(new Error("request_failed")), widget.TRANSPORT_ERROR_MESSAGE);
+  assert.strictEqual(widget.errorTextFor(undefined), widget.TRANSPORT_ERROR_MESSAGE);
+});

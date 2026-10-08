@@ -27,8 +27,15 @@ from typing import Any
 
 from sqlalchemy import select
 
+from neura_api.addresses import adapter_transport
 from neura_commerce import registry
-from neura_core import Database, NotFoundError, ServiceUnavailableError, get_logger
+from neura_core import (
+    Database,
+    NotFoundError,
+    ServiceUnavailableError,
+    get_logger,
+    get_settings,
+)
 from neura_core.tenancy import StoreConnectionRepository
 from neura_core.tenancy.schema import tenant_stores
 from neura_domain import Capability
@@ -66,9 +73,15 @@ class _CachedCapabilities:
 class StoreDirectory:
     """Resolves a tenant to a connected store. One per process."""
 
-    def __init__(self, db: Database, *, ttl_s: float = CAPABILITY_TTL_S) -> None:
+    def __init__(
+        self, db: Database, *, ttl_s: float = CAPABILITY_TTL_S, production: bool | None = None
+    ) -> None:
         self._db = db
         self._ttl_s = ttl_s
+        #: In production every call to a shop connects only to public addresses,
+        #: checked as it connects (G47, G78): the address passed a check once, but
+        #: a name can be pointed somewhere else afterwards.
+        self._production = get_settings().is_production if production is None else production
         self._capabilities: dict[str, _CachedCapabilities] = {}
 
     async def rows_for(self, tenant_id: str) -> list[dict[str, str]]:
@@ -114,6 +127,7 @@ class StoreDirectory:
                 platform,
                 base_url=str(row.base_url),
                 tenant_id=tenant_id,
+                **adapter_transport(production=self._production),
                 **credentials,
             )
         except KeyError as exc:

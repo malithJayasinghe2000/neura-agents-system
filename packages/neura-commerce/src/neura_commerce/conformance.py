@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Protocol, runtime_checkable
 
 from neura_commerce.pagination import Cursor
 from neura_commerce.protocol import CommerceAdapter
@@ -72,6 +73,31 @@ class ConformanceReport:
         self.passed_checks.append(check)
 
 
+@runtime_checkable
+class ProtocolChecks(Protocol):
+    """An adapter that can check what the shared suite cannot see.
+
+    The shared suite runs *through* the adapter, so status codes, headers and the
+    token are already absorbed by the time it looks. An adapter that speaks a wire
+    protocol of its own may check those as well. Found by its shape, never by an
+    import: the core must not learn which adapters exist (ADR-0052 §4).
+    """
+
+    async def run_protocol_checks(self, report: ConformanceReport) -> None: ...
+
+
+async def check_adapter(adapter: CommerceAdapter) -> ConformanceReport:
+    """Every check there is for one adapter: the shared suite, then its own.
+
+    The one implementation behind both the terminal tool and the dashboard's
+    *Check* (ADR-0052 §4), so the two can never disagree about a shop.
+    """
+    report = await run_conformance(adapter)
+    if isinstance(adapter, ProtocolChecks):
+        await adapter.run_protocol_checks(report)
+    return report
+
+
 async def run_conformance(adapter: CommerceAdapter) -> ConformanceReport:
     """Check one adapter against the contract."""
     report = ConformanceReport(platform=getattr(adapter, "platform", "unknown"))
@@ -101,7 +127,12 @@ async def _check_health(adapter: CommerceAdapter, report: ConformanceReport) -> 
     try:
         status = await adapter.health()
     except Exception as exc:
-        report.add(check, Severity.ERROR, f"health() raised: {exc}", "health() must never raise")
+        report.add(
+            check,
+            Severity.ERROR,
+            f"asking /health failed: {exc}",
+            "GET /health must always answer, even when something else is wrong.",
+        )
         return
 
     if not status.ok:
@@ -113,7 +144,8 @@ async def _check_health(adapter: CommerceAdapter, report: ConformanceReport) -> 
             check,
             Severity.ERROR,
             "no capabilities declared",
-            "A store declaring nothing is reachable but unusable — the agent gets no tools.",
+            'With an empty "capabilities" list the assistant can do nothing with your shop. '
+            "List each thing you built (step 2 of the guide).",
         )
         return
 
@@ -142,13 +174,19 @@ async def _check_product_read(adapter: CommerceAdapter, report: ConformanceRepor
         report.add(
             check,
             Severity.ERROR,
-            f"get_product() raised for a missing id: {type(exc).__name__}",
-            "Return None. Customers mistype ids constantly; that is not an error.",
+            f"asking for a product that does not exist failed: {type(exc).__name__}",
+            "Answer 404 for a product id that does not exist. Shoppers mistype ids all the "
+            "time; that is not an error.",
         )
         return
 
     if result is not None:
-        report.add(check, Severity.ERROR, "get_product() returned data for a nonexistent id")
+        report.add(
+            check,
+            Severity.ERROR,
+            "a product that does not exist was answered with data",
+            "Answer 404, not a product, for an id that does not exist.",
+        )
         return
 
     report.passed(check)
@@ -162,8 +200,9 @@ async def _check_product_search(adapter: CommerceAdapter, report: ConformanceRep
         report.add(
             check,
             Severity.ERROR,
-            f"search_products() raised on an empty query: {type(exc).__name__}",
-            "Return an empty page. A search matching nothing is the commonest case.",
+            f"a search that finds nothing failed: {type(exc).__name__}",
+            'Answer an empty list: {"items": [], "next_cursor": null}. A search that finds '
+            "nothing is the most common case.",
         )
         return
 
@@ -176,13 +215,14 @@ async def _check_product_search(adapter: CommerceAdapter, report: ConformanceRep
             report.add(
                 check,
                 Severity.WARNING,
-                "search returned results for nonsense text",
-                "Over-broad matching floods the agent's context with irrelevant products.",
+                "a search for nonsense text found products",
+                "Match the words a shopper typed. Matching everything gives the assistant "
+                "products that have nothing to do with the question.",
             )
         else:
             report.passed(check)
     except Exception as exc:
-        report.add(check, Severity.ERROR, f"search_products() raised: {type(exc).__name__}")
+        report.add(check, Severity.ERROR, f"a product search failed: {type(exc).__name__}")
 
     check = "products.canonical_status"
     try:
@@ -192,8 +232,9 @@ async def _check_product_search(adapter: CommerceAdapter, report: ConformanceRep
                 report.add(
                     check,
                     Severity.ERROR,
-                    f"product {product.external_id} has non-canonical status {product.status!r}",
-                    "Map platform statuses to ProductStatus; unmappable values become UNKNOWN.",
+                    f"product {product.external_id} has a status NEURA does not know: "
+                    f"{product.status!r}",
+                    'Use "active", "draft" or "archived". Any other word is read as "unknown".',
                 )
                 return
         report.passed(check)
@@ -209,13 +250,18 @@ async def _check_order_read(adapter: CommerceAdapter, report: ConformanceReport)
         report.add(
             check,
             Severity.ERROR,
-            f"get_order() raised for a missing id: {type(exc).__name__}",
-            "Return None.",
+            f"asking for an order that does not exist failed: {type(exc).__name__}",
+            "Answer 404 for an order id that does not exist.",
         )
         return
 
     if result is not None:
-        report.add(check, Severity.ERROR, "get_order() returned data for a nonexistent id")
+        report.add(
+            check,
+            Severity.ERROR,
+            "an order that does not exist was answered with data",
+            "Answer 404, not an order, for an id that does not exist.",
+        )
         return
 
     report.passed(check)
@@ -228,8 +274,9 @@ async def _check_order_read(adapter: CommerceAdapter, report: ConformanceReport)
                 report.add(
                     check,
                     Severity.ERROR,
-                    f"order {order.external_id} has non-canonical status {order.status!r}",
-                    "A platform status string must never reach the agent.",
+                    f"order {order.external_id} has a status NEURA does not know: {order.status!r}",
+                    "Use the order status words the OpenAPI file lists. Your shop's own words "
+                    "would reach the assistant, which cannot explain them to a shopper.",
                 )
                 return
         report.passed(check)
@@ -242,11 +289,21 @@ async def _check_customer_read(adapter: CommerceAdapter, report: ConformanceRepo
     try:
         result = await adapter.get_customer("__definitely_does_not_exist__")
     except Exception as exc:
-        report.add(check, Severity.ERROR, f"get_customer() raised: {type(exc).__name__}")
+        report.add(
+            check,
+            Severity.ERROR,
+            f"asking for a customer that does not exist failed: {type(exc).__name__}",
+            "Answer 404 for a customer id that does not exist.",
+        )
         return
 
     if result is not None:
-        report.add(check, Severity.ERROR, "get_customer() returned data for a nonexistent id")
+        report.add(
+            check,
+            Severity.ERROR,
+            "a customer that does not exist was answered with data",
+            "Answer 404, not a customer, for an id that does not exist.",
+        )
         return
 
     report.passed(check)
@@ -257,7 +314,7 @@ async def _check_policies(adapter: CommerceAdapter, report: ConformanceReport) -
     try:
         policies = await adapter.get_policies()
     except Exception as exc:
-        report.add(check, Severity.ERROR, f"get_policies() raised: {type(exc).__name__}")
+        report.add(check, Severity.ERROR, f"reading the policy pages failed: {type(exc).__name__}")
         return
 
     if not policies:
@@ -265,14 +322,19 @@ async def _check_policies(adapter: CommerceAdapter, report: ConformanceReport) -
             check,
             Severity.WARNING,
             "no policies returned",
-            "Returns and shipping questions are a third of support volume. "
-            "Without policy text the agent can only escalate them.",
+            "Without policy text the assistant cannot answer returns or shipping questions. "
+            "If the shop has no policy pages, leave policy.read out of the list.",
         )
         return
 
     empty = [p.external_id for p in policies if not p.body.strip()]
     if empty:
-        report.add(check, Severity.WARNING, f"policies with empty body: {empty}")
+        report.add(
+            check,
+            Severity.WARNING,
+            f"policy pages with no text: {empty}",
+            "Send each page's text, or leave that page out.",
+        )
         return
 
     report.passed(check)
@@ -291,7 +353,7 @@ async def _check_incremental_sync(adapter: CommerceAdapter, report: ConformanceR
         future = datetime(2099, 1, 1, tzinfo=UTC)
         page = await adapter.list_products(SyncQuery(updated_since=future))
     except Exception as exc:
-        report.add(check, Severity.ERROR, f"list_products() raised with updated_since: {exc}")
+        report.add(check, Severity.ERROR, f"reading products changed since a date failed: {exc}")
         return
 
     if page.items:
@@ -300,7 +362,8 @@ async def _check_incremental_sync(adapter: CommerceAdapter, report: ConformanceR
             Severity.WARNING,
             "declares sync.incremental but ignores updated_since "
             "(returned items updated after 2099)",
-            "Either honour the filter or drop the capability — we will full-sync instead.",
+            "Honour updated_since, or leave sync.incremental out of the list: NEURA then "
+            "reads every product each time.",
         )
         return
 
@@ -327,7 +390,9 @@ async def _check_pagination(adapter: CommerceAdapter, report: ConformanceReport)
                     check,
                     Severity.ERROR,
                     f"page {page_number} repeated ids: {sorted(duplicates)}",
-                    "Use a stable sort plus a cursor, never LIMIT/OFFSET.",
+                    "Sort by something that never changes, such as the id, and continue from "
+                    "the cursor. Page numbers with an offset repeat or skip products when the "
+                    "catalogue changes.",
                 )
                 return
             seen.update(p.external_id for p in page.items)
@@ -340,10 +405,15 @@ async def _check_pagination(adapter: CommerceAdapter, report: ConformanceReport)
                 report.add(
                     check,
                     Severity.ERROR,
-                    "next_cursor did not advance — sync would loop forever",
+                    "next_cursor did not move on, so reading the catalogue would never end",
+                    "Send the cursor of the next page, or null on the last page.",
                 )
                 return
             cursor = page.next_cursor
         report.passed(check)
     except Exception as exc:
-        report.add(check, Severity.ERROR, f"pagination raised: {type(exc).__name__}: {exc}")
+        report.add(
+            check,
+            Severity.ERROR,
+            f"reading products page by page failed: {type(exc).__name__}: {exc}",
+        )

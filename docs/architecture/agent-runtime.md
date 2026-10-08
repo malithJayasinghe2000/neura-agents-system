@@ -233,6 +233,8 @@ Real conversation ──► human answers the customer (as today)
 | `SUPERVISED` | Agent replies, human can recall within N seconds | Cautious go-live | ❌ needs a recall path |
 | `LIVE` | Agent replies | Steady state | ✅ the default |
 
+**Switched by the shop owner since [ADR-0054](adr/0054-the-shop-owner-switches-practice-mode-and-a-new-shop-starts-in-it.md):** **Go live** and **Back to practice mode** on the console's Home change `LIVE` ↔ `SHADOW` for the whole tenant (never `shadow_intents`); a tenant made by `make tenant-new` starts in `SHADOW` (`LIVE` stays the model's default); and the mode is read when the reply is released, so a switch reaches a chat already open (G72).
+
 Mode is per-tenant **and** per-intent — a store can run `LIVE` for order status while keeping returns policy in `SUGGEST`. This is how a merchant is talked into adopting it: they choose exactly how much rope to give it.
 
 **Two of the four are deliberately absent rather than accepted and ignored** (1.15). From the serving layer's point of view `SUGGEST` *is* `SHADOW` — what separates them is a console for the human to read the draft in, and that is Phase 2. `SUPERVISED` needs a recall path, a timer and a button. A tenant configuring either today would silently get the mode this deployment understands, so an unreadable mode resolves to **`SHADOW`**: the failure shows up as an agent that has gone quiet, never as one that has started talking (`neura_core.tenancy.modes`).

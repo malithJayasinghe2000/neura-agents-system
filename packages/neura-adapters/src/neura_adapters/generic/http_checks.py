@@ -14,10 +14,19 @@ not a bug but an incident:
 
 So these checks are additive, not a replacement — the CLI runs both and merges
 the findings into one report.
+
+**Orders are checked only in a shop that lists them** (G50). The guide lets a
+shop start with its products alone, and many frameworks answer 404 for an
+address that was never built, before any token check runs. Knocking on
+``/orders`` there read that 404 as an open door: two false failures, and the
+owner could not connect. So the token and not-found checks use orders when the
+shop lists them and its products when it does not, and the order vocabulary
+check runs only when there are orders to read.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -26,12 +35,13 @@ from neura_adapters.generic.adapter import (
     PATH_HEALTH,
     PATH_ORDER,
     PATH_ORDERS,
+    PATH_PRODUCT,
     PATH_PRODUCTS,
 )
 from neura_adapters.generic.client import GenericClient
 from neura_adapters.generic.wire import SPEC_VERSION, spec_major
 from neura_commerce import ConformanceReport, Severity
-from neura_domain import FulfillmentStatus, OrderStatus, PaymentStatus, ProductStatus
+from neura_domain import Capability, FulfillmentStatus, OrderStatus, PaymentStatus, ProductStatus
 
 _MISSING_ID = "__neura_conformance_missing__"
 
@@ -44,24 +54,58 @@ _STATUS_FIELDS = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class _Guarded:
+    """Where the token and not-found checks knock (G50)."""
+
+    collection: str
+    one: str
+    holds: str
+    """What anyone could read if it were open, for the hint."""
+    record: str
+    a_record: str
+
+
+#: Orders first: they hold customers' names and addresses, so an open /orders
+#: is the incident this module exists to catch.
+_ORDERS = _Guarded(PATH_ORDERS, PATH_ORDER, "orders", "order", "an order")
+#: Every shop the check can pass reads products: the guide's first three addresses.
+_PRODUCTS = _Guarded(PATH_PRODUCTS, PATH_PRODUCT, "products", "product", "a product")
+
+_ORDER_CAPABILITIES = frozenset({Capability.ORDER_READ, Capability.ORDER_SEARCH})
+
+
+def _guarded(capabilities: frozenset[Capability] | None) -> _Guarded:
+    """The most sensitive address the shop says it has. ``None``: the strictest."""
+    if capabilities is None or capabilities & _ORDER_CAPABILITIES:
+        return _ORDERS
+    return _PRODUCTS
+
+
 async def run_http_checks(
-    client: GenericClient, report: ConformanceReport, *, token: str | None
+    client: GenericClient,
+    report: ConformanceReport,
+    capabilities: frozenset[Capability] | None = None,
 ) -> None:
-    """Append protocol-level findings to an existing report."""
-    await _check_auth(client, report, token=token)
+    """Append protocol-level findings to an existing report.
+
+    ``capabilities`` is what the shop's ``/health`` listed; without it every
+    address is checked, orders included.
+    """
+    guarded = _guarded(capabilities)
+    await _check_auth(client, report, guarded)
     await _check_health_transport(client, report)
-    await _check_not_found(client, report)
+    await _check_not_found(client, report, guarded)
     await _check_limit(client, report)
-    await _check_status_vocabulary(client, report)
+    if guarded is _ORDERS:
+        await _check_status_vocabulary(client, report)
     await _check_product_status_vocabulary(client, report)
 
 
-async def _check_auth(
-    client: GenericClient, report: ConformanceReport, *, token: str | None
-) -> None:
+async def _check_auth(client: GenericClient, report: ConformanceReport, guarded: _Guarded) -> None:
     check = "auth.required"
 
-    if not token:
+    if not client.has_token:
         report.add(
             check,
             Severity.WARNING,
@@ -71,25 +115,27 @@ async def _check_auth(
         )
         return
 
-    anonymous = await client.request(PATH_ORDERS, authenticate=False)
+    anonymous = await client.request(guarded.collection, authenticate=False)
     if anonymous.status_code not in _REJECTING_STATUSES:
         report.add(
             check,
             Severity.ERROR,
-            f"{PATH_ORDERS} answered an unauthenticated request with HTTP {anonymous.status_code}",
+            f"{guarded.collection} answered an unauthenticated request "
+            f"with HTTP {anonymous.status_code}",
             "Every endpoint except /health must return 401 without a valid bearer "
-            "token. As it stands, anyone who learns this URL can read the store's orders.",
+            f"token. As it stands, anyone who learns this URL can read the store's "
+            f"{guarded.holds}.",
         )
     else:
         report.passed(check)
 
     check = "auth.rejects_wrong_token"
-    wrong = await client.request(PATH_ORDERS, token="not-a-real-token")  # noqa: S106
+    wrong = await client.request(guarded.collection, token="not-a-real-token")  # noqa: S106
     if wrong.status_code not in _REJECTING_STATUSES:
         report.add(
             check,
             Severity.ERROR,
-            f"{PATH_ORDERS} accepted an invalid bearer token (HTTP {wrong.status_code})",
+            f"{guarded.collection} accepted an invalid bearer token (HTTP {wrong.status_code})",
             "The token is being ignored rather than verified.",
         )
     else:
@@ -145,24 +191,28 @@ async def _check_health_transport(client: GenericClient, report: ConformanceRepo
         report.passed(check)
 
 
-async def _check_not_found(client: GenericClient, report: ConformanceReport) -> None:
+async def _check_not_found(
+    client: GenericClient, report: ConformanceReport, guarded: _Guarded
+) -> None:
     check = "errors.not_found"
-    response = await client.request(PATH_ORDER.format(id=_MISSING_ID))
+    response = await client.request(guarded.one.format(id=_MISSING_ID))
 
     if response.status_code == httpx.codes.NOT_FOUND:
         report.passed(check)
         return
 
     if response.status_code in _REJECTING_STATUSES:
-        report.add(check, Severity.ERROR, "authentication failed — check the token")
+        report.add(
+            check, Severity.ERROR, "the shop token was refused, so this could not be checked"
+        )
         return
 
     report.add(
         check,
         Severity.ERROR,
-        f"an unknown order id returned HTTP {response.status_code}, expected 404",
+        f"an unknown {guarded.record} id returned HTTP {response.status_code}, expected 404",
         "A 200 with an empty body is indistinguishable from a real record, and the "
-        "agent will answer a customer about an order that does not exist.",
+        f"agent will answer a customer about {guarded.a_record} that does not exist.",
     )
 
 
@@ -185,8 +235,8 @@ async def _check_limit(client: GenericClient, report: ConformanceReport) -> None
             check,
             Severity.WARNING,
             f"?limit=2 returned {len(payload['items'])} items",
-            "Ignoring limit means one request can pull an entire catalogue into "
-            "memory — on your server as much as ours.",
+            "Ignoring limit means one request can pull the whole catalogue into "
+            "memory, on your server as much as ours.",
         )
         return
 
@@ -226,8 +276,8 @@ async def _check_status_vocabulary(client: GenericClient, report: ConformanceRep
             check,
             Severity.WARNING,
             f"non-canonical status values: {sorted(unmapped)}",
-            "Map your platform's vocabulary to the enums in the spec. Unrecognised "
-            "values are read as 'unknown', which the agent cannot explain to a customer.",
+            "Use the status words the OpenAPI file lists. Any other word is read as "
+            '"unknown", which the assistant cannot explain to a shopper.',
         )
         return
 
@@ -241,33 +291,55 @@ def _json(response: httpx.Response) -> Any:
         return None
 
 
+#: A sample, one request: enough to catch a bridge that maps statuses wrongly.
+_PRODUCT_SAMPLE = 20
+
+#: Read as "unknown" by the adapter, so never recommended.
+_NO_STATUS = "no status"
+
+
 async def _check_product_status_vocabulary(
     client: GenericClient, report: ConformanceReport
 ) -> None:
-    """Same check for the catalogue. Separate because it is a different endpoint."""
+    """Statuses in the raw catalogue, before the client maps them.
+
+    A missing status, ``"unknown"`` and any word the format does not know all
+    end as ``unknown``, and NEURA-SELL, the suggestions and the product feed
+    keep only ``active`` products (G69). The format allows a missing status, so
+    this warns rather than fails: answering questions still works without it.
+    ``draft`` and ``archived`` are not warned about: a shop hides those on purpose.
+    """
     check = "products.status_vocabulary"
-    response = await client.request(PATH_PRODUCTS, params={"limit": 5})
+    response = await client.request(PATH_PRODUCTS, params={"limit": _PRODUCT_SAMPLE})
     if response.status_code != httpx.codes.OK:
         return
 
     payload = _json(response)
     items = payload.get("items", []) if isinstance(payload, dict) else []
+    products = [item for item in items if isinstance(item, dict)]
 
-    valid = {member.value for member in ProductStatus}
-    unmapped = {
-        str(item.get("status"))
-        for item in items
-        if isinstance(item, dict)
-        and isinstance(item.get("status"), str)
-        and item["status"] not in valid
-    }
+    usable = {member.value for member in ProductStatus} - {ProductStatus.UNKNOWN.value}
+    unusable: dict[str, int] = {}
+    for product in products:
+        status = product.get("status")
+        if isinstance(status, str) and status in usable:
+            continue
+        label = f'"{status}"' if isinstance(status, str) else _NO_STATUS
+        unusable[label] = unusable.get(label, 0) + 1
 
-    if unmapped:
+    if unusable:
+        named = ", ".join(
+            f"{label} ({count})"
+            for label, count in sorted(unusable.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
         report.add(
             check,
             Severity.WARNING,
-            f"non-canonical product status values: {sorted(unmapped)}",
-            "Map to ProductStatus; unmappable values become 'unknown'.",
+            f"{sum(unusable.values())} of {len(products)} products read have no usable status: "
+            f"{named}",
+            'Send "status": "active" for each product shoppers can buy now, and "draft" or '
+            '"archived" for the rest. Any other word, or none, is read as "unknown", and '
+            'NEURA-SELL never recommends a product that is not "active".',
         )
         return
 

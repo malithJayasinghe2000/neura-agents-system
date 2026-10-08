@@ -31,16 +31,16 @@ from langchain_core.runnables import RunnableConfig
 
 from neura_agent_core.graph.state import AgentState, runtime_of
 from neura_core import get_logger
+from neura_core.tenancy import HANDOVER_WITHOUT_DETAILS
 
 log = get_logger(__name__)
 
-#: What the shopper is told. Deliberately plain, and it promises only what the
-#: system can actually deliver — a person will see this, not "someone will reply
-#: within an hour", which we cannot know.
-DEFAULT_MESSAGE = (
-    "I want to make sure you get this right, so I'm passing you to a member of "
-    "the team. They'll have everything we've discussed."
-)
+#: What the shopper is told when the agent supplies no words of its own. It
+#: promises nothing (ADR-0055, G44): it used to say *"I'm passing you to a member
+#: of the team. They'll have everything we've discussed"*, and nobody came. A
+#: served turn names the shop's own contact details in its place
+#: (`neura_core.tenancy.handover_message`, put on by the turn service).
+DEFAULT_MESSAGE = HANDOVER_WITHOUT_DETAILS
 
 
 async def escalate(state: AgentState, config: RunnableConfig) -> AgentState:

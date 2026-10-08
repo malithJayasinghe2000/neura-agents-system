@@ -1,0 +1,8 @@
+/node_modules
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+.DS_Store
+# Copied from docs/spec at build time — docs/spec/openapi.json is the source.
+/public/spec/

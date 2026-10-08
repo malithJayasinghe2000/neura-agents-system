@@ -12,6 +12,7 @@ platform-neutral, or the abstraction is quietly undone by its own test suite.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -69,7 +70,7 @@ async def test_conformant_store_passes_every_check() -> None:
     store = ReferenceStore()
     adapter = adapter_for(store)
 
-    report = await check_store(adapter, token=DEFAULT_TOKEN)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     assert report.is_conformant, [f.message for f in report.errors]
@@ -500,6 +501,7 @@ async def test_a_float_price_is_refused() -> None:
         (Defect.IGNORES_UPDATED_SINCE, "sync.updated_since", Severity.WARNING),
         (Defect.PLATFORM_STATUS, "orders.status_vocabulary", Severity.WARNING),
         (Defect.IGNORES_LIMIT, "pagination.limit", Severity.WARNING),
+        (Defect.NO_PRODUCT_STATUS, "products.status_vocabulary", Severity.WARNING),
     ],
 )
 async def test_each_defect_is_caught_by_its_check(
@@ -508,7 +510,7 @@ async def test_each_defect_is_caught_by_its_check(
     store = ReferenceStore(defects=frozenset({defect}))
     adapter = adapter_for(store)
 
-    report = await check_store(adapter, token=DEFAULT_TOKEN)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     finding = next((f for f in report.findings if f.check == check), None)
@@ -523,18 +525,175 @@ async def test_an_unauthenticated_store_is_not_conformant() -> None:
     store = ReferenceStore(defects=frozenset({Defect.NO_AUTH}))
     adapter = adapter_for(store)
 
-    report = await check_store(adapter, token=DEFAULT_TOKEN)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     assert not report.is_conformant
     assert {f.check for f in report.errors} >= {"auth.required", "auth.rejects_wrong_token"}
+    # A shop that lists orders is checked where its customers are.
+    assert all("/orders" in f.message for f in report.errors if f.check.startswith("auth."))
+
+
+#: The guide's first three addresses: /health, /products, /products/{id}.
+PRODUCTS_ONLY = frozenset({Capability.PRODUCT_READ, Capability.PRODUCT_SEARCH})
+
+
+def built_products_only(store: ReferenceStore):
+    """A bridge routed the way many frameworks route: an address that was never
+    built answers 404 before any token check runs (G50)."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path = request.url.path.removeprefix(store.prefix)
+        if path in ("/health", "/products") or path.startswith("/products/"):
+            return store.handle(request)
+        store.requests.append(request)
+        return httpx.Response(404, json={"error": f"no such endpoint: {path}"})
+
+    return handle
+
+
+async def test_a_shop_that_never_built_orders_is_not_failed_for_them() -> None:
+    """G50: the check knocked on /orders anyway, read the 404 as an open door,
+    and two false failures locked the owner's Connect."""
+    store = ReferenceStore(capabilities=PRODUCTS_ONLY)
+    adapter = adapter_for_handler(built_products_only(store))
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    assert report.is_conformant, [f.message for f in report.errors]
+    assert {"auth.required", "auth.rejects_wrong_token", "errors.not_found"} <= set(
+        report.passed_checks
+    )
+    assert not [r for r in store.requests if r.url.path.startswith(f"{store.prefix}/orders")]
+
+
+async def test_a_shop_without_orders_still_has_its_token_checked() -> None:
+    store = ReferenceStore(capabilities=PRODUCTS_ONLY, defects=frozenset({Defect.NO_AUTH}))
+    adapter = adapter_for(store)
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    errors = {f.check: f for f in report.errors}
+    assert {"auth.required", "auth.rejects_wrong_token"} <= errors.keys()
+    assert errors["auth.required"].message.startswith("/products ")
+    assert errors["auth.required"].hint.endswith("can read the store's products.")
+
+
+async def test_a_shop_without_orders_is_asked_for_a_missing_product_instead() -> None:
+    store = ReferenceStore(capabilities=PRODUCTS_ONLY, defects=frozenset({Defect.MISSING_AS_200}))
+    adapter = adapter_for(store)
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    finding = next(f for f in report.errors if f.check == "errors.not_found")
+    assert finding.message.startswith("an unknown product id returned HTTP 200")
+    assert "about a product that does not exist" in finding.hint
+
+
+def with_product_statuses(store: ReferenceStore, statuses: list[str | None]):
+    """The store's products, each given the next status in turn; ``None`` leaves it out."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        response = store.handle(request)
+        if request.url.path != f"{store.prefix}/products" or response.status_code != 200:
+            return response
+        payload = response.json()
+        for item, status in zip(payload["items"], statuses, strict=False):
+            if status is None:
+                item.pop("status", None)
+            else:
+                item["status"] = status
+        return httpx.Response(200, json=payload)
+
+    return handle
+
+
+async def test_products_without_a_status_are_warned_about_not_failed() -> None:
+    """G69: a missing status reads as "unknown", and NEURA-SELL recommends only
+    "active" products, so a shop that leaves it out gets nothing recommended
+    while the check stayed green. The format allows it, so it warns and Connect
+    stays open."""
+    store = ReferenceStore(defects=frozenset({Defect.NO_PRODUCT_STATUS}))
+    adapter = adapter_for(store)
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    assert report.is_conformant, [f.message for f in report.errors]
+    finding = next(f for f in report.findings if f.check == "products.status_vocabulary")
+    assert finding.severity is Severity.WARNING
+    assert finding.message == "5 of 5 products read have no usable status: no status (5)"
+    assert '"status": "active"' in finding.hint
+    assert 'never recommends a product that is not "active"' in finding.hint
+
+
+async def test_each_unusable_product_status_is_named_with_its_count() -> None:
+    """The format has the word "unknown", but it means the same as none; a word the
+    format does not know is read as "unknown" too. Our own names stay out of it (G53)."""
+    store = ReferenceStore()
+    adapter = adapter_for_handler(
+        with_product_statuses(store, ["active", None, "enabled", "unknown", "enabled"])
+    )
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    finding = next(f for f in report.findings if f.check == "products.status_vocabulary")
+    assert finding.message == (
+        '4 of 5 products read have no usable status: "enabled" (2), "unknown" (1), no status (1)'
+    )
+    assert "ProductStatus" not in finding.hint
+
+
+async def test_draft_and_archived_products_are_not_a_status_problem() -> None:
+    """A shop may hide products on purpose; only a missing or unknown word is warned about."""
+    store = ReferenceStore()
+    adapter = adapter_for_handler(
+        with_product_statuses(store, ["active", "draft", "archived", "active", "active"])
+    )
+
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    assert "products.status_vocabulary" in report.passed_checks
+
+
+def _store_without_policies() -> ReferenceStore:
+    store = ReferenceStore()
+    store.policies = []
+    return store
+
+
+@pytest.mark.parametrize(
+    "store",
+    [
+        *(ReferenceStore(defects=frozenset({defect})) for defect in Defect),
+        _store_without_policies(),
+    ],
+    ids=[*(defect.value for defect in Defect), "no_policies"],
+)
+async def test_the_full_check_speaks_to_the_bridges_developer(store: ReferenceStore) -> None:
+    """G53: since the owner copies the full check to the developer, its words are
+    the developer's. Not our function names, not our type names, not a file they
+    cannot get, and no number nobody measured (CLAUDE.md §4)."""
+    adapter = adapter_for(store)
+    report = await check_store(adapter)
+    await adapter.aclose()
+
+    words = " ".join(f"{f.message} {f.hint}" for f in report.findings)
+    assert report.findings, "this broken store was not reported at all"
+    for ours in (r"\w+\(\)", r"ProductStatus", r"enums in the spec", r"support volume", "\u2014"):
+        assert not re.search(ours, words), f"{ours!r} in: {words}"
 
 
 async def test_running_without_a_token_says_so_rather_than_passing_quietly() -> None:
     store = ReferenceStore(token=None)
     adapter = adapter_for(store, token=None)
 
-    report = await check_store(adapter, token=None)
+    report = await check_store(adapter)
     await adapter.aclose()
 
     warning = next(f for f in report.findings if f.check == "auth.required")

@@ -38,6 +38,8 @@ TENANTS = "tenants"
 API_KEYS = "api_keys"
 TENANT_STORES = "tenant_stores"
 TENANT_USAGE = "tenant_usage"
+SHOP_TOKENS = "shop_tokens"
+SHOP_CHECKS = "shop_checks"
 
 
 #: One merchant. The row that has to exist before anything else in the system
@@ -56,6 +58,13 @@ tenants = Table(
     Column("status", String(32), nullable=False, server_default="active"),
     Column("enabled_agents", JSONB, nullable=False, server_default="[]"),
     Column("config", JSONB, nullable=False, server_default="{}"),
+    #: When a data-processing agreement with this merchant was recorded, and
+    #: ``NULL`` if none has been. ADR-0042 §2: *"no tenant stores personal data
+    #: until a data-processing agreement is in place — it is a row in the tenant
+    #: record, not a handshake."* A typed column rather than a key in ``config``
+    #: because it is **enforced** (ADR-0013): an ``observe:write`` key cannot be
+    #: issued without it, and the event route refuses without it.
+    Column("dpa_signed_at", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
@@ -121,6 +130,50 @@ tenant_stores = Table(
     # a tenant may run two shops, and two shops on the same software is the
     # ordinary case rather than the exotic one.
     UniqueConstraint("tenant_id", "platform", "base_url", name="uq_tenant_stores_tenant_store"),
+)
+
+
+#: The shop token NEURA made before the shop is connected (ADR-0052 §1).
+#:
+#: One per tenant: making another replaces it. Sealed exactly like a
+#: connection's ``credentials`` (envelope encryption, security-model.md §5), so
+#: a dump of this table alone is as useless as a dump of ``tenant_stores``.
+#: *Connect* moves it into ``tenant_stores`` and deletes the row. **Nothing reads
+#: it back to a screen**: it is shown once, by the request that made it.
+shop_tokens = Table(
+    SHOP_TOKENS,
+    metadata,
+    Column("tenant_id", String(64), primary_key=True),
+    Column("credentials", Text, nullable=False),
+    Column("wrapped_dek", Text, nullable=False),
+    #: The console user who made it. A person, never a shopper.
+    Column("made_by", String(64), nullable=False),
+    Column("made_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+
+#: One run of the full check against a shop's bridge (ADR-0052 §4).
+#:
+#: Kept, rather than living only on a job row, because the job queue purges
+#: finished work and the screen must still say *"19 of 19 · checked Sep 30"*.
+#: ``store_id`` is ``NULL`` for a check made before the shop is connected, which
+#: is also what *Connect* reads: it is allowed only after a clean check of the
+#: same address. ``result`` holds the check's findings, never the token.
+shop_checks = Table(
+    SHOP_CHECKS,
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("tenant_id", String(64), nullable=False),
+    Column("store_id", String(64), nullable=True),
+    Column("address", Text, nullable=False),
+    #: ``pending`` until the worker writes ``done`` or ``failed``. A check that
+    #: found problems is ``done``; ``failed`` means we could not run it.
+    Column("status", String(16), nullable=False, server_default="pending"),
+    Column("result", JSONB, nullable=True),
+    Column("requested_by", String(64), nullable=False),
+    Column("requested_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    Index("ix_shop_checks_tenant_requested", "tenant_id", "requested_at"),
 )
 
 

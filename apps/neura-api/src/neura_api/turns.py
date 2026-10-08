@@ -32,7 +32,7 @@ in ``audit.py``.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any
 
@@ -45,6 +45,7 @@ from neura_agent_core.shadow import ShadowRepository, ShadowTurn
 from neura_agent_core.shadow_evidence import ShadowEvidenceRepository
 from neura_agent_core.tools import SessionIdentity
 from neura_api.audit import TenantAuditLog
+from neura_api.jobs.retention import enqueue_sweep
 from neura_api.jobs.webhooks import enqueue_drain
 from neura_api.metering import MeteredLLM
 from neura_api.stores import StoreDirectory
@@ -54,9 +55,11 @@ from neura_core.tenancy import (
     Admission,
     AuthenticatedCaller,
     RuntimePolicy,
+    TenantRepository,
     TurnMode,
     UsageDelta,
     UsageMeter,
+    handover_message,
     resolve_runtime_policy,
     resolve_turn_mode,
 )
@@ -175,6 +178,10 @@ class TurnService:
                 channel=turn.channel,
                 locale=turn.locale,
             )
+            if started:
+                # A new transcript is something to expire, so it books the
+                # sweep that will — in this transaction, or not at all.
+                await enqueue_sweep(session, tenant_id)
             history = (
                 []
                 if started
@@ -250,21 +257,36 @@ class TurnService:
             await _close(store.adapter)
         latency_ms = int((time.perf_counter() - turn_started) * 1000)
 
-        # Shadow mode is resolved *after* the turn, because it is per-intent and
-        # the intent is something the turn produces (agent-runtime.md §6). That
-        # ordering is also what makes a shadow turn worth anything: the whole
-        # graph has already run, on the same models with the same tools, so what
-        # a human grades is the answer the shopper would have received rather
-        # than a cheaper approximation of it.
-        mode = resolve_turn_mode(
-            tenant_mode=turn.caller.tenant.config.mode,
-            shadow_intents=turn.caller.tenant.config.shadow_intents,
-            intent=outcome.intent,
-        )
-
         # ── After the turn: one transaction, everything or nothing ───────────
         async with self._db.tenant_session(tenant_id) as session:
             conversations_repo = ConversationRepository(session)
+
+            # Shadow mode is resolved *after* the turn, because it is per-intent
+            # and the intent is something the turn produces (agent-runtime.md
+            # §6). That ordering is also what makes a shadow turn worth
+            # anything: the whole graph has already run, on the same models with
+            # the same tools, so what a human grades is the answer the shopper
+            # would have received rather than a cheaper approximation of it.
+            #
+            # Read from the shop's row **now**, in the transaction that releases
+            # the reply, not from what the caller held when it was authenticated
+            # (G72, ADR-0054 §6): a chat's live connection is authenticated once
+            # and can stay open for as long as the shopper keeps talking, and the
+            # owner's *Back to practice mode* must reach its very next reply. A
+            # row that has gone falls back to what the caller held.
+            current = await TenantRepository(session).get(tenant_id)
+            config = (current or turn.caller.tenant).config
+            mode = resolve_turn_mode(
+                tenant_mode=config.mode,
+                shadow_intents=config.shadow_intents,
+                intent=outcome.intent,
+            )
+            # A handover says how to reach the shop, in the shop's own contact
+            # details, and promises no person (ADR-0055, G44). Put on here, the
+            # one place every reply is released, for both assistants and both
+            # transports; a handover is fixed text, sent whole, never streamed.
+            if outcome.escalated:
+                outcome = replace(outcome, reply=handover_message(config))
 
             if mode is TurnMode.SHADOW:
                 # The shopper's words are history; the agent's are not. The

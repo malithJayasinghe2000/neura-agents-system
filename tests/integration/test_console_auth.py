@@ -149,6 +149,62 @@ class TestVerifyAndSession:
         assert data["user_id"] == owner["user"]
         assert [m["tenant_id"] for m in data["memberships"]] == [owner["tenant"]]
 
+    async def test_a_membership_carries_its_shop_name_and_no_other_shops(
+        self, client: TestClient, db: Database, owner
+    ) -> None:
+        """The name, so a merchant never has to recognise ``tn_01M…`` — and only theirs.
+
+        And the shop's assistants, sorted, so the console can hide a screen that
+        belongs to one the shop does not have (2026-09-30: *Sold out* was shown
+        to a shop with NEURA-CARE only). Passed through as data; the API names
+        no agent.
+
+        ``tenants`` is read in each held shop's own session. A second shop with a
+        recognisable name and no membership is the assertion that the lookup
+        cannot be widened into a way of reading another merchant's name.
+        """
+        from neura_core import get_settings
+        from neura_core.tenancy import TenantRepository
+        from neura_core.tenancy.schema import tenants
+
+        stranger = ids.new_id(ids.TENANT)
+        async with db.tenant_session(owner["tenant"]) as s:
+            await TenantRepository(s).create(
+                tenant_id=owner["tenant"], name="Corner Bookshop", enabled_agents=["sell", "care"]
+            )
+        async with db.tenant_session(stranger) as s:
+            await TenantRepository(s).create(tenant_id=stranger, name="Somebody Else's Shop")
+
+        try:
+            cookie = issue(owner["user"], get_settings().secret_key)
+            response = client.get("/v1/console/me", cookies={COOKIE_NAME: cookie})
+
+            assert response.json()["data"]["memberships"] == [
+                {
+                    "tenant_id": owner["tenant"],
+                    "role": "owner",
+                    "name": "Corner Bookshop",
+                    "assistants": ["care", "sell"],
+                }
+            ]
+            assert "Somebody Else" not in response.text
+            assert stranger not in response.text
+        finally:
+            for tenant_id in (owner["tenant"], stranger):
+                async with db.tenant_session(tenant_id) as s:
+                    await s.execute(delete(tenants).where(tenants.c.tenant_id == tenant_id))
+
+    def test_a_shop_with_no_tenant_row_has_no_name_rather_than_an_invented_one(
+        self, client: TestClient, owner
+    ) -> None:
+        from neura_core import get_settings
+
+        cookie = issue(owner["user"], get_settings().secret_key)
+        data = client.get("/v1/console/me", cookies={COOKIE_NAME: cookie}).json()["data"]
+
+        assert data["memberships"][0]["name"] is None
+        assert data["memberships"][0]["assistants"] == []
+
     async def test_a_revoked_membership_stops_working_on_the_next_request(
         self, client: TestClient, db: Database, owner
     ) -> None:

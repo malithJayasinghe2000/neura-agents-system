@@ -57,6 +57,7 @@ from neura_core.tenancy import (
     TenantRepository,
     UsageMeter,
 )
+from neura_core.tenancy.keys import generate
 from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
 from neura_core.webhooks import (
     DeliveryStatus,
@@ -181,15 +182,23 @@ class StubLLM:
         return _Embedding()
 
 
-class _Response:
-    def __init__(self, content: str = "") -> None:
-        from neura_llm import FinishReason
+def _Response(content: str = "") -> Any:  # noqa: N802 — kept as the name every call site uses
+    """A model reply, built from the REAL type so it cannot fall behind it.
 
-        self.content = content
-        self.tool_calls: list[Any] = []
-        self.usage = _Usage()
-        self.cost_usd = Decimal("0.0005")
-        self.finish_reason = FinishReason.STOP
+    It used to be a hand-written class. The real `ChatResponse` gained
+    `structured_repairs` and `model`, the copy did not, and 40 tests here failed
+    for weeks unnoticed — `make check` does not run this suite (G42 in
+    CONNECTING_A_NEW_SHOP_LOG.md). Same numbers as before: 120 + 30 tokens, $0.0005.
+    """
+    from neura_llm import FinishReason
+    from neura_llm.types import ChatResponse, Usage
+
+    return ChatResponse(
+        content=content,
+        usage=Usage(prompt_tokens=120, completion_tokens=30),
+        cost_usd=Decimal("0.0005"),
+        finish_reason=FinishReason.STOP,
+    )
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -269,6 +278,9 @@ async def _provision(
             kind=kind,
             scopes=scopes
             if scopes is not None
+            # A public key holds only what the chat box uses (G80).
+            else ["care:chat:write", "care:order:read", "care:catalogue:read", "care:escalate"]
+            if kind is ApiKeyKind.PUBLIC
             else [
                 "care:chat:write",
                 "care:conversations:read",
@@ -292,6 +304,27 @@ async def _provision(
                 base_url="https://shop.example/neura/v1",
                 credentials={"token": "shh"},
             )
+    return issued.token
+
+
+async def _public_key_as_issued_before_g80(database: Database, tenant_id: str) -> str:
+    """A chat box key with the runbook's old scopes, written to the table the
+    way ``ApiKeyRepository.issue`` wrote it, because ``issue`` now refuses it.
+    Shops connected before G80 hold keys like this one."""
+    issued = generate(ApiKeyKind.PUBLIC)
+    async with database.tenant_session(tenant_id) as session:
+        await session.execute(
+            api_keys.insert().values(
+                id=f"key_g80_{tenant_id[-6:]}",
+                tenant_id=tenant_id,
+                kind=ApiKeyKind.PUBLIC.value,
+                name="chat box, before G80",
+                token_prefix=issued.token_prefix,
+                token_hash=issued.token_hash,
+                scopes=["care:chat:write", "care:conversations:read", "care:order:read"],
+                allowed_origins=["https://shop.example"],
+            )
+        )
     return issued.token
 
 
@@ -405,6 +438,47 @@ class TestAuthenticationIsWired:
         )
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
+
+    async def test_a_secret_key_from_a_web_page_is_refused(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """G55: a real secret key with chat rights, sent the way the chat box's
+        fallback sends it, from a page. It used to answer, so nobody noticed the
+        secret was in the page. From a server, with no ``Origin``, it still works."""
+        token = await _provision(db, TENANT_A)
+        refused = client.post(
+            "/v1/care/chat",
+            json={"message": "hi"},
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+        assert refused.status_code == 401
+        assert refused.json()["error"]["code"] == "SECRET_KEY_IN_PAGE"
+
+        accepted = client.post("/v1/care/chat", json={"message": "hi"}, headers=_auth(token))
+        assert accepted.status_code == 200
+
+    @pytest.mark.parametrize("path", ["/v1/care/conversations", "/v1/care/conversations/{id}"])
+    async def test_a_public_key_cannot_read_transcripts(
+        self, client: TestClient, db: Database, path: str
+    ) -> None:
+        """G80: the chat box key is in every page's source, and the runbook gave
+        it ``conversations:read``. With the shop's ``Origin`` (any script can
+        send one), it listed and read every shopper's conversation. A key made
+        that way, written straight to the table as the runbook's were, is now
+        refused; the chat box never reads a transcript."""
+        await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        async with db.tenant_session(TENANT_A) as session:
+            await ConversationRepository(session).start(
+                TENANT_A, conversation_id="cnv_g80_someone_elses", agent_key="care"
+            )
+        token = await _public_key_as_issued_before_g80(db, TENANT_A)
+
+        response = client.get(
+            path.format(id="cnv_g80_someone_elses"),
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+        assert response.status_code == 403
+        assert response.json()["error"]["details"]["missing_scopes"] == ["care:conversations:read"]
 
 
 # ── A turn, end to end ───────────────────────────────────────────────────────
@@ -971,7 +1045,9 @@ class TestWebhooks:
             jobs = await JobQueue(session).list_for(TENANT_A)
 
         assert deliveries, "the turn queued no deliveries; this test proves nothing"
-        assert [j.kind for j in jobs] == [WEBHOOK_DRAIN]
+        # Webhook jobs only: a new conversation also books its own deletion
+        # (`retention.sweep`, ADR-0048), which is not this test's subject.
+        assert [j.kind for j in jobs if j.kind == WEBHOOK_DRAIN] == [WEBHOOK_DRAIN]
 
     async def test_a_tenant_with_no_endpoints_queues_no_drain_job(
         self, client: TestClient, db: Database
@@ -983,7 +1059,10 @@ class TestWebhooks:
         client.post("/v1/care/chat", json={"message": "hello"}, headers=_auth(token))
 
         async with db.tenant_session(TENANT_A) as session:
-            assert await JobQueue(session).list_for(TENANT_A) == []
+            jobs = await JobQueue(session).list_for(TENANT_A)
+        # The conversation's own `retention.sweep` booking (ADR-0048) is expected;
+        # a drain job is what must not be there.
+        assert [j.kind for j in jobs if j.kind == WEBHOOK_DRAIN] == []
 
     async def test_a_delivery_dies_after_its_attempts_are_used(self, db: Database) -> None:
         """And is still readable — that is the dead-letter queue api-design.md §9
@@ -1082,6 +1161,82 @@ class TestIsolation:
 
 
 # ── The WebSocket transport (ADR-0016) ───────────────────────────────────────
+
+
+class NeedsPersonLLM(StubLLM):
+    """A router that calls every message one a person must act on, which CARE
+    always hands over (`nodes/route.py`)."""
+
+    async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
+        result = await super().chat_structured(role, request, schema)
+        if schema.__name__ == "Route":
+            result.value = schema(intent="needs_person", confidence=0.95, search_query="")
+        return result
+
+
+class TestHandover:
+    """ADR-0055, G44. A handed-over shopper is told how to reach the shop, in the
+    shop's own words, and never that a person is coming."""
+
+    CONTACT = TenantConfig(contact_email="hello@yourshop.example", contact_phone="+94 11 234 5678")
+    WITH_CONTACT = (
+        "I can't help with this here. Please contact our store: "
+        "hello@yourshop.example, +94 11 234 5678."
+    )
+
+    @staticmethod
+    def _handing_over(client: TestClient) -> None:
+        from neura_api.turns import TurnService
+
+        app = client.app
+        app.state.turns = TurnService(app.state.database, NeedsPersonLLM(), app.state.stores)  # type: ignore[attr-defined]
+
+    async def test_a_handover_names_the_shops_contact_details(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+
+        body = client.post(
+            "/v1/care/chat", json={"message": "please cancel my order"}, headers=_auth(token)
+        ).json()["data"]
+
+        assert body["state"] == ConversationState.ESCALATED.value
+        assert body["reply"] == self.WITH_CONTACT
+        async with db.tenant_session(TENANT_A) as session:
+            messages = await ConversationRepository(session).messages(
+                TENANT_A, body["conversation_id"]
+            )
+        # The transcript holds what the shopper read, not the old promise.
+        assert messages[-1].content == self.WITH_CONTACT
+
+    async def test_with_no_details_it_promises_nothing(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A)
+        self._handing_over(client)
+
+        body = client.post(
+            "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
+        ).json()["data"]
+
+        assert body["state"] == ConversationState.ESCALATED.value
+        assert body["reply"] == "I can't help with this here. Please contact our store."
+
+    async def test_the_live_connection_says_the_same(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
+            socket.send_json({"type": "message", "content": "what is your returns policy?"})
+            frames = _drain(socket)
+
+        assert frames[-1]["state"] == ConversationState.ESCALATED.value
+        assert frames[-1]["reply"] == self.WITH_CONTACT
+        # A handover is fixed text, sent whole: no `token` frame carries the old words.
+        assert not [f for f in frames if f["type"] == "token"]
 
 
 class TestShadowMode:
@@ -1190,13 +1345,42 @@ class TestShadowMode:
         second place that has to be true."""
         token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
         assert not [f for f in frames if f["type"] == "token"]
         assert frames[-1]["reply"] == ""
         assert frames[-1]["state"] == ConversationState.SHADOWED.value
+
+    async def test_a_switch_reaches_a_chat_that_is_already_open(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """G72, ADR-0054 §6. The mode is read when the reply is released, not
+        when the chat opened: a shop switched to practice mode withholds the
+        very next reply of a shopper who is still talking, and switched back,
+        shows the one after."""
+        token = await _provision(db, TENANT_A)
+
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
+            socket.send_json({"type": "message", "content": "what is your returns policy?"})
+            live = _drain(socket)
+
+            async with db.tenant_session(TENANT_A) as session:
+                await TenantRepository(session).set_config(TENANT_A, TenantConfig(mode="shadow"))
+            socket.send_json({"type": "message", "content": "and for sale items?"})
+            practice = _drain(socket)
+
+            async with db.tenant_session(TENANT_A) as session:
+                await TenantRepository(session).set_config(TENANT_A, TenantConfig(mode="live"))
+            socket.send_json({"type": "message", "content": "thanks, and shipping?"})
+            live_again = _drain(socket)
+
+        assert live[-1]["state"] != ConversationState.SHADOWED.value
+        assert practice[-1]["state"] == ConversationState.SHADOWED.value
+        assert practice[-1]["reply"] == ""
+        assert not [f for f in practice if f["type"] == "token"]
+        assert live_again[-1]["state"] != ConversationState.SHADOWED.value
 
     async def test_a_shadow_row_is_invisible_to_another_tenant(
         self, client: TestClient, db: Database
@@ -1295,7 +1479,7 @@ class TestAWithheldTurnIsNeverEmptyHanded:
         socket happened to open."""
         token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
@@ -1528,7 +1712,7 @@ class TestStreaming:
     ) -> None:
         token = await _provision(db, TENANT_A)
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
@@ -1548,7 +1732,7 @@ class TestStreaming:
         something: it is the one stream nobody treats as a response body."""
         token = await _provision(db, TENANT_A)
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             frames = _drain(socket)
 
@@ -1562,7 +1746,7 @@ class TestStreaming:
         a character at a time is theatre."""
         token = await _provision(db, TENANT_A)
 
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json(
                 {
                     "type": "message",
@@ -1584,7 +1768,7 @@ class TestStreaming:
         client.post(
             "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
         )
-        with client.websocket_connect(f"/v1/care/stream?token={token}") as socket:
+        with client.websocket_connect("/v1/care/stream", headers=_auth(token)) as socket:
             socket.send_json({"type": "message", "content": "what is your returns policy?"})
             _drain(socket)
 
@@ -1606,6 +1790,22 @@ class TestStreaming:
         with (
             pytest.raises(WebSocketDisconnect) as raised,
             client.websocket_connect("/v1/care/stream?token=nonsense") as socket,
+        ):
+            socket.receive_json()
+        assert raised.value.code == 4401
+
+    async def test_a_secret_key_in_the_socket_address_is_refused(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """G34 in CONNECTING_A_NEW_SHOP_LOG.md: an address is written down by the
+        web server, a proxy and a browser's history. A valid secret key sent there
+        is refused, even though the same key in the header is accepted."""
+        from starlette.websockets import WebSocketDisconnect
+
+        token = await _provision(db, TENANT_A)
+        with (
+            pytest.raises(WebSocketDisconnect) as raised,
+            client.websocket_connect(f"/v1/care/stream?token={token}") as socket,
         ):
             socket.receive_json()
         assert raised.value.code == 4401

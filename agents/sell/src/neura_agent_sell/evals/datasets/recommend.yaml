@@ -80,3 +80,28 @@ cases:
       recorded that exact mistake. "We have the Moor Walking Boot, but not in a
       UK 9" contains the forbidden phrase while being exactly right, and a check
       that fails a correct reply teaches whoever reads the report to ignore it.
+
+  - id: recommend_005
+    intent: recommend
+    synthetic: true
+    input: "I need a mug I can heat on my camp stove."
+    fixtures: [short_ids.json]
+    expect:
+      intent: recommend
+      tools_called: [search_products]
+      grounded: true
+      escalated: false
+      must_contain: ["Camp Mug"]
+      must_not_contain: ["(Product"]
+    notes: >-
+      Product ids ONE character long ("4", "5"), as a real connected shop numbers
+      them (CONNECTING_A_NEW_SHOP_LOG.md G36). "Safe to heat directly on a camp
+      stove" is in product 4's description and nowhere else, so a correct reply
+      rests on that description reaching verify. Before the fix, an id under three
+      characters was never seen as cited, the description was withheld, and this
+      exact reply failed as unsupported and was handed to a person. Every id in
+      store.json is long, which is why no earlier case caught it.
+
+      must_not_contain "(Product": the reply the shopper reads carries no internal
+      id (G41). Measured 2026-09-30 before that fix, this case's reply was "I
+      recommend the Enamel Camp Mug 350ml (Product 4)…".

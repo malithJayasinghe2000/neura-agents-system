@@ -393,7 +393,10 @@ class TestConformanceCatchesFailures:
 
         report = await run_conformance(RaisesOnMissing())
         assert not report.is_conformant
-        assert any("get_product" in f.message for f in report.errors)
+        # In the bridge developer's words, not our method's name (G53).
+        missing = next(f for f in report.errors if f.check == "products.get_missing")
+        assert missing.message.startswith("asking for a product that does not exist failed")
+        assert "404" in missing.hint
 
     async def test_erroring_on_empty_search_is_an_error(self) -> None:
         class RejectsEmptySearch(AcmeAdapter):

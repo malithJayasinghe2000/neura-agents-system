@@ -16,6 +16,7 @@ from pathlib import Path
 _HERE = Path(__file__).parent
 
 WIDGET_JS = (_HERE / "widget.js").read_text(encoding="utf-8")
+PAIRS_JS = (_HERE / "pairs.js").read_text(encoding="utf-8")
 DEMO_HTML = (_HERE / "demo.html").read_text(encoding="utf-8")
 
-__all__ = ["DEMO_HTML", "WIDGET_JS"]
+__all__ = ["DEMO_HTML", "PAIRS_JS", "WIDGET_JS"]

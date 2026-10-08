@@ -13,6 +13,11 @@ of ADR-0024:
 
     POST /mcp                            an external AI agent, `sell:mcp:connect`
 
+    POST /suggestions                    a storefront page, `sell:suggest:read`
+
+    GET/PUT/DELETE /console/shops/…      the shop owner, signed in to the console
+                                         (ADR-0050) — see ``console.py``
+
     POST   /feed                         merchant, `sell:feed:manage`
     GET    /feed                         merchant, `sell:feed:manage`
     POST   /feed/{id}/rotate             merchant, `sell:feed:manage`
@@ -37,10 +42,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import CursorResult
 
+from neura_agent_sell import console as owner_console
+from neura_agent_sell import pairing as pairing_surface
 from neura_agent_sell.feed import build, canonical, jsonld, publishable
 from neura_agent_sell.feed import tokens as feed_tokens
 from neura_agent_sell.feed.schema import sell_feeds
 from neura_agent_sell.mcp import protocol as mcp_protocol
+from neura_agent_sell.pairing.cache import DatabasePairingCache
+from neura_agent_sell.pairing.choices import DatabaseOwnerChoices
+from neura_api.ratelimit import enforce, subjects_for
 from neura_commerce.identity import EntityType
 from neura_commerce.sync import DatabaseEntityStore
 from neura_core import NotFoundError, get_logger
@@ -74,6 +84,28 @@ class FeedCreated(BaseModel):
     #: response body has saved everything they will ever get.
     url_shown_once: str
     formats: list[str] = Field(default_factory=list)
+
+
+class SuggestionRequest(BaseModel):
+    """What a storefront page sends.
+
+    **`product_ids` is deliberately not called `cart_items`.** The name is the
+    contract: this surface is told what is on a page, never what a shopper is
+    doing, and a field called `cart` would make the second reading the natural
+    one for whoever wires up the next platform.
+
+    Over-long lists are truncated rather than refused (`select.MAX_INPUT_IDS`):
+    a shopper with eleven things in their basket should not meet a validation
+    error on the cart page.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    product_ids: list[str] = Field(default_factory=list, max_length=100)
+    #: Optional while a tenant has one shop, which is the MVP shape
+    #: (`StoreDirectory.connect`). Stated rather than implied, because
+    #: `tenant_stores` already allows several.
+    store_id: str | None = Field(default=None, max_length=128)
 
 
 async def _managing_caller(request: Request, agent_key: str) -> Any:
@@ -176,6 +208,71 @@ def build_routes(agent_key: str) -> APIRouter:
             return Response(status_code=202)
 
         return _json(response)
+
+    # ── Storefront ────────────────────────────────────────────────────────────
+
+    @router.post("/suggestions", summary="Products that go with the ones a page names")
+    async def suggestions(request: Request, body: SuggestionRequest) -> dict[str, Any]:
+        """What goes with these products ([ADR-0040], amended by [ADR-0045]).
+
+        **The fourth surface, and no model runs on this request.** A page sends
+        product ids; ordinary code reads a stored pairing if a background job
+        has computed one, falls back to the merchant's own product text if not,
+        drops the anchor's own category, and returns at most two products.
+
+        **A model may have chosen what to search for, and never what to say.**
+        ADR-0045 §1 replaced ADR-0040 §5's *"no model runs in it"* with *"no
+        model runs between a shopper and an answer"* — so this handler makes no
+        model call on any path, including the first request for a product
+        nobody has ever paired. That one answers from words and queues the
+        computation for next time.
+
+        **We are never told these ids came from a cart, and must not be.** The
+        Generic Commerce Interface has nine endpoints and none of them is a
+        cart; every platform exposes one differently, so asking the shop about
+        carts would mean per-platform code and would break
+        [Rule 1](../../../../AGENTS.md). A page that knows what it is displaying
+        already has the ids, which is why this needs no tenth endpoint.
+
+        **No runner is required**, for the same reason the feed and MCP need
+        none: a pairing is not a conversation and has no graph.
+
+        **An empty result is a 200.** Unknown ids, a store that cannot search,
+        a product with no categories, nothing complementary in the catalogue —
+        all of them return `suggestions: []` and the block does not render.
+        Showing nothing costs a shopper nothing; a 4xx on a cart page costs the
+        merchant a support ticket about an error nobody can act on.
+        """
+        caller = await _suggest_caller(request, agent_key)
+        await _suggest_rate_limit(request, caller)
+
+        connection = await request.app.state.stores.connect(
+            caller.tenant_id, store_id=body.store_id
+        )
+        try:
+            pairing = await pairing_surface.suggest(
+                body.product_ids,
+                adapter=connection.adapter,
+                capabilities=connection.capabilities,
+                tenant_id=caller.tenant_id,
+                # The resolved store id, never `body.store_id`: a pairing keyed
+                # by an absent id would be a different row from the same
+                # tenant's pairing keyed by the id they later start sending.
+                cache=_pairing_cache(caller.tenant_id, connection.store_id),
+                # Asked first, and when the owner has chosen it is the whole
+                # answer (ADR-0050).
+                choices=_owner_choices(caller.tenant_id, connection.store_id),
+            )
+        finally:
+            # Same reason as MCP: the adapter holds an HTTP client, and a cart
+            # page is loaded far more often than a conversation is started.
+            await _close(connection.adapter)
+
+        return {
+            "heading": pairing.heading,
+            "paired_with": pairing.paired_with,
+            "suggestions": pairing.suggestions,
+        }
 
     # ── Merchant ──────────────────────────────────────────────────────────────
 
@@ -355,6 +452,8 @@ def build_routes(agent_key: str) -> APIRouter:
             ),
         }
 
+    # ── The owner's side of suggestions ([ADR-0050]) ─────────────────────────
+    owner_console.register(router, agent_key)
     return router
 
 
@@ -392,6 +491,74 @@ async def _mcp_caller(request: Request, agent_key: str) -> Any:
     require_scopes(caller, "sell:mcp:connect")
     require_agent(caller, agent_key)
     return caller
+
+
+def _pairing_cache(tenant_id: str, store_id: str) -> DatabasePairingCache:
+    """Where a request reaches its stored pairings ([ADR-0045]).
+
+    A function rather than an expression inline, for one reason worth stating:
+    it is the seam a test replaces. `tests/unit/test_sell_pairing.py` drives the
+    real route, the real scope check and the real orchestration against a cache
+    it can see into, and does it **without a database** — which is what keeps
+    the endpoint's tests unit tests rather than a suite that skips when Postgres
+    is absent.
+
+    **The resolved `store_id`, never the body's.** `StoreDirectory.connect`
+    fills in a tenant's only store when a page names none, and keying a pairing
+    by an absent id would file the same shop's pairings under two keys — one
+    written by pages that name the store and one by pages that do not.
+    """
+    return DatabasePairingCache(get_database(), tenant_id=tenant_id, store_id=store_id)
+
+
+def _owner_choices(tenant_id: str, store_id: str) -> DatabaseOwnerChoices:
+    """Where a request reaches the owner's choices ([ADR-0050]).
+
+    A seam for the same reason as :func:`_pairing_cache`: the endpoint's tests
+    replace it and run without a database. Keyed by the **resolved** store id,
+    like the cache, so a page that names its store and one that does not reach
+    the same choice.
+    """
+    return DatabaseOwnerChoices(get_database(), tenant_id=tenant_id, store_id=store_id)
+
+
+async def _suggest_caller(request: Request, agent_key: str) -> Any:
+    """Authenticate a storefront page.
+
+    `sell:suggest:read` and not `sell:catalogue:read`: the catalogue scope is
+    held by keys that read products directly, and this one is served to every
+    browser that loads a merchant's cart page. ADR-0040 §1 says the surface has
+    "a different consumer, a different gate and a different failure mode" — the
+    gate is this line, and a shared scope would make the narrower power
+    unexpressible, exactly as `sell:mcp:connect` exists so an external agent
+    cannot hold a conversation.
+
+    **No runner is resolved**, as with the feed and MCP: there is no graph.
+    """
+    from neura_api.dependencies import authenticate_request
+    from neura_core.tenancy.auth import require_agent, require_scopes
+
+    caller = await authenticate_request(request)
+    require_scopes(caller, "sell:suggest:read")
+    require_agent(caller, agent_key)
+    return caller
+
+
+async def _suggest_rate_limit(request: Request, caller: Any) -> None:
+    """ADR-0017's ladder, with no conversation to narrow it.
+
+    A cart page loads for every visitor, so this is the busiest authenticated
+    endpoint SELL has. `conversation_id=None` is honest rather than lazy —
+    there is no conversation — which leaves the public-key case limited by
+    tenant, key and client address.
+    """
+    from neura_api.dependencies import client_address
+
+    enforce(
+        await request.app.state.limiter.check(
+            subjects_for(caller, client=client_address(request), conversation_id=None)
+        )
+    )
 
 
 async def _mcp_context(request: Request, caller: Any) -> Any:
@@ -623,4 +790,4 @@ def _now() -> Any:
     return datetime.now(UTC)
 
 
-__all__ = ["CACHE_SECONDS", "PAGE_SIZE", "FeedCreated", "build_routes"]
+__all__ = ["CACHE_SECONDS", "PAGE_SIZE", "FeedCreated", "SuggestionRequest", "build_routes"]

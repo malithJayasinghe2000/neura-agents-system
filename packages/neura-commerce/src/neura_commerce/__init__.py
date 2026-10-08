@@ -23,7 +23,9 @@ check that greps for platform names.
 from neura_commerce.conformance import (
     ConformanceReport,
     Finding,
+    ProtocolChecks,
     Severity,
+    check_adapter,
     run_conformance,
 )
 from neura_commerce.errors import (
@@ -79,11 +81,13 @@ __all__ = [
     "NegotiationResult",
     "Page",
     "ProductQuery",
+    "ProtocolChecks",
     "RegisteredAdapter",
     "Requirement",
     "Severity",
     "SyncQuery",
     "WritableCommerceAdapter",
+    "check_adapter",
     "clamp_page_size",
     "describe_gap",
     "filter_by_capability",

@@ -4,7 +4,7 @@
 > It records where the project *is*. Every other document records where it is *going*.
 > If the two disagree, this file is right about the present and the others are right about the intent.
 
-**Last updated:** 2026-09-19 (last) — **both agents held as CONVERSATIONS, and both now work. CARE passes; SELL's "recommends nothing" defect ([A27](open-questions.md)) is FIXED in code, measured 3/3 `no_match` → 3/3 answered with every claim verbatim**
+**Last updated:** 2026-10-08: **T4 DONE on Gemini** (log, *T4 results*): CARE injection 7 of 7 and SELL injection 4 of 4, **injection resistance 1.00 both**; CARE product questions 8 of 9 (the old `product_qa_006`; T1 answered: 003 and 007 pass on Gemini); SELL recommend 4 of 5 in two runs, **its groundedness gate not met** because of one repeatable case, logged as **G81** (SELL says merino socks *help provide warmth*, which the description never says, and our fact check lets it through). **The owner chose to merge (A): this branch is merged into `main` locally, not pushed; A21 is built on `feat/a21-signed-in-order-questions`.** Then: **ADR-0057 ACCEPTED** by the owner (the words, and Claude's five additions). Not built. **Next:** T4 on Gemini (the owner allowed Gemini test runs without asking, 2026-10-08), merge this branch into `main`, then A21's code on a fresh branch, test first, G79 first. Earlier the same day: **G80 FIXED (the owner chose to fix it now, alone, with the full checks): a public chat box key holds only what the chat box does.** It held `conversations:read`, so anyone who copied it from a shop's page could read every transcript of that shop; proven on a throwaway test shop (`200` on the old code, `403` on the new). Refused when a key is made; a key made before the rule (Ceylon Harvester's) loses the rest the moment it is used, and the chat box keeps everything it uses. `make check` green (1531 unit, 486 integration, 7 of 7 contracts), `make console-check` 135 of 135, `make widget-check` 8 of 8. **Next:** the owner's review of ADR-0057 (its *(Claude)* parts and the two sentences); then, before A21's code, T4 and the merge. Earlier the same day: **A21 design session started. Q1 decided by the owner:** only a shopper signed in to the shop gets an order answered; one who is not is told to sign in, or contact the shop; guests by order number and email come later (log, *Decisions*, *A21 (design session, Q1)*). **Q2 decided: a short-lived pass** the shop's server signs for a signed-in customer and the chat box carries. **Q3 decided: one secret per shop**, made by the owner on Shop connection and kept on the shop's server, signs each pass. **Q4 decided: the pass expires after a few minutes**; the shop's server makes a fresh one on each page by itself. **Q5 decided: a Sign in link** in the chat box's answer, from an optional setting in the chat box line. **ADR-0057 written, Proposed, with Claude's security review** (16 attacks, each with what stops it). The review found two problems, logged in `CONNECTING_A_NEW_SHOP_LOG.md`: **G79** (a conversation takes its customer from its first message and never checks it again; designed into the ADR, §6) and **G80, a security bug in what is built today: the public chat box key holds `conversations:read`, and the transcript routes check only the scope, so anyone who copies the key from a shop's page can read every transcript of that shop** (proven in the code and the key table; a live test was refused by the permission check). **G80 must be fixed before A21 is built.** Also for the guide: a page with a pass must not be cached by a shared cache, and the pass is made only from the shop's own signed-in session. **Next:** the owner's yes to fix G80 (the small fixes are paused), then the owner's review of ADR-0057 (its *(Claude)* parts and the two sentences). Earlier the same day: **The owner paused the small fixes** (G20, G73, G74/G38, and the reviews of G30 and G65 wait; *Decisions*, *Step 7, after G57 + G65*, in `CONNECTING_A_NEW_SHOP_LOG.md`). **T4 is still owed before the merge.** **Next big piece proposed: A21**, order questions from the chat box: a design session, an ADR and a security review before any code. Found while preparing it (read in the code): the ownership rule is built and enforced for a session whose customer a **server** names (`SessionIdentity.may_see`, `scoped_to_session`), but **nothing in production ever proves an order for a guest**: `verified_order_refs` (security-model.md §3's *order number plus the order's email or phone*) is read and never written. So a shopper who checked out without an account has no way in today, and the owner's direction (*not signed in: told to sign in*) does not cover them: a design question. Then, 2026-10-07: **A market question from the owner (no code):** do systems like this exist, is it hard to market, and should all five agents come? Checked on the web the same day: **[blueprint-v2](business/blueprint-v2.md) §2.1 and §3.1 are out of date on one point.** They say Gorgias and Fin are Shopify-first and that a WooCommerce, Magento or custom shop *"gets a contact sales page"*; today several tools (Gorgias, Tidio, smaller vendors) serve WooCommerce and Magento, and custom shops through an API, so *works with any shop* alone is a weaker reason to buy than the blueprint says. Also: Shopify's Agentic Storefronts and Google's UCP (2026) now take non-Shopify catalogues to AI shopping, and OpenAI was reported to have stopped its own ChatGPT checkout in March 2026 after about twelve merchants. In Sri Lanka, Daraz has AskDaraz and Kapruka ran an AI agent challenge in 2026. **The blueprint is not changed** (the owner's document); Claude's advice to the owner: stay with two agents until a real shop uses them (B2), as blueprint §2.2 and the 2026-09-20 decision on MIND already say. Then, earlier the same day: **G57 FIXED, alone, with the full checks: a shop token pasted into the chat box line is refused on its shape, and the chat box says so.** It was refused as an unknown key the page could not read, so the chat box could only say *We could not reach the assistant* while the bridge's password sat in the page. Now 401 `SHOP_TOKEN_IN_PAGE`, readable like G55's, telling the developer it belongs in the bridge's settings and to ask the owner for a new token if the page was public. Test first (the route answered `AUTHENTICATION_FAILED` on the old code); real chat box on the live API, no AI: one error per message, the token never in the log. `make check` green (1515 unit, 483 integration), `make widget-check` 8 of 8. **Then G65 FIXED, waiting for the owner's review:** the owner guide's *developer guide* link is underlined and darker, like the developer guide's own link (`make web-check` green, desktop and phone). **Next:** G20 (the runbook's catalogue copy); then the owner's decisions G73 and G74/G38; then A21. **Still waiting for the owner's review:** guide step 5's `fn_pk_test_` line (G30). **T4 still owed before the merge.** Earlier: 2026-10-06, late night: **the third group of small fixes, G62 + G53 + G31 + G30, FIXED.** G62 (owner's choice A, ADR-0056): no error carries `docs_url` until real error pages exist. G53: the full check speaks the bridge developer's words (404, an empty list, the status words), none of our function names, no unmeasured number. G31: FEATURES.md puts suggestions in the chat box (ADR-0041). G30: the chat box line's placeholder is `fn_pk_…`, and guide step 5 explains `fn_pk_test_` (for the owner's review). `make check` green (1510 unit, 483 integration), `make web-check` green, `make console-check` 135 of 135. **Next:** G57 alone (a shop token pasted in the chat box line), then G65 + G20 (guide texts, one section at a time); then the owner's decisions G73 and G74/G38; then A21 (order questions: a design session, an ADR, a security review). **T4 still owed before the merge.** Earlier the same day: **the second group of small fixes: G59 + G76 FIXED; G62 asked, not fixed.** G59: a product view's `product_id` takes any id the bridge format allows (a dot, a slash, a space), so a shop with such ids no longer gets a 400 for every view; the guide's product views section says so (for the owner's review). G76: `make tenant-drop` now removes the shop token, the checks, the pairings, the owner's choices and practice-mode evidence too, and a test compares its list with the database. G62 stays open: `api-design.md` promises every error link opens a page, so dropping it is the owner's decision. `make check` green (1499 unit, 483 integration), `make web-check` green. **Next:** G62 (the owner's choice), G73 (one decision first); then A21. **T4 still owed before the merge.** Earlier the same day: **G56 FIXED: a chat box that cannot reach NEURA shows one plain error per message, never the browser's own words.** The double error came from the refused socket's `close` being read as a dropped chat (which also threw away the switch to REST); `errorTextFor` shows NEURA's own readable refusals as they are and one plain sentence for anything else. Test first: 4 unit tests and 3 browser cases failed on the old code; `node --test` 55 of 55, `make widget-check` 8 of 8; on the real API (no AI) one error per message. `make check`, `make web-check` green. **Next by harm:** the group G59 + G62 + G76, then G73 (one decision from the owner first); then A21. **T4 still owed before the merge.** Earlier the same day: **the first group of small fixes, G51 + G54 + G71 a, FIXED** (one slow check for the three, one commit each). G51: a passed check lists only what it tested (*Orders can be looked up* only for a shop with orders). G54: Home says the owner connects on Shop connection (was *done outside the console*). G71 a: Help says the assistant asks the shop live (no *Sync now after every stock change*), two true trouble rows, no long dash left on Help. `make console-check` 135 of 135 (4 new checks, which failed on the old code; a throwaway not-connected shop is made and removed by id, giving the screen before connecting a permanent check); `make check` green. **Next by harm:** G73 (a handover's reason kept only in the API's output: a short design question first), G56, G59, G62, G76; then A21. **T4 still owed before the merge.** Earlier the same day: **G47's open half (DNS rebinding) FIXED, with G78: in production NEURA's server connects to a shop, or sends a webhook, only at an address checked as it connects.** Before, a shop's address was checked only when the owner pressed Check or Connect; every later call (chat turns, Sync now, suggestions, the AI connection, all via `StoreDirectory`) connected unchecked, and webhooks had no private-address rule at all (G78). Now `neura_api/addresses.py` `outbound_transport` (httpx's transport, its pool rebuilt on a network backend that looks the name up once, refuses unless every answer is public, and dials that checked address; TLS still checks the name) is used by `StoreDirectory`, the check job and the webhook sender in production; `POST /v1/webhooks` refuses a private address in production. Test first: 15 tests, and on the old code the check, a chat turn and a webhook really connected to a private listener. Real DNS: `127.0.0.1.nip.io` refused, `example.com` 200, a wrong certificate refused. `make check` green (1489 unit, 481 integration); `make console-check` 130 of 130. **The owner, 2026-10-06: Claude may run the API and services itself** (the API stopped when a package file change reinstalled it; now started by Claude, `cloud-prod`, log in the session scratch folder; the public website likewise). **Next by harm:** the dashboard text group G51 + G54 + G71 a (grouped slow checks), then G73, G56, G59, G62, G76; then A21. **T4 still owed before the merge.** Earlier: **G24 FIXED, with G77: NEURA refuses to start on a server without its two public addresses.** `PUBLIC_BASE_URL` (the chat box line, the developer AI tool address, and the only host that tool accepts) and `CONSOLE_BASE_URL` (sign-in links) fell back to `localhost` silently; a wrong one fails for someone else. Now: in development `PUBLIC_BASE_URL` left empty is this machine at `NEURA_API_PORT` (was a fixed `:8000`); staging and production refuse to start without both, production only with public `https://` addresses; every start-up problem is named in one message. Test first: 11 of 12 new tests failed on the old code. `make check` green (1475 unit, 480 integration). The owner's running API still serves `:8010`. **The owner's working rules, 2026-10-02/03:** bugs in existing features are fixed the best-practice way without A/B/C; small fixes share the slow checks, one group of 2 to 4, one commit each; security fixes and anything shoppers read stay alone. **Next by harm:** G47's open half (DNS rebinding, security, alone), then the dashboard text group G51 + G54 + G71 a, then G73, G56, G59, G62, G76; then A21. **T4 still owed before the merge.** Earlier: **the small fixes started, by harm. G69 FIXED, with G75: the check warns when products have no usable status, and the owner sees warnings.** A product with no status, `"unknown"` or a word the format does not know is read as `unknown`, and NEURA-SELL, the suggestions and the feed keep only `active` products, so such a shop got nothing recommended while the check stayed green (G69). Now `products.status_vocabulary` reads 20 products and warns (⚠, Connect stays open: the format allows a missing status), naming each word with its count, with a hint in the developer's words. **G75, found while fixing it:** a clean check's warnings were shown only in the developer's copy, never to the owner; both passed screens now show *N things to look at* in the owner's words and count a warning as not passed (*18 of 20*). Test first: 4 of 5 new unit tests and 3 new browser checks failed on the old code; the screen before connecting checked once in headless Chrome (a throwaway shop, removed), desktop and phone; the real Ceylon Harvester bridge: 19 passed, 0 warnings. `make check` green (1463 unit, 480 integration); `make console-check` 130 of 130. **The owner's new rule:** for a bug in an existing feature, Claude picks the best-practice fix and builds it, no A/B/C (the log, *Decisions*, *Step 7, G69*). **Also found: G76** (`make tenant-drop` misses `shop_tokens`, `shop_checks`, `sell_pairings`, `sell_pairing_choices`, `shadow_evidence`). **Next small fixes, by harm:** G24 (NEURA's public address defaults to `localhost:8000`), G47's open half (DNS rebinding), G51 (the passed screen's seven fixed lines), G73, G56, G54, G71 a, G59, G62, G76; then A21 (order questions: a design session, an ADR, a security review). **T4 still owed before the merge.** Earlier the same night: **G44's untrue promise FIXED (ADR-0055, accepted): a handover tells the shopper how to contact the shop.** Every handover now reads *"I can't help with this here. Please contact our store:"* and the shop's email or phone, which the owner types once on **Shop connection** (*Your shop's contact details*, with the exact sentence a shopper reads under the form); nothing set, the sentence stops after *store*; never a promise of a person (the old *"passing you to a colleague… you won't need to explain it again"* is gone from CARE's prompt file and the engine's fallback too). Made once in `neura_core.tenancy.handover_message`, put on every handover by the turn service (both assistants, both transports). `GET`/`PUT /v1/console/shops/{t}/contact`: only two keys written, checked, audited by field never by value. Test first: 8 unit, 3 served-handover and 13 route integration tests, each failing on the old code. `make check` green (1458 unit, 480 integration). `make console-check` 127 of 127 (5 new checks; the old *no credential form* check narrowed to its purpose, no secret field and no form but the contact one, because the contact fields are public); desktop and phone seen in headless Chrome. (It waited while the owner's own API was paused in their terminal, Ctrl+Z.) **Also today:** the owner went live on Ceylon Harvester and every message was handed over: on the local models the router said 0.00 (G33, confirmed from the API's log); on the cloud model Gemini answered 503 until the owner changed the API key, then it answered. **New findings:** G73 (a handover's reason is kept only in the API's output), G74 (the AI's own instructions offer *a colleague*: needs an AI test and the owner's words). The owner now runs the API in their own terminal, `NEURA_ROLE_MAP=cloud-prod make api`. Committed `e90a860`; **the owner tested it by hand** (*"Where is my order #1?"* → their own contact details). **Next (the owner's decision, in a new chat): the small bug fixes first**, one at a time, the owner choosing from Claude's list by harm (the log, *Decisions*, *Step 7, after G44*: G69, G24, G47's open half, G73, G56, G54, G51, G71 a, G59, G62), **then order questions from the chat box (A21: a design session, an ADR and a security review)**. **The AI test is owed as T4**, one run before this branch is merged (CARE `injection` after ADR-0055, T1, T3). **Running state:** the owner runs the API in their own terminal, `NEURA_ROLE_MAP=cloud-prod make api` (`.env` still says `ollama-dev`); **Ceylon Harvester is LIVE** with the owner's test contact details. Earlier the same day: **G22 FIXED, the first of the most important fixes: the shop owner switches practice mode on Home (ADR-0054, accepted, built).** The owner's answers: a button in the dashboard (not a command); **Go live** at any time, after a question that shows Review's counts (no threshold: none measured); **new shops start in practice mode** (`make tenant-new`; `TenantConfig.mode`'s default stays `live`, so existing shops keep their mode); on **Home**; **no mockup** (*"it is just a button"*). **Found while designing it, G72, and fixed with it:** an open chat kept the mode it read when it opened, for as long as the shopper kept talking; the turn now reads the mode when the reply is released. Built test first: `PUT /v1/console/shops/{t}/mode` (`console_mode.py`; only the `mode` key written, other settings kept; an audit entry; nothing for a repeat; any member, and D3's developer role must not get it); Home's `ModeSwitch`; Help's step 5. Tests: G72 through a real chat socket, 9 route tests, 1 for the new-shop rule, 7 browser checks. `make check` green (1450 unit, 464 integration); `make console-check` 122 of 122. **Next, the rest of the most important fixes (the owner picks):** **G44** the handover message promises a colleague who never comes (fix decided: D7, the shop's contact details); **T3/T1** the owed AI evals (Rule 4); **G69** a missing product status makes NEURA-SELL recommend nothing; **G24** NEURA's public address defaults to `http://localhost:8000`; **G47's** open half, DNS rebinding. Earlier the same day: **ADR-0053 is fully built: step 7, the dashboard's Help, done.** The owner accepted A11 (the guide's *Using an AI coding tool?* box) and chose **Help only** (Shop connection unchanged: its guide link already leads to the address; words only, no setting). Mockup on the design canvas, row 11, boards 36-37, approved, built: `GET /v1/widget/snippet` gains `developer_mcp_url` (made by the API from its public address, like the chat box line); Help's *For your developer* links the guide for developers and shows the AI tool address, and *Copy these steps* carries both. **G71 logged** (Help still said three things the guide corrected): (b) the unlinked guide and (c) the long dashes fixed in that box; (a) *Sync now* and two other long dashes open (group B). Test first: 1 API test and 6 browser checks failed on the old code, then passed. `make check` green (1448 unit, 454 integration, 7 of 7 contracts); `make console-check` 115 of 115 (one earlier run lost its browser and was re-run). console.md, FEATURES.md, the log updated; canvas row retitled *approved and built*. **The owner's new rule for step 7: the most important fixes first.** Claude's proposed order by harm, still true in today's code (checked): **G22** a new shop starts live and nothing can switch practice mode on (`TenantConfig.mode` defaults to `live`); **G44** the handover message promises a colleague who never comes (`care/prompts/escalation_message.md`, `graph/nodes/escalate.py`; fix decided: D7); **T3/T1** the owed AI evals (SELL's injection resistance not re-measured after G41, Rule 4); **G69** a missing product status makes NEURA-SELL recommend nothing, silently; **G24** NEURA's public address defaults to `http://localhost:8000` (every chat box line and the AI tool address would be wrong in production); **G47's** open half, DNS rebinding. **Next: the owner picks the first.** Earlier the same day: **E6, the MCP server for developers, designed with the owner and BUILT (ADR-0053, accepted).** `POST /v1/developers/mcp` teaches a developer's AI coding tool how to build a bridge: the nine addresses, a sample answer for each, 17 rules (`neura_adapters/generic/teacher.py`, discovered by the API through the `neura.bridge_teacher` entry point; `neura_api/developer_mcp.py` on the official `mcp` 2.2.0 library, stateless, read-only labels, a limit per client address, counted). Proven: 34 tests (the MCP project's own client, both protocol eras), MCP Inspector strict, and a real AI coding tool (the owner's yes, $0.034). The guide's *Before you start* names it and FEATURES.md has it (A11, **accepted by the owner, 2026-10-02**). **Left: ADR-0053 step 7, the dashboard Help mockup.** Also 2026-10-01/02: guide sections A6 (product views) and A7 (*Webhooks to NEURA*) and A10 (a sample answer in step 1) accepted; A8 skipped; A9 moved to later; G64 fixed (500 → 400); G66, G70 fixed in the OpenAPI file; G58 to G70 logged; G4 closed without a table, G16 skipped, G15 undecided, G69 open. Last commit `15554e8`. Earlier, 2026-10-01, end of day: **while guide step 5 waits for the owner's review, the next section, *Optional: product views*, was checked against the code (read only, no AI). Five findings logged, G58 to G62 ([`CONNECTING_A_NEW_SHOP_LOG.md`](CONNECTING_A_NEW_SHOP_LOG.md)): no example request anywhere a developer can get (G58); a product id with a dot, slash, colon or space is refused for views though the bridge format allows it (G59); the guide never says the shop builds the switch and collects shoppers' consent (G60); the section uses our own bridge's words (G61); every NEURA error links to `docs.fiveneurals.com`, which does not exist (G62). Then the owner: the guide never says what the Sold out list is (G63); the website's product pages already describe it, so the guide links there, and **product views stay optional, said to be part of NEURA-SELL (decided)**. Proving the section with real requests (throwaway Connect Test 1, agreement and key removed after): **G64, a code bug: three wrong requests got a 500 instead of a 400** (`errors.py` could not turn our own checks' errors into JSON). **FIXED the same day, the owner's choice** (test first: 500 on the old code, 400 naming the field on the new; proven on the live API; the three product view messages made plain); `make check` green (1413 unit, 454 integration). **Then *Optional: product views* rewritten (A6, committed, WAITING FOR THE OWNER'S REVIEW):** what the Sold out list is and a link to its block on `/sell/` (anchor added, two long dashes gone); who does what; a real example request with the six fields; four rules; how you'll know it works. `make web-check` green; desktop and phone checked in headless Chrome. **G65 found** (the owner guide's link to the developer guide doesn't look like a link). **A6 accepted by the owner.** **Then *Change messages* rewritten (A7, committed, WAITING FOR THE OWNER'S REVIEW):** *Don't build these yet* (NEURA has no address for them; skip `entityChanged` in the OpenAPI file; leave `events.realtime` out) and *You lose nothing* (the chat box asks the bridge live; only NEURA's copy, used by the dashboard, waits for *Sync now*). **Found while checking it: G66** (the OpenAPI file teaches change messages NEURA cannot receive; the file itself still to decide) and **G67** (the old text implied the chat needs *Sync now*). **The owner then chose the heading *Webhooks to NEURA* (done, committed), and remembered product changes being built: checked again, only the shop's side and NEURA's unused signature check (`verify()`) are; no receiving address (405). **A7 accepted by the owner.** **Then *If something doesn't work* rewritten (A8, committed, WAITING FOR THE OWNER'S REVIEW)**: four groups by where the developer sees a problem (the full check's first lines, the chat box's two refusals, the assistant's answers, product views); **G68 logged** (the old list was out of date; the owner guide's list too, group B). **A8 skipped by the owner (not important for now; the new text stays). *The full specification* (A9, with G66's file fix) moved to later by the owner.** **Then G1 (no sample answers): one sample in step 1, `GET /products/1042` (A10, the owner's choice; it passes NEURA's own reader), committed, WAITING FOR THE OWNER'S REVIEW.** **A10 accepted. G4: no table (the owner); G69 found (a missing product `status` makes NEURA-SELL recommend nothing; open, for the check). G16 skipped like G45 (A21 is the fix); G15 not decided (Claude: skip for now).** **2026-10-02: a design session on E6, the MCP server for developers (the owner's idea):** teacher only (no account, no token, never calls a shop); NEURA runs it; it teaches everything (format, a sample for every answer, the rules developers get wrong); announced in the guide **and** the dashboard's Help (mockup first). **ADR-0053 written, improved with five best-practice changes the owner asked for (the official MCP library, stateless; a real AI tool test; read-only labels; the format version; counting), and ACCEPTED by the owner.** **Built so far (2026-10-02):** step 1 (the official MCP library, `mcp` 2.2.0) and step 2 (the teacher's content, `generic/teacher.py`, 19 tests; the OpenAPI file's G66 and G70 sentences fixed). **Step 3 built too:** `POST /v1/developers/mcp`, public, stateless, plain JSON, four read-only tools, a limit per client address, counted; the teacher is discovered through an entry point (the API may not import the adapter package); 14 tests with the MCP project's own client in both protocol eras; live call proven. **Step 5's free half done:** *MCP Inspector* lists and calls the tools; its strict check found one vague output field, fixed test first. **The real AI tool test passed** (the owner's A: a separate Claude Code run on Haiku, given only the address, answered four developer questions correctly from the teacher, $0.034). **Step 6 done:** the guide's *Before you start* says *Using an AI coding tool? Add this address*, and FEATURES.md has the feature (A11, accepted by the owner, 2026-10-02). **Next:** step 7, the Help mockup on the design canvas (the console work cycle: read canvas.json first, then the owner's approval, then build). Step 5 is done; the owner moved on without changes.** Earlier, later the same day: **guide step 3 *Check your work* rewritten for the dashboard (A3 in [`CONNECTING_A_NEW_SHOP_LOG.md`](CONNECTING_A_NEW_SHOP_LOG.md)), committed by the owner's request, and REVIEWED BY THE OWNER THE SAME DAY ("it is looking good").** The 7 long dashes left in the top, *Before you start* and step 1 are removed (the owner's yes). The shop owner runs the check (*no tool to download*); who does what in four rows; a real, shortened example of the full check; ✘ stops Connect, ⚠ does not; four things to compare by hand. Changed with it: step 3's *who* in the top list, and step 1's token sentence (the shop owner makes the real token). `make check` (1400 unit, 453 integration) and `make web-check` green. **Found while checking the code (G50 to G54, in the log):** G50 the check failed a bridge that built only step 1's first three addresses when its framework answers 404 before the token check (the Laravel way), with untrue security advice, so Connect stayed locked: **FIXED the same day, the owner's choice** (the check tests the token on orders only in a shop that lists them, otherwise on its products; 4 new tests; no guide change); still open: G51 a clean check always lists the same seven things (*"Orders can be looked up"*) whatever the shop built; G52 a connection's address can't be changed or removed (idea D8); G53 the full check's advice names our own code (*"Return None"*) and states an unmeasured number; G54 Home still says connecting is done outside the dashboard. Also done: the design canvas's row 10 is retitled *approved and built* (Review's and Suggestions' rows still say *for your approval* though built; offered, not changed). **Guide step 4 *Connect your shop* rewritten the same day (A4): the shop owner presses Connect, what happens then, what the developer keeps doing after; committed; then reworked after the owner asked whether it was friendly enough (step 3's who-does-what box, now shared as `WhoSteps`, and *Your part after connecting*), committed, and accepted by the owner.** **To remember (the owner's decision):** steps 3 and 4 say *Shop owner* for pressing Check and Connect only because no developer account exists; **when the developer role (D3) is built, they say *You*** (written in D3's row in the log and beside the guide's lines). **Guide step 5 *Add the chat box* rewritten the same day (A5; closes G25, G26, G28, G32 in the guide, says G27's AI use), committed, WAITING FOR THE OWNER'S REVIEW.** **Found while checking it: G55 (security): a secret key pasted into the chat box line worked quietly** (the socket refused it, the widget fell back to a plain request, and a secret key was accepted from any web page), so the secret sat in the page's source. **FIXED the same day, the owner's request:** a secret key that comes with a browser's `Origin` is refused before any lookup (`SECRET_KEY_IN_PAGE`), readable by the page so the chat box says why; 6 new tests; proven 200 → 401 with a real key, and in a real browser. **G56 found (open):** a refused chat box key shows two errors, one the browser's raw *"Failed to fetch"*; step 5's sentence about the refusal was corrected (it claimed a message the page can never read). Also corrected G32: one chat box key can cover several exact addresses. **Keys, explained to the owner:** three exist (shop token `fn_st_`, made in the dashboard; chat box key `fn_pk_` and secret key `fn_sk_`, both still made by FiveNeurals with a command). **New dashboard ideas, listed with the owner's ok:** D9 (soon) the owner makes the chat box key in the dashboard; D10 (later) a secret key for the optional extras; each needs a short ADR and a mockup. **G57 logged (open):** a shop token pasted into the chat box line fails without saying why while it sits in the page. **Next:** the owner reviews step 5; then the rest of the guide (*Optional: product views*, *Change messages*, *If something doesn't work*), one section at a time. Earlier the same day: **CONNECTING CEYLON HARVESTER, STEP 7 (fix everything) IN PROGRESS. All code bugs are fixed and committed (G34–G37, G39–G43; last commit `93df26d`). NOW: group A, the developer guide (`apps/neura-web/src/app/docs/developers/page.tsx`), section by section with the owner's review after each — top of page + *Before you start* + step 1 rewritten and waiting for the owner's review (uncommitted); **step 2 *Say what your shop can do* rewritten too (A2: exact `/health` values, what to list with the address each needs, *leave one out = safe / list one you didn't build = fails quietly*) — waiting for review, uncommitted; `make check` + `make web-check` green. Two new findings: G45 (the new step 1 text promises a handover and order answers the code doesn't give — fix after review) and G46 (the check tool calls a bridge with nothing built "Conformant" — a 404 reads as *nothing there*; tool fix undecided).** **Then the owner chose to build the check in the dashboard first (D2, with D5: the owner makes the shop token): mockup on the design canvas, row 10, boards 31-35, waiting for approval; needs a short ADR before code; G47 (NEURA calls any address it is given) and G48 (a wrong token shows as 8 failures) found. Guide step 3 waits for it. G45 skipped by the owner; the sign-in and order work (A21) comes after the guide work. New owner rules: no long dashes, no screenshots for page reviews.** **BUILT the same day: the owner connects their own shop in the dashboard (ADR-0052)**: *Connect your shop* (make the token, shown once; the full check in the background, one cause first; connect after a clean check), *Check again*, *Make a new token* (honest about G49), only public addresses in production (G47, both doors; DNS rebinding open). `make check` green (1400 unit, 453 integration), `make console-check` 109/109. **Committed by the owner's request 2026-10-01** (two commits: the guide's top and steps 1-2, then the dashboard). NEXT: the owner looks and says commit; then guide steps 3 and 4 (they now describe the dashboard), then the rest of group A; the sign-in and order work (A21) after the guide. Rules for the guide: written for ANY shop (no Ceylon Harvester names), human-friendly, easy to look at. New idea logged: E6, an MCP server for developers (design + ADR later). Owed: AI test runs T1 and T3 when Gemini is not overloaded. NEURA runs on `ollama-dev`; Ceylon Harvester stays in practice mode. Everything is in [`CONNECTING_A_NEW_SHOP_LOG.md`](CONNECTING_A_NEW_SHOP_LOG.md) — Step 7.** Before that, 2026-09-30, evening — **connecting Ceylon Harvester from zero: steps 0–5 done (chat box on the shopper pages, the dashboard ticks; G24–G34 found — G34 is a security one: a key in the socket address is logged in full), step 6: Ceylon Harvester in PRACTICE MODE, the owner asked six questions — **two code bugs found: G35 (CARE says a SOLD-OUT product is "available to buy" — harmful) and G36 (SELL cannot see 1–2 character product ids, so true recommendations are blocked)**; all six graded (4 Good · 1 Not good · 1 Harmful); **step 6 DONE; step 7 STARTED — code bugs first: G35 FIXED (sold out no longer reads "available to buy"; `make check` green, 1351 tests; new eval case product_qa_008 passes on Gemini, 7/8 product_qa — the failure is the old product_qa_006); G36 FIXED IN CODE (SELL now sees 1-character product ids — one shared `citations.py`; 1358 tests) — AI run done: new case recommend_005 passes, injection 1.00 (recommend 4/5 — the failure is the known recommend_003); G41 found (SELL replies show internal ids like "(Product 4)" to shoppers); G34 FIXED (keys hidden in addresses in the log; a secret key in an address refused; 1362 tests); **G42 FIXED: the 40 failing integration tests were two stale test helpers — now 445/445 pass, and `make check` now runs them (needs `make up`); GitHub CI on `main` has probably been red since late August — check Actions**; G37 FIXED (CARE no longer shows unreleased products; product_qa_009 passes on ollama-dev, 6/9 vs 4/9 on the old code — the two new failures fixed, the other three fail on the old code too) — **TO DO (T1 in the log): re-run CARE product_qa on Gemini when it is not overloaded, to confirm 003/006/007 are the local model**; G39 FIXED (Review names a catalogued product instead of "may have been deleted"); G40 FIXED (the menu's Review count re-reads on every move); G43 found and fixed (a jobs test broke on the test shops' real jobs — the integration suite shares the dev database). G41 FIXED IN CODE (the shopper no longer reads "(Product 4)"; AI run owed — T3). **Decided: every handover tells the shopper to contact the store, with the shop's contact details (D7, a dashboard setting — mockup first); live replies / taking a shopper's email need a design session and an ADR (G44).** All step-7 code bugs are fixed; next: the guide fixes and the dashboard ideas (D1–D7).**. NEURA is back on `ollama-dev`; Ceylon Harvester stays in practice mode — see [`CONNECTING_A_NEW_SHOP_LOG.md`](CONNECTING_A_NEW_SHOP_LOG.md).** Earlier the same day: **THE PUBLIC WEBSITE IS BUILT: `apps/neura-web` ([ADR-0051](architecture/adr/0051-the-public-website-is-its-own-app-and-says-only-what-the-code-does.md)), five static pages from canvas rows 8–9, checked by the new `make web-check`. NOT DEPLOYED — contact address, the API's public address, the sign-in address and hosting are undecided (placeholders in `src/lib/site.ts`).** Earlier the same day: **the owner approved canvas rows 8–9 (public sites; not built); Help now has five steps; the FEATURES.md rule is in CLAUDE.md §6.** Before that, 2026-09-29 — **B7's gates run, all green after two fixes; `docs/FEATURES.md` created (every feature, checked against the code); the public-site mockups (canvas rows 8–9) revised and WAITING FOR THE OWNER'S APPROVAL — nothing of the public sites is built.** Details under *Console session, 2026-09-27 night*. Before that, 2026-09-28, night — **SHOP CONNECTION IS REDESIGNED AND BUILT, WITH A NEW HELP PAGE (group B7, canvas seventh row, boards 21–23, approved by the owner). Every console screen has now been redesigned.** Shop connection (console.md §3.4): a **Get set up** checklist — connected · *your shop answers* (**Check now**, still a click, never a page load) · catalogue copied · the chat box on the shop (*"Used today from bagisto.test"*, from the most recently used live public key's `last_used_at` and allowed address — two columns selected, never the key) · then, optional for Sold out, the data agreement and product views arriving; **Our copy of your catalogue** with **Sync now** (the third console write, and it writes only our copy: it queues the existing `enqueue_sync`, a **full** read; pressing twice is one sync; the page watches our own data and refreshes itself when it finishes), *"nothing syncs by itself yet"* from the server, and *"Search by meaning covers 29 of 38 products — the other 9 are not in it yet"*; **What your shop lets the assistant do** in plain words, and *Read only*; **Connection details**. **Help → Connecting your shop** under *Setup* (ADR-0026 §7, never built until now): who does what, six steps with *How you'll know* (the checklist's ticks), the API's own chat box line, *Copy these steps for your developer*, five problems — no platform names, no time estimates. `docs/CONNECTING_THE_SHOP.md` rewritten to the same six steps. **Three things building it found, all written into console.md §3.4:** (1) **`last_run_count` is records written — new or changed — not records read**: the first live Sync now read all 38 products and recorded **1**, so the approved *"38 read"* (and the old screen's *"118 read"*) claimed a number nobody records; it now says *"1 new or changed"*. (2) **An incremental sync cannot see a stock change from a sale** — the reference bridge's *changed since* filter follows the product rows — so Sync now does a full read, or *"stock changes show up after the next sync"* would be false. (3) **A new tenant starts live, not in practice mode** (`TenantConfig.mode` defaults to `live`, and no `make` command sets it), so Help says *"while practice mode is on"*. Also dropped from Help, because stage 2 is undecided: *"This moves into the console later"*. **Seen live on the real shop in headless Chrome:** the checklist all ticked; Check now listing 8 plain-word permissions; Sync now → *"Asked your shop…"* → the time moved by itself → *"Finished."*; a phone with no sideways scroll. **For the owner — one line in neura-agents' own `.env`:** `PUBLIC_BASE_URL=http://localhost:8010` — the Help page shows the API's own snippet, and without it the snippet says port **8000**. API: `/store` gains `setup`, per-connection `index`, `sync_asked`, `notes`; `variant` no longer counted; new `POST …/store/{id}/sync` (202). Tests: `test_console_shop_and_usage.py` **44 passed** (+12); `test_console_screens.py` +6. **Gates at the end of this session are in the B7 note under *Console session*.** Not committed. Previously the same day, handover — **SHOP CONNECTION + A HELP PAGE ARE DESIGNED AND APPROVED BY THE OWNER, AND NOT BUILT (group B7, canvas seventh row, boards 21–23). The next session builds them; the whole approved design is written in [console.md §3.4](console.md) under *"Redesign APPROVED 2026-09-28 — NOT BUILT YET"*.** Approved with it, three things that were the owner's call: **Sync now** (a console action that queues the existing `enqueue_sync` — it writes our copy only, never the shop); **"The chat box is on your shop · used today from bagisto.test"** from the public key's `last_used_at` (never the key); and **"Search by meaning covers 29 of 38 products"** (display only). Stage 2 — widget code with a key made in the console, a connect form, creating a shop and inviting its owner, the data agreement in the console — **is not decided** (the admin side, group C). Found while designing: `docs/CONNECTING_THE_SHOP.md` is out of date (no owner account, agreement, product views or suggestions scope; `NEURA_WIDGET_HOST=…:8000`). Previously the same day, closing — **USAGE AND COST IS REDESIGNED AND BUILT (canvas sixth row, boards 19–20, approved by the owner), and the assistants are now named NEURA-CARE / NEURA-SELL on every screen — the owner's decision, replacing *Customer care* / *Shopping help*, which stay beside the name where there is room.** Usage (console.md §3.5): *questions* not *turns*; dates in words; practice mode once; four conversation counts with *See them →*; **AI use** — AI calls, tokens explained in one line, cost *Not priced* said once with the server's reason; a server sentence when an agent called a model on a day with no turn (`background_ai` — the test shop's *NEURA-SELL: 0 conversations, 3,326 tokens* was pairing work in the background, ADR-0045); and **by assistant for the period chosen**, not today only. **That last one corrects a written rule**: console.md §3.5 said a period split *"would report something nobody measured"*, but the rollup is one row per (tenant, day, agent), so it is the same sum as the total — the rule is struck through there, not deleted. API: `/usage` swaps `today_by_agent` for `by_agent`, adds `period.first_recorded`; `UsageMeter` gains `by_agent_since`, `worked_without_a_conversation`, `first_recorded`. Tests: `test_console_shop_and_usage.py` +3 (the split follows the period and adds up to the totals; the background sentence only when it happened; where *everything* starts) and −1 (the today-only rule); `make console-check` **91/91** first run (was 87: *questions* shown, *turns* gone, the split covers the period, NEURA-CARE on Conversations); `make check` **1342**; integration **392** passed, only the known 40 fail; widget 51, pairs 8/8; lint, `tsc`, prettier clean. Not committed. **Next candidate, the owner's call: Shop connection** — the last screen only moved into the new frame. Previously the same day — **SOLD OUT IS REDESIGNED AND BUILT, approved by the owner from a mockup on the same canvas (fifth row, boards 15–18).** The owner opened it empty and could not tell how it worked; with data (after switching views on in the test shop and selling out the Cashmere Crew Jumper by hand) it read *VIEWS 3 · SESSIONS 1* beside `#1320`, and could not say whether the jumper was *still* sold out — and **the synced catalogue said it was in stock**, because nothing had synced since its stock went to 0. Now (console.md §3.7): one name, *Sold out*, with its job under it; each product a sentence (*"Opened 3 times, in 1 visit"*) with category and price; **Still sold out / Back in stock / Couldn't check, asked of the shop when the screen opens — one stock lookup for every product listed** (`?stock=now`; Home never asks; an empty list asks nothing); **Is it working?** (agreement since when; whether any product view arrived this week — a yes or no, never a count — which splits *switched off* from *nothing sold out was opened*); **How this works** in three steps, its *"we keep it for N days"* read from the retention setting; three empty screens for three causes. **The checklist is our side only** — the owner asked twice; nothing in the shop changes. A product the shop says nothing about reads *Couldn't check*, never *Still sold out*. **Seen live on the real shop**: *Still sold out* with the jumper at 0, then *Back in stock* after it was put back to 10. **Also fixed, from B4:** Home's Suggestions card had lost its number when pages went 50 → 25 (it counted the first page); it now reads the server's `meta.counts` (*"Automatic for all 38"*). API: `/sold-out` gains `agreement_since`, `receiving`, `kept_days`, per-product `categories`/`price`/`in_stock_now`, and `stock`; `ObservedEventRepository.any_views_since`. Tests: `test_console_sold_out.py` **28** (was 12: the shop answers / does not / cannot share stock, one lookup with the variant ids, Home's read never connects, an unknown value is a 400); new `tests/unit/test_console_sold_out_stock.py` (4); `make check` **1342** (was 1338); `make console-check` **87/87** (was 81 — the sentence, *Couldn't check* for a product no shop has, the stock line, the checklist, a phone, and Home's count now checked on a shop that has SELL — the first version of that check sat on the first shop, which has none, and was silently skipped); widget **51**, pairs **8/8**; lint, `tsc`, prettier clean; `make test-integration` only the known 40. **Headless Chrome was flaky this session**: of four `console-check` runs, one lost its tab and one hung (on a Suggestions step this change does not touch) — both on steps that passed in the other runs; the full run passed 87/87. **Left in the test shop, for the owner:** product views are still **switched on** (`NEURA_OBSERVE_ENABLED=true` in Bagisto's `.env` — editing that file was refused to this session) and the owner's `queue:work … --queue=neura-observe` may still be running; the jumper is back at **10**; the 5 real test views (jumper 3, jacket 2) delete themselves after 7 days. Not committed. Previously the same day — **SUGGESTIONS IS REDESIGNED AND BUILT, approved by the owner from a mockup on the same canvas (fourth row).** The owner found the screen empty: every word-matched product read *"Automatic"* over nothing, because a word-path answer is worked out live on a basket and never stored — the screen could change what it could not show. Now products are on the left and one is open on the right; chips *All · Your choice · Chosen by AI · Automatic* carry counts; each row has category and price; **opening a product previews what a shopper's basket shows with it now** — the basket's own `suggest()`, same heading and cards, and where they came from (*your choice* / *the AI, which looked for …* / *the product's own words*) — or **why nothing shows** (no category, nothing matched, …); when the AI tried and lost it says what it looked for; *Change these* is the same editor in the panel. Two rules the owner approved: **the shop is asked only when the owner opens a product**, and **a preview never runs the model or saves anything** (a read-only wrapper on the basket's cache; `make console-check` asserts the job queue does not grow on a never-paired product). API: the list gains `mode`, `meta.counts`, `meta.counted_all` (reads ≤ 2,000 products), `categories`, `price`; new `…/suggestions/{product}/preview`; `Pairing` gains `origin` and `reason`, which **the storefront route does not send** (a test pins it). Tests: `test_sell_pairing.py` +14 (origin, every empty reason, never queues, unreachable shop, storefront unchanged); `test_sell_owner_choices.py` **27** (was 16); `make check` **1338** (was 1324); `make console-check` **79/79** (was 73); widget **51**, pairs **8/8**, `eval-fast` clean; integration only the known 40. **Not run:** the pairing eval with a real model (Rule 4) — it needs model calls and the owner's OK; the change adds two fields and changes no decision, and all 105 earlier pairing tests pass unchanged. **Found while designing it — setup, not code, and not fixed:** the AI has run for 4 of 38 products (only a basket's first view runs it) and found something once (*Leather Loafer → Merino Walking Socks*, after the owner added it to a cart); `.env` has `NEURA_ROLE_MAP=ollama-dev`, so it runs the small local `qwen3:8b` (it asked for *phone case*, *towel*), where ADR-0045's measured run used `gemini-3.8-flash`; and **the search index lacks the 9 newest products**, so the AI's search by meaning cannot find the complements the shop stocks. Fixing both needs the owner's OK (a re-index and cloud model calls). **Then, the same session, at the owner's request:** an empty choice's button says *Show nothing with this product* (not *Save*) and the empty list says *No products picked yet. Use Find below to add some.* — the first wording confused the owner; a **Category** menu with *No category*; and **pages of 25** (*Showing 26–38 of 38*, *Previous / Next*) instead of a scroll box, with the open product sticky. `test_sell_owner_choices.py` **32**; `make console-check` **81/81**; `make check` **1338**; widget 51, pairs 8/8; integration only the known 40. Committed by the owner (`08064b4`). Previously the same day — **THE SINGLE CHAT PAGE IS REDESIGNED AND BUILT, from a third owner-approved mockup (same canvas, third row: https://claude.ai/artifact/RSKb3YFWGcLHxQ4utyfHcM).** A chat held in practice mode used to open on the shopper's question and a sentence pointing at Review — the reply was not on the page. Now **each held reply sits under the question it answers** (dashed edge, *Held — not sent*) with **its own** *Grade this reply* (`/review?turn=`), or *"You graded this Good — I'd send this"* and *Open in Review*; one sentence at the top says what the shopper saw and how many wait; a sent reply says **what it looked at by name** from the synced catalogue (*Waxed Cotton Field Jacket*, never `product:1311`), in Review's own words (`consulted()` and `no_draft_reason` are now shared); the question type (`order_status`) is gone — the owner agreed. The owner's question while designing it is now written into console.md §3.3: **Conversations = read the whole story (one row = one chat); Review = the to-do list for grading (one row = one reply).** API: the transcript gains **`held`** (a separate field, never merged into `messages`) and each citation gains **`name`**. Tests: `test_console_conversations.py` **39** (was 29 — another shop's draft under this shop's conversation id, and another shop's catalogue title, never appear); `make check` **1324** (was 1317); `make console-check` **73/73** (was 64 — held reply shown and marked, no-draft reason, graded state, the link opens exactly that reply, names not ids, no `order_status`, no sideways scroll on a phone); widget **51**, pairs **8/8**; lint, `tsc`, prettier clean; `make test-integration` still fails **only** the known 40 in `test_api_postgres.py`. Two things found and written down, not fixed: `shadow_turns` has **no index on `conversation_id`** (a per-tenant scan; an index is a migration), and the **synced catalogue and the search index disagree** on names (category 32: *Shirts & Knitwear* vs *men clothes*), so Review and the chat page can word one citation differently. Also seen on real data: a reply sent on Sep 2 told a shopper *"Product 1311 (Waxed Cotton Field Jacket…)"* — an internal id in shopper-facing text; not investigated (it may predate a fix). Committed by the owner (`8a6f611`). Previously, 2026-09-27, later still — **THE REVIEW SCREEN IS REDESIGNED AND BUILT, from a second owner-approved mockup.** The owner found it messy. Now: **To review** is an **inbox** (waiting replies grouped by day and by chat, one reply open with *Earlier in this chat*, *What it looked at* in plain words, the reply, *Fact check*, three big buttons — **Good — I'd send this / Not good / Harmful** — and *Details* folded away; **Good opens the next reply**, Not good / Harmful ask *what was wrong?*); **Already graded** is a **table**. Filters on both: outcome or grade with counts, **Asked** (Any time · Today · 7 · 30 days · Choose dates — the day the *shopper asked*, the owner agreed) and Assistant. Two decisions while building, both in console.md §3.2: **no "Couldn't help" filter** (a polite decline is recorded as *answered*, and splitting it would need the API to know agents' intent labels), and **"today" is the reader's today** (a `tz` cookie; the API takes calendar days + `tz`, `zoneinfo`, 400 on a bad zone). The agreement **percentage is no longer shown** — counts instead. API: `/review` gains `state`/`verdict`/`agent`/`since`/`until`/`tz`; new `/review/counts` and `/review/{id}`. `make console-check` **64/64** (was 59 — grading opens the next reply, the side menu's count follows, filters and dates, evidence beside the buttons); `test_console_review.py` **31** (+8: filters, counts, time zones, isolation); `make check` **1317**, widget **51**, pairs **8/8**; integration still only the known 40. Committed since by the owner. Previously the same night — **THE CONSOLE REDESIGN (the owner's "group B") IS BUILT, from a mockup the owner approved on real data.** A **side menu** replaced the tabs (shop name + *Switch shop*, a Review badge counting replies waiting, *Setup* below, one menu button on a phone); a new **Home** per shop — mode first, **Needs you** (each counted fact a sentence with one action, shown only when true), **Last 7 days** with the server's caveat chosen **by key**, and **Your setup**; **All shops** is one card per shop with a status line; **Conversations** leads each row with the shopper's **first question**, searches what shoppers wrote (`?q=`), filters by assistant (`?agent=`) and says *"Showing 1–25 of 55"* with *Newer*/*Older*. **Plain words, owner-approved**: *Held for your review*, **practice mode** (= shadow mode; in the glossary), *Customer care* / *Shopping help*, *1 question*, *Shop connection*, *Usage and cost*. API: the conversation list gained `first_question`, `q`, `agent`, and `meta.total/offset/has_previous/previous_cursor` — still a keyset cursor, the position is counted and never used to fetch; usage caveats are now `{key, text}` and say *practice mode*. **Home adds a screen and no data** — every figure on it is one another screen already shows. Colour and type unchanged on purpose (console.md §8). `make console-check` **59/59** (was 43 — Home, the menu, a phone with no sideways scroll, previews, search found and search empty); `test_console_conversations.py` +9 (search stays inside the shop, `%`/`_` literal, the *Newer* cursor walks back exactly one page); `make check` **1317**, `make test-widget` **51**, `make pairs-check` **8/8**; `make test-integration` still fails **only** the same 40 in `test_api_postgres.py`. Committed since by the owner. Previously the same night — **The console-enhancement session began, and its first four fixes are BUILT (the owner's "group A"): no decision was needed for any of them.** The landing page drew the wordmark and *Sign out* **twice** (its own header inside the layout's); a *"Not built yet"* card said Shop and Usage were unwritten when every screen was built; shops appeared only as `tn_01M…` — **`/me` now returns each shop's name**, read in that shop's own tenant session and only for a membership just proved (`tenants` is under forced RLS; a new integration test puts a second, named shop with no membership beside it and asserts its name never appears), and the id stays, small, for support; and dates were `9/24/2026, 9:09:29 PM` in the **server's** time zone — one `<When>` component now writes *"Today, 9:09 PM"* / *"Sep 24, 9:09 PM"* in the **browser's**, on all five screens that show a date. Seen in headless Chrome, not only asserted. `make check` **1317**, `make test-widget` **51**, `make pairs-check` **8/8**, `make console-check` **43/43**, `test_console_auth.py` **12/12** (was 10); lint, `tsc`, prettier clean. **Discussed and NOT decided — see the owner's note by NEXT ACTION.** Previously the same day, evening — **[ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) is ACCEPTED AND BUILT: the shop owner may choose any product's paired suggestions in a seventh console screen, *Suggestions*, and that choice wins.** It replaced the planned *upsell ADR*: asked what "better" should mean, the owner chose not to let the system decide — the owner picks, per product. Three rules the owner approved: **the owner's choice always wins** (a choice that cannot be honoured — everything sold out, or unreadable — shows **nothing**, never the automatic path that could bring back what the owner removed); **same for every shopper**; **nothing written to the shop**. The category rule binds automatic pairings and not the owner, which is how upsell happens; an owner-chosen block says *"Recommended with your …"*. **Run end to end on the real shop, in Chrome**: the owner opened Suggestions, added *Tapered Wool Trousers* and a belt to *Halden Cargo Trousers*, saved, and the real cart page's panel opened by itself with *"Recommended with your Halden Cargo Trousers"* and both; *Back to automatic* restored *"Goes well with…"*. Driving it found a real defect — a stored **empty** AI pairing was labelled *"Chosen by AI"* over nothing, while the basket actually answers from words — fixed and tested. `make console-check` **43/43** (was 39); new tests: 11 unit, 16 integration. Previously the same day — **[ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) STAGE 1 IS BUILT: the console has a sixth screen, *Sold out* — products shoppers opened while they could not be bought, last 7 days, views and sessions, never a session token.** It counts `product.viewed` rows with `in_stock = false`; unknown stock is named in a caveat, not counted. Titles come from the synced catalogue (no call to the shop); a product it lacks is shown by id. **Not gated by the SELL entitlement** — `neura-api` may not learn an agent's name, and every console screen is agent-agnostic; what gates it is the data. `make console-check` **39/39** in real Chrome (was 33), including *no session token reaches the page* and *a product in stock when viewed is not listed*; `tests/integration/test_console_sold_out.py` **12/12**. **No merchant has seen it**, so 0046 §8's falsification test (*restocked nothing → delete it*) has not started. Previously the same day — **[ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md) is ACCEPTED AND BUILT: a product view now records whether the product was `in_stock` at that moment.** The owner chose it over *"check stock when the list is opened"*, which would erase Monday's sold-out views of a product restocked on Friday. Required on `product.viewed`, refused on `cart.added`; the bridge reads stock **fresh, after the page is sent** (a cached page shows old stock). Run on the real shop: an in-stock view stored `true`, a view of product 1305 with its stock set to 0 stored `false`; 1305 was put back to **30** and both rows deleted. **Both of stage 1's open questions are now closed** — the other (*which store?*) the owner closed as not a problem: one connection is one shop. Previously, 2026-09-26, evening — **[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md) PHASE 1 IS BUILT AND WAS RUN AGAINST THE REAL SHOP: events are collected, deleted on schedule, and shown nowhere. Two `RETENTION_*` settings are real for the first time; two are still not, and [ADR-0048](architecture/adr/0048-observation-phase-1-what-the-build-decided.md) says why.** Four owner decisions, all recorded in ADR-0048: a **secret key** with `observe:write` (not a signed message); the agreement as **`tenants.dpa_signed_at`**, enforced at key issue, at the route and by the sweep; **`product.viewed` and `cart.added` only** — no searches; and **events 7 days, conversations 90 days**, enforced by a `retention.sweep` job that re-arms itself while a tenant holds anything and is booked by every write. **The live run found a real defect**: the shop's full-page cache serves product pages without rendering them, so the first hook saw only the first visit after a cache clear — **views were lost silently, most on the most-visited pages**. Fixed in the bridge (`ProductViewMarker`) and written into the spec for every future bridge. `make check` **1304** (was 1274), `make test-widget` **51**, `make pairs-check` **8/8**; the new integration file **20/20**; `make test-integration` still fails the **same 40** in `test_api_postgres.py` (the `structured_repairs` stub), nothing new. Previously the same day: **THE PAIRING SURFACE WAS FINISHED.** Previously the same day: **[ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) IS BUILT, and its §9 falsification test was run TWICE because the first run found the test shop was the instrument. Before: words 19/29, model 19/29. The shop stocked no belt, no socks, no shoe polish and no wool wash, so nine were added — and after: words 28/38, model 29/38.** **Stocking the complements is what moved the number, and it moved the WORD path most** (19 → 28 with no model anywhere). **The model buys one extra product of coverage and changes the CONTENT of seven blocks** — it pairs the rain shell with waterproofing spray where words pair it with a cotton frock, and it covers the suede boot that words cannot; it is also worse on the loafer. **The finding that matters most is about §9 itself: coverage counts blocks that RENDERED, and both arms render about the same number — so the metric the ADR chose to falsify itself with cannot see the thing that actually separates the two paths.** **DECIDED the same day: KEPT** — not because §9 was met (it was not) but because §9's metric is blind to the difference, and the model is better where the two differ. **[ADR-0047](architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md) was then written, accepted, BUILT and MEASURED the same day**: a kind now also goes to the embedding index, because the model asked for `ankle socks` and the shop's *Merino Walking Socks* shares no word with it. It converts that miss — **29 of 38 kinds-with-nothing-to-match → 2** — and measuring it found the parameter that decides this surface: at the retriever's default `min_score` **0.3** it reaches **36 of 38** while suggesting **cargo trousers for a wool wash**; at **0.65** it reaches **29 of 38** and pairs a boot with shoe trees and polish, a jumper with wool wash and a clothes brush, a hiking shoe with socks and waterproofing spray. **0.65 shipped — the high-coverage setting was the worse product.** The mechanism works end to end on the real shop — a cache miss answers from words *now* and queues a job; the worker calls `gemini-3.8-flash`, searches the merchant's own catalogue and stores the ids; the next request uses them with no model call. **But 24 of 29 products got CORRECT kinds the shop does not stock** — a loafer asked for shoe trees and shoe polish, a cashmere jumper for wool detergent — so **the ceiling is the catalogue, not the model**, which is the same ceiling 2026-09-24 found from the other side. **§9 says delete it if it does not beat the baseline; §9 was written expecting a model that could not find pairings, and it found them.** The obligation it created is transferred rather than discharged: **the 38 blocks still need hand-grading, words against model**, before this surface is judged again. Rule 4 now reaches this surface and is met: a new `pairing.yaml` (5 cases, 2 adversarial) runs the real compute *and* request paths — **5/5, injection resistance 1.00 ✔**; the full SELL suite and `eval-guard-off` both exit 0 with **injection resistance 1.00 ✔**. `make check` **1266**, `make test-widget` **51**, `make pairs-check` **8/8**. Three corrections came out of building it: *"a hallucinated product name finds nothing"* is **false** (a keyword search matches on a shared word — a bad suggestion, which §7 already names as the worst case); a **provider outage must never be cached** as "pairs with nothing", which the first version would have done permanently; and the first eval dataset filed its anchor where ADR-0040 §4's category rule could not reach it, so it **paired a walking boot with a walking boot and passed**. Previously, 2026-09-25 — **FIVE ADRs accepted (0042–0046) and NOTHING BUILT. [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) adds a sixth SELL surface — one merchant-facing screen of sold-out products people wanted — and **only its stage 1 (view counts, no identity) is approved**; stage 2 needs a *volunteered-data* category ADR-0042 does not have, stage 3 needs A21's identity token. SELL is now six surfaces, two of them merchant-facing. [ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) lets a model compute a pairing **lazily, on first use, in the background** — never while a shopper waits, cached per product and not per person, with the word path as the day-one fallback; it amends ADR-0040 §5, so that ADR's title is no longer literally true and **Rule 4 now reaches the pairing surface**. Previously: **[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md) is ACCEPTED and reverses this morning's own sentence: a shopper MAY be observed, but only for a shop that switches it on and only through events the shop's server sends — off means the data never exists, and scoring is a points table, not a model. It amends ADR-0042 §1 rather than superseding it. Still nothing built anywhere. Previously: **two ADRs written and ACCEPTED, and NOTHING BUILT — accepted is not scheduled. [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md) makes a merchant-facing recovery list SELL's fifth surface — **checkout**, not cart, because an abandoned cart usually belongs to nobody — export-only, nothing sent, on the unused `CART_READ` capability. CLAUDE.md is edited: five surfaces, four built, and a row that says ask before starting the fifth. Sending to a shopper and tracking one are both still excluded. Previously: **[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md) is PROPOSED and nothing was built: we may hold what a merchant already holds, and may never watch a shopper — held versus observed is the line, and it leaves lead scoring blocked on purpose. Writing it found that three `RETENTION_*` settings have sat in `.env` for weeks with no code reading any of them. Previously, 2026-09-24: **term selection no longer spends every search on the longest words: one is reserved for the title and one for the description, measured across all 29 real products (18 → 19 with a suggestion), and measuring it disproved this file's own account of why the misses happen — the Leather Loafer and the Cashmere Jumper are category and catalogue-size limits, not word limits. `make check` 1229, `make test-widget` 51, `make pairs-check` 8/8 stub + 1/1 live. Previously, 2026-09-24: the paired suggestion now renders in the assistant panel and may open itself once per tab, off by default ([ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md)) — the shop's whole integration is one attribute on a tag that already existed. Previously, 2026-09-21: ADR-0040's paired suggestion was BUILT and RUN AGAINST THE REAL SHOP — SELL's fourth surface, no model in it. `make check` exit 0 (1227 passed), `make test-widget` 38/38. The live run found a real defect (ranking by word length, not distinctiveness), it is fixed and measured instead, and §4's example reproduces: rain shell → hiking shoe. 17 of 28 real products produce a suggestion. `make pairs-check` drives it in real headless Chrome, 8/8 stub and live cross-origin against the real shop; no shopper has seen it. Previously, 2026-09-20: the open question raised that day is DECIDED — MIND is parked until a design partner asks for it, and [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) was accepted. The handover was to go first; the owner then deferred it, so the build went first instead**
 > ### ⚠️ Read every green result in this file as "passed **on cloud**"
 >
 > **Owner's decision, 2026-09-19:** finish CARE and SELL on a cloud model, and **do not re-test on
@@ -372,7 +372,1129 @@ browser**: SELL *"I recommend the Lightweight Rain Shell (Product 1315)…"* and
 most items within 30 days…"*. **The first time SELL has ever answered through the widget.** One turn
 each, not an eval, and **passed on cloud** — which is the only thing it says.
 
-**Next action:** **CARE and SELL now work end to end on the cloud path, and the goal has changed shape.**
+**2026-09-20 — a design conversation, no code. Two things came out of it and neither is built.**
+
+**The trigger:** the owner compared what exists against the
+[v1 blueprint](archive/FiveNeurals_AI_Agents_Blueprint_v1.md) and judged the product thin — *"only a
+chat bot, no marketing point"*. Measured against that document's 13 capabilities across SELL and CARE:
+**2 built** (Sales Conversation AI, Smart Escalation), **3 partial** (cross-sell, Knowledge Evolution,
+omnichannel-as-chat-only), **8 absent**. Verified in code, not estimated — there is no sentiment,
+translation, voice or channel code anywhere.
+
+**The 8 absent ones fail for exactly three reasons**, and the grouping is the useful part: **(1) the
+agent cannot write** — dynamic pricing, cart recovery, proactive outreach all need `WRITE`, which
+[ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) puts in Phase 2 behind an **approval queue
+that does not exist**; **(2) the data is not collected** — lead scoring, revenue forecasting, churn;
+**(3) simply unbuilt, nothing blocking** — multi-language, sentiment, an email channel.
+
+**Outcome 1 —
+[ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) is
+written and is PROPOSED, not accepted.** A paired suggestion on the cart page: the page hands NEURA
+product ids and gets back at most two complementary products. **A fourth SELL surface with no model in
+it**, alongside the MCP server and the feed. Decided in conversation and recorded there: the shop
+hands over ids rather than NEURA asking about carts (**there is no cart in the nine endpoints, and
+every platform exposes one differently — asking would break Rule 1**); selection is by the product's
+own words and **never by behaviour**, because there is no purchase history and *"customers also
+bought"* would be a false claim to a shopper; the **same category is excluded**, measured — `waterproof`
+returns a rain shell and a shoe, `jacket` returns four tops; **nothing is shown rather than something
+poor**; the heading **names the cart item it pairs with**, so the claim is attributable and
+refusable. The two parameters — most-expensive item, two suggestions — are **guesses and labelled as
+such**. **Nothing is built and the ADR is uncommitted.**
+
+**Outcome 2 — the pricing feature is MIND's, not SELL's, and the owner found that himself.** The
+discussion started as "dynamic pricing" and arrived at merchant-facing advice in the console —
+*"40 in stock, nothing sold in 90 days"*. **That is a threshold alert to a shop owner, not anything a
+shopper sees**, and [blueprint-v2 §5.3](business/blueprint-v2.md) lists exactly that under **MIND v1**.
+Two things already settle parts of it: §148 **removed individual willingness-to-pay pricing** on EU
+Omnibus / GDPR Art. 22 grounds and rules that *"any future pricing work stays at segment / inventory /
+time granularity, never individual"* — so **the version discussed is the permitted one**; and
+[agents/README.md](agents/README.md) says MIND has **no technical design at all** and that a request to
+build it must be answered with a design session, not an invented design. Signals available today
+without new data, checked against the canonical models: per-product sales (`OrderLine` carries
+`product_external_id`, `quantity`, `unit_price`; `Order` carries `placed_at`), stock levels, actual
+price paid versus list, and **a product's price against its own category — which needs no sales history
+at all**. Competitor pricing was raised and is out: it means scraping, it is fragile and legally grey,
+and blueprint-v2 puts it under **MIND's *Vision* tier**, not v1.
+
+**THE OPEN QUESTION, and it is the owner's:** **(A)** hold a design session for MIND, or **(B)** park
+MIND, accept or reject ADR-0040, and get the cart suggestion in front of the tester. **Nothing was
+decided in that conversation; it was decided later the same day — see the entry below.** The relevant
+constraint is the roadmap's own: MIND is **Phase 3**, after a first paying
+design partner, and [B2](open-questions.md) — no merchant on live traffic — is still the top risk and
+outranks both.
+
+**2026-09-20, later — the open question above is DECIDED, and the decision SPLIT option B rather than
+taking it whole.** **MIND is parked**, and the trigger is [X3](open-questions.md)'s own condition rather
+than a quiet week: the design session happens **when a design partner asks for it**. Holding it now
+would have answered X3 — *"to be decided by what a design partner asks for, not by us"* — in the absence
+of the single input it was deferred for, and [roadmap.md](roadmap.md) puts MIND in **Phase 3, after a
+first paying partner**. Nothing from the MIND discussion is lost and **no design was invented for it**:
+the permitted scope (**threshold-based anomaly alerts**, [blueprint-v2 §5.3](business/blueprint-v2.md)
+v1, inside §148's segment / inventory / time granularity) and the signals available today are recorded
+in the entry above, which is where a future design session starts.
+
+**[ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md) is ACCEPTED** — owner decision, 2026-09-20 — **and still not built.** Its status was
+flipped from Proposed, and the row was added to [the ADR index](architecture/adr/README.md), which had
+never carried it.
+
+**What was split, and why that is not pedantry.** Option B as posed bundled *decide the ADR* with
+*build it and hand both to the tester* — which spends the handover to buy a feature. **The tester's list
+of everywhere they got stuck is the highest-value input this project can obtain, it cannot be produced
+on this machine, and it is the only work here blocked on another person's calendar.** So: **hand over
+now with what already works, and build the cart suggestion inside the wait.** The tester meets a fourth
+surface on their second pass rather than their first, which also keeps a failed install easy to
+diagnose. **Acceptance decided the design, not the schedule** — recorded in the ADR itself, so the
+sequencing is not later re-read as a change of mind.
+
+**Unchanged by this, deliberately:** `make verify-probe AGENT=sell` **stays RED** and must not be made
+green by lowering the bar; Stage 6 §4 shadow mode stays untouched until a human-response path exists;
+and [B2](open-questions.md) still outranks everything on the list below. **Nothing was built today and
+nothing was measured** — this entry records two decisions and three edited documents.
+
+**2026-09-21 — ADR-0040's paired suggestion is BUILT: SELL's fourth surface, and the third with no
+model in it.** The owner deferred the tester handover, which removed the only reason the 09-20 decision
+held this back, so it was built first instead. `make check` **exit 0 — 1220 passed**, mypy 224 files,
+**7 contracts kept**, platform independence ✔; `make test-widget` **38 pass, 0 fail**.
+
+**What exists.** `POST /v1/sell/suggestions` takes product ids and returns at most two complementary
+products; `agents/sell/src/neura_agent_sell/pairing/` holds the logic, split so that `select.py` is
+**pure** — every rule about what a shopper may be shown is testable without a store, an adapter or a
+network — and `orchestrate.py` holds everything that touches the shop. `pairs.js` is the client half,
+a `<neura-pairs>` custom element served from `/v1/widget/pairs.js` beside the chat widget, **a separate
+asset on purpose**: a merchant who wants suggestions and no chat box must not have to ship a chat
+widget, and a shopper on that page must not download one. `GET /v1/widget/snippet` now returns both
+pastes. **No tenth endpoint was added** — the shop hands over ids and is never asked about a cart, which
+is what keeps [Rule 1](../AGENTS.md) intact.
+
+**The decisions that are code rather than prose, since that is the part that rots:** the heading is
+built **server-side** in `select.heading_for` and used verbatim by the client, so ADR-0040 §3's ban on
+"often bought together" / "customers also bought" / "trending" is enforced rather than remembered — a
+page cannot substitute a claim about behaviour over our products. The anchor's own category is excluded
+from its own suggestions, and **an uncategorised product returns nothing rather than something**:
+without categories §4's rule cannot be applied, and applying no rule is how the measured four-jackets
+result gets shipped. Term selection is **longest word first**, which removes the need for a stopword
+list — a third tuned parameter, and a worse one. `sell:suggest:read` is its own scope, not
+`sell:catalogue:read`: the key sits on a public cart page, and a key that can ask "what goes with these"
+must not thereby be able to read the catalogue.
+
+**Every ordinary disappointment is an empty 200, never an error** — unknown ids, a store that cannot
+search, a shop that times out, nothing complementary in the catalogue. That is ADR-0040 §4, and it is
+also [Finding 49](TESTING_LOG.md) from the other side: a shopper on a cart page has already decided to
+buy, and a stack trace there is the most expensive place in the product to put one.
+
+**47 tests, and what they are not.** 44 in `tests/unit/test_sell_pairing.py` plus 3 widget-hosting
+tests, and 16 more in `tests/widget/pairs.test.js`. **These are tests, not evals, for the reason
+`test_sell.py` already records and [E8](open-questions.md) already registers** — there is no model on
+this surface, so there is nothing that can regress in the way an eval exists to catch, and calling them
+an eval would inflate the suite with cases that can only ever pass deterministically. Rule 4 is
+untouched in substance: no prompt, graph node, tool or model config was edited, and `make eval-fast`
+is unchanged.
+
+**2026-09-21, later — it was run against the REAL shop, and the real shop found a defect the fixture
+store could not.** Live against Bagisto on `http://bagisto.test/neura/v1`, 29 products, a provisioned
+tenant and a public `sell:suggest:read` key — **no model of any kind was run, because this surface has
+none.**
+
+**The defect: term selection was ranked by word length, and length is not distinctiveness.** For the
+Lightweight Rain Shell the longest words are `lightweight` (11), `waterproof` (10) and `paperback` (9 —
+from *"around the size of a paperback"*). `lightweight` matched trousers and a frock, filled both
+places, and an early stop meant **`waterproof` was never searched** — so the pairing ADR-0040 §4 names
+as its measured example, the rain shell and the hiking shoe, was exactly the one the code could not
+produce. It passed every fixture test because the fixture descriptions are terse and technical; **real
+merchant copy carries marketing adjectives, care instructions and similes, and any of them can be
+long.**
+
+**Fixed by measuring instead of assuming.** Each term is already searched on its own, so the size of
+each answer is a free measure of how common that word is in *this* catalogue: `waterproof` returned 2
+products, `lightweight` returned 3, and the shoe now outranks the frock. **It ranks terms, never
+products** — a per-product score is the first step towards ranking by something other than the
+merchant's own words, and what waits at the end of that road is behaviour. The early stop is gone,
+because which term wins cannot be known before every count is in; the search ceiling is unchanged at
+three. Live result after the fix: **`1315` → `1332 Waterproof Hiking Shoe`**, which is ADR-0040 §4
+reproduced against a real store.
+
+**Coverage on the real catalogue: 17 of 28 products produce a suggestion.** The other eleven correctly
+show **nothing** — every one traced to a designed path in the logs: the anchor's own category held all
+the matches, or the term matched only the anchor itself, or (`1310` Merino Crew Knit, `1327` Canvas
+Court Sneaker) **the merchant filed the product under no category at all**, where §4's rule cannot be
+applied and the surface refuses rather than guesses.
+
+**And a finding worth keeping, because it is about the merchant's data rather than our code.** Several
+pairings put trousers beside trousers — `1303` Chinos → `1317` High-Rise Tailored Trousers. §4 worked
+exactly as written: it excluded the anchor's own category, and **the shop files `1317` under category
+33, "Tops".** The rule is precisely as good as the merchant's categorisation, which extends ADR-0040's
+stated bound — *"quality is bounded by how well merchants write product descriptions"* — to how well
+they file them. **This was not fixed, and must not be fixed quietly**: changing what §4 excludes is a
+change to a decided rule and needs an ADR, not a patch. The failure mode it produces is still the one
+the ADR chose: **visible and ignorable, never invisible and believed.**
+
+**2026-09-21, last — it now runs in a REAL browser, and `make pairs-check` is the gate.**
+`scripts/pairs_check.py` drives the real `pairs.js` in real headless Chrome over the DevTools
+Protocol, reusing `widget_check.py`'s driver rather than writing a second one. **Stub mode needs
+nothing at all** — no database, no shop, no models, because the surface has no model in it to need
+one — and **8 of 8 scenarios pass**: a block renders in a real Shadow root; the heading is the
+server's words verbatim; no suggestions renders **nothing at all**, not an empty box; products with
+no heading render nothing (§3); **a product title that IS markup renders as literal text** —
+`<img src=x onerror=…>` produced **0 `img` elements, 0 `script` elements and an unchanged
+`document.title`**; and a `javascript:` link and a `data:` image never reach an attribute.
+
+**Live mode proves the half a stub structurally cannot: the page is on a different origin from the
+API**, which a merchant's cart page always is. The harness is served from its own port and the key is
+origin-locked to it, so the fetch crosses origins for real and exercises the per-key CORS decision
+(`middleware/cors.py`) and the key's origin lock together. **Passed against the running API and the
+real shop: `1315` → heading *"Goes well with your Lightweight Rain Shell"*, cards Waterproof Hiking
+Shoe and Linen Drawstring Trousers.**
+
+**One thing that check caught about itself, and it is the reason to write the detail down.** The stub
+routed scenarios by splitting the key on its last underscore, and every scenario name contains one —
+so the three hostile cases were silently served the *ordinary* script. **Three safety checks read
+green while never having run.** It is the same shape as every entry in this file about a control
+nobody executed, arriving inside the tool built to execute controls. Fixed by splitting on the whole
+prefix, and the comment in `pairs_check.py` says why.
+
+**What has NOT happened.** **No shopper has ever seen it.** The two
+parameters — most-expensive item, two suggestions — remain **guesses that ADR-0040 labels as guesses**,
+and the ADR's falsification test stands: if the suggestion is taken so rarely that it is noise,
+**delete the surface rather than add a model to it**. *"17 of 28"* is a property of one catalogue and
+of this mechanism; **it says nothing about whether a shopper is helped.**
+
+**Also found, and it is not mine:** `make test-integration` **fails 40 tests on `main`** — identical
+failures with and without this work, verified by stashing it. The stub `_Response` in
+`tests/integration/test_api_postgres.py` lacks `structured_repairs`, which the serving path reads.
+**`make check` does not run `test-integration`**, which is why every green `make check` in this file
+sat on top of it. Not fixed here; recorded so it is not rediscovered.
+
+**2026-09-24 — the suggestion moved into the panel we own, and the reason was the owner's, not a
+developer's.** [ADR-0041](architecture/adr/0041-a-suggestion-is-delivered-in-the-panel-we-own.md) amends ADR-0040's *delivery* and its *pop-up exclusion*; the fourth
+surface itself — endpoint, selection, category rule, heading, empty-is-a-result — is untouched.
+
+**The question that caused it: what does this cost the next platform?** The cart-page block needed a
+template, a placement and **theme styling** on the shop's side, repeated per platform and per theme.
+That is not a Rule 1 breach — no platform name entered our code and the check stays green — but it
+erodes the claim Rule 1 protects. The shop's whole integration is now **one attribute on the
+`<script>` tag that was already there**: `data-neura-products="1315,1320"`. No new template, no
+element, no styling. **And the second objection was the deciding one** — a block is seen, a panel is
+opened, and *"if the user does not open it, the user does not see it."*
+
+**So the panel may open itself, and every condition on it is a restriction:** off by default
+(`NEURA_PAIRS_AUTO_OPEN=false`), only when there is a suggestion, **once per tab** — returning to the
+cart does not reopen it — and a switch in the shop's `.env` rather than a deploy, because **nobody has
+measured whether this helps or hurts.** ADR-0040 excluded a pop-up that needed a behavioural event, a
+session and [A21](open-questions.md); this needs none of those — a page loads, and **no agent speaks**.
+It renders as a `note`, never as an assistant bubble, because no assistant wrote it.
+
+**Verified in a real browser on the real shop.** Cart holding `1315`: the panel opened by itself
+showing *"Goes well with your Lightweight Rain Shell"* with the Waterproof Hiking Shoe and Linen
+Drawstring Trousers, **with the Art. 50 disclosure above it** — inherited from the panel rather than
+solved again. **Second visit: the panel stayed shut and the cards were still inside it.** The
+cart-page block is kept and **switched off** (`NEURA_PAIRS_INLINE_BLOCK=false`); both on shows the same
+products twice. `make check` **1227 passed**, `make test-widget` **51 pass**, `make pairs-check` 8/8,
+`make widget-check` green.
+
+**2026-09-24, later — three things were reverted on purpose, and each revert is a decision worth
+keeping.**
+
+**The cart-page block was removed from the Bagisto bridge.** Once the panel version worked, the
+standalone template was dead code in somebody else's repository. `pairs.js` is still published and
+still gated by `make pairs-check`; **no bridge mounts it.** ADR-0041 §5 is corrected to say so.
+
+**A mini-cart drawer hook was built and then reverted, at the owner's call.** `window.neura.showPairs(ids)`
+plus a bridge route and a click listener — all working except the last step — and the owner stopped it
+with the right reason: **a drawer is not common to every platform, and wiring one means shop-side work
+in both repositories for something not every shop has.** The reverted work found two things worth
+keeping anyway: **Bagisto's own `/api/checkout/cart` returns no product id** (only the cart *line* id),
+so any page wanting to ask "what goes with these" has nothing to send without a bridge route of its
+own; and `NeuraBridgeServiceProvider.php` is back to **byte-for-byte untouched**.
+
+**The console's "check your pairings" screen was proposed and NOT built.** The owner asked for the
+merchant-facing half — a list the shop owner reviews and exports — and then stopped it. **The shape it
+was heading towards is recorded here so it is not re-derived:** a fifth console screen over the
+**synced** catalogue rather than the live shop (checking 10,000 products live is 40,000 requests at the
+merchant's server), reusing `pairing/select.py` unchanged because it is pure. The customer-facing
+variant — *"these people bought X, suggest Y, export with emails"* — is **orders, never carts**: there
+is no cart in the nine endpoints, cart recovery is excluded by [CLAUDE.md](../CLAUDE.md), and
+`CUSTOMER`/`ORDER` are syncable but **not currently synced** (only `product`, `category`, `policy` have
+rows). It also makes us a processor for real people's names and emails, which is an agreement before it
+is any code.
+
+**One operational fix, recorded because it will bite again.** The tester's shop key lacked
+`sell:suggest:read`, and swapping `NEURA_WIDGET_KEY` in the shop's `.env` **did not take** — Herd's PHP
+workers serve a cached `.env`, and `config:clear`, `view:clear` and `herd restart` all failed to shift
+it. The fix was to **add the scope to the existing key** in `api_keys` and restore the original `.env`.
+**Prefer widening a key over swapping one** on a Herd-served shop.
+
+**Term selection picked the *longest* words, and real merchant copy puts care instructions and
+marketing adjectives there.** Measured on the real shop: the Leather Loafer searched `stitched`,
+`polished`, `flexible` and found **nothing**, while `leather` — one letter shorter — finds a boot. The
+Cashmere Jumper searched `mongolian`, `detergent` and found nothing. **— FIXED 2026-09-24, later; and
+the fix showed the diagnosis in this paragraph was wrong about why the misses happen. See the entry
+below.**
+
+**2026-09-24, last — the longest-word defect is FIXED, and measuring it disproved the reason this file
+gave for the misses.** No ADR: ADR-0040 never specified how terms are chosen, so this changes an
+implementation note in `select.py` and nothing that was decided.
+
+**The rule now: one search is reserved for the title, one for the description, and the third goes to
+the longest word left.** A title is written to identify a product; a description is written to sell it.
+The title slot is what the Leather Loafer never had — it now searches `leather` rather than three care
+instructions. The description keeps a slot of its own because a rule that simply preferred the title
+would have spent all three of the Lightweight Rain Shell's searches on `lightweight`, `shell` and
+`rain`, **losing `waterproof` and with it the Hiking Shoe that ADR-0040 §4 measures**. No stopword
+list, no material list, no tuned parameter: three searches still, `MAX_TERMS` unchanged.
+
+**Measured end to end against the real shop, every one of the 29 products, before and after.**
+`make check` **exit 0 — 1229 passed** (1227 + 2), `make test-widget` **51**, `make pairs-check` **8/8**
+stub and **1/1 live cross-origin**, `1315` → Waterproof Hiking Shoe unchanged.
+
+**Coverage: 18 of 29 → 19 of 29.** Honest accounting of that one net product: **`1311` Waxed Cotton
+Field Jacket** and **`1329` Everyday Running Trainer** gained a suggestion (`corduroy` → `cotton`,
+`engineered` → `everyday`); **`1328` Suede Desert Boot** lost its only one and **`1309` Oxford
+Button-Down Shirt** dropped from two to one, both because the title word displaced `unlined` — a
+construction adjective the shirt and the boot happened to share, which had paired them by luck in
+exactly the way ADR-0040 §4 says `waterproof` did.
+
+**And the part worth keeping, because this file was wrong about it:** the two products named above as
+the headline misses **are still misses, and neither is a word-selection failure.**
+
+* **`1330` Leather Loafer.** `leather` is now searched and **does** find `1326` Leather Chelsea Boot.
+  The boot is then correctly dropped: both products sit in **category 36**, and §4 excludes the
+  anchor's own category. **Nothing is the right answer** — a shopper buying a loafer does not want
+  another leather shoe. The previous entry's *"would have found two boots"* was true of the search and
+  not of the result.
+* **`1320` Cashmere Crew Jumper.** `cashmere` is now searched and matches **one** product: itself. In a
+  29-product catalogue there is no second cashmere item to pair with.
+
+**So the ceiling on this surface is not the word rule.** It is the size of the catalogue and how the
+merchant files things — the same bound as the 2026-09-21 trousers-beside-trousers finding, arriving
+from the other side. **A bigger gain would have to come from changing what §4 excludes, which is a
+decided rule and needs an ADR, not a patch.** Still true, and unchanged by this: no shopper has ever
+seen this surface, and *"19 of 29"* says nothing about whether one is helped.
+
+
+**2026-09-25 — a posture was decided and written, and nothing was built.**
+[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md)
+is **ACCEPTED — owner decision, 2026-09-25, and not built**: NEURA may store personal data the merchant's own store already holds about a person the
+merchant already has a relationship with, and **may not create new knowledge about a shopper by watching
+one.** The line is **held versus observed**, not personal versus anonymous — an email, an order, a
+checkout someone began and left are on the permitted side; page views, clicks, dwell time and session
+following are not, and building them needs a tracking script, [A21](open-questions.md)'s undesigned
+identity mechanism and a consent surface of our own.
+
+**Why a separate ADR at all.** Three blueprint capabilities — cart recovery, churn and proactive
+outreach, revenue forecasting — are blocked by nothing but this one unmade decision, and arguing it
+inside four feature ADRs would produce four slightly different answers. **It deliberately does not
+unblock the fourth**: predictive lead scoring needs the observed column and stays blocked.
+
+**Four things it strengthens rather than weakens**: [§148](business/blueprint-v2.md)'s ban on individual
+pricing (*"we have the data now"* is the argument §148 rejects), [ADR-0040 §3](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)'s
+ban on ranking by behaviour, [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)'s read-only rule,
+and a bar on any feature holding personal data without its own ADR.
+
+**One finding came out of writing it, and it is the house failure shape again.**
+`RETENTION_CONVERSATIONS_DAYS`, `RETENTION_AUDIT_LOG_DAYS` and `RETENTION_TRACES_DAYS` have been in
+`.env` for weeks and **no code reads any of them** — a retention control that has never executed, the
+same shape as a run that measured nothing and a widget check that had been dead four days. §3 requires
+the first feature under this ADR to make them real or say in its own ADR that it has not.
+
+**Accepted by the owner the same day it was written, and accepted is not implemented.** **No personal
+data is stored, `ORDER` and `CUSTOMER` sync stay off, and no table exists.** What acceptance changes is
+that the argument is settled: the next feature that needs shopper data cites this file instead of
+re-deriving it. The feature it exists for — abandoned-checkout recovery, merchant-facing, export-only —
+is [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md),
+written and accepted the same day.
+
+**2026-09-25, later — the feature ADR-0042 exists for is written, and it is still not built.**
+[ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md)
+is **ACCEPTED — owner decision, 2026-09-25, and not built**: a merchant-facing recovery list is **SELL's fifth surface** — the checkouts with a
+contactable owner that never became an order, shown to the merchant, exported by the merchant, acted on
+by the merchant. **We send nothing to anyone.**
+
+**It reopens [CLAUDE.md](../CLAUDE.md)'s cart-recovery exclusion, and the reopening is narrow.** The
+excluded version needed identity, behavioural events, a scheduler, an outbound channel and a write. This
+one needs none of them: nobody is watched, the merchant already knows the person, the merchant picks the
+moment, the merchant sends. **[CLAUDE.md](../CLAUDE.md) was edited the same day**: SELL now reads *five
+surfaces, four built*, the cart-recovery exclusion is replaced by a row that fixes the scope and says
+**do not start it — ask first**, and two new rows keep the harder exclusions visible on their own
+(**sending anything to a shopper** and **tracking one** are both still closed).
+
+**The design decision worth keeping is `checkout`, not `cart`.** Verified against the test shop's own
+schema: `cart.customer_id`, `cart.customer_email` and `cart.is_guest` are all nullable and Bagisto sets
+`is_guest = 1` for anyone not signed in. **An abandoned cart usually belongs to nobody** — sign-in
+happens at checkout, and an abandoned cart is one that never got there. Naming the stage solves the
+identity problem instead of filtering around it, and the spec sentence is generic — *"a cart with a
+contactable owner that has not become an order"* — so no platform's vocabulary enters our code. On
+Bagisto the difference is one non-null field, so the choice costs nothing.
+
+**`Capability.CART_READ` is what this uses**, and it has existed in `neura_domain.enums` unused since
+the capability set was written. The interface gains an **optional** endpoint, not a mandatory tenth one:
+declared → the screen exists; not declared → it does not.
+
+**Explicitly deferred, and both were the owner's own points.** Recording *what a shopper removed* from a
+cart needs the cart kept over time — a bigger footprint and a different privacy argument — so v1 stores
+the **latest state only**. `CUSTOMER` sync is not needed; `ORDER` sync **is**, and is still off.
+
+**Three parameters, all guesses and labelled so**: abandoned after **1 hour** (borrowed from common
+industry practice, not measured here), retention in days set at build time, list ordered by value. And
+**a sixth console screen**, which breaks [console.md §2](console.md)'s *"the discipline is five"* — named
+in the ADR as a decision rather than left to be noticed later.
+
+**The honest bound.** Nobody knows how many of a real shop's checkouts carry a contact; it depends on the
+merchant's own storefront capturing an email early. **This is the first feature in the product that is
+worthless until it has run for weeks** — every surface so far works on day one for any shop. So the
+sequencing is deliberate: **decided now, built when there is traffic**, and the falsification test is in
+the ADR — *if merchants do not export the list, delete the screen.*
+
+**Two things the next session must not assume.** **Accepted is not scheduled** — both ADRs say
+*Accepted, not built*, and CLAUDE.md's new row says to ask before starting the fifth surface, because
+the whole argument for it was *decide now, build when a merchant exists*. And **nothing about the data
+has changed yet**: no table, no rows, no personal data, `ORDER` sync still off, and the `RETENTION_*`
+settings still read by no code.
+
+**[AGENTS.md](../AGENTS.md) was stale in four places and is now corrected**, which matters because it is
+third in CLAUDE.md's reading order and a fresh session believes it. It called SELL *"DESIGNED, not
+built… 3 surfaces"* — it had been built for weeks; it called the widget *"THE ONLY JAVASCRIPT IN THIS
+REPOSITORY — one file"* when `pairs.js` made it two on 2026-09-21, so a session reading it would have
+thought a second file was forbidden; its *"add an agent"* recipe still listed cart recovery as excluded;
+and **`make pairs-check` was missing from the command list entirely** — a gate nobody reading that file
+would know to run, which is how a check quietly stops being run at all.
+
+**2026-09-25, last — a sentence accepted this morning is reversed this evening, on purpose, and still
+nothing is built.**
+[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md) is
+**Proposed**: a shopper may be observed — page views, searches, cart actions — **only for a tenant whose
+shop has switched it on, and only through events the shop's own server sends.** It **amends**
+[ADR-0042 §1](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md),
+which named predictive lead scoring as the capability its held/observed line blocked. **0042 is amended,
+not superseded** — a tenant that has not switched this on is governed by it unchanged.
+
+**Why the reversal is not a mistake being corrected.** Lead scoring *is* shopper watching; there is no
+version of *"who is browsing and who is about to buy"* that does not record what a person did, and the
+blueprint's own example request — `{"session_data": {"pages_viewed": […], "time_on_site": 340}}` — is the
+forbidden payload, written three months before the rule existed. The owner weighed the trade and took it.
+
+**The three design decisions worth keeping.** **(1) The shop's server sends; no script of ours runs in a
+shopper's browser** — the bridge's `EntityChanged` listener and `DeliverWebhook` job are that pattern
+already built, an ad blocker cannot silently bias the data, and one generic event shape keeps
+[Rule 1](../AGENTS.md) intact. **(2) The switch governs SENDING, not saving.** `NEURA_OBSERVE_ENABLED=false`
+in the shop's own config, like `NEURA_PAIRS_AUTO_OPEN`: off means the data **never exists**, not that we
+received it and threw it away — *"a filter at our end is not a switch"*. **(3) Scoring is a points table,
+not a model**, because there are no labelled sessions to train on, because rules are what the industry
+actually ships, and because a merchant can be told why a visitor scored 65.
+
+**A dashboard toggle is the better product and is deliberately not v1** — recorded in §3 in full so it is
+not re-derived: the obstacle is that if the authority lives with us the shop keeps sending, and the fix
+needs the bridge to learn its own state from us, a mechanism that exists in **neither** repository today.
+
+**What can and cannot be proved here.** Phase 1 — events in, stored, deleted on schedule — is provable by
+the owner browsing their own storefront: the pipe works or it does not. **Phase 3 is not**: a score of 65
+meaning *"about to buy"* needs many real people, some of whom bought and some of whom did not, and the
+person acting out the sessions already knows the answer. Scope is recorded in the ADR as such.
+
+**What it costs, stated plainly.** *"We never watch your shoppers"* becomes *"we watch only if your shop
+turns it on"* — honest, and weaker, and it was the clearest difference between this product and the
+tracking companies it competes with. **Watching can start later; it cannot be undone.** Four uses stay
+forbidden and this ADR strengthens them: individual pricing ([§148](business/blueprint-v2.md)), ranking
+products by behaviour ([ADR-0040 §3](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)),
+writes and shopper-bound messages ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)), and automated
+decisions with legal effect.
+
+**ACCEPTED by the owner the same day, and accepted is not built.** No event has been stored, the switch
+does not exist, and the points in §6 are borrowed illustrations measured against nothing.
+**[CLAUDE.md](../CLAUDE.md) was edited with it**: the *"track a shopper"* row now says **allowed, on these
+conditions** and lists them, a new row keeps **pricing, behavioural ranking and automated decisions
+excluded** so nobody reads observation as permission to act on it, and §5 records that
+*"we never watch your shoppers"* **is no longer true and must not be repeated** — the accurate sentence is
+*"we watch only if your shop turns it on."*
+
+**2026-09-25, also — a model is allowed back into the pairing surface, off the request path.**
+[ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md)
+is **ACCEPTED — owner decision, 2026-09-25, and not built.** It **amends
+[ADR-0040 §5](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md)**:
+*"no model runs in it"* becomes **"no model runs between a shopper and an answer."** §3's behavioural
+ban, §4's category rule and empty-is-a-result, and §6's parameters are untouched.
+
+**Why, and the measurement is this file's own.** The 2026-09-24 term fix moved coverage 18 → 19 of 29 and
+showed the remaining misses are not word-selection failures: `1330` Leather Loafer finds a boot and
+correctly drops it as same-category, `1320` Cashmere Jumper matches only itself. **Word matching finds
+products described alike; a pairing needs products that go together.** A model knows a loafer goes with
+socks, needs no history, and works on a shop's first day.
+
+**Two alternatives were considered and rejected in writing.** *Purchase history* is the industry standard
+and is unavailable — no `ORDER` rows, §3 bans behavioural ranking, and a new shop has zero orders.
+*Embeddings* are available (pgvector, an embedder) and are the **wrong relation**: a rain shell's nearest
+neighbour is another rain shell, which §4 then excludes. A third — the merchant setting pairs by hand —
+was rejected by the owner for the right reason: it moves work onto the person the product should save.
+
+**The shape is the owner's, and it is cheaper than the one proposed to them.** Not precomputed at sync:
+**computed lazily on first use and cached.** A 10,000-product catalogue where 200 products ever reach a
+cart costs **200 calls, not 10,000**, and the cache warms in popularity order with no ranking logic
+anywhere. The first request for a product answers from the existing word path — never a regression — and
+queues the computation; **every shopper after that, forever, gets the better answer.** The cache is keyed
+by product, not by person: nothing about a shopper is stored, so this needs no consent and does not touch
+[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md).
+
+**Two costs recorded rather than discovered later.** **(1) [Rule 4](../AGENTS.md) reaches this surface.**
+`test_sell_pairing.py` says its cases are tests and not evals *because there is no model that can
+regress*; that ends here, and the eval — injection resistance at 1.00 included — is most of the work, not
+the prompt. **(2) A risk this surface has never carried:** ADR-0040's safety argument was that there is no
+model to persuade, and the input is merchant catalogue text, which the glossary classifies as
+**untrusted**. Bounded structurally: the model returns *kinds*, never product names, so only the store can
+name a product; it has no tools; **nothing it produces reaches a shopper as words** — `heading_for` still
+builds every visible sentence; and it runs in the background. **Worst case is a bad suggestion, not a
+fabricated claim.**
+
+**The falsification test is a number that already exists:** the word path gives **19 of 29**. If the model
+path does not beat that by enough to justify the eval suite behind it, **delete it and keep the words** —
+they cost nothing, cannot be injected, and need no eval.
+
+**2026-09-26 — ADR-0045 IS BUILT, IT RUNS END TO END ON THE REAL SHOP, AND ITS OWN FALSIFICATION TEST
+CAME BACK A TIE. That last part is a decision for the owner and is deliberately not taken here.**
+
+**What exists now.** A model computes what *kinds* of product go with one, **in the background, on
+[ADR-0022](architecture/adr/0022-scheduling-under-rls.md)'s job queue**, and the result is stored per
+product and reused. Six pieces, all of them:
+`prompts/pairing.md` · `pairing/kinds.py` (the call, and the sanitiser on its output) ·
+`pairing/compute.py` (kinds → the merchant's own ids) · `pairing/schema.py` + a migration
+(`sell_pairings`, ordinary tenant RLS) · `pairing/cache.py` (the fingerprint, the Protocol, the enqueue)
+· `jobs.py` (the handler) · and the wiring in `pairing/orchestrate.py`.
+
+**Proven end to end against the running API and the real Bagisto shop, both branches.** Request one for
+product `1309` answered **`1323` from the word path immediately** and wrote a `sell.pairing.compute` row.
+The worker — never told this tenant existed — claimed it, called `gemini-3.8-flash`, and stored a row.
+**Twice, because the model gave slightly different kinds each time, and both outcomes are correct:**
+`['undershirts','ties']` → stored `['1321']`, and request two returned **`1321`** — a different, better
+answer, with **no model call and no search**. `['undershirts','neckties']` → matched nothing → stored
+**empty with `note: "no complementary product matched these kinds"`**, and request two fell through to the
+word path's `1323`. `tenant_usage` recorded **`turns=0, llm_calls=1, 639 prompt tokens`** — the background
+call is charged and is not counted as a turn.
+
+**THE FALSIFICATION TEST (§9), MEASURED THE DAY IT WAS BUILT, ON ALL 29 REAL PRODUCTS, BOTH ARMS:**
+
+| arm | products with a suggestion | of which from the model |
+|:--|:--|:--|
+| **words** (unchanged, costs nothing) | **19 of 29** | — |
+| **model** (`gemini-3.8-flash`, one call per product) | **19 of 29** | **1** |
+
+**A tie, and 18 of the model arm's 19 are the word path answering underneath it.** §9 says: *"if the model
+path does not beat that by a margin worth the eval suite it drags behind it, delete it and keep the
+words."*
+
+**But the measurement also says WHY, and it is not the model. `make pairs-coverage` prints it as its own
+line: 24 of 29 products got correct kinds the shop does not stock.** The Leather Loafer asked for
+`shoe trees, shoe polish, shoe horns`. The Cashmere Jumper asked for `wool detergent, cashmere combs,
+clothes brushes`. The Chelsea Boot asked for `shoe cream, shoe trees, shoe horns`. **Every one of those is
+right, and this 29-product clothing catalogue sells none of them** — no belts, no shoe care, no detergent,
+no accessories at all. **The model did the thing ADR-0045 was written to buy and the shelf was empty.**
+
+**So the ceiling is the catalogue, which is the same ceiling this file found on 2026-09-24 from the other
+side** — *"it is the size of the catalogue and how the merchant files things"* — now confirmed from a
+third direction and much more sharply. **§9's rule was written expecting a model that could not find
+pairings. It found them.** That is a different result from the one the rule anticipates, so **applying it
+mechanically would delete a working feature on the strength of a test shop's inventory**, and ignoring it
+silently would be worse. **It is the owner's call and it is the top item below.**
+
+**What it cost, stated plainly.** A prompt, a table, a migration, a job kind, a handler, a fifth
+entry-point group, an eval dataset, and 35 more unit tests — against one changed suggestion on one test
+shop. **Reversible exactly as the ADR promised**: drop the table, delete the prompt, and the word path is
+untouched underneath. `suggest(cache=None)` is still byte-for-byte the 2026-09-24 surface, which is what
+`make pairs-check`'s stub mode and every existing test run.
+
+**Rule 4 now reaches this surface and is satisfied.** A new dataset, `pairing.yaml`, **5 cases, 2 of them
+adversarial**, run through the *real* compute path and then the *real* request path so what is scored is
+the block a shopper would actually see. On `cloud-prod`: **5/5 passed, injection resistance 1.00 ✔, tool
+selection 1.00 ✔.** The whole SELL suite on `cloud-prod`: **exit 0, injection resistance 1.00 ✔**, and
+`eval-guard-off` **exit 0, injection resistance 1.00 ✔**. The three failures in the full run
+(`injection_003`, `no_match_001`, `recommend_003`) are **graph cases this change does not touch** —
+ordinary cloud variance on groundedness and a truncated price — and `groundedness 0.88` is a figure from
+the **unqualified** Nemotron judge and must not be quoted as evidence either way.
+
+**What `injection_resistance` means on this surface, because it is not what it means elsewhere.** There
+are no tools here, so a gate that could only ever read zero would measure nothing. It reads ADR-0045 §3's
+invariant instead: **every id shown came back from a search of the merchant's own catalogue.** An id from
+anywhere else is recorded as an unauthorised call. Today that is structurally impossible; asserting it is
+how it stays so.
+
+**Three things found while building, all of them corrections to something this project believed:**
+
+1. **"A hallucinated product name finds nothing" is FALSE, and a test asserted it before it was
+   measured.** A keyword search matches on any shared word, so an invented *"Dry Bag Pro 2000"* can
+   perfectly well return a real product containing *"pro"*. That is a **bad suggestion** — exactly the
+   worst case ADR-0045 §7 names and calls an eval case rather than a security incident. What is
+   structural, and what the test now asserts, is that nothing the model invented is ever in the result.
+2. **A provider outage must not be cached.** `kinds_for` originally returned an empty list for both "the
+   model found nothing" and "there was no model", which would have written *"pairs with nothing"* into the
+   table on the strength of a dead server — **permanently**, since the row would go on matching the live
+   fingerprint. It now returns a result that says which, the handler **raises** on an outage so the queue
+   retries, and nothing is stored. Same shape as [E6](open-questions.md), arriving in a table instead of a
+   report.
+3. **The first pairing dataset filed its anchor in a category the fixture catalogue does not use**, so
+   ADR-0040 §4's *"not the anchor's own category"* rule could never fire — and the first run paired a
+   walking boot with a walking boot and a rain shell with two more rain shells. **The four-jackets result
+   the rule exists to prevent, passing an eval.** A case now declares its category in a tag.
+
+**Two bounds on spend that the ADR did not ask for and a public endpoint makes necessary.** Anyone
+holding a storefront key can name products a shop has never paired, and each is a model call. The dedupe
+key makes twenty cart pages one computation; **the tenant's own daily budget is read before the call and
+honoured**, so a merchant at their hard ceiling stops paying for pairings exactly as they stop paying for
+conversations; and `max_attempts` is **2** rather than five, because every retry is another call and a
+shopper loses nothing when this dead-letters.
+
+**The fifth discovery seam.** `neura.job_handlers`, keyed by **job kind** rather than agent key, because
+that is what `JobRunner.register` dispatches on. Without it, registering this handler meant
+`from neura_agent_sell.jobs import ...` inside `neura-api`, and *"one codebase, five products"* stops
+being structural. A kind claimed twice is refused — which handler ran would otherwise depend on
+entry-point iteration order. Verified at startup: `job_kinds=['sell.pairing.compute', 'sync.store',
+'webhook.drain']`, with the API never naming SELL.
+
+**Gates:** `make check` **exit 0 — 1266 passed** (1229 + 37), `make test-widget` **51**, `make pairs-check`
+**8/8** stub. `make test-integration` still fails 40 tests **on main as well** — pre-existing, a missing
+field in a test stub, not touched here and not in `make check`.
+
+**Still true and unchanged by any of it:** no shopper has ever seen this surface, and *"19 of 29"* says
+nothing about whether one is helped.
+
+**2026-09-26, later the same day — THE TEST SHOP WAS THE INSTRUMENT, AND FIXING IT CHANGED BOTH ARMS.
+Nine products were added; the word path gained NINE covered products and the model path gained TEN. §9's
+verdict is still a near-tie on coverage, and the sharper finding is that COVERAGE CANNOT SETTLE IT.**
+
+**What was changed, and it is the harness, not this repository.** The Bagisto test shop had **ten
+categories, all clothing and footwear, and nothing a shopper buys alongside them** — no belt, no socks, no
+shoe polish, no wool wash. `NeuraDemoDataSeeder` gained two categories (**Accessories**, id 40;
+**Garment Care**, id 41) and **nine products** (SKUs `ACC-001`–`004`, `CAR-001`–`005`): a leather belt,
+merino socks, tights, a silk tie, shoe cream, cedar shoe trees, waterproofing spray, a wool wash and a
+horsehair clothes brush. The seeder is idempotent and was re-run, then `indexer:index --mode=full`. **The
+shop now has 38 products.** Its own `categoryIds()` docstring says categories are *looked up rather than
+created*, and the new method says out loud that it bends that rule and why.
+
+**Both arms, re-measured on the same 38 products:**
+
+| arm | before (29 products) | after (38 products) | of which from the model |
+|:--|:--|:--|:--|
+| **words** | 19 of 29 | **28 of 38** | — |
+| **model** | 19 of 29 | **29 of 38** | **7** |
+
+**So stocking the complements is what moved the number, and it moved the WORD path most.** A belt
+described as *"full-grain leather"* is found by a loafer described as *"polished calf leather"*; a
+*"wool"* wash is found by a cashmere jumper; a *"waterproofing"* spray is found by a *"waterproof"* hiking
+shoe. **Word matching works well when the shop actually stocks the complement** — 19 → 28 without a model
+anywhere. The model path adds **one** product of coverage on top of that.
+
+**But the model changed the CONTENT of 7 blocks, and coverage is blind to that.** Two are plainly better
+and are the argument for keeping it:
+
+* **`1315` Lightweight Rain Shell** — words pair it with a pair of linen trousers and a cotton frock. The
+  model pairs it with the **waterproofing spray**. Only one of those is a pairing.
+* **`1325` Long Sleeve Jersey Frock** — words pair it with chinos and a jogger. The model pairs it with
+  **tights**.
+* **`1328` Suede Desert Boot** — words find **nothing**; the model finds the **shoe trees**. The one
+  product the model covers that words cannot.
+
+And one is worse: **`1330` Leather Loafer** — words give a belt *and* a silk tie, the model gives shoe
+trees alone. A shopper is shown one item instead of two.
+
+**THE FINDING THAT MATTERS MOST IS ABOUT §9 ITSELF.** Its falsification test is *"measure coverage before
+and after"*, and coverage counts **blocks that rendered**. Both arms render about the same number; what
+differs is whether the thing in the block belongs there, and **coverage cannot see that**. A rain shell
+beside a cotton frock counts exactly the same as a rain shell beside waterproofing spray. **So the metric
+ADR-0045 chose to falsify itself with is not the metric that separates the two paths** — which is a
+finding about the ADR, not about the model, and it is the reason the keep/delete decision below is still
+open rather than answered.
+
+**Twenty-nine of 38 products still got correct kinds the shop does not stock** — shoe horns, garment bags,
+wooden hangers, drying racks, pocket squares, cufflinks, strapless bras. The ceiling moved; it did not go
+away, and it is still the catalogue's.
+
+**One bias, stated because it runs the model's way.** The nine products were chosen **from the kinds the
+model had already asked for** on the 29-product run, which advantages the model arm by construction. Two
+things blunt it. The range is what any clothing shop of this kind genuinely stocks — a belt and shoe
+polish are not exotic. And the bias did not land where it was pointed: **the word path gained more from
+the new stock than the model path did**, so *"coverage is a near-tie"* survives the bias rather than
+depending on it.
+
+**Nothing in `neura-agents` changed for this** — no code, no prompt, no test. `make check` **1266**,
+`make test-widget` **51**, `make pairs-check` **8/8**, all still green from the build entry above. The only
+edits are `scripts/pairs_coverage.py`'s printed baseline constant and this file.
+
+**2026-09-26, and last — [ADR-0047](architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md)
+is PROPOSED, not built, and it changes ONE STEP of ADR-0045.**
+
+**Why, and it is a measured miss rather than an idea.** Run 2 above left two distinct reasons a kind
+produces nothing, and only one of them is the catalogue's fault:
+
+* **`shoe horns`, `garment bags`, `pocket squares`** — the shop does not stock them. **Correct.** Empty is
+  a result, and no software fixes it.
+* **`ankle socks`** — the shop sells **Merino Walking Socks**. **A miss we caused**: no shared word, so
+  `search_products` returned nothing. `1327` Canvas Court Sneaker is the measured instance — it asked for
+  `ankle socks, shoe cleaner, waterproof spray`, the shop stocks socks and a spray, and the block rendered
+  nothing.
+
+**The proposal is one lookup, not a redesign:** resolve a kind through the **existing pgvector index** as
+well as the keyword search — `ankle socks` → *Merino Walking Socks*, by meaning. The tool has been serving
+CARE's and SELL's retrieval since milestone 1.9 ([ADR-0005](architecture/adr/0005-pgvector-not-qdrant.md)),
+and semantic lookup is the ordinary industry answer to this exact failure rather than anything novel.
+
+**It does NOT reverse ADR-0045's rejection of embeddings, and the distinction is the ADR.** That rejection
+is about **product → product** — *"a rain shell's nearest neighbour is another rain shell"* — and stands.
+This is **phrase → product**, which is the operation `Retriever.search` already performs on a shopper's
+sentence. The relation that decides complementarity is still the model's; embeddings only carry its answer
+to the shelf.
+
+**The §3 invariant survives structurally.** A chunk's `source_id` **is** the merchant's own `external_id`,
+and the index holds nothing but entities our own sync pulled from that tenant, inside a
+`Namespace(tenant_id, embedding_model)` with no un-namespaced read. A vector hit is a product the merchant
+sells, in the merchant's own numbering — which is
+[ADR-0029](architecture/adr/0029-the-index-may-name-a-candidate-never-describe-one.md) unchanged rather
+than stretched.
+
+**Three tiers, each degrading in silence:** vector hits, then keyword hits, then the word path. **Keyword
+search is not replaced** — it produced 28 of 38 alone, it is exact where a merchant's vocabulary is exact,
+and it needs no index, so a tenant who has never been indexed loses nothing.
+
+**Its falsification test is deliberately NOT §9's, because §9's does not work.** Coverage scored the rain
+shell beside a cotton frock identically to the rain shell beside waterproofing spray. ADR-0047 is judged on
+the row it exists to fix instead: **count the kinds that found nothing while the shop stocked the thing** —
+at least **2 of 38** today. If semantic resolution does not convert those, remove it whatever coverage says.
+**And it asks for a second measurement before either ADR is judged again: a hand-graded pass over the 38
+blocks, words against model, by a person willing to say which is better.**
+
+**One alternative was considered seriously and rejected on a measured risk:** broadening the keyword search
+(stem, split, drop words), which `tools/catalogue.py` already does for a failed shopper search and which
+needs no index. It converts `ankle socks` → `socks`, and would equally convert `shoe cleaner` → `shoe`,
+which matches **every shoe in the shop**. **Widening a keyword search trades a miss for a wrong answer**,
+and a wrong pairing is the expensive error on this surface.
+
+**Nothing is built and nothing is decided.** The status is **Proposed**; accepting it is the owner's, and
+it sits behind the keep-or-delete decision on ADR-0045 itself — there is no point improving a surface that
+is about to be removed.
+
+**2026-09-26, last — [ADR-0047](architecture/adr/0047-a-kind-is-resolved-by-meaning-not-by-a-shared-word.md)
+IS BUILT AND MEASURED. It passes its own test, and the measurement found a second parameter that decides
+whether this surface helps a merchant or embarrasses one.**
+
+**What was built.** One step: a kind now goes to the tenant's **embedding index** as well as to their search
+box (`compute._by_meaning`), the handler builds a `Retriever` over `DatabaseVectorStore`, and the whole tier
+is optional — no index means the keyword hits stand alone, and the word path is under both. Eight unit tests
+with a **stub index**, because what changed is a lookup rather than a model behaviour: the prompt, the kinds
+and the eval dataset are untouched.
+
+**Its own falsification test, passed decisively.** ADR-0047 asked: *count the kinds that found nothing while
+the shop stocked the thing*, at least 2 of 38. **29 of 38 → 2 of 38.** `1327`'s `ankle socks` against
+*Merino Walking Socks* is exactly the miss it was written for, and it converts.
+
+**AND THAT NUMBER WAS A TRAP, WHICH IS THE ENTRY WORTH READING.** At the retriever's default `min_score` of
+**0.3** the surface reached **36 of 38** — and several of the new blocks were things that should have been
+empty:
+
+* **Wool and Delicates Wash → cargo trousers.**
+* **Horsehair Clothes Brush → cargo trousers, cashmere jumper.**
+* **Woven Silk Tie → cashmere jumper, satin frock.**
+
+**That is ADR-0040 §4's failure bought with a coverage number** — *"showing something silly costs the
+merchant's trust in the whole product"* — and 36 of 38 is worse than 29 of 38 for the merchant. The
+retriever's 0.3 is tuned for a shopper's *sentence*, where recall matters and `verify` rejects anything
+ungrounded; **a two-word kind has no such backstop.**
+
+**Measured at three values, and the first conclusion drawn was wrong:**
+
+| `min_score` | coverage | from the model | kinds unstocked | what it suggested |
+|:--|:--|:--|:--|:--|
+| 0.30 | 36 of 38 | 32 | 2 | wool wash → cargo trousers. **Nonsense** |
+| 0.50 | 35 of 38 | 32 | 3 | the same nonsense — *"the threshold is not the lever"* was concluded here, and it was **wrong** |
+| **0.65** | **29 of 38** | **16** | 19 | boot → shoe trees + polish · jumper → wool wash + brush · hiking shoe → socks + spray. **Right** |
+
+**0.65 is the shipped value, and at 0.65 this surface finally does the thing ADR-0045 was bought for.** The
+Leather Chelsea Boot pairs with shoe cream and cedar shoe trees. The Cashmere Crew Jumper pairs with the
+wool wash and the clothes brush. The Waterproof Hiking Shoe pairs with merino socks and waterproofing spray.
+**None of those shares a usable word with its anchor, and the word path finds none of them.**
+
+**What it costs, named rather than hidden:** at 0.65 the **Cedar Shoe Trees** and the **Suede Desert Boot**
+fall to nothing, though the shop stocks the polish and the spray they asked for. A stricter threshold buys
+silence at the price of some true pairings, and that trade is the right way round on this surface.
+
+**So, against `words 28 of 38`:** the model path at 0.65 renders **29** — one more — but **16** of them come
+from the model rather than 7, and those 16 are where the difference lives. **Coverage still cannot see it**,
+which is the same finding ADR-0045 §9 produced this morning, arriving a third time.
+
+**A cosine threshold is a property of the embedding model, not of the problem.** This is `nomic-embed-text`
+on one shop on one afternoon, and ADR-0047 §7 already labels the parameter a guess. **`.env` has no
+`CLOUD_MODEL_EMBEDDER` at all**, so this path runs only on a local embedder or `hybrid` today — measured on
+`hybrid`, reasoner `gemini-3.8-flash`, embedder `nomic-embed-text`. **Re-measure on any other embedder.**
+
+**One deviation from ADR-0047 §6, stated rather than skipped quietly.** §6 asks for a new **eval** case —
+a kind the shop stocks under another word. It is **not added**, for three reasons: the model's behaviour is
+unchanged by this ADR (same prompt, same kinds), the fixture store's keyword search matches **any** term
+over two characters so it cannot reproduce the real shop's miss, and with no cloud embedder configured the
+eval cannot run the vector tier on `cloud-prod` at all. **Eight unit tests and this live measurement cover
+it instead.** If the owner wants §6 honoured literally, it needs a configured cloud embedder first.
+
+**Gates:** `make check` **exit 0 — 1274 passed** (1266 + 8), `make test-widget` **51**, `make pairs-check`
+**8/8**. `make pairs-coverage` gained `MEANING=1`, `TENANT=` and `MINSCORE=`; the index it reads is left in
+place under `tn_ragsmoke` by `make rag-check … KEEP=1`.
+
+**2026-09-25, and last — a sixth SELL surface, and only a third of it is approved to build.**
+[ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md)
+is **ACCEPTED — owner decision, and nothing built.** One merchant-facing screen: sold-out or unfindable
+products, ranked by how many people wanted them, with the contactable ones named underneath.
+**We store the interest, we show it, we contact nobody.**
+
+**Why it is SELL's, since the rule makes it arguable.**
+[ADR-0033](architecture/adr/0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md) says
+CARE answers what the store *has* and SELL helps the shopper *choose* — so *"is it in stock?"* reads like
+CARE. **It is SELL's because of where it fires**: on SELL's own
+[ADR-0027](architecture/adr/0027-a-constraint-miss-is-not-an-empty-store.md) dead end, the honest-miss
+path already in its graph, where SELL tried to help someone choose and could not. Same purpose as
+[ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md):
+**recovering a sale, not answering a question.**
+
+**Three inputs, three permissions, and that is the whole structure — they are three features sharing one
+screen.** **Stage 1, APPROVED:** page views of sold-out products — a count, **no identity**, riding on
+[ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)'s event
+stream plus a filter and a screen. *"The sold-out Cashmere Jumper was viewed 47 times this week"* is
+useful alone, needs no consent and has nothing to delete on request — **the cheapest thing designed
+today. Stage 2, BLOCKED:** a shopper typing an email into the chat is **volunteered** data, and
+[ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md)
+names only *held* and *observed*. **That third category is a one-line amendment and a prerequisite, not a
+footnote. Stage 3, BLOCKED:** identifying a logged-in viewer needs [A21](open-questions.md)'s short-lived
+signed token — which A21 itself calls *"the one place where inventing something plausible would be
+worst"*, an ADR **and** a security review. **Recorded in the ADR precisely so nobody smuggles 2 or 3 in
+as "while we're here".**
+
+**Two refusals written into it.** A shopper is never told *"12 people are looking at this"* — manufactured
+urgency, the same class of claim as "customers also bought". And the counts never reorder what a shopper
+is offered; they are merchant-facing only.
+
+**One accepted abuse:** somebody can type another person's address. Mitigated by the merchant's message
+saying *"you asked us about X"* with an unsubscribe — a controller obligation for the agreement, not a
+thing our code can fix.
+
+**Consequences worth seeing plainly.** SELL now has **six surfaces, two of them merchant-facing** — the
+agent has grown an admin side. The console is **two screens over** [console.md §2](console.md)'s *"the
+discipline is five"*, broken twice in one day, both times deliberately and both times written down.
+
+**OWNER, 2026-09-27, end of session: the next session ENHANCES THE CONSOLE (dashboard).** The owner will describe
+what to change; **do not start building before they do**, and design anything new with them first.
+[ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md) (the recovery
+list) is **PARKED by the owner** — it could be built now against fake checkouts, and the owner chose not to yet. The
+open decision about a **recurring catalogue sync** (below) is still open.
+
+**Console session, 2026-09-27 night — where it stands.** The owner's list, from screenshots, split three ways:
+
+| group | what | state |
+|:--|:--|:--|
+| **A** | double header, stale *"Not built yet"* card, shop **names** instead of `tn_…`, readable dates in the owner's time zone | ✅ **BUILT** (see *Last updated*) |
+| **B** | friendlier design for a **non-technical owner**: side menu + shop switcher, a per-shop **Home**, one-click shop cards, plain words, first-question previews, search, assistant filter, *"1–25 of N"* paging, phone layout | ✅ **BUILT** from the owner-approved mockup (https://claude.ai/artifact/RSKb3YFWGcLHxQ4utyfHcM — private to the owner). Deviation from the mockup, on purpose: Home's Suggestions card counts only when SELL's page holds every product, else it states no number |
+| **B2** | **Review redesign**: inbox for waiting replies, table for graded, filters by outcome/grade, date asked and assistant | ✅ **BUILT** 2026-09-27 from the owner-approved mockup (same artifact, second row). See console.md §3.2 |
+| **B3** | **One chat** (the transcript page): held replies shown in the chat under their question, one *Grade this reply* per reply, what a sent reply looked at by name, no system words | ✅ **BUILT** 2026-09-28 from the owner-approved mockup (same artifact, third row). See console.md §3.3 |
+| **B4** | **Suggestions**: list + one product open, filters with counts, a **preview of what a basket shows** (asked of the shop on open, never a model run), why nothing shows, what the AI looked for; then a Category menu (with *No category*), pages of 25, and *Show nothing with this product* on an empty choice | ✅ **BUILT** 2026-09-28, approved by the owner (canvas fourth row). See console.md §3.6 |
+| **B5** | **Sold out**: one name, a sentence per product, **Still sold out / Back in stock / Couldn't check** from one stock lookup at the shop when the screen opens, *Is it working?* (agreement; views arriving), *How this works*, three empty screens; and Home's Suggestions count restored | ✅ **BUILT** 2026-09-28, approved by the owner (canvas fifth row, boards 15–18). See console.md §3.7 |
+| **B6** | **Usage and cost**: plain words, practice mode once, conversation counts with links, **AI use** (calls, tokens explained, cost said once), a sentence for AI work with no conversation, **by assistant for the period chosen**; and **NEURA-CARE / NEURA-SELL** as the assistants' names on every screen | ✅ **BUILT** 2026-09-28, approved by the owner (canvas sixth row, boards 19–20; the names decided after, no mockup). See console.md §3.5 and §3.0 |
+| **B7** | **Shop connection** (a *Get set up* checklist, Sync now, freshness said honestly, what the shop allows in plain words, connection details) and a new **Help: Connecting your shop** page; rewrite `docs/CONNECTING_THE_SHOP.md` | ✅ **BUILT** 2026-09-28, approved by the owner (canvas seventh row, boards 21–23). See console.md §3.4 — including eight corrections building it made to the mockup (Sync now is a full read; *"38 read"* was wrong — the count is records **new or changed**; a new tenant starts **live**, so Help says *"while practice mode is on"*) |
+| **C** | a **platform-admin dashboard** (FiveNeurals staff; everything `make tenant-new` / `key-new` / `user-link` / `tenant-dpa` does today) and **roles** | **Discussed, NOT decided — needs an ADR.** It reverses [console.md §1.1](console.md) (*"not an admin panel for us"*) and [ADR-0026 §5](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) (*"no permission model before a merchant asks"*), and an admin is the first person who reaches **every** tenant |
+
+What was proposed for C, for the ADR to accept or reject — **none of it is decided**: a separate admin app/address with
+stronger sign-in and every action audited; **permissions in code, roles as data** (a role is a named set of
+permissions, so *custom roles* later is a data change, not a rewrite); rules that make custom roles safe — no granting
+what you do not hold, owner-only actions (sign the DPA, delete the shop, transfer ownership) never grantable, always
+one owner, shop roles can never reach company actions, new permissions start off, a test that fails on any endpoint
+with no declared permission. Suggested staging: **now** platform admin + owner; **next** support (company) + staff
+(shop); **later** developer, partner/agency, billing — each only when a real person asks. The owner has not yet said
+whether admin and roles are one ADR or two.
+
+**Offered to the owner on 2026-09-28 and NOT decided:** working out AI suggestions for every product ahead of time (rather than on a basket's first view) — model calls for every product, and a change to ADR-0045's *on first use*, so an owner decision and probably an ADR; and fixing the test shop's AI setup (re-index the 9 missing products; a cloud role map).
+
+**Every console screen has now been redesigned from an owner-approved mockup** — Shop connection last (B7, 2026-09-28), with a new Help page.
+
+**Discussed with the owner after B7, 2026-09-28 — directions, NOT decisions (no ADR yet):** the owner found Help's
+*"Install the NEURA bridge"* said what and not how, and that nothing guides **who makes each key and how it reaches
+the developer**. Their directions: (1) **a public guide website** for owners and developers — no secrets on it; (2)
+**the chat box key made by the owner in the dashboard** (low risk: public, origin-locked; console.md's planned v1.1
+*Settings & keys*) — the two secret keys (shop token, observe key) stay with FiveNeurals until their own decisions;
+(3) onboarding stays **by hand** (FiveNeurals adds the owner's email) until prices exist, then maybe self sign-up;
+(4) an admin dashboard (group C) would keep the email link for owners and add a **second step** for admins (an app
+code or a security key), on its own address, every action recorded. **A mockup of the public guide is on the canvas,
+eighth row, boards 24–27, awaiting the owner's approval**; dashed tags on it mark what is undecided (the site's
+address and hosting; how a developer gets the check tool — `neura-conformance` lives only in our code today; how the
+shop token reaches the developer). Found while writing it: **the shop token is issued by FiveNeurals** (the reference
+bridge's settings say *"Issued by Neura, one per shop"*), and there is no command that makes one.
+
+**Later the same discussion (2026-09-28/29) — still directions, not decisions:** the public web presence is **two
+sites**, the SaaS norm: a **product site** (one page per assistant, marketing style) and a **docs site** (setup
+guides). Canvas **row 8 = docs site** (boards 24–27, retitled), **row 9 = product site** (boards 28 NEURA-CARE,
+29 NEURA-SELL, 30 phone) — **both awaiting the owner's approval**. The owner's rules for the product site: **made-up
+examples only, never the test shop's data** (no *"order 86"*, no *Cashmere jumper*); attractive but **honest** (no
+results, no prices); **features are not setup steps** (*Sold out* is a NEURA-SELL feature — the docs row still lists
+it as step 6 and should lose it). Proposed and not yet answered: give **Recommend** its own block on the NEURA-SELL
+page (it is only in the hero). The accent colour on rows 9's boards is a **placeholder** with a Tweak — branding is
+undecided. **Agreed direction for keeping the sites current as features and assistants are added:** one file,
+**`docs/FEATURES.md`** — every assistant, every feature, plain words, status (built / not built), where it runs — and
+one rule: *a feature is not finished until its line there is updated* (to go into CLAUDE.md §6). Later the sites
+may be generated from it. **Not created yet.** Also found: the console shows *Sold out* to every shop, including one
+without NEURA-SELL, although ADR-0046 makes it a SELL surface — a small mismatch, not fixed.
+
+**2026-09-29 — `docs/FEATURES.md` created, canvas rows 8–9 revised; the owner has not approved either row yet.**
+`FEATURES.md` lists every NEURA-CARE and NEURA-SELL feature and what both share, with status and where it runs,
+checked against the code, plus **six limits a public page must not hide**. The one that matters most: **L1 — from
+the chat box, order status always passes to a person today** ([A21](open-questions.md)); it answers only when the
+shop's own server sends the chat with a customer id. **The NEURA-CARE product board (28, not touched this session)
+leads with *"Where's my order? — answered in seconds"*, which is not true from the chat box, and "in seconds" is a
+time claim** — for the owner to decide. Canvas: row 8 lost *"Optional: Sold out"* from the steps (now **five**; the
+developer guide keeps product views as an unnumbered *Optional* section, because it is how to set that up); row 9's
+NEURA-SELL board gained a **Recommend** block (its picture is the exact fixed *"nothing fits"* reply from
+`no_match.py`), and two claims on it were corrected to the code — **product cards have no "reason" tags** (the
+reasons are in the reply's words; `tools/card.py`) and **compare is a written reply, not a table**. Still to align
+if the docs row is approved: the console's **Help** page (`help.ts`) and `CONNECTING_THE_SHOP.md` still list
+*"Optional: Sold out"* as step 6. **Proposed, not yet added:** the one-line rule for CLAUDE.md §6.
+
+**2026-09-30 — the owner decided:** (1) **canvas rows 8 and 9 are APPROVED** (retitled *"approved, not built
+yet"*); **not built** — where the sites live, hosting, domain and contact address are still undecided and must be
+asked. (2) **Keep NEURA-CARE's *"Where's my order? — answered in seconds"* as it is** — the owner's choice, made
+knowing FEATURES.md's L1 (from the chat box an order question goes to a person today) and that *"in seconds"* is a
+time claim. Do not change it again unasked. (3) **Done:** *Optional: Sold out* removed from the console's **Help**
+steps (`help.ts`, now five) and from `CONNECTING_THE_SHOP.md` (product views kept as an unnumbered optional section);
+`console_check.py` expects five; console.md updated. Seen in real headless Chrome, desktop and phone: five steps.
+Gates: `make console-check` **109 passed, 0 failed**, `make check` green, console lint/tsc/prettier clean. (4) **The
+FEATURES.md rule is in CLAUDE.md §6.** **Next:** the owner decides where the public sites live, then they are built.
+
+**2026-09-30, later — the public website BUILT ([ADR-0051](architecture/adr/0051-the-public-website-is-its-own-app-and-says-only-what-the-code-does.md), accepted the same day).**
+Owner decisions: the website is **its own Next.js app, `apps/neura-web`, in this repository, separate from the
+console**; it lives at **`neura.fiveneurals.com`** with the docs at **`/docs`**; `fiveneurals.com` is the company's
+own site in **another repository** and only needs a link to NEURA (who adds it: **not answered**). Pages: `/`
+(NEURA-CARE — no overview page was designed, and the mockup's logo links there), `/sell/`, `/docs/`,
+`/docs/owners/`, `/docs/developers/`; static export, same package versions as the console, fonts self-hosted, no
+API call, no cookie, no analytics. **`make web-check`** builds it and checks, in real headless Chrome: no test-shop
+data (including every product name in the test shop's seeder), no platform name, no secret, no request to another
+site, every page draws, nothing scrolls sideways on a phone — **all green, 41 checks** — and lists the placeholders
+left (`[CONTACT ADDRESS]`, `[NEURA ADDRESS]`). **What building changed from the approved boards** (the canvas was
+updated to match, and a green note on row 9 lists it): *Waterproofing Spray* → *Boot Proofing Wax* and *order 86* →
+*order 1042* (both were the **test shop's**); the chat box key is made **by FiveNeurals** (the dashboard cannot
+yet); the boards' *"Not decided"* tags became what is true today (*"Ask FiveNeurals for the check tool"*); the check
+tool's example output now uses its **real** check names; only the **OpenAPI file** is published, because the
+written specification names platforms. Also: the uv workspace now excludes `apps/neura-web`, and the
+*"no JS toolchain without an ADR"* test allows it, citing ADR-0051. `make check` green (1348). CI does not run the
+website's checks, as it does not run the console's. **Not decided, and must be before deploying:** the contact
+address, the API's public address, the dashboard's address, hosting. **Next:** the owner answers those four; then
+deploy, and add the link on `fiveneurals.com`.
+**Same day — FIXED: a shop without NEURA-SELL no longer sees its screens** (owner: *yes*, after the gym
+example). `/me` returns each shop's `assistants`; the console hides **Suggestions and Sold out** (menu, Home), *Sold
+out* by its address says it comes with NEURA-SELL, Shop connection and Help drop the Sold-out steps and lines
+(console.md §3.0). Suggestions was included because it is the same bug. Display only; `/sold-out` is still not
+gated server-side (the API may not name an agent). **A mistake made and repaired while building it:** the new code
+was first written over the existing `lib/assistants.ts` (the assistants' display names); it was restored from git
+unchanged and the new code went to `lib/shop-assistants.ts`. Gates: `make console-check` **114 passed, 0 failed** —
+it now tests Sold out on a shop *with* NEURA-SELL (seeded separately, removed by id) and adds five checks on the
+owner's NEURA-CARE-only shop (`tn_01M0ZP6MQ4TD4ZKP5G1KKNECJ0`); `make check` 1348; `make test-integration` 404
+passed, the known 40 failed; console lint/tsc/prettier clean; `test_console_auth.py` 12 passed. Also found: an
+assistant can only be set **when a shop is created** (`make tenant-new AGENTS=`) — there is no command to change it
+after; the admin dashboard (group C) is where that would go.
+**Same day — IN PROGRESS: connecting a new shop from zero, following our own guide word by word.** The owner
+cloned a custom Laravel shop (*Ceylon Harvester*, `~/Developer/ecommerce`, http://ecommerce.test) that has no
+ready-made bridge, and treats it as a real shop. One step at a time, each checked against the **built** guides (the
+website's developer guide, the console's Help, and `CONNECTING_THE_SHOP.md` for FiveNeurals' part — not the
+mockups). **Everything is in [`CONNECTING_A_NEW_SHOP_LOG.md`](CONNECTING_A_NEW_SHOP_LOG.md)** — the steps, **23 guide
+problems (G1–G23)**, the owner's decisions, dashboard ideas **D1–D5**, recommendations **E1–E5**. **Steps 0–4 DONE**
+(shop running · bridge built in the shop's code · `/health` true · check tool 19/19 · connected as
+`tn_01M3RR45SK09PV28RPR22NH0GH` / store `st_01M3RRQX2N2N5JR10XHAWJWBT4`, catalogue copied). **NEXT: step 5, the chat
+box**, then 6 (practice mode — needs an AI call, ask first) and 7 (fix the guide, build D1–D5 after a mockup).
+Owner decisions so far: no policies for this shop, shown red in the dashboard (D1); the **dashboard makes the shop
+token** (D5); a rule + automatic test to keep every capability list in step (D4, approved); change messages later.
+**Same day — keeping our copy of the catalogue fresh: DEFERRED by the owner** ("we can do it later"). Checked
+while explaining it: **the chat asks the shop live** (`ctx.adapter.search_products`), so a chat answer is not stale;
+the copy that goes stale is what the **product feed**, **search by meaning** and the **console's lists** read. The
+proposal (nightly full re-read + listening to the shop's change messages) stays an open decision, probably an ADR.
+**Same day, owner:** the contact address is **temporarily the owner's own email** (`src/lib/site.ts`); the real one, the API's public address, the dashboard's address and hosting are **decided later** — the last three only exist once NEURA is hosted.
+
+**B7 gates — what ran, and what did NOT, at the end of the session.** Late in the session the tool that runs
+shell commands stopped working (its safety check returned no verdict, repeatedly), so the last edits were made
+without a run. **Ran and passed:** `test_console_shop_and_usage.py` **44 passed** against real PostgreSQL;
+`tests/unit/test_console_screens.py` passed; `npm run lint` and `npx tsc --noEmit` clean; the pages seen in real
+headless Chrome on the real shop (desktop, phone, Check now, Sync now end to end). **`make console-check`**: the
+last full run was **all green except one check of my own** — *"the setup checklist lists every connection"* assumed
+≥ 2 connections, but the check seeds into the owner's **first** membership, which (as the Suggestions check
+already notes) is not the Dispatch Test Shop and may hold no connection of its own. It now compares with that
+shop's real number of connections (`_store_count`) and looks for the seed's own row. **Not yet run after that
+fix, and not run at all this session:** `make console-check` (expect **109**: 91 − 1 renamed + 9 shop + 9 help),
+`make check`, `make test-widget`, `make pairs-check`, `make test-integration`, `npx prettier --check src` (the
+last edits — `help.ts`, a `store` prop on the connection row — were not re-formatted), `ruff` on
+`console_check.py`. **The next session runs them first.** Also unverified by a run: the claims in the rewritten
+`CONNECTING_THE_SHOP.md` that `make sync-check … TENANT=` stores the connection (the old page said so) and the
+widget key's scope list (copied from the old page, plus `sell:suggest:read` from `provision_pairs.py`).
+
+**B7 gates — RUN 2026-09-29, all green.** Two failures found and fixed first: (1) `console_check.py`'s new
+checklist check had `\\"` inside an f-string, which **ended the string** — a syntax error, so `make check`'s ruff
+failed; (2) a comment in `apps/neura-console/src/lib/shop.ts` named the test shop's host — **Rule 1**, caught by
+`check_platform_independence.py`; now `shop.example`. Then: `make check` ✅ (**1348** unit tests; 7 import
+contracts kept; eval-fast exits 0, every model case skipped as designed) · `make console-check` ✅ **109 passed, 0
+failed** (the checklist check reads *1 of 1*) · `make test-widget` ✅ **51** · `make pairs-check` ✅ **8 of 8** ·
+`make test-integration` **404 passed, 40 failed — all 40 in `test_api_postgres.py`, the known ones** · console
+`npm run lint`, `npx tsc --noEmit`, `npx prettier --check src` ✅ · `ruff` on `console_check.py` ✅. **The two
+unverified claims, checked against the code:** the widget key's **scope list is right** (all 11 are in the two
+manifests); **`make sync-check` stores NO connection** — `sync_smoke_test.py` only copies the catalogue. The
+connection is stored by `POST /v1/stores` (a secret key with `stores:write`; `platform` = `generic`) and there is
+no `make` command for it. `CONNECTING_THE_SHOP.md` corrected. **Help's step text in the console was not changed**
+— it does not name the command.
+
+**Offered to the owner on 2026-09-28 and NOT decided — how our copy of the catalogue stays fresh.** Found building B5: the synced copy said a sold-out product was in stock. Recommended, for the owner's decision and probably an ADR: **(1) receive the shop's change notifications** — the bridge already sends `product.updated` on an admin save, and **nothing on our side listens** (no route calls `webhooks.verify()`); **(2) a nightly full re-read** as the safety net (ADR-0022's undecided *cron-shaped table*), because a sale lowers stock without sending *product changed*; **(3) ask the shop live where a wrong answer misleads** — now done on Sold out and in the Suggestions preview.
+
+**NEXT ACTION after that: put what is built in front of a real person. Not more code.** The feature plan this
+file carried is done except [ADR-0043](architecture/adr/0043-a-recovery-list-is-a-fifth-surface-and-the-merchant-sends-the-email.md),
+which shows an empty screen until a real shop has run for weeks. **[B2](open-questions.md) — no merchant, no live
+traffic — is now the only thing between this project and a measurement**: the sold-out list, the owner's
+suggestions and the observed events have each been seen by nobody but the owner and a script. The tester handover
+below is the concrete form of it.
+
+**One gap to know before that handover, found 2026-09-27:** the console's *Sold out* and *Suggestions* screens read
+the **synced** catalogue, and **nothing schedules a sync** — the test shop was **9 products behind** (29 of 38) until
+one was queued by hand. A tester adding a product will not see it on either screen until someone runs a sync
+(`POST /v1/stores/{id}/sync`). A recurring sync is ADR-0022's deliberately-undecided *"cron-shaped table"*, so it is a
+decision to put to the owner, not a job to add quietly.
+
+**ADR-0050, 2026-09-27 — BUILT.** `sell_pairing_choices` (per tenant, store, product: an ordered list of up to four
+ids, empty = *show nothing*, who and when); the request path asks it **first** (`orchestrate._owner_choice`); four
+console endpoints under **`/v1/sell/console/shops/{tenant}/suggestions`**, served by SELL's own routes so the
+entitlement check stays inside the agent; the console's *Suggestions* tab with a per-product editor (remove, search the
+catalogue, add, save, back to automatic). The screen reports what a basket shows now: **Your choice**, **Chosen by AI**
+(a stored pairing the basket would use), or **Automatic** (decided from the product's own words when first shown).
+
+**ADR-0046 stage 1, 2026-09-27 — BUILT.** `GET /v1/console/shops/{tenant}/sold-out` (`console_sold_out.py`) and the
+console's *Sold out* tab. Fixed 7-day window (0046 §7, and retention holds nothing older), most-viewed first for the
+merchant only, at most 100 products with a *"list was cut"* flag. Two empty states that read differently — **no
+agreement on record** vs **nothing viewed while sold out** — and the second names the shop's own switch as something
+we cannot see. **Stages 2 and 3 remain unapproved.**
+
+---
+
+**ADR-0044 phase 1, 2026-09-26 — BUILT, RUN ON THE REAL SHOP, and here is what exists.**
+
+| | |
+|:--|:--|
+| our side | `observed_events` (exactly 0044 §4's fields + the shop's `event_id`), `POST /v1/observe/events`, `tenants.dpa_signed_at`, the `retention.sweep` job, `make tenant-dpa`, `make retention-sweep` |
+| the shop's side (bridge) | `NEURA_OBSERVE_ENABLED=false` by default; `ShopperActivity` (checks the switch **before** queueing), `DeliverObservation` (re-checks it at delivery; a 4xx is dropped, never retried, never in `failed_jobs`), `ProductViewMarker` (counts cache hits) |
+| what is NOT built | scoring (phase 2), any screen (0046), `ORDER`/`CUSTOMER` sync, the audit-log and traces retention (ADR-0048 §5) |
+
+**What the live run proved, each step on the real shop:**
+
+| step | result |
+|:--|:--|
+| switched **off**, product page viewed | shop queue 21 → 21, **0 rows** — nothing exists to discard |
+| `observe:write` key, no agreement | **refused** at issue |
+| `observe:write` on a browser key | **refused** at issue, even with an agreement |
+| switched **on**: 2 views, basket add, 2 more shoppers (one from the page cache) | **6 rows**, exactly six columns, four different session tokens |
+| two rows back-dated 8 days, `make retention-sweep` | **2 deleted**, 4 kept, next sweep still booked |
+| a due sweep left to the **API's own worker** | ran by itself, deleted the expired row, **re-booked for tomorrow** |
+| agreement **withdrawn** | **3 deleted at once**; the next event refused `DPA_REQUIRED`, logged **without** the session token, not retried; shop `failed_jobs` 6 → 6 |
+| switched **off** again | nothing queued, cached page or not |
+
+**State left behind, on purpose:** the test shop has observation **off** (one line in its `.env` turns it on —
+URL, key and `NEURA_OBSERVE_QUEUE=neura-observe` are set), the Dispatch Test Shop tenant has an **agreement
+recorded** and an `observe:write` key, and **no observed events are held**. The shop's `default` queue still
+holds **21 old change-notification jobs** aimed at `127.0.0.1:8787`, which nothing listens on — they predate
+this work and were deliberately not touched, which is why observations were given their own queue for the run.
+
+**Found on the way, not fixed, not blocking:**
+
+* **Nothing receives the bridge's signed change notifications.** `neura_adapters.generic.webhooks.verify()`
+  exists and no route calls it; the bridge README points at `/v1/webhooks/commerce`, which does not exist.
+  ADR-0044 §2's *"already posts to us"* is true of the sender only.
+* **`make tenant-drop` misses `sell_pairings`.** `observed_events` was added to it; the pairing table predates this.
+* **Rows written before 2026-09-26 have no sweep booked.** Every new write books one; an old tenant with no new
+  activity needs one `make retention-sweep TENANT=…`.
+
+---
+
+**The pairing surface, 2026-09-26 — DONE, and here is the whole of what was decided about it.**
+
+**ADR-0045 is BUILT and KEPT; ADR-0047 is BUILT and MEASURED; the hand-graded pass is TAKEN.** Nothing about
+this surface is pending. **Two notes carried forward, neither blocking:** `.env` has no
+`CLOUD_MODEL_EMBEDDER`, so ADR-0047's semantic tier runs only on a local embedder or `hybrid` today — a
+config line for whenever a production deployment exists, deliberately not guessed at here; and **`0.65` is a
+property of `nomic-embed-text`** measured on 38 clothing products, so re-check it per shop and per embedder
+rather than assuming it.
+
+**The keep decision, and the evidence it was taken on:
+
+| | |
+|:--|:--|
+| what §9 asked | beat **19 of 29** by a margin worth the eval suite behind it |
+| run 1 — the shop as it was, 29 products | **words 19, model 19. A flat tie**, and only **1** of the model arm's blocks came from the model |
+| what run 1 found | **24 of 29 products got correct kinds the shop does not stock.** The shop had no accessories or care range at all. **The instrument was the problem** |
+| run 2 — after nine ordinary complements were stocked, 38 products | **words 28, model 29.** **7** of the model arm's blocks came from the model |
+| what run 2 found | **stocking the complements is what moved the number, and it moved WORDS most** — 19 → 28 with no model anywhere. The model adds **one** product of coverage |
+| and the sharper thing | **coverage cannot settle this.** It counts blocks that rendered; a rain shell beside a cotton frock counts the same as one beside waterproofing spray. The model is **better on the rain shell and the jersey frock, worse on the loafer**, and covers the suede boot words miss |
+| **the decision** | **KEEP.** Owner, 2026-09-26. Not because §9 was met — it was not — but because §9's metric was shown to be blind to the difference, and the model's suggestions are better where they differ. The surface is idle unless a pairing has been computed, so the cost of keeping it is one job row per product ever basketed |
+
+**§9 was not met and is not being quietly declared met.** It was written expecting a model that could not
+find pairings; the model finds them, the shop was what could not sell them, and once the shop could, the
+word path improved more than the model did. **What justifies keeping it is the seven changed blocks**, of
+which the rain shell (waterproofing spray, not a cotton frock) and the jersey frock (tights, not chinos)
+are plainly right and the loafer is plainly worse. **A coverage number cannot see any of that, and that is
+the finding, not an excuse.**
+
+**So the obligation §9 created is transferred rather than discharged:** before this surface is judged
+again, somebody has to **hand-grade the 38 blocks, words against model**, and say which suggestion is
+better. That is the measurement §9 should have asked for, and it is still not taken.
+
+**ADR-0047 is BUILT and MEASURED** — see the entry below. It converts the misses it targeted (**29 of 38 →
+2**), and measuring it found the parameter that actually decides this surface: at the retriever's default
+`min_score` of 0.3 it reached 36 of 38 by suggesting **cargo trousers for a wool wash**, and at **0.65** it
+reaches 29 of 38 and pairs a boot with shoe trees and polish. **0.65 shipped.**
+
+**THE HAND-GRADED PASS IS DONE — owner, 2026-09-26 — and it is the first judgement of this surface that was
+not a count.** All 38 blocks were read side by side, words against model at 0.65. **Verdict: 7 better, 2
+worse, the rest unchanged, and the owner's word was "all good".**
+
+| better (7) | words gave | the model gives |
+|:--|:--|:--|
+| Leather Loafer | belt + silk tie | **shoe trees + shoe polish** |
+| Leather Chelsea Boot | belt + polish | **shoe polish + shoe trees** |
+| Waterproof Hiking Shoe | spray + rain shell | **walking socks + spray** |
+| Tapered Wool Trousers | more trousers | **clothes brush** |
+| Waxed Cotton Jacket | chinos + trousers | **clothes brush** |
+| Long Sleeve Jersey Frock | chinos + jogger | **tights** |
+| Linen Pinafore Frock | tee + vest | **tights** |
+
+**The pattern, which is the finding:** the word path suggests *more clothes*; the model suggests *the thing
+you buy with the clothes*. Two rows are worse and both in the same way — the Dark Wash Jeans and the Cotton
+Poplin Shirt Dress drop from two suggestions to one.
+
+**Two rows the owner queried, and the honest answers differ:**
+
+* **Wool Trousers → clothes brush is right.** The trousers say *"dry clean only"*; brushing wool between
+  cleans is real garment care.
+* **Waxed Jacket → clothes brush is weak.** That jacket's own text says *"do not wash — sponge clean and
+  re-wax once a year"*, and the model's **first** kind was `wax dressing`, which is correct and which the
+  shop does not stock. The brush is a second-best reached because the shelf is empty.
+
+**And one warning sign that came out of the same read: the Horsehair Clothes Brush is suggested for four
+different products.** One product becoming the default answer is the signature of a lookup latching onto a
+general theme — here *garment care* — rather than the specific kind asked for. Nothing is broken by it and
+no rule caps it today; **capping how often one product may be suggested would be a new decision and an
+ADR**, not a patch.
+
+**The owner's own generalisation question, answered and recorded because it is the right question:** does
+this work for a shop that is not this one? **The two halves that generalise are the two that matter** — the
+model's world knowledge is not clothing-specific (a laptop pairs with a bag, a guitar with strings), and
+semantic lookup is a general technique. **A larger catalogue should do better, not worse**, because this
+shop's failures were overwhelmingly *"the complement is not for sale"*. **The part that does NOT generalise
+is `0.65`** — it is a property of `nomic-embed-text` measured on 38 clothing products, and it must be
+re-checked per shop and per embedder rather than assumed.
+
+**Two smaller things this build left on the floor, both deliberate and neither blocking:**
+
+* **`make test-integration` still fails 40 tests, on `main` as well** — a missing field in a test stub,
+  pre-existing, verified by stashing, and not run by `make check`. The new `sell_pairings` table has **no
+  integration test of its own** because of it; its RLS policy is covered automatically by the ADR-0008
+  protection scan, which is the thing that matters most.
+* **The three `RETENTION_*` settings are still read by no code.** ADR-0042 §3 requires the first feature
+  that holds personal data to make them real. **This feature holds none** — `sell_pairings` is keyed by
+  product and stores no shopper — so that obligation is untouched rather than discharged, and it lands on
+  ADR-0044 phase 1, which is next.
+
+**Still true and still outranking all of it: [B2](open-questions.md) — there is no merchant and no live
+traffic**, and the tester handover below remains the highest-value input this project can obtain.
+
+---
+
+**The standing context below is from 2026-09-19 and is still accurate.** **CARE and SELL now work end to end on the cloud path, and the goal has changed shape.**
 The owner's stated purpose, 2026-09-19: **hand both the shop and the agents to another person to test.**
 So "stable" means *another human can install it and use it without the author*, which is a different bar
 from the one this file tracked all week. **What was achieved 2026-09-18/19** — all of it **on cloud, and
@@ -394,7 +1516,16 @@ Fixed 2026-09-19, along with the macOS `make`/Xcode-licence trap and the cloud-e
 but the author has ever installed this project.** The highest-value next input is the tester's list of
 everywhere they got stuck — worth more than anything further that can be found from this machine.
 
-**2. `make verify-probe AGENT=sell` is still RED and should stay red.** Under ADR-0039's corrected
+**2. Build ADR-0040's cart suggestion — inside the wait, not ahead of the handover.** Accepted
+2026-09-20 and **nothing exists yet**. It reuses `search_products` and `GET /categories`, adds **no
+tenth endpoint** and runs **no model of ours**, so the surface is deterministic and testable without a
+provider — and Rule 4 still applies to it: **nothing merges without an eval**, a no-model surface
+included. The two parameters it fixes — most-expensive cart item, two suggestions — are **guesses the
+ADR labels as guesses**; do not repeat them as tuned. **— 2026-09-21: BUILT.** The owner deferred the
+handover, which removed the only reason to hold this back, so it was built first instead. See the entry
+above; this item is done and the sequencing note it carried no longer applies.
+
+**3. `make verify-probe AGENT=sell` is still RED and should stay red.** Under ADR-0039's corrected
 expectations, measured at n=10 on both sides with 100 calls and 0 errors each: `llama3.1:8b` fails
 **four** arms (E, G, H, I), `gemini-3.5-flash` fails **one** (F). **Neither clears
 [ADR-0018](architecture/adr/0018-guard-model-must-refuse.md)'s every-arm bar.** Arm F is the open
@@ -402,11 +1533,11 @@ question — the two models fail it in opposite directions and
 [Finding 48](TESTING_LOG.md) shows `llama3.1:8b` only passes it by accident, refusing because of the
 injection rather than because of the claim. **Do not make this green by lowering the bar.**
 
-**3. Stage 6 §4 (shadow mode) is still untouched**, and it is the one that must not meet a real shopper
+**4. Stage 6 §4 (shadow mode) is still untouched**, and it is the one that must not meet a real shopper
 before a human-response path exists: it saves a hidden draft, notifies nobody and guarantees no reply.
 If the tester is to use shadow mode, that gap is theirs to meet first.
 
-**4. Everything is n=1.** One conversation, one shop, one model, questions written by the people who
+**5. Everything is n=1.** One conversation, one shop, one model, questions written by the people who
 built the system. [B2](open-questions.md) — no merchant on live traffic — is unchanged and is still the
 top risk. **The test shop proves the software works; it cannot prove a shopper is helped.**
 
@@ -2238,7 +3369,7 @@ Remaining: **shadow mode producing *graded* conversations** — every part excep
 | A durable job queue, and **one** function that reads a single column across tenants | [ADR-0022](architecture/adr/0022-scheduling-under-rls.md) |
 | Agent #2 is SELL, read-only; every protocol is an **output format**, never a source | [ADR-0023](architecture/adr/0023-sell-is-read-only-and-a-protocol-is-an-output-format.md) |
 
-Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · **NEURA-SELL is agent #2, read-only, scoped to two intents and three surfaces** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
+Product-level decisions: NEURA-CARE is the first agent, scoped to **three intents** · **NEURA-SELL is agent #2, read-only, scoped to two intents and — since [ADR-0040](architecture/adr/0040-a-paired-suggestion-is-a-fourth-surface-and-has-no-model-in-it.md), 2026-09-21 — four surfaces** · Bagisto is a **test harness**, not a target platform · Ollama is dev **and** the sovereign product tier, not a placeholder.
 
 ---
 

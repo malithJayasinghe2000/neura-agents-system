@@ -7,6 +7,7 @@ or unexpected — leaves through here, so clients only ever parse one structure.
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -49,9 +50,15 @@ def register_error_handlers(app: FastAPI) -> None:
                     "code": "INVALID_REQUEST",
                     "message": "Request validation failed.",
                     "type": "invalid_request",
-                    "details": {"errors": exc.errors()},
+                    # A check of our own (a validator) carries its Python
+                    # exception, and can carry the date it refused. As they
+                    # are, neither is JSON, and this handler itself failed as a
+                    # 500 for one wrong field (G64): the exception becomes its
+                    # message.
+                    "details": {
+                        "errors": jsonable_encoder(exc.errors(), custom_encoder={Exception: str})
+                    },
                     "request_id": _request_id(request),
-                    "docs_url": "https://docs.fiveneurals.com/errors/INVALID_REQUEST",
                 }
             },
         )
@@ -67,7 +74,6 @@ def register_error_handlers(app: FastAPI) -> None:
                     "message": str(exc.detail),
                     "type": "invalid_request" if exc.status_code < 500 else "api_error",
                     "request_id": _request_id(request),
-                    "docs_url": f"https://docs.fiveneurals.com/errors/{code}",
                 }
             },
         )
@@ -85,7 +91,6 @@ def register_error_handlers(app: FastAPI) -> None:
                     "message": "An internal error occurred.",
                     "type": "api_error",
                     "request_id": _request_id(request),
-                    "docs_url": "https://docs.fiveneurals.com/errors/INTERNAL_ERROR",
                 }
             },
         )

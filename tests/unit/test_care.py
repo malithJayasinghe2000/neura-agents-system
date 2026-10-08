@@ -35,9 +35,15 @@ from neura_agent_care.nodes import (
 from neura_agent_care.prompts import REQUIRED, REVISION, load_prompts, prompt_hashes
 from neura_agent_care.runtime import build_runtime
 from neura_agent_care.tools import CARE_TOOLS, TOOL_SCOPES
+from neura_agent_care.tools.catalogue import get_product_details, search_products
 from neura_agent_care.tools.handover import HANDOVER_REQUESTED
 from neura_agent_care.tools.orders import NOT_FOUND, find_orders_for_customer, get_order_status
-from neura_agent_care.tools.render import order_evidence, policy_evidence, product_evidence
+from neura_agent_care.tools.render import (
+    order_evidence,
+    policy_evidence,
+    product_evidence,
+    product_summary,
+)
 from neura_agent_core.graph import CONFIG_KEY, GraphContractError, initial_state
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity, ToolContext
@@ -301,6 +307,55 @@ class TestEvidenceRendering:
         product = asyncio.run(store.get_product("p_300"))
         assert product is not None
         assert "not available to buy" in product_evidence(product)
+
+    def test_a_sold_out_product_is_never_available_to_buy(self) -> None:
+        """G35 in CONNECTING_A_NEW_SHOP_LOG.md: status alone said "available to buy".
+
+        The search-result line carried no stock, so a sold-out product read as
+        buyable and the agent told a shopper "Yes, we have it" — with the fact
+        check passing, because the reply matched its evidence.
+        """
+        store = load_store(TENANT, [])
+        product = asyncio.run(store.get_product("p_400"))
+        assert product is not None
+        for rendered in (product_summary(product), product_evidence(product)):
+            assert "out of stock" in rendered
+            assert "available to buy" not in rendered
+
+    def test_an_in_stock_product_says_in_stock(self) -> None:
+        store = load_store(TENANT, [])
+        product = asyncio.run(store.get_product("p_200"))
+        assert product is not None
+        assert "available to buy, in stock" in product_summary(product)
+
+    def test_unreported_stock_is_not_called_available(self) -> None:
+        store = load_store(TENANT, [])
+        product = asyncio.run(store.get_product("p_200"))
+        assert product is not None
+        unreported = product.model_copy(
+            update={"variants": [v.model_copy(update={"in_stock": None}) for v in product.variants]}
+        )
+        rendered = product_summary(unreported)
+        assert "did not report whether it is in stock" in rendered
+        assert "available to buy" not in rendered
+
+    def test_an_unreleased_product_is_not_in_search_results(self) -> None:
+        """G37: a DRAFT product was listed, with its price, to a shopper."""
+        store = load_store(TENANT, [])
+        result = asyncio.run(search_products.fn(query="trekking poles", ctx=_ctx(store)))
+        assert "Trekking" not in result
+        assert "55" not in result
+
+    def test_an_unreleased_product_reads_as_absent_by_id(self) -> None:
+        store = load_store(TENANT, [])
+        result = asyncio.run(get_product_details.fn(product_ref="p_500", ctx=_ctx(store)))
+        assert result.startswith("The store has no product with id 'p_500'")
+        assert "Trekking" not in result
+
+    def test_a_withdrawn_product_asked_by_id_is_still_named_as_withdrawn(self) -> None:
+        store = load_store(TENANT, [])
+        result = asyncio.run(get_product_details.fn(product_ref="p_300", ctx=_ctx(store)))
+        assert "withdrawn from sale" in result
 
     def test_availability_never_reads_as_a_discount(self) -> None:
         """Found by reading the output of a real run, not by an assertion.

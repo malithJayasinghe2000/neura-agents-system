@@ -6,7 +6,7 @@ serves a custom or newly built store — nobody will ever write a native adapter
 for a shop that exists once
 (docs/architecture/adr/0009-generic-commerce-interface.md).
 
-Four parts:
+Five parts:
 
 * ``adapter`` — ``GenericAdapter``, the ``CommerceAdapter`` implementation.
 * ``wire`` — the mapping between a store's JSON and the canonical model. The
@@ -14,6 +14,8 @@ Four parts:
 * ``webhooks`` — HMAC verification for store-to-us change notifications.
 * ``spec`` / ``cli`` — the published OpenAPI document and the conformance tool a
   merchant's developer runs against their own endpoint.
+* ``teacher`` — what the developer MCP server teaches a developer's AI tool: the
+  format, a sample for every answer, and the rules (ADR-0053).
 """
 
 from neura_adapters.generic.adapter import SPEC_CAPABILITIES, GenericAdapter

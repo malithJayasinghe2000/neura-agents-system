@@ -9,7 +9,7 @@
  * Embedded as two lines, which is the whole integration:
  *
  *     <script src="https://api.example.com/v1/widget/widget.js" async
- *             data-neura-key="fn_pk_live_..."></script>
+ *             data-neura-key="fn_pk_..."></script>
  *
  * Four rules this file exists to keep, each decided elsewhere:
  *
@@ -44,6 +44,15 @@
   var PLACEHOLDER = "Ask a question…";
 
   /**
+   * Ids accepted from one page. The server truncates too; this is here so a
+   * page holding a long list does not spend the bytes.
+   */
+  var MAX_PAIR_IDS = 10;
+
+  //: Marks that the panel has already opened itself for a suggestion this tab.
+  var PAIRS_OPENED_KEY = "neura:pairs:opened";
+
+  /**
    * What the widget says when a turn produced nothing to render.
    *
    * This is the ADR-0020 §4 error path and it must never be reached in normal
@@ -57,6 +66,22 @@
 
   var TRANSPORT_ERROR_MESSAGE =
     "We could not reach the assistant. Please check your connection and try again.";
+
+  /**
+   * What a shopper reads when a message could not be answered (G56).
+   *
+   * Only NEURA's own words, from a refusal the page could read (`fromServer`,
+   * set by `RestTransport`), are shown as they are: they were written for a
+   * person. Anything else is the browser's or a parser's text ("Failed to
+   * fetch", "Unexpected token '<'"), in the browser's language and meaningless
+   * to a shopper, so it becomes the one plain sentence above.
+   */
+  function errorTextFor(err) {
+    if (err && err.fromServer && err.message) {
+      return err.message;
+    }
+    return TRANSPORT_ERROR_MESSAGE;
+  }
 
   /**
    * Widget copy for the graph's progress frames.
@@ -187,6 +212,66 @@
     return out;
   }
 
+  /**
+   * The product ids a page handed us, cleaned. [ADR-0040]
+   *
+   * **The page says what it is displaying; it never says what it means.** These
+   * are ids on a page — they are not called a cart here, and must not be,
+   * because every platform exposes a cart differently and the moment this
+   * knows about carts it stops being portable.
+   *
+   * Commas and spaces are tolerated: a theme building this attribute in a
+   * template loop produces `"1315, 1320,"`, and a widget that ignored a whole
+   * page over a trailing comma would be a widget nobody ships.
+   */
+  function productIdsFrom(raw) {
+    var out = [];
+    var seen = {};
+    String(raw || "").split(",").forEach(function (part) {
+      var id = part.trim();
+      if (id && !Object.prototype.hasOwnProperty.call(seen, id) && out.length < MAX_PAIR_IDS) {
+        seen[id] = true;
+        out.push(id);
+      }
+    });
+    return out;
+  }
+
+  /**
+   * What a suggestions response shows, or `null` for "show nothing".
+   *
+   * The same three refusals `pairs.js` makes, and for the same reasons: no
+   * products means no block; **no heading means no block**, because an
+   * unattributed "goes well with" names nothing a shopper can judge; and a card
+   * with no title is a grey box a shopper reads as a broken site.
+   */
+  function pairsFor(payload) {
+    if (!payload || !payload.heading) {
+      return null;
+    }
+    var items = productsForTurn({ products: payload.suggestions });
+    return items.length ? { heading: String(payload.heading), products: items } : null;
+  }
+
+  /**
+   * Should the panel open by itself?
+   *
+   * **Three conditions, and all of them are restrictions.** Opening a chat
+   * panel over a page is an interruption, and the cart page is where a shopper
+   * has already decided to buy — the one place an interruption can cost the
+   * merchant money rather than merely annoy someone.
+   *
+   *   - the merchant asked for it (`data-neura-pairs-auto-open`), and the
+   *     default is **off**: a behaviour this intrusive is opted into, never
+   *     inherited;
+   *   - there is something worth showing — no suggestion, no interruption;
+   *   - it has not already happened this session, so returning to the page
+   *     does not reopen it. Once is a suggestion; every time is nagging.
+   */
+  function shouldAutoOpenPairs(config, block, alreadyOpened) {
+    return Boolean(config && config.pairsAutoOpen && block && !alreadyOpened);
+  }
+
   /** Read the embed configuration off the <script> tag that loaded us. */
   function configFrom(script, location) {
     var data = (script && script.dataset) || {};
@@ -206,6 +291,11 @@
       agent: data.neuraAgent || AGENT_DEFAULT,
       title: data.neuraTitle || TITLE_DEFAULT,
       open: data.neuraOpen === "true",
+      // [ADR-0040] on this surface. Absent on every page but the one the
+      // merchant chose, which is why the widget asks for suggestions nowhere
+      // else and costs nothing on the rest of the storefront.
+      productIds: productIdsFrom(data.neuraProducts),
+      pairsAutoOpen: data.neuraPairsAutoOpen === "true",
     };
   }
 
@@ -260,9 +350,15 @@
         return;
       }
       var settled = false;
+      // Whether it ever opened. A socket refused at the handshake fires `error`
+      // and then `close`; that `close` is the same refusal, not a dropped chat.
+      // Read as one, it drew a second error and threw away the switch to REST
+      // the refusal had just made (G56).
+      var opened = false;
 
       socket.onopen = function () {
         settled = true;
+        opened = true;
         self.socket = socket;
         resolve(socket);
       };
@@ -286,12 +382,14 @@
       };
       socket.onclose = function () {
         self.socket = null;
-        if (!settled) {
-          settled = true;
-          reject(new Error("socket_closed"));
-        } else {
-          handlers.onClose();
+        if (!opened) {
+          if (!settled) {
+            settled = true;
+            reject(new Error("socket_closed"));
+          }
+          return;
         }
+        handlers.onClose();
       };
     });
   };
@@ -344,7 +442,11 @@
       return response.json().then(function (json) {
         if (!response.ok) {
           var detail = (json && json.error && json.error.message) || "";
-          throw new Error(detail || "request_failed");
+          var refused = new Error(detail || "request_failed");
+          // NEURA's own sentence, written for a person: the only error text a
+          // shopper is ever shown as it is (`errorTextFor`).
+          refused.fromServer = Boolean(detail);
+          throw refused;
         }
         return (json && json.data) || {};
       });
@@ -457,7 +559,15 @@
   function defineChatElement() {
     function NeuraChat() {
       var self = Reflect.construct(HTMLElement, [], NeuraChat);
-      self.config = { key: "", base: "", agent: AGENT_DEFAULT, title: TITLE_DEFAULT, open: false };
+      self.config = {
+        key: "",
+        base: "",
+        agent: AGENT_DEFAULT,
+        title: TITLE_DEFAULT,
+        open: false,
+        productIds: [],
+        pairsAutoOpen: false
+      };
       self.conversationId = null;
       self.transport = null;
       self.pending = false;
@@ -540,6 +650,101 @@
 
       if (this.config.open) {
         this.toggle(true);
+      }
+
+      // Last, and only when a page handed over ids. Everything above must be
+      // built before a network reply can arrive, or a fast response renders
+      // into a panel that does not exist yet.
+      if (this.config.productIds.length) {
+        this.loadPairs();
+      }
+    };
+
+    /**
+     * Ask what goes with the products this page named. [ADR-0040]
+     *
+     * **No model of ours runs in this**, on either side: the endpoint chooses
+     * by the merchant's own product text, and nothing here generates a
+     * sentence. What arrives is a fixed heading and a list of products, so
+     * there is no prose for a false claim to live in — which is the property
+     * that lets this render without a `verify` step in front of it.
+     *
+     * **Every failure is silent.** A network error, a key without
+     * `sell:suggest:read`, a shop that cannot search — none of them is a
+     * shopper's problem, and all of them happen on a page where the shopper is
+     * about to pay. Nothing renders and the panel does not open.
+     */
+    NeuraChat.prototype.loadPairs = function () {
+      var self = this;
+
+      fetch(this.config.base + "/v1/sell/suggestions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + this.config.key
+        },
+        body: JSON.stringify({ product_ids: this.config.productIds })
+      })
+        .then(function (response) {
+          return response.ok ? response.json() : null;
+        })
+        .then(function (payload) {
+          var block = pairsFor(payload);
+          if (!block) {
+            return;
+          }
+          self.renderPairs(block);
+          if (shouldAutoOpenPairs(self.config, block, self.pairsAlreadyOpened())) {
+            self.rememberPairsOpened();
+            self.toggle(true);
+          }
+        })
+        .catch(function () {
+          /* silent: see above */
+        });
+    };
+
+    /**
+     * The suggestion, in the log, and **not dressed as something the assistant
+     * said**.
+     *
+     * It gets the `note` style rather than an assistant bubble because no
+     * assistant wrote it. A fixed heading rendered as a reply would be the
+     * widget putting words in the agent's mouth — harmless today, and exactly
+     * the habit that makes a later generated line indistinguishable from a
+     * fixed one.
+     */
+    NeuraChat.prototype.renderPairs = function (block) {
+      var row = element("div", "row");
+      row.dataset.role = "assistant";
+      row.appendChild(element("div", "note", block.heading));
+      this.log.appendChild(row);
+      this.renderProducts(block.products);
+    };
+
+    /**
+     * Once per tab. Returning to the cart page must not reopen the panel — one
+     * suggestion is help, and the same suggestion on every visit is nagging.
+     *
+     * `sessionStorage`, like the conversation id and for the same reason: a
+     * shared computer must not carry this between people.
+     */
+    NeuraChat.prototype.pairsAlreadyOpened = function () {
+      try {
+        return sessionStorage.getItem(PAIRS_OPENED_KEY) === "true";
+      } catch (err) {
+        // A browser refusing storage gets the cautious answer: treat it as
+        // already opened, so the failure mode is a panel that stays shut
+        // rather than one that opens on every page view.
+        return true;
+      }
+    };
+
+    NeuraChat.prototype.rememberPairsOpened = function () {
+      try {
+        sessionStorage.setItem(PAIRS_OPENED_KEY, "true");
+      } catch (err) {
+        /* storage refused; the panel opens this once and that is acceptable */
       }
     };
 
@@ -644,11 +849,7 @@
           self.complete(data);
         },
         function (err) {
-          self.render({
-            role: "error",
-            text: (err && err.message) || TRANSPORT_ERROR_MESSAGE,
-            disclosure: "",
-          });
+          self.render({ role: "error", text: errorTextFor(err), disclosure: "" });
           self.setBusy(false);
         }
       );
@@ -848,11 +1049,16 @@
     module.exports = {
       EMPTY_TURN_MESSAGE: EMPTY_TURN_MESSAGE,
       STEP_FALLBACK: STEP_FALLBACK,
+      TRANSPORT_ERROR_MESSAGE: TRANSPORT_ERROR_MESSAGE,
       configFrom: configFrom,
       endpointFor: endpointFor,
+      errorTextFor: errorTextFor,
       labelForStep: labelForStep,
       messagesForTurn: messagesForTurn,
+      pairsFor: pairsFor,
+      productIdsFrom: productIdsFrom,
       productsForTurn: productsForTurn,
+      shouldAutoOpenPairs: shouldAutoOpenPairs,
       withoutEmphasis: withoutEmphasis,
     };
   }

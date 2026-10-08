@@ -1,6 +1,6 @@
 # The Merchant Console — Design
 
-**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27** — `make console-check` — 33 checks in a real browser. · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
+**Status:** Designed 2026-08-26. **All five v1 screens built 2026-08-27**, a sixth — **Sold out**, [ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1 — a seventh — **Suggestions**, [ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md) — and an eighth — the shop's **Home** — all **built 2026-09-27**, when the console also gained a side menu and plain words (§3.0) and Review was redesigned (§3.2); the single chat page (§3.3), Suggestions (§3.6), Sold out (§3.7), Usage and cost (§3.5) and Shop connection (§3.4, with a new **Help** page) were redesigned 2026-09-28 — `make console-check` — 91 checks in a real browser before Shop connection's (which adds 18; see PROJECT_STATE, B7, for the run still owed). · **Decision:** [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) · **Unblocks:** A4, E1, S5, and eventually [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)
 
 > **Read [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) first.** It records *why* — including the three decisions a fresh session is most likely to reverse by accident: the browser never holds a tenant API key, login is built rather than bought, and `users` is deliberately not tenant-scoped.
 
@@ -25,8 +25,11 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 | 1 | **Sign in** | `users`, `login_tokens` | ✅ **built 2026-08-27** |
 | 2 | **Conversations** | `conversations`, `conversation_messages` | ✅ **built 2026-08-27** |
 | 3 | **Review** (shadow grading) | `shadow_turns`, `conversation_messages`, `document_chunks` | ✅ **built 2026-08-27 — the one that earns its keep** |
-| 4 | **Shop** | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4** |
-| 5 | **Usage** | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** |
+| 4 | **Shop** (on screen: *Shop connection*) | `tenant_stores`, `sync_checkpoints`, `neura_entities` | ✅ **built 2026-08-27 — read-only, see §3.4.** Redesigned 2026-09-28: a *Get set up* checklist (also `api_keys`, `tenants`, `observed_events`, `document_chunks`), and **Sync now** — the third console write, and it writes only our copy. With it, a **Help** page, *Connecting your shop* (ADR-0026 §7) |
+| 5 | **Usage** (on screen: *Usage and cost*) | `tenant_usage`, `tenants` | ✅ **built 2026-08-27** — redesigned 2026-09-28 (§3.5): every part follows the period, by assistant included |
+| — | **Home** — what needs the owner, and how the assistant is set up (§3.0) | nothing of its own — it reads the endpoints of Review, Usage, Shop, Sold out and Suggestions | ✅ **built 2026-09-27** — outside v1's five like the two below it. **Adds a screen and no data**: every figure on it is one another screen already shows, with its period and its server-written caveat |
+| — | **Sold out** — views of products while they could not be bought ([ADR-0046](architecture/adr/0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md) stage 1, [ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)) | `observed_events`, `synced_entities`, `tenants` | ✅ **built 2026-09-27** — outside v1's five, and 0046 records breaking the discipline on purpose. Counts and sessions, never a session token; not gated by the SELL entitlement (neura-api may not learn an agent's name). **Redesigned 2026-09-28 (§3.7)**: opening it asks the shop, in one stock lookup for every product listed, whether each can be bought now — the second console call that reaches the shop, and Home never makes it |
+| — | **Suggestions** — what a basket suggests with each product, and the owner's way to change it ([ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md)) | `synced_entities`, `sell_pairings`, `sell_pairing_choices` | ✅ **built 2026-09-27** — the **second screen that writes** (after grading). Served by SELL's own routes under `/v1/sell/console/…`, so the SELL entitlement is checked inside the agent; a shop without SELL is told so. Reads the **synced** catalogue: a product the shop added since the last sync is not listed until a sync runs. **Redesigned 2026-09-28 (§3.6)**: opening a product previews what a basket shows — the only console call that reaches the shop, and never a model run |
 | 6 | Security | `audit_log` | v1.1 — closes **S5** |
 | 7 | Settings & keys | `api_keys` | v1.1 |
 | 8 | Approvals | — | **blocked** by [ADR-0010](architecture/adr/0010-read-only-mvp-tools.md) |
@@ -36,6 +39,49 @@ Deliberately cut the way CARE's three intents were cut. The temptation is eleven
 ---
 
 ## 3. The screens
+
+### 3.0 The frame, the Home screen and the words — 2026-09-27
+
+**2026-09-30 — a shop sees only its own assistants' screens.** The owner found *Sold out* in the menu of a shop
+with NEURA-CARE only (*"a gym app showing the pool to a member without the pool"*). `/me` now carries each
+membership's `assistants` (its `enabled_agents`, sorted — passed through as data, so the API still names no agent),
+and `lib/shop-assistants.ts` hides NEURA-SELL's screens from a shop without it: **Suggestions** and **Sold out** leave
+the menu and Home; *Sold out* opened by its address says it *"comes with NEURA-SELL, which this shop doesn't have"*;
+Shop connection drops the two optional Sold-out steps; Help drops its Sold-out lines. **Display only** — SELL's own
+routes still check the entitlement; `/sold-out` itself is not gated by it (it lives in `neura-api`, which may not
+name an agent). An unreadable `/me` shows the screens rather than hiding a feature silently. `make console-check`
+now checks both kinds of shop (**114**).
+
+**Asked for by the owner from screenshots, designed as a mockup on real data, approved, then built.** The owner's
+brief: *a shop owner is not always technical.*
+
+**The frame.** A side menu replaced the row of tabs: the shop's **name** (from `/me`, which now returns it — read in
+each held shop's own tenant session, never another's) with *Switch shop*, the everyday screens (Home, Review with a
+count of replies waiting, Conversations, Suggestions, Sold out), then *Setup* (Shop connection, Usage and cost), and
+*Sign out*. On a phone it folds into one menu button. The shop id is shown once, small, on Shop connection — *"if
+support asks"*.
+
+**Home** is the landing screen of a shop. Mode first (*Practice mode is on* / *Your assistant is live*), then
+**Needs you** — each item one counted fact said as a sentence with one action, shown only when true (replies waiting
+in Review; conversations handed to a person in the last 7 days; no shop connected) — then **Last 7 days** (three
+counts, the period's dates, and the server's `handed_to_a_person` caveat, chosen **by key**: usage caveats are
+`{key, text}` since this day so a screen can show the one that belongs to its figures without matching words), then
+**Your setup**. The Suggestions card counts only when SELL's page holds every product; otherwise it says no number.
+
+**Home's switch, 2026-10-02** ([ADR-0054](architecture/adr/0054-the-shop-owner-switches-practice-mode-and-a-new-shop-starts-in-it.md); the owner's decisions, no mockup by the owner's choice). The mode section gains **Go live** in practice mode and **Back to practice mode** when live. *Go live* first asks, in the same section: *"Go live? From now on, shoppers see your assistant's replies as soon as it writes them, also in chats that are already open"*, then Review's counts as a sentence (*"You checked 6 replies in Review: 4 good, 1 not good, 1 harmful. 2 more are waiting in Review."*, or *"You haven't checked any replies in Review yet."*), with **Go live** and **Stay in practice mode**; no threshold. *Back to practice mode* is one press. Both write `PUT /v1/console/shops/{t}/mode` (`console_mode.py`): only the `mode` key of the shop's settings, an audit entry (`mode.live` / `mode.practice`, who, before and after), nothing for a repeat; then the page is read again. On a phone the buttons are full width. Help's step 5 now says *"A new shop starts in practice mode… then press Go live on Home when you are ready."* **What building decided:** the turn reads the mode when the reply is released (`turns.py`), because a chat's live connection kept the mode it read when it opened (G72); `make tenant-new` writes practice mode into a new shop, and `TenantConfig.mode`'s default stays `live`. `make console-check` adds seven checks (Go live offered; the question's numbers equal the database's; asking changes nothing; no sideways scroll on a phone; *Stay* changes nothing; Go live and back, each said on Home and true in the database), starting the shop in practice and putting its mode back after.
+
+**The words** the owner approved, used everywhere a merchant reads them:
+
+| was | now |
+|:--|:--|
+| Withheld (shadow mode) · shadow mode | **Held for your review** · **practice mode** (glossary: same thing as shadow mode) |
+| `care` / `sell` | **NEURA-CARE** / **NEURA-SELL** since 2026-09-28 — the owner's decision: the name on what a merchant pays for is the name on every screen. What each does (*Customer care* / *Shopping help*, the words approved the day before) stays beside it where there is room — the Usage table, a phone card (`assistantPurpose`). One file, `lib/assistants.ts`; an unknown key shows as itself |
+| 1 turn | **1 question** |
+| `web` | not shown while it is the only channel |
+| Shop · Usage | **Shop connection** · **Usage and cost** |
+| `9/24/2026, 9:09:29 PM` (server's zone) | **Today, 9:09 PM** / **Sep 24, 9:09 PM** in the owner's own zone (`<When>`) |
+
+**Colour and type did not change**, on purpose — §8 still leaves branding undecided.
 
 ### 3.1 Sign in
 
@@ -50,6 +96,45 @@ A queue of turns the agent drafted while in shadow mode: the shopper's question,
 * **Show the evidence, not just the reply.** A grader who cannot see what the agent was working from is grading fluency. This is `--out`/**E7** restated as a screen: a draft is only judgeable against what it was allowed to rely on.
 * **A withheld turn must look withheld.** 1.16 found that a shopper shown an empty panel is a bug report within a day ([ADR-0020](architecture/adr/0020-a-withheld-turn-says-so.md)); the merchant-facing version of the same mistake is a grading queue that silently omits the turns the agent declined to answer. Those are the interesting ones.
 * **Do not add sampling.** **A4** is unanswered, and a sampling rate chosen before anyone has graded for an hour is a rate invented to fit an imaginary constraint.
+
+#### Redesigned 2026-09-27 — an inbox and a table, from the owner's approved mockup
+
+The owner found the card-per-turn page messy: every card fully expanded, our words (`get_order_status`,
+`order_status`, *"took 14874 ms"*, a prompt hash) at the same weight as the reply, and graded turns mixed
+into the queue. Now two tabs, because grading and looking back are different jobs:
+
+| tab | layout | what it does |
+|:--|:--|:--|
+| **To review** (default) | **inbox** — waiting replies on the left, grouped **by day** in the reader's own zone and **by chat** within a day (*"2 replies in one chat"*); one reply open on the right | question · *Earlier in this chat* · **What it looked at** (the documents' own words, the lookups by name) · the reply · *Fact check* · three buttons · *Details* (time, model calls, cost, type, prompt) folded away. **Good** saves and opens the next reply; **Not good** / **Harmful** save at once, then ask *what was wrong?* On a phone: the list, then one reply at a time with the buttons fixed at the bottom |
+| **Already graded** | **table** — question · assistant · grade · note · asked · graded by · graded | opens a reply again to change its grade |
+
+**Filters on both**, all in the URL: outcome (*All · Answered · Handed to a person · Blocked as an attack*) or
+grade (*All · Good · Not good · Harmful*), each with its count given the other filters; **Asked** (*Any time ·
+Today · Last 7 days · Last 30 days · Choose dates*) — the day the **shopper asked**, on both tabs, because it
+means one thing everywhere and it is the shopper's day the owner cares about (*day graded* waits for more than one
+grader, i.e. roles); and **Assistant**. A filtered view says *"Showing 2 of 6 waiting · asked Sep 21 – Sep 27"*
+and *Show all*.
+
+**Kept, and how:** the evidence is in the open reply beside the buttons — you cannot grade a reply you have not
+opened, so it is never behind a click at the moment of grading; declined and escalated turns are listed and
+explain themselves; every turn is reachable (the list pages, every filter clears); counts only — **the agreement
+percentage is no longer shown** (the API still returns it), because *"9 good, 1 not good, 0 harmful"* is the same
+fact with its denominator; *"No shopper saw any of these replies"* is said once, at the top.
+
+**Two decisions made while building it:**
+
+* **"Couldn't help" is not a separate filter.** The mockup had it; the system records a polite *"that's outside
+  what I can help with"* as an ordinary **answered** turn (`state=resolved`), exactly as Conversations shows it,
+  and telling it apart would need `neura-api` to know each assistant's own intent labels, which it may not. The
+  outcome filter is the conversation vocabulary instead.
+* **"Today" is the reader's today.** The browser writes its IANA zone into a `tz` cookie (a preference, not a
+  credential — `TimeZoneCookie`); the page groups by day in that zone and sends `since`/`until` as calendar days
+  **plus `tz`**, and the API turns them into instants with `zoneinfo` and refuses an unknown zone or a reversed
+  window with a 400.
+
+**API, 2026-09-27:** `GET /review` takes `state`, `verdict`, `agent`, `since`, `until`, `tz`;
+`GET /review/counts` returns `{total, by_state, by_verdict}` for the same filters; `GET /review/{id}` opens one
+turn by link (404 for another shop's). One filter definition (`shadow._matching`) serves the page and its counts.
 
 #### Built 2026-08-27, and the four things building it settled
 
@@ -94,6 +179,8 @@ approved this?"* with something nobody could type in.
 
 Transcript list, filter by escalated / blocked / declined. Read-only.
 
+**Since 2026-09-27** each row leads with the shopper's **first question** (one line, as stored — tokens included and explained under the list), the list is searchable by **what shoppers wrote** (`?q=`, never the assistant's words; `%` and `_` are searched for, not interpreted) and narrowed by **assistant** (`?agent=` — a key the API matches as data and cannot refuse, so an unknown one matches nothing), and it says *"Showing 26–50 of 55"* with *Newer* and *Older*. Paging is still a keyset cursor (api-design.md §5): the position is **counted** for the words and never used to fetch, and the *Newer* cursor is computed by the server.
+
 **PII is shown to the merchant unredacted, and this is a decision rather than an oversight** — they are the data controller for their own customers, and a support conversation with the addresses starred out is useless for the purpose they need it for. The redaction that matters is on what reaches the *model* (`PiiVault`, per-turn, never persisted), and that is unchanged.
 
 > **Found while building Review, 2026-08-27: the paragraph above is not currently
@@ -107,6 +194,39 @@ Transcript list, filter by escalated / blocked / declined. Read-only.
 > discovering it at the top of the file: either the merchant gets tokens and this
 > paragraph is rewritten, or the transcript starts holding real addresses and
 > security-model.md §6.2 is reopened. Nothing has been changed here on either side.
+
+#### One chat, redesigned 2026-09-28 — the held reply is in the chat, from the owner's approved mockup
+
+The owner opened *"Where is my order 86?"* and saw the question, one sentence (*"The draft is in Review"*) and an
+empty page: most chats are held in practice mode, and a held reply lived only in Review. Now the page reads as a
+chat, and it answers the question the owner asked while designing it — **Conversations is for reading the whole
+story, Review is the to-do list for grading** (one row there is a chat; here, one reply):
+
+| what | how |
+|:--|:--|
+| **Title** | the shopper's **first question** — the words the owner clicked in the list |
+| **One sentence at the top** | what the shopper saw and how many held replies wait — *"Practice mode. The shopper saw none of the replies below. 2 are waiting for your grade."* / *"Sent. The shopper saw every reply below."* — counted from the replies on the page (`whatTheShopperSaw`) |
+| **A held reply** | under the question it answers, dashed edge, **Held — not sent**, the assistant's name and *would have answered*; then **Grade this reply** (`/review?turn=<id>`), or *"You graded this Good — I'd send this"* with **Open in Review**. **One per reply**: a chat with two questions has two buttons. A held turn with no draft says why, in Review's words (`no_draft_reason`, now shared) |
+| **A sent reply** | plain edge, **Sent**, and *What it looked at* in Review's words (`consulted()`, now shared) — *"It looked up products and read 6 items from your shop:"* — **by name** from the synced catalogue (three shown, *Show 3 more*), never `product:1311` |
+| **Removed** | the question type (`order_status`, `recommend`) — our word; the owner agreed to drop it |
+
+**Grading stays in Review**, where the evidence sits beside the buttons (§3.2). The chat page shows no evidence,
+fact check or cost for a held reply — only the draft and a way there.
+
+**API, 2026-09-28.** `GET /conversations/{id}` gains **`held`**: each `shadow_turns` row of that conversation, oldest
+first — `id`, `message_id` (the shopper message it answers), `agent`, `state`, `draft`, `no_draft_reason`,
+`verdict`, `reviewed_by`, `reviewed_at`. **A separate field, never merged into `messages`** — a draft is what the
+agent *would* have said, and merging it would make it history (shadow.py). Each citation gains **`name`**: the
+title from `synced_entities` for the same `(type, id)` pair (a product's or policy's `title`, a category's
+`name`), `null` for a lookup and for anything the synced catalogue lacks — read like Sold out reads titles, never
+from the shop. Asserted with two populated tenants: another shop's draft filed under **this** shop's conversation
+id, and another shop's catalogue title for the same id, never appear.
+
+**Known limits.** `shadow_turns` has no index on `conversation_id`, so the read scans one tenant's held turns —
+fine at pilot size, and an index is a migration. And a name comes from the **synced catalogue** while Review's
+evidence comes from the **search index**, which can disagree: on the test shop category 32 is *"Shirts &
+Knitwear"* in the catalogue and *"men clothes"* in the index, so one citation can be worded differently on the two
+screens until the index is rebuilt.
 
 #### Built 2026-08-27, and it shipped against the tokens
 
@@ -178,6 +298,142 @@ tell the two apart.
 is the fact a merchant needs; the value is a string they can only paste somewhere
 it will go stale (api-design.md §5).
 
+#### Redesigned 2026-09-28 — approved and BUILT (canvas seventh row, boards 21–23)
+
+The owner found the screen thin and asked what connecting a new shop takes. It was **nine steps, two
+people, all in a terminal** (docs/CONNECTING_THE_SHOP.md), and nothing in the console guided any of it. Approved
+from the mockup and built the same day: **stage 1** below. **Stage 2 is not decided** — the widget install code with a key made in the
+console, a connect form (still deliberately not built, as above), creating a shop and inviting its owner, and
+recording the data agreement from the console (the admin side, group C — an ADR).
+
+**Shop connection** (board 21, phone board 23):
+
+| part | what it shows | from |
+|:--|:--|:--|
+| **Get set up** — a checklist, each step ✔ / not yet, and who does it | *Your shop is connected* (host, "set up by FiveNeurals") · *Your shop answers* — **still a button** (*Check now* / *Check again*): the shop is asked only when pressed, as today · *Your catalogue is copied* (products, last read) · *The chat box is on your shop* — **"used today from bagisto.test"**, from the public key's `last_used_at` and its allowed origin (**owner-approved**; never the key, its prefix, its hash or its scopes) · then **Optional — needed for Sold out**: *Data agreement on record* (since when) · *Your shop is sending product views* (the Sold out `receiving` fact) | `tenant_stores`, the health probe, `sync_checkpoints`, `api_keys`, `tenants.dpa_signed_at`, `observed_events` |
+| **Our copy of your catalogue** | products · categories · policy pages (**Variants is dropped** — sizes and colours live inside a product, so it always read 0); *"Last read from your shop yesterday, 2:51 PM. New products and stock changes show up after the next sync — nothing syncs by itself yet."*; **Sync now** (*"Reads your shop again. Nothing in your shop changes."*) and, after it, *"Asked your shop for a fresh copy. The counts and the time above update when it finishes."*; per kind *"38 read"*, and `last_run_count = 0` said as *"no changes since the time before"* (it read as a contradiction beside *11 policy pages*); **"Search by meaning covers 29 of 38 products — the 9 newest are not in it yet"** (**owner-approved**; display only — rebuilding the index runs a model and is not offered) | the synced catalogue, `document_chunks` (distinct `source_id` per `source_type`) |
+| **What your shop lets the assistant do** | after *Check now*: the declared capabilities **in plain words** (read and search products, categories, check stock, look up orders, a customer's details, policy pages, copy only what changed, send change messages — *"NEURA does not listen to these yet"*); before it, *"Press Check now above to ask your shop."*; always **"Read only. Your assistant cannot change anything in your shop."** | the health probe |
+| **Connection details** — for your developer or support | address, *Standard NEURA bridge* (was `generic`), status, Shop ID | `tenant_stores` |
+
+**Sync now — owner-approved 2026-09-28.** A new console action, the third that writes (after grading and the
+owner's suggestions), and it writes **only our copy**: it queues the sync job that already exists
+(`neura_api.jobs.enqueue_sync`, which returns the running job rather than queueing a second — pressing it four
+times is one sync). Nothing is written to the shop.
+
+**Help — "Connecting your shop"** (board 22), a new console page under *Setup* in the side menu. **Already
+decided in [ADR-0026](architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) §7** (merchant
+help lives inside the console), never built until now: who does what (*You* · *Your developer* · *FiveNeurals, for
+now*); five steps (six when built; the owner removed *Optional: Sold out* on 2026-09-30 — it is a
+NEURA-SELL feature, not a connection step), each with who and **"How you'll know"** — the same ticks as the checklist; **For your developer**:
+the one-line chat box snippet (`<script src=".../v1/widget/widget.js" async data-neura-key="fn_pk_…">` —
+platform-agnostic, the same `SNIPPET` the API serves; no platform's own settings or commands, Rule 1) and the two
+keys explained (the shop token is secret and stays on the shop's server; the chat box key is public and locked to
+the shop's address), with *Copy these steps for your developer*; and **If something doesn't work** — five common
+problems in plain words. **No time estimates and no numbers**: nothing has been measured.
+
+**Rewritten with it:** `docs/CONNECTING_THE_SHOP.md` (2026-09-19) predated the console — no owner account or
+sign-in link, no data agreement, no product views, no suggestions key scope, and `NEURA_WIDGET_HOST=…:8000`, where
+another project listens on this machine. It now follows the Help page's five steps (product views an unnumbered optional section after them), each with the checklist tick
+that shows it is done.
+
+**What building it decided — each a correction of the mockup, none a new feature:**
+
+| # | the mockup said | built as | why |
+|:--|:--|:--|:--|
+| 1 | *Sync now* (mode unstated) | a **full** read (`incremental=False`) | the screen promises *"stock changes show up after the next sync"*, and a shop's *changed since* filter follows a product's own edits — the reference bridge filters on the product rows, so a sale that lowers stock is invisible to an incremental read |
+| 2 | *"Products — 38 read"* | *"Products — 1 new or changed"*; 0 is still *"no changes since the time before"* | `last_run_count` is what the sync **wrote** (created + updated), not what it read. The first live *Sync now* read all 38 products and recorded **1**. The old screen's *"118 read"* had the same error |
+| 3 | *"the 9 newest are not in it yet"* | *"the other 9 are not in it yet"* | nothing checks that the missing ones are the newest. Counted from the catalogue's side (a synced product with at least one chunk), across embedding models, so an index entry for a product the shop no longer has does not count |
+| 4 | *Check now* as a link (`?check=`) | a button whose answer lives in the page, not the address | *Sync now* re-reads the page when its sync finishes; an address carrying the check would have asked the shop again on that re-read. **A page load still never asks the shop** |
+| 5 | *"used today from bagisto.test"* | the most recently used **live** public key (not revoked, not expired) — its `last_used_at` and allowed addresses, **two columns selected by name** | a shop can hold several public keys; a revoked key used later must not tick the box. The key, prefix, hash and scopes cannot be returned because they are never read |
+| 6 | Help step 2: *"This moves into the console later"* | dropped | the connect form is stage 2 and **not decided**; a help page must not promise it |
+| 7 | Help step 5: *"no shopper sees it yet"* | *"While practice mode is on, … no shopper sees them"* | **a new tenant starts live** (`TenantConfig.mode` defaults to `live`) |
+| 8 | one shop connection | the connection steps and the two cards repeat per connection, named by address when there is more than one | `make console-check` adds a second connection to a real shop |
+
+**Sync now, as built:** the button queues the job and the page then re-reads **our own** `/store` every few
+seconds (never the shop) until the job is no longer queued or running, then refreshes: *"Finished. The counts and
+the time above are the fresh copy."* — or, if the product sync's time did not move, *"The sync stopped before it
+finished…"*. It stops watching after a few minutes and says the sync has not finished yet. Seen live on the test
+shop: pressed, *"Asked your shop for a fresh copy…"*, the time changed by itself, *"Finished."*
+
+**Help's chat box line** is fetched from `GET /v1/widget/snippet` — exactly the API's `SNIPPET` — so its address is
+the API's `PUBLIC_BASE_URL`. **Since 2026-10-03 (G24)**: left empty in development it is this machine at
+`NEURA_API_PORT` (it was a fixed `http://localhost:8000`, the wrong port here); staging and production refuse to
+start without it, and production only with a public `https://` address.
+
+**Help's *For your developer*, 2026-10-02** (canvas row 11, boards 36-37, approved by the owner; ADR-0053 §6 step 7,
+G71). The box now reads in building order: *"The bridge answers nine read-only addresses… The guide for developers
+explains each one"* and **Open the guide for developers** (`DEVELOPER_GUIDE_URL`, the address Shop connection
+already copies, ADR-0051's, online once the website is deployed; it opens in a new tab); then **Does your developer
+use an AI coding tool?**, the developer MCP's address and one sentence (*their tool learns from NEURA how to build
+the bridge; it never sees your shop and needs no token*); then the chat box line; then the two keys. *Copy these
+steps for your developer* ends with the guide's address and *"Using an AI coding tool? Add this address to it as an
+MCP server: …"*. On a phone the copy button is full width. No long dash in the box or in what it copies; the page's
+first paragraph and one *If something doesn't work* row keep theirs for now (G71 c, with G71 a, *Sync now*: the rest
+of Help, later). **Words only: no setting, no switch; Shop connection is unchanged** (the owner's choice: its guide
+link already leads to the address). **What building decided:** the address is the API's, never built by the
+console: `GET /v1/widget/snippet` gains `developer_mcp_url`, made from the same public address as the chat box line
+(`PUBLIC_BASE_URL`, or `base=`) and the MCP server's own mount, so Help shows NEURA's real address where the
+public guide shows a placeholder (ADR-0053 §6 expected a placeholder in both; the dashboard has the address, the
+website does not). When the API can't be reached the AI tool block is left out and the copy has no such line.
+`make console-check` adds six checks: the guide link; the address equals the chat box line's address plus
+`/v1/developers/mcp`; **that address answers `tools/list`**; no long dash in the box; the copied text carries both
+addresses; no long dash in it (all six failed on the old page, then passed).
+
+**Shop connection's *Your shop's contact details*, 2026-10-02** ([ADR-0055](architecture/adr/0055-a-handover-tells-the-shopper-how-to-contact-the-shop.md), G44; the owner's decisions, no mockup by the owner's choice). After *Get set up*, shown connected or not: *"When your assistant can't help a shopper, it tells them to contact your store with these. Both are optional."* An **Email** and a **Phone** field and **Save** (full width on a phone); under them, *What a shopper reads when your assistant can't help* and the **server's** sentence, returned with the details, so the screen never shows a copy (*"I can't help with this here. Please contact our store: hello@yourshop.example, +94 11 234 5678."*; with nothing set, the sentence stops after *store*). `GET`/`PUT /v1/console/shops/{t}/contact` (`console_contact.py`): the email must look like one; the phone is digits, spaces, `+ - ( )`, 6 to 15 digits; an empty field clears it; a refused field comes back as one sentence naming it (*"Email: this doesn't look like an email address…"*), the form's own browser check is off (`noValidate`) so only ours speaks; only the two keys of the shop's settings are written; an audit entry names which fields changed, never their values. **Where the sentence is used:** every handover the turn service releases, both assistants, both transports (`turns.py`, `neura_core.tenancy.handover_message`); the engine's fallback and CARE's `escalation_message.md` say the no-details form. `make console-check` adds five checks (the section is there; a wrong email is refused in plain words and nothing saved; saved details are in the settings; the screen shows the shopper's sentence with them; no sideways scroll on a phone), and puts the test shop's details back. Its older *no credential form exists on the shop screen* check now allows this one form and still fails any other field, or any password, token, secret or key field.
+
+**API, 2026-09-28.** `GET /console/shops/{t}/store` gains, per connection, `index` (`products`, `searchable`),
+`sync_asked` (`status`, `queued_at` of a sync still queued or running — nothing else of the job) and `notes`
+(`{key, text}`: `no_schedule` always, `index` when there are products), and at the top a `setup` block —
+`chat_box` (`last_used_at`, `origins`, or `null`), `agreement_since`, `receiving` (any product view in 7 days,
+`ObservedEventRepository.any_views_since`, as Sold out asks it) and `window_days`. `variant` is no longer counted.
+New `POST /console/shops/{t}/store/{store}/sync` → **202**, `enqueue_sync(…, incremental=False)`; a store that is
+not this shop's is a 404 and queues nothing. Tests: `test_console_shop_and_usage.py` +12 (every setup fact; no part
+of a chat box key — token, prefix, scopes — in the body; a revoked key used later is not the one reported; an
+empty shop says no to each; the index counts a product in two chunks once and ignores an indexed product the
+catalogue lacks; Sync now queues one full read, twice is one, shows on the screen, 404 for an unknown or another
+shop's store, 401 with no session); `test_console_screens.py` +6 (the sentences, singular and plural; variants not
+counted).
+
+#### Connect your shop, from the dashboard: approved and BUILT 2026-10-01 (ADR-0052, canvas row 10, boards 31-35)
+
+**The owner connects their own shop.** Decided by the owner on 2026-10-01 (ideas D2 and D5 in
+[CONNECTING_A_NEW_SHOP_LOG.md](CONNECTING_A_NEW_SHOP_LOG.md)), recorded in
+[ADR-0052](architecture/adr/0052-the-shop-owner-connects-their-own-shop.md), which amends the two decisions above:
+the connect form is now built, and a token is shown **once**, by the response that made it.
+
+| part | what it does |
+|:--|:--|
+| **Connect your shop** (not connected) | Replaces *"No shop connected yet"*. Three steps, each saying who: **1 You** make the shop token (NEURA makes it, shown once with Copy and how to send it safely; after a reload only *when* it was made); **2 Your developer** builds the bridge (*Copy the guide link*); **3 You** type the bridge's address, press **Check**, then **Connect and copy my catalogue** |
+| **The check** | The full check (`neura_commerce.check_adapter`, the terminal tool's own), queued as a `shop.check` job and watched every 3 s, like Sync now. One cause said first (G48): *Your shop refused the token* / *We couldn't reach this address* / *There is no bridge at this address*. *Copy the full check for your developer* gives the technical list, without the private file path (G17). A clean check lists **only what it tested and passed** (G51, 2026-10-03: a shop without orders is never told *Orders can be looked up*) and says *"The check proves the format, not the facts."* **Its warnings reach the owner** (G75, 2026-10-02): *N things to look at*, in the owner's words for four of them (products with no usable status, G69; orders' status words; empty policy pages; a search that finds products for nonsense), any other counted as *a technical detail for your developer*; a warning is counted, not passed (*18 of 20*) |
+| **Connect** | Only after a clean check of the same address, made after the token. Saves the connection, discards the waiting token, queues the full copy, and keeps that clean check as the connection's first |
+| **Your shop passes the check** (connected) | Replaces *Your shop answers*. **Check again** runs the full check; the page opens on the last one, read from our table, so a page load still never asks the shop. A clean check with warnings shows the same *things to look at* box and *Copy the full check for your developer* (G75) |
+| **Your shop token** (connected) | *Set {when}*, never the token. **Make a new token** asks first and says what really happens (G49): NEURA stops using the old token at once, **your shop still accepts it until your developer puts the new one in**. The new token is shown once |
+
+**What building it decided, each a correction of the mockup, none a new feature:**
+
+| # | the mockup said | built as | why |
+|:--|:--|:--|:--|
+| 1 | *"ecommerce.test · connected by you on Sep 30"* | the address only | who connected is not stored on the connection; the audit log has it |
+| 2 | the connect card replaces the page | the connect card, then *Get set up* below it; *Help* linked once, from the card | the chat box and Sold out steps still belong on the checklist |
+| 3 | after *Check*, step 1 folds to *"Made today"* | the token stays on screen for the rest of that visit | a reload is what hides it; copying it twice in one visit is no leak |
+| 4 | (not drawn) | after Connect, the page opens on the clean check, not *"Not checked yet"* | found in the browser test; the check is carried over to the connection |
+| 5 | *"the old one stops working at once"* | *"your shop still accepts the old one until your developer puts the new one in"* | G49, fixed in the ADR before the build |
+
+**API, 2026-10-01** (`routes/console_connect.py`): `POST /console/shops/{t}/token` (returned once; 409 when
+connected), `POST /checks` (`{address}` or `{store_id}`; 202; one live check per shop; 409 without a token),
+`GET /checks/{id}`, `POST /connect` (409 `CHECK_FIRST` without a clean check of that address after the token),
+`POST /store/{s}/token` (returned once). `GET /store` gains `connect` (when a token was made, the last check) and,
+per connection, `last_check` and `token_set_at`. Tables `shop_tokens` (sealed like `tenant_stores.credentials`) and
+`shop_checks` (findings, never a token). Each token made, replaced and each connect writes an audit event, with no
+token. **Addresses** (`addresses.py`, G47): in production `https://` and public internet addresses only, checked
+before every call, for `POST /v1/stores` too; outside production a test shop on this machine is allowed. **DNS
+rebinding, ADR-0052 §3's known limit, closed 2026-10-03** (G47, G78): in production every call to a shop and every
+webhook connects through `outbound_transport`, which checks the address as it connects (security-model.md §8).
+
+**Checked:** `make check` (1400 unit, 453 integration: `test_shop_connect.py` 27, `test_console_connect.py` 8);
+`make console-check` 109 of 109; a live run against the API (24 of 24) and a real-Chrome run of the whole flow (25 of
+25), both on throwaway test accounts with a fake bridge (the reference store), never on a real test shop.
+
 ### 3.5 Usage
 
 Conversations, turns, escalations, blocked attacks, tokens, cost — from `tenant_usage`, which has been written since 1.14.
@@ -210,15 +466,122 @@ entirely from true numbers.**
 
 **Every total names its period**, and an unknown `?period=` is a 400 rather than
 a silent correction: a quietly adjusted window is a wrong number, not a wrong
-parameter. The per-agent split is labelled *today* because that is the grain the
+parameter. ~~The per-agent split is labelled *today* because that is the grain the
 meter records; summing it across a 30-day selector would report something nobody
-measured.
+measured.~~ **Corrected 2026-09-28:** the meter's grain is one row per
+`(tenant, day, agent)` (ADR-0015), so a period's per-agent figure is the same kind of
+sum as the period's total, and the agents' rows add up to it. The split now follows
+the period chosen — see below.
 
 **The caveats come from the server**, not from the JavaScript bundle — ADR-0020's
 rule for merchant-facing sentences — and each appears only when it is true, so
 the list never becomes boilerplate a reader learns to skip.
 
+#### Redesigned 2026-09-28, from the owner's approved mockup
+
+The owner's screen read *TURNS 82*, *TOKENS 291,499*, `2026-08-30 to 2026-09-28`,
+*not priced* three times, practice mode twice, a per-assistant split for **today**
+under a **30-day** selector — and *Shopping help: 0 conversations, 3,326 tokens*,
+which looks broken and is the AI computing pairings in the background (ADR-0045).
+
+| what | how |
+|:--|:--|
+| **Period** | chips *Today · Last 7 days · Last 30 days · Everything*; the heading says it in words — *Last 30 days · Aug 30 – Sep 28*, *Everything recorded · since Sep 1* (`period.first_recorded`). The meter's days are UTC calendar days, formatted as days (`dayWords`), never converted through a time zone |
+| **Practice mode** | once, before any figure (the server's `practice_mode` caveat is not repeated under it) |
+| **Conversations** | four counts — conversations, **questions** shoppers asked (was *turns*), handed to a person, blocked as attacks — with *See them →* on conversations and on handed to a person (`?state=escalated`); the server's *"36 of 53 … a count, not a deflection rate"* under them |
+| **AI use** | AI calls, tokens (*"the unit AI providers charge by"*), and cost: an amount when measured, else **Not priced** said once, the server's reason under it — never a zero figure. **When an agent called a model on a day it served no turn** (`background_ai`), one sentence: *"Some AI work happens without a conversation, like working out product suggestions."* A day that mixed both cannot be split by the rollup, so the sentence errs towards silence |
+| **By assistant** | a table (a card per assistant on a phone) **for the period chosen**, each named as the merchant buys it — **NEURA-CARE** / **NEURA-SELL**, with *Customer care* / *Shopping help* under it — and *"The rows add up to the totals."* |
+
+Still true: no rate, no trend, no chart, and `$0` never renders (`make console-check`).
+
+**API, 2026-09-28.** `GET /usage` replaces `today_by_agent` with **`by_agent`** for the
+period (`UsageMeter.by_agent_since`), adds `period.first_recorded`
+(`UsageMeter.first_recorded`) and the `background_ai` caveat
+(`UsageMeter.worked_without_a_conversation`). `neura-api` still names no agent: the
+sentence names a feature, and the screen maps keys to names.
+
 ---
+
+### 3.6 Suggestions — redesigned 2026-09-28, from the owner's approved design
+
+**The screen could change what it could not show.** Every product whose suggestions come from its own words read
+*"Automatic"* over an empty row, because a word-path answer is worked out live on a shopper's basket and never
+stored. On the test shop that was **37 of 38 products** — so the owner, asked what the screen was for, answered
+correctly (*see each product's suggestions, change them if you want*) and could only do the second half.
+
+| what | how |
+|:--|:--|
+| **Layout** | products on the left, one open on the right, like Review; on a phone the list, then one product with *All products* to go back. **Pages of 25** like Conversations — *"Showing 26–38 of 38"*, *Previous / Next* (products have no date order, so not *Newer / Older*) — rather than a list in its own scroll box; the open product **stays on screen** while the page scrolls |
+| **Filters with counts** | *All · Your choice · Chosen by AI · Automatic* — counted given the search and category, never given the mode filter, so each chip says what choosing it would show. A **Category** menu (the shop's own categories with counts, and **No category** — the products that can never get an automatic suggestion), from the synced catalogue: no call to the shop |
+| **Each row** | title, category names and price from the synced catalogue; *No category* is said, because it is the reason nothing can be picked automatically |
+| **Open a product → the preview** | *"What a shopper's basket shows with it now"*: the heading and cards a basket gets, then **where they came from** — *Your choice* / *Picked by the AI — it looked for …* / *Picked automatically from this product's own words* |
+| **When nothing shows** | **why**, in words the owner can act on: no category in the shop, nothing matched, the owner chose nothing, the owner's choices are sold out, the shop did not find the product |
+| **When the AI tried and lost** | *"The AI also tried: it looked for laundry detergent, garment bag and phone case, matched nothing in your shop, so word matching is used"* — so *the AI found nothing* and *the AI never ran* read apart |
+| **Change these** | the same ADR-0050 editor, in the panel, starting from what shoppers see now (or the owner's own list); the product picker now shows prices. With the list empty the sentence says what to do (*No products picked yet. Use Find below to add some.*) and **the button says what it does — *Show nothing with this product*** rather than *Save*, because an empty choice turns automatic suggestions off for that product (owner-approved after the first version confused the owner) |
+
+**Two rules the owner approved with it:**
+
+* **The shop is asked only when the owner opens a product** (and on *Ask your shop again*). Everything else on the
+  screen is the synced catalogue. A shop that does not answer is **said** (*"Your shop did not answer just now"*),
+  never shown as *nothing to suggest* — `suggest()` forgives a failed lookup as a missing product, so the preview
+  asks for the product itself first.
+* **A preview never runs the model and never saves anything.** It calls the basket's own `suggest()` with the
+  basket's own cache and choices, through the same seams (`routes._pairing_cache`, `routes._owner_choices`), so it
+  cannot drift from what a shopper sees — but the cache is wrapped read-only (`_ReadOnlyPairings`): a basket's miss
+  queues a model computation ([ADR-0045](architecture/adr/0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md) §2), and an owner clicking through products is not a shopper's first use.
+  `make console-check` asserts the job queue does not grow when a never-paired product is opened.
+
+**API, 2026-09-28.** `GET /v1/sell/console/shops/{t}/suggestions` gains `mode` (`owner` · `automatic` · `pending`,
+400 on anything else), `category` (an id, or `none`; an unknown id matches nothing rather than being refused),
+`meta.counts` and `meta.counted_all` (it reads up to 2,000 products to count and filter by mode, and says when it
+stopped short), `meta.categories` (`named` with counts, and `none`), paging as Conversations pages
+(`total`, `offset`, `has_previous`, `previous_cursor`; pages of 25), and each row's `categories` and `price`. New
+`GET …/suggestions/{product}/preview` → `product` (the list's row), `reachable`, `origin` (`owner` · `model` ·
+`words`), `reason`, `heading`, `suggestions` (the basket's cards), `ai` (`kinds`, `found` — only for the product's
+current text). `Pairing` gained `origin` and `reason` for it; **the storefront route still sends only `heading`,
+`paired_with` and `suggestions`**, and a test pins that a shopper's page learns nothing new.
+
+**Found while designing it, on the test shop — not fixed here:** the AI has run for 4 of 38 products (it runs only
+when a basket first shows a product) and found something once (*Leather Loafer → Merino Walking Socks*, after the
+owner added the loafer to a cart on 2026-09-28). Two causes, both setup rather than code: `.env` has
+`NEURA_ROLE_MAP=ollama-dev`, so the worker uses the small local `qwen3:8b` (it asked for *phone case* and *towel*
+for clothes), where ADR-0045's measured run used `gemini-3.8-flash`; and the **search index lacks the 9 newest
+products** (belt, socks, tights, tie, shoe cream, shoe trees, waterproofing spray, wool wash, clothes brush), so
+the AI's search by meaning cannot find the very complements the shop stocks.
+
+### 3.7 Sold out — redesigned 2026-09-28, from the owner's approved design
+
+**The owner could not tell how it worked, and could not act on it.** Empty, it said *"No sold-out product was
+viewed"* and that a switch *"cannot be seen from here"* — without saying where the switch is. With data, it said
+*VIEWS 2 · SESSIONS 1* in capitals beside an internal id (`#1320`), and a caveat handed the most useful fact back to
+the owner: *"some may be back in stock now"*. And the synced copy of the catalogue could not answer that either: on
+the test shop it still said the sold-out jumper was **in stock**, because nothing had synced since its stock went to
+0 — the same undecided recurring sync as §3.6.
+
+| what | how |
+|:--|:--|
+| **One name** | *Sold out*, in the menu and as the title (was *Wanted while sold out*), with its job under it: *"Products shoppers wanted while you had none, so you know what to restock."* |
+| **Each product is a sentence** | *"Opened **3 times**, in 1 visit · last opened 28 Sep"*, then category and price from the synced catalogue; the id is gone (a product the catalogue lacks is still shown, by id, and says so). The API still says `sessions`; the screen says *visits* |
+| **Now** — *Still sold out* / *Back in stock* / *Couldn't check* | Asked of the shop **when the owner opens the screen** (and on *Check again*): **one stock lookup for every product listed**, never one per product (`GET /inventory?variant_ids=…`, which takes many). The rule is the shop's own for a view (ADR-0049): in stock when **any** variant has stock. *Back in stock* adds *"These visits happened while it could not."* A shop that does not answer, or does not share stock, is said under the list (*"…so we can't say what is in stock today. The counts are still right."*), and a product the shop said nothing about reads *Couldn't check* — **never** *Still sold out* |
+| **Is it working?** | ✔/✗ *Data agreement on record* (since when), ✔/✗ *Your shop is sending product views* — whether **any** product view arrived in the window, sold out or not: a yes or no, never a count. It is what tells *switched off* from *nothing sold out was opened*. The switch itself is in the shop and cannot be seen; the screen says so and says *usually*, not *the switch is off* |
+| **How this works** | three numbered steps (a sequence), and *"Nothing here reaches your shoppers, and we never contact them."* Step 3's *"We keep it for N days"* is the retention setting the sweep enforces (`kept_days`), not a number typed into the page |
+| **Three empty screens** | no agreement (*Nothing is collected*), no views arriving (*Nothing to show yet* — *usually this means product views are switched off in your shop's settings; whoever set up your shop can switch them on*), views arriving but nothing sold out opened (*No sold-out product was opened … Nothing to restock*) |
+| **Fine print** | one line, from the server: a visit is not a person, crawlers are counted, *"We never know who the shopper was."* The *"may be back in stock"* caveat is gone — the screen now says, per product |
+
+**The rule the owner approved with it: the shop is asked only when this screen opens.** Home reads the same route
+without `?stock=now` and never reaches the shop; an empty list asks nothing. It is the second console call that
+reaches the shop, after the Suggestions preview (§3.6). It opens a connection like the Shop screen's probe
+(§3.4) — the store directory reuses a shop's declared capabilities for a minute, so a first opening may also make
+the shop's `/health` call.
+
+**The checklist is built entirely on our side.** The agreement is our row; *views arriving* is our table. Nothing
+changed in the shop's bridge — a merchant turns views on once, in their shop's settings (ADR-0044), and this screen
+only reads what arrives.
+
+**API, 2026-09-28.** `GET /v1/console/shops/{t}/sold-out` gains `agreement_since`, `receiving`, `kept_days`, each
+product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), and `stock` (`asked_at`, `answered`,
+`reason`: `unreachable` · `not_supported`) — `null` unless `?stock=now`, the only value it takes (400 otherwise).
+`ObservedEventRepository.any_views_since` answers *receiving* with an `EXISTS`, never a count.
 
 ## 4. Identity — the part that is genuinely new
 
@@ -291,7 +654,7 @@ once been true of the route somebody added last. So clauses 1, 2, 4 and 6 are re
 — each against real PostgreSQL with **two populated tenants** — and `test_console_auth.py` owns
 3 and 5.
 
-`make console-check` then re-asserts them **in real headless Chrome**, 33 times, because every
+`make console-check` then re-asserts them **in real headless Chrome** — 91 checks since 2026-09-28 — because every
 rule this console has is a claim about what a *rendered page* contains. A server that offered
 safe material and a screen that displayed it are not the same thing, and only one of them is the
 product: a page can fetch a payload with no credential in it and still print `$0.00` under the
@@ -313,7 +676,7 @@ nothing to look at is not a check* — the same lesson as **E6**, in a third pla
 | **Node and npm enter a pure-Python repo** | Second toolchain in `make check`; two ways to have a stale dependency. |
 | **One role, `owner`** | A merchant who wants to give a support agent read-only access cannot, until somebody asks and it is designed. |
 | **No approval queue** | Every write feature stays blocked. This is by design and is the next thing the console unlocks. |
-| **No connect form (v1)** | A merchant cannot connect their own shop; somebody with API access has to. Deliberate — see §3.4. It blocks self-serve onboarding and nothing else. |
+| ~~**No connect form (v1)**~~ | **Lifted 2026-10-01** ([ADR-0052](architecture/adr/0052-the-shop-owner-connects-their-own-shop.md)): the owner connects their own shop on Shop connection. A new shop's **account** is still made by FiveNeurals. |
 | **Shadow mode must be on to have anything to review** | A merchant who goes live immediately sees an empty Review screen forever. **Done 2026-08-27** — the empty state says exactly that, and distinguishes it from a filter that matched nothing. |
 
 ---

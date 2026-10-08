@@ -54,6 +54,8 @@ from __future__ import annotations
 
 import re
 
+from neura_agent_sell.citations import cited_ids
+
 #: A rendered entry starts at `Product <id>:` in column 0 of a tool result and
 #: runs to the next one. Anchored to the format `tools/render.py::candidate`
 #: writes, and asserted against the real renderer in `tests/unit/test_sell.py`
@@ -63,12 +65,6 @@ _ENTRY = re.compile(r"^Product ([A-Za-z0-9][A-Za-z0-9_-]*):", re.MULTILINE)
 
 #: The description line, from its label to the end of that line.
 _DESCRIPTION = re.compile(r"^(\s*description: )(.*)$", re.MULTILINE)
-
-#: Token shapes that could be a product id, matching `respond.py::_CITED`
-#: exactly. **The two must agree**: `respond` refuses a draft citing a product
-#: that was never shortlisted, and if this file read citations differently it
-#: could withhold the evidence for a product `respond` considers cited.
-_CITED = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9_-]{2,})\b")
 
 #: Stated, never silent. A model shown nothing concludes there was nothing.
 WITHHELD = (
@@ -83,12 +79,17 @@ def hide_uncited_descriptions(draft: str, evidence: str) -> str:
     Signature is ``(draft, evidence) -> str`` because that is
     `Runtime.evidence_filter`. Pure, deterministic, and no model call.
     """
-    cited = set(_CITED.findall(draft))
     if not evidence:
         return evidence
 
+    entries = _split_entries(evidence)
+    # The ids this evidence carries, looked for by name — `citations.py` says why
+    # a generic id-shaped token is not enough. `respond` reads citations with the
+    # same function, so the two cannot disagree about which product a draft cites.
+    cited = set(cited_ids(draft, (pid for _, pid in entries if pid is not None)))
+
     out: list[str] = []
-    for chunk, product_id in _split_entries(evidence):
+    for chunk, product_id in entries:
         # Text outside any product entry — tool result wrappers, retrieved
         # context, the shortlist's own preamble — is passed through untouched.
         # This function's remit is one field of one rendering, and widening it

@@ -25,17 +25,18 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from neura_agent_core.review import (
+    IN_CATALOGUE,
     SOURCE_GONE,
     TOOL_NOT_RECORDED,
     Evidence,
     ReviewItem,
     _evidence_for,
+    no_draft_reason,
 )
 from neura_agent_core.shadow import ShadowTurn, ShadowVerdict
 from neura_api.routes.console_review import (
     _cost_payload,
     _item_payload,
-    _no_draft_reason,
     _scorecard_payload,
 )
 
@@ -91,6 +92,26 @@ class TestEvidenceIsShownOrExplained:
         assert piece.available is False
         assert piece.reason == SOURCE_GONE
 
+    def test_a_product_still_in_the_catalogue_is_not_called_deleted(self) -> None:
+        """G39: SELL cites the products it read live from the shop. On a shop with
+        no search index every one of them read "may have been deleted"."""
+        [piece] = _evidence_for(
+            turn(citations=[{"type": "product", "id": "4"}]),
+            {},
+            {"4": "Ceylon Black Tea BOPF 400g"},
+        )
+        assert piece.reason == f"Ceylon Black Tea BOPF 400g — {IN_CATALOGUE}"
+        assert "deleted" not in piece.reason
+        assert piece.available is False, "the text the assistant saw is still not shown"
+
+    def test_a_product_gone_from_the_catalogue_too_is_still_called_gone(self) -> None:
+        [piece] = _evidence_for(turn(citations=[{"type": "product", "id": "9"}]), {}, {"4": "Tea"})
+        assert piece.reason == SOURCE_GONE
+
+    def test_only_products_are_looked_up_in_the_catalogue(self) -> None:
+        [piece] = _evidence_for(turn(citations=[{"type": "policy", "id": "4"}]), {}, {"4": "Tea"})
+        assert piece.reason == SOURCE_GONE
+
     def test_every_citation_produces_a_row_even_when_nothing_backs_it(self) -> None:
         """Dropping the unresolvable ones would tell a grader the agent worked
         from less than it did."""
@@ -133,25 +154,25 @@ class TestAWithheldTurnSaysSo:
         assert payload["withheld"] is True
 
     def test_an_escalated_turn_with_no_draft_explains_itself(self) -> None:
-        reason = _no_draft_reason(ReviewItem(turn=turn(draft="", escalated=True)))
+        reason = no_draft_reason(turn(draft="", escalated=True))
         assert "handed this to a person" in reason
 
     def test_a_draft_discarded_by_verify_quotes_the_reason(self) -> None:
         """A failed grounding check is a decision made *about* the agent, and
         conflating it with an escalation hides the one that says it was wrong."""
-        reason = _no_draft_reason(
-            ReviewItem(turn=turn(draft="", grounded=False, verify_reason="claimed a refund policy"))
+        reason = no_draft_reason(
+            turn(draft="", grounded=False, verify_reason="claimed a refund policy")
         )
         assert "grounding check" in reason
         assert "claimed a refund policy" in reason
 
     def test_a_blocked_turn_names_the_guard(self) -> None:
-        reason = _no_draft_reason(ReviewItem(turn=turn(draft="", state="blocked")))
+        reason = no_draft_reason(turn(draft="", state="blocked"))
         assert "guard" in reason
 
     def test_an_unexplained_empty_draft_still_produces_words(self) -> None:
         """The fallback case. Whatever happened, the card is never blank."""
-        assert _no_draft_reason(ReviewItem(turn=turn(draft="", state="resolved"))).strip()
+        assert no_draft_reason(turn(draft="", state="resolved")).strip()
 
     def test_no_draft_reason_is_empty_exactly_when_there_is_a_draft(self) -> None:
         assert _item_payload(ReviewItem(turn=turn()))["no_draft_reason"] == ""

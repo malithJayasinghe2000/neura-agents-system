@@ -38,7 +38,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from neura_api.dependencies import DatabaseDep
 from neura_api.envelopes import envelope
-from neura_core import get_logger, get_settings
+from neura_core import Database, get_logger, get_settings
 from neura_core.email import Mailer
 from neura_core.identity import (
     COOKIE_NAME,
@@ -49,6 +49,7 @@ from neura_core.identity import (
     request_sign_in_link,
     verify,
 )
+from neura_core.tenancy import TenantRepository
 
 log = get_logger(__name__)
 
@@ -162,13 +163,38 @@ async def me(
     async with db.identity_session(signed_in.user_id) as session:
         held = await memberships_for(session, signed_in.user_id)
 
-    return envelope(
-        {
-            "signed_in": True,
-            "user_id": signed_in.user_id,
-            "memberships": [{"tenant_id": m.tenant_id, "role": m.role} for m in held],
-        }
-    )
+    memberships = []
+    for m in held:
+        name, assistants = await _shop(db, m.tenant_id)
+        memberships.append(
+            {"tenant_id": m.tenant_id, "role": m.role, "name": name, "assistants": assistants}
+        )
+    return envelope({"signed_in": True, "user_id": signed_in.user_id, "memberships": memberships})
+
+
+async def _shop(db: Database, tenant_id: str) -> tuple[str | None, list[str]]:
+    """The shop's own name, and the assistants it has.
+
+    **The name**, so a merchant never has to recognise ``tn_01M…``. ``None`` when
+    there is no name to show; the screen falls back to the id rather than
+    inventing one.
+
+    **The assistants** are ``enabled_agents``, sorted, passed through as data:
+    the console hides a screen that belongs to an assistant the shop does not
+    have (a shop with NEURA-CARE only is not shown *Sold out*). This module still
+    names no agent — it hands over a list it does not read. **Display only**:
+    every agent's own routes check the entitlement themselves.
+
+    ``tenants`` is tenant-scoped and the identity session names no tenant, so
+    both are read in that shop's own session — and only for a membership just
+    proved above, which is what stops this being a way to read another
+    merchant's details.
+    """
+    async with db.tenant_session(tenant_id) as session:
+        tenant = await TenantRepository(session).get(tenant_id)
+    if tenant is None:
+        return None, []
+    return (tenant.name or None), sorted(tenant.enabled_agents)
 
 
 @router.post("/auth/sign-out", summary="End the session")

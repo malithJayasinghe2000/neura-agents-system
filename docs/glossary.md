@@ -47,6 +47,7 @@ Shared vocabulary. Words here mean exactly one thing across code, docs and conve
 | **Resolution** | A conversation the agent closed without escalation. The billing unit. |
 | **Deflection rate** | Resolutions ÷ total conversations. Escalated and abandoned conversations are *not* deflected. |
 | **Shadow mode** | Agent runs on real traffic, sends nothing, logs what it would have said. |
+| **Practice mode** | The **merchant-facing name for shadow mode** — the same thing, said the way a shop owner would. Used in the console and in its server-written caveats; the code, the ADRs and `TurnMode.SHADOW` keep *shadow*. Owner-approved 2026-09-27. |
 | **Grounded** | Every factual claim in a reply is supported by retrieved context or tool output. |
 
 ## LLM
@@ -76,6 +77,11 @@ Shared vocabulary. Words here mean exactly one thing across code, docs and conve
 | **Envelope encryption** | KEK wraps a per-tenant DEK; the DEK encrypts credentials. Rotation without mass re-encryption. |
 | **Audit log** | Append-only, hash-chained record of every LLM call, tool decision, escalation and approval. |
 | **RLS** | PostgreSQL Row-Level Security. Primary tenant isolation control. |
+| **Held vs observed** | *Held*: data the merchant already has — an email, an order ([ADR-0042](architecture/adr/0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md)). *Observed*: data that exists only because someone watched a shopper — a page view, a basket add ([ADR-0044](architecture/adr/0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)). The line, not *personal* vs *anonymous*: an anonymous session token is still personal data. |
+| **Observed event** | One row in `observed_events`: a session token, `product.viewed` or `cart.added`, a product id, a time — and, on a view, whether the product was `in_stock` at that moment ([ADR-0049](architecture/adr/0049-a-product-view-records-whether-it-could-be-bought.md)). Sent by the **shop's server**, only when the shop switched it on. Never a search ([ADR-0048](architecture/adr/0048-observation-phase-1-what-the-build-decided.md)). |
+| **DPA** | Data-processing agreement between a merchant and us. Recorded as `tenants.dpa_signed_at`; without one, no key can send observed events and none are kept. |
+| **Owner's choice** | A product's paired suggestions as the shop owner set them in the console ([ADR-0050](architecture/adr/0050-the-shop-owner-may-choose-a-products-suggestions.md)). Wins over the model and the word path; an empty choice means *show nothing*; no choice means *automatic*. |
+| **Retention sweep** | The `retention.sweep` job that deletes what has expired, per tenant, daily while anything is held. Booked by every write that creates something to expire. |
 
 ## Evaluation
 

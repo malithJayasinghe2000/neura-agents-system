@@ -13,6 +13,7 @@ surface, when it exists, is graded by `make eval` like CARE's.
 
 from __future__ import annotations
 
+import importlib
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -20,12 +21,13 @@ from typing import Any
 import pytest
 
 from neura_agent_sell import MANIFEST
+from neura_agent_sell import evidence as evidence_module
+from neura_agent_sell.citations import cited_ids, without_ids
 from neura_agent_sell.evals.store import load_store
-from neura_agent_sell.evidence import _CITED, WITHHELD, hide_uncited_descriptions
+from neura_agent_sell.evidence import WITHHELD, hide_uncited_descriptions
 from neura_agent_sell.feed import build, canonical, jsonld, publishable
 from neura_agent_sell.mcp import McpServer
 from neura_agent_sell.mcp.server import PROTOCOL_VERSION
-from neura_agent_sell.nodes.respond import _CITED as _RESPOND_CITED
 from neura_agent_sell.tools import MCP_TOOLS, SELL_TOOLS, TOOL_SCOPES, render
 from neura_domain import Capability, Money, Product, ProductStatus, ProductVariant
 
@@ -121,6 +123,32 @@ class TestDiscovery:
         from neura_api.registry import discover_agent_routes
 
         assert "sell" in discover_agent_routes()
+
+    def test_sell_supplies_its_own_background_work(self) -> None:
+        """The fifth seam ([ADR-0045]): a pairing is computed on ADR-0022's
+        queue, and `_job_runner` registers the handler without naming SELL.
+
+        Keyed by **job kind**, because that is what `JobRunner.register`
+        dispatches on — and `discover_job_handlers` refuses a kind claimed
+        twice, since which handler ran would otherwise depend on entry-point
+        iteration order.
+        """
+        from neura_agent_sell.pairing.cache import PAIRING_COMPUTE
+        from neura_api.registry import discover_job_handlers
+
+        handlers = discover_job_handlers(db=None, stores=None, llm=None)
+        assert PAIRING_COMPUTE in handlers
+
+    def test_a_handler_factory_that_raises_does_not_stop_the_worker(self) -> None:
+        """One agent's background work must not deny the loop to every other
+        agent — the same forgiveness a broken runner and a broken router get,
+        and for the same reason."""
+        from neura_api.registry import discover_job_handlers
+
+        # `build_handlers` takes what it needs by keyword and ignores the rest.
+        # Calling it with nothing at all is the closest thing to a broken
+        # deployment this can reach without monkeypatching entry points.
+        assert isinstance(discover_job_handlers(), dict)
 
 
 @pytest.mark.parametrize("forbidden", ["bagisto", "shopify", "woocommerce", "magento"])
@@ -966,6 +994,18 @@ class TestAFabricatedProductCannotReachAShopper:
         assert _invented_ids("The Fell jacket is waterproof and packs away.", state) == set()
         assert _invented_ids("Try p_jacket_3 instead.", state) == {"p_jacket_3"}
 
+    def test_a_rejected_short_id_is_still_caught(self) -> None:
+        """G36: the check was blind to ids under three characters."""
+        from neura_agent_sell.nodes.respond import _invented_ids
+
+        result = "Product 4: Enamel Camp Mug 350ml\n\nProduct 5: Collapsible Silicone Cup"
+        state = {
+            "promises": ["4"],
+            "invocations": [_invocation("search_products", result)],
+        }
+        assert _invented_ids("The mug (Product 4) is the one.", state) == set()
+        assert _invented_ids("Or the cup (Product 5).", state) == {"5"}
+
 
 class TestTheTerminalNodesGenerateNothing:
     """`decline` and `no_match` skip `verify`, so nothing in them may be composed."""
@@ -1250,6 +1290,22 @@ class TestCardsObeyTheFabricationCheck:
             ),
         )
         assert [c["id"] for c in out["cards"]] == ["1315", "1311"]
+
+    async def test_the_shopper_reads_no_id_but_still_gets_the_card(self) -> None:
+        """G41: the id comes out of the reply; the check and the card still used it."""
+        from neura_agent_sell.nodes import respond
+
+        out = await respond(
+            {
+                "draft": "I recommend the Ceylon Black Tea BOPF 400g (Product 4).",
+                "grounded": True,
+                "promises": ["4"],
+                "invocations": [_invocation("search_products", "Product 4: Ceylon Black Tea")],
+            },
+            self._runtime_with({"4": {"id": "4", "title": "Ceylon Black Tea"}}),
+        )
+        assert out["reply"] == "I recommend the Ceylon Black Tea BOPF 400g."
+        assert [c["id"] for c in out["cards"]] == ["4"]
 
     async def test_an_escalated_turn_carries_no_cards(self) -> None:
         """`respond` never runs, so there is nothing to show — which is how a
@@ -1947,6 +2003,75 @@ class TestEvidenceFilter:
 
     def test_citation_parsing_agrees_with_respond(self) -> None:
         """The two must agree, or this file withholds evidence for a product
-        `respond` considers cited."""
+        `respond` considers cited — so they share one function, not two copies."""
+        # `importlib`, because `neura_agent_sell.nodes` exports the `respond`
+        # function under the module's own name.
+        respond_module = importlib.import_module("neura_agent_sell.nodes.respond")
+        assert evidence_module.cited_ids is respond_module.cited_ids is cited_ids
+
+    def _short_id_shortlist(self) -> str:
+        store = load_store("t_test", ["short_ids.json"])
+        products = {p.external_id: p for p in store._products.values()}
+        entries = [render.candidate(products[pid]) for pid in ("4", "5")]
+        return '<tool_result name="search_products">\n' + "\n\n".join(entries) + "\n</tool_result>"
+
+    def test_a_one_character_id_is_cited(self) -> None:
+        """G36: products `3`, `4`, `5` on a connected shop were never seen as cited,
+        so a claim copied from product 4's description failed `verify`."""
+        evidence = self._short_id_shortlist()
+        filtered = hide_uncited_descriptions(
+            "The Enamel Camp Mug 350ml (Product 4) is safe to heat on a camp stove.", evidence
+        )
+        assert "Safe to heat directly on a camp stove" in filtered, "the cited description stays"
+        assert "Not for use over a flame" not in filtered, "the uncited one is still withheld"
+        assert filtered.count(WITHHELD) == 1
+
+
+class TestCitedIds:
+    """`citations.cited_ids` — known ids, as whole tokens, in the order named."""
+
+    def test_short_ids_are_found(self) -> None:
+        assert cited_ids("Try the mug (Product 4) or product 5.", ["3", "4", "5"]) == ["4", "5"]
+
+    def test_an_id_inside_a_longer_word_or_number_is_not(self) -> None:
+        draft = "A 400g pack at 4.50 GBP, item p_4, 14 in a box, 4-pack."
+        assert cited_ids(draft, ["4", "p", "0"]) == []
+
+    def test_order_follows_the_draft(self) -> None:
+        assert cited_ids("First p_boot_1, then p_jacket_1.", ["p_jacket_1", "p_boot_1"]) == [
+            "p_boot_1",
+            "p_jacket_1",
+        ]
+
+    def test_long_ids_behave_as_before(self) -> None:
         draft = "The **Moor Walking Boot (p_boot_1)** and the Fell (p_jacket_1) are both good."
-        assert _CITED.findall(draft) == _RESPOND_CITED.findall(draft)
+        assert cited_ids(draft, ["p_boot_1", "p_jacket_1", "p_jacket_2"]) == [
+            "p_boot_1",
+            "p_jacket_1",
+        ]
+
+    def test_only_known_ids_are_looked_for(self) -> None:
+        assert cited_ids("The Fell jacket is waterproof.", []) == []
+
+
+class TestWithoutIds:
+    """G41: the shopper read "Ceylon Black Tea BOPF 400g (Product 4)"."""
+
+    def test_a_bracketed_id_is_removed(self) -> None:
+        reply = "I recommend the Ceylon Black Tea BOPF 400g (Product 4), which is 1850 LKR."
+        assert without_ids(reply, ["4"]) == (
+            "I recommend the Ceylon Black Tea BOPF 400g, which is 1850 LKR."
+        )
+
+    def test_every_bracket_shape_is_removed(self) -> None:
+        reply = "The **Moor Walking Boot (p_boot_1)**, the mug [4] or the cup (product id 5)."
+        assert without_ids(reply, ["4", "5", "p_boot_1"]) == (
+            "The **Moor Walking Boot**, the mug or the cup."
+        )
+
+    def test_the_shoppers_own_numbers_stay(self) -> None:
+        reply = "Brew 4 cups; size 4 fits (4 pack)."
+        assert without_ids(reply, ["4"]) == reply
+
+    def test_an_unknown_id_in_brackets_stays(self) -> None:
+        assert without_ids("A pack (p_other).", ["4"]) == "A pack (p_other)."

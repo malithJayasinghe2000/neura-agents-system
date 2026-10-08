@@ -5,11 +5,12 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:$(PATH)
 
 .PHONY: help install dev up down logs api lint format typecheck arch test test-unit \
-        test-integration test-widget widget-check widget-check-live widget-demo tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
+        test-integration test-widget widget-check widget-check-live widget-demo pairs-check pairs-coverage tenant-drop eval eval-fast eval-guard-off eval-one eval-agents eval-compare check migrate revision clean reset \
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        api-check verify-probe router-probe console console-check
+        tenant-dpa retention-sweep \
+        api-check verify-probe router-probe console console-check web-check
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -104,6 +105,13 @@ test-widget:  ## The widget's pure logic (Node's built-in runner — no npm, no 
 console-check:  ## Drive ALL FIVE console screens in REAL headless Chrome: make console-check EMAIL=...
 	uv run python scripts/console_check.py "$(EMAIL)"
 
+# The public website (ADR-0051): build it, then check what the built pages
+# contain — no test-shop data, no secret, no platform name, no request to another
+# site — and draw every page in real headless Chrome, desktop and phone. Lists
+# the placeholders still undecided. SHOTS=dir also saves a screenshot per page.
+web-check:  ## Build the PUBLIC website and check it in REAL headless Chrome. No models, no API.
+	uv run python scripts/web_check.py $(if $(SHOTS),--shots $(SHOTS),)
+
 widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no cost.
 	uv run python scripts/widget_check.py
 
@@ -114,6 +122,37 @@ widget-check:  ## Drive the REAL widget in REAL headless Chrome. No models, no c
 widget-check-live:
 	uv run python scripts/widget_check.py --live --url $(or $(URL),http://localhost:8000) \
 	  --shop-url $(SHOP) --shop-token $(TOKEN) $(if $(SHADOW),--shadow,)
+
+# ADR-0040's block, in the same browser and for the same reason. Stub mode needs
+# nothing at all — no database, no shop, no models — because the surface has no
+# model in it to need one.
+#   make pairs-check
+#   make pairs-check LIVE=1 URL=http://localhost:8010 \
+#        SHOP=http://bagisto.test/neura/v1 TOKEN=... [PRODUCTS=1315]
+# Live mode serves the harness from its OWN port and locks the key to it, so the
+# block's fetch crosses origins exactly as a merchant's cart page does — which is
+# the half stub mode structurally cannot reach.
+pairs-check:  ## Drive the REAL suggestion block in REAL headless Chrome. No models, no cost.
+	uv run python scripts/pairs_check.py $(if $(LIVE),--live,) \
+	  $(if $(URL),--url $(URL),) $(if $(SHOP),--shop-url $(SHOP),) \
+	  $(if $(TOKEN),--shop-token $(TOKEN),) $(if $(PRODUCTS),--products $(PRODUCTS),)
+
+# ADR-0045 §9's falsification test, and the only one of these that is a
+# MEASUREMENT rather than a check: it exits 0 whatever it finds, because "the
+# model path is worse" is a result that ADR plans for and acts on.
+#   make pairs-coverage URL=http://bagisto.test/neura/v1 TOKEN=...
+#   make pairs-coverage URL=... TOKEN=... MODEL=1 ROLE_MAP=cloud-prod
+#   make pairs-coverage URL=... TOKEN=... MODEL=1 MEANING=1 TENANT=tn_ragsmoke
+# MEANING=1 adds ADR-0047's second lookup and needs the shop indexed under
+# TENANT first: make rag-check URL=... TOKEN=... KEEP=1 TENANT=tn_ragsmoke
+# The words arm costs nothing. The model arm costs one call per product, and
+# stores nothing — the pairings live in memory for the length of the run, so a
+# second run measures the catalogue rather than the first run.
+pairs-coverage:  ## How many real products produce a suggestion: words vs model [MODEL=1 ROLE_MAP=...]
+	uv run python scripts/pairs_coverage.py --url $(URL) --token $(TOKEN) \
+	  $(if $(MODEL),--model,) $(if $(ROLE_MAP),--role-map $(ROLE_MAP),) \
+	  $(if $(MEANING),--meaning-for $(or $(TENANT),tn_ragsmoke),) \
+	  $(if $(MINSCORE),--min-kind-score $(MINSCORE),)
 
 # Set a tenant up and hand you a URL to open in your OWN browser. A headless
 # pass proves the widget works; it does not show anybody what it looks like.
@@ -353,7 +392,10 @@ eval-compare:  ## Same suite on two role maps: make eval-compare A=ollama-dev B=
 	uv run neura-eval --agent $(AGENT) --role-map $(A)
 	uv run neura-eval --agent $(AGENT) --role-map $(B)
 
-check: lint typecheck arch test eval-fast  ## Everything CI runs. Run before every push.
+# test-integration is in here because it was not, and 40 of its tests failed for
+# weeks with nobody noticing (G42 in docs/CONNECTING_A_NEW_SHOP_LOG.md). It needs
+# the database (`make up`); without it `make check` fails, which is the point.
+check: lint typecheck arch test test-integration eval-fast  ## Everything CI runs. Run before every push (needs `make up`).
 
 # ── Database ─────────────────────────────────────────────────────────────────
 
@@ -410,6 +452,19 @@ key-new:  ## Issue a key: make key-new TENANT=tn_... SCOPES=care:chat:write [NAM
 
 key-revoke:  ## Revoke a key: make key-revoke TENANT=tn_... KEY=key_...
 	uv run python scripts/tenant_admin.py revoke-key --tenant-id $(TENANT) --key-id $(KEY)
+
+# ADR-0042 §2: no tenant stores personal data until a data-processing agreement
+# is recorded — a row, not a handshake. An `observe:write` key cannot be issued
+# without one. WITHDRAW=1 clears it AND deletes the tenant's observed events in
+# the same transaction, because the reason to hold them has ended.
+tenant-dpa:  ## Record a data-processing agreement: make tenant-dpa TENANT=tn_... [WITHDRAW=1]
+	uv run python scripts/tenant_admin.py dpa --tenant-id $(TENANT) $(if $(WITHDRAW),--withdraw,)
+
+# The retention pass the worker runs daily (ADR-0042 §3), run now. Deletes
+# observed events past RETENTION_OBSERVED_EVENTS_DAYS and conversations untouched
+# for RETENTION_CONVERSATIONS_DAYS, then books the next pass if anything is left.
+retention-sweep:  ## Delete what has expired, now: make retention-sweep TENANT=tn_...
+	uv run python scripts/tenant_admin.py sweep --tenant-id $(TENANT)
 
 revision:  ## New migration: make revision M="add tenants"
 	uv run alembic revision --autogenerate -m "$(M)"

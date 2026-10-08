@@ -88,6 +88,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from neura_core import metadata, new_id
 from neura_core.ids import MESSAGE
@@ -297,16 +298,33 @@ class ShadowRepository:
         tenant_id: str,
         *,
         graded: bool | None = None,
+        state: str | None = None,
+        verdict: ShadowVerdict | None = None,
+        agent_key: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
         before: tuple[datetime, str] | None = None,
         limit: int = 50,
     ) -> list[ShadowTurn]:
-        """The queue, newest first. ``graded=False`` is the reviewer's working set."""
-        query = select(shadow_turns).where(shadow_turns.c.tenant_id == tenant_id)
+        """The queue, newest first. ``graded=False`` is the reviewer's working set.
 
-        if graded is True:
-            query = query.where(shadow_turns.c.verdict.is_not(None))
-        elif graded is False:
-            query = query.where(shadow_turns.c.verdict.is_(None))
+        The other filters narrow a queue a person is working through — by what
+        the turn would have done (``state``), by their own verdict, by assistant,
+        and by when it was recorded (``since`` inclusive, ``until`` exclusive).
+        **None of them samples**: each is chosen by the reader and shown on the
+        screen, and every recorded turn is reachable with all of them cleared.
+        """
+        query = select(shadow_turns).where(
+            *_matching(
+                tenant_id,
+                graded=graded,
+                state=state,
+                verdict=verdict,
+                agent_key=agent_key,
+                since=since,
+                until=until,
+            )
+        )
 
         if before is not None:
             # Keyset pagination on (created_at, id), the same shape the
@@ -321,6 +339,24 @@ class ShadowRepository:
 
         rows = await self._session.execute(
             query.order_by(shadow_turns.c.created_at.desc(), shadow_turns.c.id.desc()).limit(limit)
+        )
+        return [_from_row(row) for row in rows]
+
+    async def for_conversation(
+        self, tenant_id: str, conversation_id: str, *, limit: int = 200
+    ) -> list[ShadowTurn]:
+        """Every turn held back in one conversation, oldest first, graded or not.
+
+        For the transcript screen, which shows each draft under the question it
+        answered. Graded turns are included because a conversation is read
+        whole: a grade is part of what happened to it, not a reason to hide it.
+        """
+        rows = await self._session.execute(
+            select(shadow_turns)
+            .where(shadow_turns.c.tenant_id == tenant_id)
+            .where(shadow_turns.c.conversation_id == conversation_id)
+            .order_by(shadow_turns.c.created_at, shadow_turns.c.id)
+            .limit(limit)
         )
         return [_from_row(row) for row in rows]
 
@@ -371,6 +407,45 @@ class ShadowRepository:
         # those are the same thing, and the caller turns both into one 404.
         return bool(result.rowcount)
 
+    async def counts(
+        self,
+        tenant_id: str,
+        *,
+        graded: bool | None = None,
+        agent_key: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> QueueCounts:
+        """How many turns match, split by what they would have done and by verdict.
+
+        The numbers beside a screen's filter buttons. Taken with the same
+        filters as :meth:`pending` **except** the two the buttons choose between
+        — so each button says how many it would show, given everything else the
+        reader has already narrowed by.
+        """
+        where = _matching(tenant_id, graded=graded, agent_key=agent_key, since=since, until=until)
+        by_state = {
+            str(row[0]): int(row[1])
+            for row in (
+                await self._session.execute(
+                    select(shadow_turns.c.state, func.count())
+                    .where(*where)
+                    .group_by(shadow_turns.c.state)
+                )
+            ).all()
+        }
+        by_verdict = {
+            str(row[0]): int(row[1])
+            for row in (
+                await self._session.execute(
+                    select(shadow_turns.c.verdict, func.count())
+                    .where(*where, shadow_turns.c.verdict.is_not(None))
+                    .group_by(shadow_turns.c.verdict)
+                )
+            ).all()
+        }
+        return QueueCounts(total=sum(by_state.values()), by_state=by_state, by_verdict=by_verdict)
+
     async def scorecard(self, tenant_id: str, *, agent_key: str | None = None) -> Scorecard:
         """Counts, in one query. Rates are computed on :class:`Scorecard`, with
         their denominators attached."""
@@ -406,6 +481,47 @@ class ShadowRepository:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class QueueCounts:
+    """Counts of one filtered slice of the queue. Counts only — no rate."""
+
+    total: int = 0
+    #: Keyed by the recorded ``state`` (``resolved``, ``escalated``, ...).
+    by_state: dict[str, int] = field(default_factory=dict)
+    #: Keyed by verdict. A verdict nobody gave is absent, not zero.
+    by_verdict: dict[str, int] = field(default_factory=dict)
+
+
+def _matching(
+    tenant_id: str,
+    *,
+    graded: bool | None = None,
+    state: str | None = None,
+    verdict: ShadowVerdict | None = None,
+    agent_key: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[ColumnElement[bool]]:
+    """One definition of the queue's filters, so a page and the counts beside
+    it can never disagree about which turns they describe."""
+    clauses: list[ColumnElement[bool]] = [shadow_turns.c.tenant_id == tenant_id]
+    if graded is True:
+        clauses.append(shadow_turns.c.verdict.is_not(None))
+    elif graded is False:
+        clauses.append(shadow_turns.c.verdict.is_(None))
+    if state:
+        clauses.append(shadow_turns.c.state == state)
+    if verdict is not None:
+        clauses.append(shadow_turns.c.verdict == verdict.value)
+    if agent_key:
+        clauses.append(shadow_turns.c.agent_key == agent_key)
+    if since is not None:
+        clauses.append(shadow_turns.c.created_at >= since)
+    if until is not None:
+        clauses.append(shadow_turns.c.created_at < until)
+    return clauses
+
+
 def _from_row(row: Any) -> ShadowTurn:
     return ShadowTurn(
         tenant_id=str(row.tenant_id),
@@ -437,6 +553,7 @@ def _from_row(row: Any) -> ShadowTurn:
 
 __all__ = [
     "SHADOW_TURNS",
+    "QueueCounts",
     "Scorecard",
     "ShadowRepository",
     "ShadowTurn",

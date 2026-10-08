@@ -40,17 +40,19 @@ merchant reads numbers.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from neura_agent_core.review import ReviewItem, ReviewQueue, evidence_payload
+from neura_agent_core.conversations import ConversationState
+from neura_agent_core.review import ReviewItem, ReviewQueue, evidence_payload, no_draft_reason
 from neura_agent_core.shadow import ShadowRepository, ShadowVerdict
 from neura_api.dependencies import acting_for
 from neura_api.envelopes import decode_cursor, encode_cursor, envelope, page
-from neura_core import NotFoundError, get_logger
+from neura_core import NotFoundError, ValidationError, get_logger
 
 log = get_logger(__name__)
 
@@ -95,15 +97,42 @@ async def scorecard(request: Request, tenant_id: str) -> dict[str, Any]:
     )
 
 
+#: The filters a reader narrows the queue by — shared by the page and its counts.
+#: ``since``/``until`` are calendar days **in the reader's time zone** (``tz``),
+#: because "today" in Colombo is not "today" in UTC for five and a half hours of
+#: every day, and a date filter that disagreed with the dates on the screen would
+#: be a wrong number wearing a right label.
+Agent = Annotated[str | None, Query(max_length=64)]
+Since = Annotated[date | None, Query()]
+Until = Annotated[date | None, Query()]
+Tz = Annotated[str, Query(max_length=64)]
+
+
 @router.get("/review", summary="Turns awaiting a human verdict, with their evidence")
 async def review_queue(
     request: Request,
     tenant_id: str,
     graded: Annotated[bool | None, Query()] = None,
+    state: Annotated[str | None, Query()] = None,
+    verdict: Annotated[str | None, Query()] = None,
+    agent: Agent = None,
+    since: Since = None,
+    until: Until = None,
+    tz: Tz = "UTC",
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     actor = await acting_for(request, tenant_id)
+    start, end = _window(since, until, tz)
+    filters = {
+        "state": _state(state),
+        "verdict": _verdict(verdict),
+        # A key the API matches as data. It knows no agent's name, so an
+        # unknown one is not refused — it matches nothing.
+        "agent_key": (agent or "").strip() or None,
+        "since": start,
+        "until": end,
+    }
 
     position = decode_cursor(cursor)
     before = (
@@ -117,7 +146,7 @@ async def review_queue(
         # One extra row, to learn whether there is a next page without counting
         # the table. The extra row is dropped below and never rendered.
         items = await ReviewQueue(session).page(
-            actor.tenant_id, graded=graded, before=before, limit=limit + 1
+            actor.tenant_id, graded=graded, before=before, limit=limit + 1, **filters
         )
 
     has_more = len(items) > limit
@@ -132,6 +161,57 @@ async def review_queue(
     return page(
         [_item_payload(item) for item in items],
         next_cursor=next_cursor,
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
+@router.get("/review/counts", summary="How many turns match, by outcome and by verdict")
+async def review_counts(
+    request: Request,
+    tenant_id: str,
+    graded: Annotated[bool | None, Query()] = None,
+    agent: Agent = None,
+    since: Since = None,
+    until: Until = None,
+    tz: Tz = "UTC",
+) -> dict[str, Any]:
+    """The numbers beside the screen's filter buttons. Counts, never a rate."""
+    actor = await acting_for(request, tenant_id)
+    start, end = _window(since, until, tz)
+
+    db = request.app.state.database
+    async with db.tenant_session(actor.tenant_id) as session:
+        counts = await ShadowRepository(session).counts(
+            actor.tenant_id,
+            graded=graded,
+            agent_key=(agent or "").strip() or None,
+            since=start,
+            until=end,
+        )
+
+    return envelope(
+        {"total": counts.total, "by_state": counts.by_state, "by_verdict": counts.by_verdict},
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
+@router.get("/review/{shadow_id}", summary="One turn, with its evidence")
+async def review_item(request: Request, tenant_id: str, shadow_id: str) -> dict[str, Any]:
+    """One turn by id — so a reply can be opened by a link, graded or not.
+
+    404 for another tenant's turn and for one that does not exist, which under
+    RLS are the same fact.
+    """
+    actor = await acting_for(request, tenant_id)
+
+    db = request.app.state.database
+    async with db.tenant_session(actor.tenant_id) as session:
+        item = await ReviewQueue(session).one(actor.tenant_id, shadow_id)
+    if item is None:
+        raise NotFoundError("No such turn.", details={"id": shadow_id})
+
+    return envelope(
+        _item_payload(item),
         request_id=getattr(request.state, "request_id", None),
     )
 
@@ -200,7 +280,7 @@ def _item_payload(item: ReviewItem) -> dict[str, Any]:
             "asked_at": item.asked_at.isoformat() if item.asked_at else None,
         },
         "draft": turn.draft,
-        "no_draft_reason": "" if item.has_draft else _no_draft_reason(item),
+        "no_draft_reason": "" if item.has_draft else no_draft_reason(item.turn),
         "intent": turn.intent,
         "state": turn.state,
         "escalated": turn.escalated,
@@ -224,26 +304,52 @@ def _item_payload(item: ReviewItem) -> dict[str, Any]:
     }
 
 
-def _no_draft_reason(item: ReviewItem) -> str:
-    """Why there is no reply to grade, in the merchant's words.
-
-    Ordered by what the grader most needs to know. An escalation is a decision
-    the agent made; a failed ``verify`` is a decision made *about* the agent, and
-    conflating them would hide the one that says the model was wrong.
+def _window(
+    since: date | None, until: date | None, tz: str
+) -> tuple[datetime | None, datetime | None]:
+    """Calendar days in ``tz`` → the instants that bound them: ``since`` from its
+    first moment, ``until`` through its last. Refused rather than guessed: an
+    unknown zone or a window that ends before it starts is a 400, because a
+    silently corrected window is a different set of rows under the same label.
     """
-    turn = item.turn
-    if turn.escalated:
-        return "The agent handed this to a person instead of answering."
-    if turn.grounded is False:
-        reason = turn.verify_reason.strip()
-        return (
-            f"The draft failed the grounding check and was discarded: {reason}"
-            if reason
-            else "The draft failed the grounding check and was discarded."
+    try:
+        zone = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValidationError("Unknown time zone.", details={"tz": tz}) from None
+
+    start = datetime.combine(since, time.min, zone) if since else None
+    end = datetime.combine(until + timedelta(days=1), time.min, zone) if until else None
+    if start is not None and end is not None and start >= end:
+        raise ValidationError(
+            "The first day is after the last day.",
+            details={"since": str(since), "until": str(until)},
         )
-    if turn.state == "blocked":
-        return "The guard stopped this turn before the agent answered."
-    return f"The agent produced no reply. It recorded the turn as {turn.state!r}."
+    return start, end
+
+
+def _state(value: str | None) -> str | None:
+    """What the turn would have done — the conversation vocabulary, or a 400."""
+    if value in (None, ""):
+        return None
+    try:
+        return ConversationState(value).value
+    except ValueError:
+        raise ValidationError(
+            "Unknown state.",
+            details={"state": value, "expected": [s.value for s in ConversationState]},
+        ) from None
+
+
+def _verdict(value: str | None) -> ShadowVerdict | None:
+    if value in (None, ""):
+        return None
+    try:
+        return ShadowVerdict(value)
+    except ValueError:
+        raise ValidationError(
+            "Unknown verdict.",
+            details={"verdict": value, "expected": [v.value for v in ShadowVerdict]},
+        ) from None
 
 
 def _cost_payload(cost: Any) -> dict[str, Any]:

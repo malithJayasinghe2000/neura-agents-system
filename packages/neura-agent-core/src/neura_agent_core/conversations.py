@@ -42,6 +42,8 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    delete,
+    exists,
     func,
     select,
     update,
@@ -50,7 +52,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
+from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
 from neura_core import metadata, new_id
 from neura_core.ids import MESSAGE
 
@@ -256,6 +260,8 @@ class ConversationRepository:
         tenant_id: str,
         *,
         state: ConversationState | None = None,
+        agent: str | None = None,
+        search: str | None = None,
         before: tuple[datetime, str] | None = None,
         limit: int = 50,
     ) -> list[Conversation]:
@@ -265,10 +271,14 @@ class ConversationRepository:
         writes several conversations in the same millisecond — and a cursor over
         a non-unique key skips and repeats rows, which is the exact failure
         api-design.md §5 rejects offsets for.
+
+        ``search`` matches what the **shopper** wrote, never the reply: the
+        question a merchant remembers is the customer's, and matching the
+        assistant's words would find every thread it ever mentioned returns in.
         """
-        query = select(conversations).where(conversations.c.tenant_id == tenant_id)
-        if state is not None:
-            query = query.where(conversations.c.state == state.value)
+        query = select(conversations).where(
+            *_matching(tenant_id, state=state, agent=agent, search=search)
+        )
         if before is not None:
             moment, last_id = before
             query = query.where(
@@ -283,6 +293,87 @@ class ConversationRepository:
             )
         ).all()
         return [_conversation_from_row(row) for row in rows]
+
+    async def count_for(
+        self,
+        tenant_id: str,
+        *,
+        state: ConversationState | None = None,
+        agent: str | None = None,
+        search: str | None = None,
+        through: tuple[datetime, str] | None = None,
+    ) -> int:
+        """How many conversations match — or, with ``through``, how many sort at
+        or before that position in :meth:`list_for`'s order.
+
+        The second is what lets a cursor page say *"26-50 of 55"* **without
+        becoming an offset**: the position is counted for the label and never
+        used to fetch, so a row written meanwhile can shift the words by one but
+        can never make a page skip or repeat a row.
+        """
+        query = (
+            select(func.count())
+            .select_from(conversations)
+            .where(*_matching(tenant_id, state=state, agent=agent, search=search))
+        )
+        if through is not None:
+            query = query.where(_at_or_newer(through))
+        return int((await self._session.execute(query)).scalar_one())
+
+    async def cursor_for_page_before(
+        self,
+        tenant_id: str,
+        *,
+        page_after: tuple[datetime, str],
+        size: int,
+        state: ConversationState | None = None,
+        agent: str | None = None,
+        search: str | None = None,
+    ) -> tuple[datetime, str] | None:
+        """The position that fetches the page *before* the one after ``page_after``.
+
+        A keyset cursor only walks forward, and a merchant also wants *Newer*.
+        The previous page is the ``size`` rows at or newer than ``page_after``,
+        so the cursor that fetches it is the row just newer than all of them.
+        ``None`` means there is no such row — the previous page is the first
+        page, which is fetched with no cursor at all.
+        """
+        row = (
+            await self._session.execute(
+                select(conversations.c.updated_at, conversations.c.id)
+                .where(*_matching(tenant_id, state=state, agent=agent, search=search))
+                .where(_at_or_newer(page_after))
+                .order_by(conversations.c.updated_at.asc(), conversations.c.id.asc())
+                .offset(size)
+                .limit(1)
+            )
+        ).first()
+        return (row[0], str(row[1])) if row is not None else None
+
+    async def first_questions(
+        self, tenant_id: str, conversation_ids: Sequence[str]
+    ) -> dict[str, str]:
+        """The shopper's first message in each conversation, keyed by conversation.
+
+        One line per row of a list — what lets a merchant tell two threads apart
+        without opening either. A conversation where the shopper never wrote is
+        simply absent from the result, not given an empty string.
+        """
+        if not conversation_ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                select(conversation_messages.c.conversation_id, conversation_messages.c.content)
+                .where(
+                    conversation_messages.c.tenant_id == tenant_id,
+                    conversation_messages.c.conversation_id.in_(list(conversation_ids)),
+                    conversation_messages.c.role == Role.SHOPPER.value,
+                )
+                .order_by(conversation_messages.c.conversation_id, conversation_messages.c.sequence)
+                .distinct(conversation_messages.c.conversation_id)
+            )
+        ).all()
+        return {str(row[0]): str(row[1]) for row in rows}
 
     async def messages(
         self, tenant_id: str, conversation_id: str, *, limit: int = 200
@@ -492,6 +583,57 @@ class ConversationRepository:
         )
         return message_id
 
+    async def delete_older_than(self, tenant_id: str, cutoff: datetime) -> int:
+        """Delete every conversation untouched since ``cutoff``. Returns how many.
+
+        ``RETENTION_CONVERSATIONS_DAYS`` made real (ADR-0042 §3). **Untouched**,
+        not *started*: ``updated_at`` moves on every turn, so a conversation a
+        shopper came back to last week is not deleted for having begun in June.
+
+        **The fan-out is the point** (security-model.md §6.2). The messages, and
+        the agent's checkpointed working state — the same two tables
+        ``adelete_thread`` clears, keyed by the conversation id as ``thread_id``
+        — go in the same transaction as the row. A sweep that deleted the
+        transcript and left the working state would have deleted nothing a
+        forensic reader could not reassemble.
+
+        **Deliberately left behind:** ``shadow_turns``, the graded review queue
+        (``by_ids`` renders a deleted question as *"no longer in the
+        transcript"* for exactly this case), and ``audit_log``, which the app
+        role cannot delete from at all (ADR-0048 §5).
+        """
+        expired = (
+            select(conversations.c.id)
+            .where(conversations.c.tenant_id == tenant_id)
+            .where(conversations.c.updated_at < cutoff)
+        ).scalar_subquery()
+
+        await self._session.execute(
+            delete(conversation_messages)
+            .where(conversation_messages.c.tenant_id == tenant_id)
+            .where(conversation_messages.c.conversation_id.in_(expired))
+        )
+        for table in (agent_checkpoint_writes, agent_checkpoints):
+            await self._session.execute(
+                delete(table)
+                .where(table.c.tenant_id == tenant_id)
+                .where(table.c.thread_id.in_(expired))
+            )
+        result = await self._session.execute(
+            delete(conversations)
+            .where(conversations.c.tenant_id == tenant_id)
+            .where(conversations.c.updated_at < cutoff)
+        )
+        return int(cast("CursorResult[Any]", result).rowcount or 0)
+
+    async def any_for(self, tenant_id: str) -> bool:
+        """Is any conversation left for a future sweep to expire?"""
+        return bool(
+            await self._session.scalar(
+                select(exists().where(conversations.c.tenant_id == tenant_id))
+            )
+        )
+
     async def _next_sequence(self, tenant_id: str, conversation_id: str) -> int:
         current = await self._session.scalar(
             select(func.max(conversation_messages.c.sequence))
@@ -499,6 +641,47 @@ class ConversationRepository:
             .where(conversation_messages.c.conversation_id == conversation_id)
         )
         return int(current or 0) + 1
+
+
+def _matching(
+    tenant_id: str,
+    *,
+    state: ConversationState | None,
+    agent: str | None,
+    search: str | None,
+) -> list[ColumnElement[bool]]:
+    """The filters a conversation list is narrowed by — one definition, so a
+    page, its count and its *Newer* cursor can never disagree about which rows
+    they are talking about."""
+    clauses: list[ColumnElement[bool]] = [conversations.c.tenant_id == tenant_id]
+    if state is not None:
+        clauses.append(conversations.c.state == state.value)
+    if agent:
+        clauses.append(conversations.c.agent_key == agent)
+    if search:
+        clauses.append(
+            exists().where(
+                conversation_messages.c.tenant_id == conversations.c.tenant_id,
+                conversation_messages.c.conversation_id == conversations.c.id,
+                conversation_messages.c.role == Role.SHOPPER.value,
+                conversation_messages.c.content.ilike(f"%{_literal(search)}%", escape="\\"),
+            )
+        )
+    return clauses
+
+
+def _literal(text: str) -> str:
+    """Escape ``LIKE``'s own characters, so a shopper who typed ``50%`` is searched
+    for ``50%`` rather than for "50 followed by anything"."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _at_or_newer(position: tuple[datetime, str]) -> ColumnElement[bool]:
+    """Rows at ``position`` or ahead of it in newest-first order."""
+    moment, row_id = position
+    return (conversations.c.updated_at > moment) | (
+        (conversations.c.updated_at == moment) & (conversations.c.id >= row_id)
+    )
 
 
 def _conversation_from_row(row: Any) -> Conversation:

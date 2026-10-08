@@ -344,3 +344,117 @@ class TestNoAuthorityAndNoOtherTenantInAnyBody:
             assert "fn_pk_" not in body
             assert other_shop.tenant not in body
             assert other_shop.user not in body
+
+
+def ids_in(rows: list[dict]) -> set[str]:
+    return {row["id"] for row in rows}
+
+
+def grade(client: TestClient, shop: Shop, turn: str, verdict: str) -> None:
+    response = client.post(
+        f"/v1/console/shops/{shop.tenant}/review/{turn}/grade",
+        json={"verdict": verdict, "note": ""},
+        cookies=cookie_for(shop.user),
+    )
+    assert response.status_code == 200, response.text
+
+
+class TestNarrowingTheQueue:
+    """The redesigned Review screen (2026-09-27): the reader may narrow the
+    queue by what a turn would have done, by their verdict, by assistant and by
+    the day it was asked — and every button carries a count. None of it samples:
+    nothing is hidden until the reader chooses it, and the rules above still
+    hold with every filter cleared."""
+
+    def test_by_what_the_turn_would_have_done(self, client: TestClient, shop) -> None:
+        assert ids_in(queue_of(client, shop, query="?state=escalated")) == {shop.declined_turn}
+        assert ids_in(queue_of(client, shop, query="?state=resolved")) == {shop.answered_turn}
+
+    def test_an_unknown_state_or_verdict_is_refused_not_ignored(
+        self, client: TestClient, shop
+    ) -> None:
+        """An ignored filter returns everything while looking filtered."""
+        for query in ("?state=nonsense", "?verdict=nonsense"):
+            response = client.get(
+                f"/v1/console/shops/{shop.tenant}/review{query}", cookies=cookie_for(shop.user)
+            )
+            assert response.status_code == 400, query
+
+    def test_by_verdict(self, client: TestClient, shop) -> None:
+        grade(client, shop, shop.answered_turn, "agree")
+        assert ids_in(queue_of(client, shop, query="?graded=true&verdict=agree")) == {
+            shop.answered_turn
+        }
+        assert queue_of(client, shop, query="?graded=true&verdict=would_have_harmed") == []
+
+    def test_an_unknown_assistant_matches_nothing_rather_than_everything(
+        self, client: TestClient, shop
+    ) -> None:
+        assert len(queue_of(client, shop, query="?agent=care")) == 2
+        assert queue_of(client, shop, query="?agent=nobody-by-this-name") == []
+
+    def test_by_the_day_it_was_asked_in_the_readers_time_zone(
+        self, client: TestClient, shop
+    ) -> None:
+        """ "Today" is the reader's today. Both turns were recorded just now, so
+        they are in today's window in Colombo as well as in UTC, and in no
+        window that ended last year."""
+        from zoneinfo import ZoneInfo
+
+        for zone in ("UTC", "Asia/Colombo"):
+            today = datetime.now(ZoneInfo(zone)).date().isoformat()
+            rows = queue_of(client, shop, query=f"?since={today}&until={today}&tz={zone}")
+            assert ids_in(rows) == {shop.answered_turn, shop.declined_turn}, zone
+        assert queue_of(client, shop, query="?since=2020-01-01&until=2020-01-31") == []
+
+    def test_a_window_that_cannot_be_read_is_refused(self, client: TestClient, shop) -> None:
+        for query in (
+            "?tz=Not/AZone",
+            "?tz=../../etc/passwd",
+            "?since=2026-09-10&until=2026-09-01",
+        ):
+            response = client.get(
+                f"/v1/console/shops/{shop.tenant}/review{query}", cookies=cookie_for(shop.user)
+            )
+            assert response.status_code == 400, query
+
+    def test_the_counts_are_this_shops_and_split_by_outcome_and_verdict(
+        self, client: TestClient, shop, other_shop
+    ) -> None:
+        """Both fixtures hold the same two turns. Were isolation to fail, every
+        count here would simply double — silently, and plausibly."""
+
+        def counts(query: str) -> dict:
+            response = client.get(
+                f"/v1/console/shops/{shop.tenant}/review/counts{query}",
+                cookies=cookie_for(shop.user),
+            )
+            assert response.status_code == 200, response.text
+            return response.json()["data"]
+
+        waiting = counts("?graded=false")
+        assert waiting["total"] == 2
+        assert waiting["by_state"] == {"resolved": 1, "escalated": 1}
+        assert waiting["by_verdict"] == {}
+
+        grade(client, shop, shop.answered_turn, "agree")
+        assert counts("?graded=true")["by_verdict"] == {"agree": 1}
+        assert counts("?graded=false")["total"] == 1
+        assert counts("?since=2020-01-01&until=2020-01-31")["total"] == 0
+
+    def test_one_turn_opens_by_its_id_and_another_shops_does_not(
+        self, client: TestClient, shop, other_shop
+    ) -> None:
+        mine = client.get(
+            f"/v1/console/shops/{shop.tenant}/review/{shop.answered_turn}",
+            cookies=cookie_for(shop.user),
+        )
+        assert mine.status_code == 200
+        assert mine.json()["data"]["question"]["text"] == QUESTION
+
+        theirs = client.get(
+            f"/v1/console/shops/{shop.tenant}/review/{other_shop.answered_turn}",
+            cookies=cookie_for(shop.user),
+        )
+        assert theirs.status_code == 404
+        assert other_shop.tenant not in theirs.text

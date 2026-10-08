@@ -66,6 +66,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from neura_agent_core.conversations import ConversationRepository
 from neura_agent_core.rag.schema import document_chunks
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
+from neura_commerce.identity import EntityType
+from neura_commerce.sync.schema import synced_entities
 
 #: How much of a cited source is shown per turn. A policy page is short; a
 #: synced product description occasionally is not, and a queue that renders
@@ -138,6 +140,20 @@ SOURCE_GONE = (
     "re-indexed since this turn ran."
 )
 
+#: A cited product that is not in the search index but IS in our copy of the
+#: shop's catalogue. SELL cites every product it recommended, read live from
+#: the shop, so on a shop nobody indexed every one of them used to be reported
+#: as SOURCE_GONE — "may have been deleted" about products still on sale
+#: (CONNECTING_A_NEW_SHOP_LOG.md G39). What is true: it was read from the shop,
+#: it is still in the catalogue, and the exact text the assistant saw is not
+#: kept here. The title is the catalogue's current one, which is what makes it
+#: recognisable; nothing else from the copy is shown, because the copy may have
+#: changed since the turn and the queue shows evidence, not today's product.
+IN_CATALOGUE = (
+    "Read from your shop during this chat. It is still in your catalogue; the exact "
+    "text the assistant saw is not kept here."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewItem:
@@ -190,6 +206,7 @@ class ReviewQueue:
         graded: bool | None = None,
         before: tuple[datetime, str] | None = None,
         limit: int = 20,
+        **filters: Any,
     ) -> list[ReviewItem]:
         """One page of the queue, newest first, each turn with its evidence.
 
@@ -197,15 +214,24 @@ class ReviewQueue:
         to answer is in here beside a turn it answered confidently, because those
         are the interesting ones and a queue that hid them would be the
         merchant-facing version of the empty bubble ADR-0020 was written about.
-        ``graded`` filters on whether a *human* has looked, which is the only
-        axis a reviewer works along.
+        ``graded`` filters on whether a *human* has looked, which is the axis a
+        reviewer works along.
+
+        **Since 2026-09-27 the reader may also narrow it** (``filters``, passed
+        to :meth:`ShadowRepository.pending`): by what the turn would have done,
+        by verdict, by assistant and by date. That is not the state filter this
+        docstring refuses — nothing is hidden *by default*, the screen opens on
+        every waiting turn, and a narrowed view says so and how to clear it.
         """
-        turns = await self._shadow.pending(tenant_id, graded=graded, before=before, limit=limit)
+        turns = await self._shadow.pending(
+            tenant_id, graded=graded, before=before, limit=limit, **filters
+        )
         if not turns:
             return []
 
         questions = await self._conversations.by_ids(tenant_id, [turn.message_id for turn in turns])
         sources = await self._sources(tenant_id, turns)
+        catalogued = await self._catalogued(tenant_id, turns, sources)
 
         items: list[ReviewItem] = []
         for turn in turns:
@@ -216,7 +242,7 @@ class ReviewQueue:
                     question=message.content if message else "",
                     question_recorded=message is not None,
                     asked_at=message.created_at if message else None,
-                    evidence=_evidence_for(turn, sources),
+                    evidence=_evidence_for(turn, sources, catalogued),
                 )
             )
         return items
@@ -228,12 +254,15 @@ class ReviewQueue:
 
         questions = await self._conversations.by_ids(tenant_id, [turn.message_id])
         message = questions.get(turn.message_id)
+        sources = await self._sources(tenant_id, [turn])
         return ReviewItem(
             turn=turn,
             question=message.content if message else "",
             question_recorded=message is not None,
             asked_at=message.created_at if message else None,
-            evidence=_evidence_for(turn, await self._sources(tenant_id, [turn])),
+            evidence=_evidence_for(
+                turn, sources, await self._catalogued(tenant_id, [turn], sources)
+            ),
         )
 
     async def _sources(
@@ -303,9 +332,46 @@ class ReviewQueue:
             )
         return resolved
 
+    async def _catalogued(
+        self,
+        tenant_id: str,
+        turns: Sequence[ShadowTurn],
+        sources: dict[tuple[str, str], tuple[str, bool]],
+    ) -> dict[str, str]:
+        """Cited products the index lacks but our catalogue copy has: id → title.
+
+        One query for the page, like :meth:`_sources`, and only for the ids that
+        query did not find. Any platform: the queue does not know which store a
+        turn read, and a tenant's product id names one product either way.
+        """
+        product = EntityType.PRODUCT.value
+        wanted = {
+            str(citation.get("id", ""))
+            for turn in turns
+            for citation in turn.citations
+            if citation.get("type") == product
+            and citation.get("id")
+            and (product, str(citation.get("id"))) not in sources
+        }
+        if not wanted:
+            return {}
+
+        synced = synced_entities.c
+        rows = (
+            await self._session.execute(
+                select(synced.external_id, synced.document["title"].astext)
+                .where(synced.tenant_id == tenant_id)
+                .where(synced.entity_type == product)
+                .where(synced.external_id.in_(sorted(wanted)))
+            )
+        ).all()
+        return {str(external_id): str(title or "") for external_id, title in rows}
+
 
 def _evidence_for(
-    turn: ShadowTurn, sources: dict[tuple[str, str], tuple[str, bool]]
+    turn: ShadowTurn,
+    sources: dict[tuple[str, str], tuple[str, bool]],
+    catalogued: dict[str, str] | None = None,
 ) -> list[Evidence]:
     """Turn a row's citations into things a person can read.
 
@@ -336,13 +402,17 @@ def _evidence_for(
 
         found = sources.get((kind, identifier))
         if found is None:
+            reason = SOURCE_GONE
+            if kind == "product" and catalogued and identifier in catalogued:
+                title = catalogued[identifier]
+                reason = f"{title} — {IN_CATALOGUE}" if title else IN_CATALOGUE
             evidence.append(
                 Evidence(
                     kind="document",
                     type=kind,
                     id=identifier,
                     available=False,
-                    reason=SOURCE_GONE,
+                    reason=reason,
                 )
             )
             continue
@@ -362,6 +432,29 @@ def _evidence_for(
     return evidence
 
 
+def no_draft_reason(turn: ShadowTurn) -> str:
+    """Why there is no reply to show, in the merchant's words.
+
+    Said by Review and by the transcript, so one held turn with no draft reads
+    the same on both screens. Ordered by what the reader most needs to know. An
+    escalation is a decision the agent made; a failed ``verify`` is a decision
+    made *about* the agent, and conflating them would hide the one that says the
+    model was wrong.
+    """
+    if turn.escalated:
+        return "The agent handed this to a person instead of answering."
+    if turn.grounded is False:
+        reason = turn.verify_reason.strip()
+        return (
+            f"The draft failed the grounding check and was discarded: {reason}"
+            if reason
+            else "The draft failed the grounding check and was discarded."
+        )
+    if turn.state == "blocked":
+        return "The guard stopped this turn before the agent answered."
+    return f"The agent produced no reply. It recorded the turn as {turn.state!r}."
+
+
 def evidence_payload(item: Evidence) -> dict[str, Any]:
     return {
         "kind": item.kind,
@@ -376,6 +469,7 @@ def evidence_payload(item: Evidence) -> dict[str, Any]:
 
 __all__ = [
     "EXCERPT_CHARS",
+    "IN_CATALOGUE",
     "MAX_CHUNKS_PER_SOURCE",
     "SOURCE_GONE",
     "TOOL_NOT_RECORDED",
@@ -383,4 +477,5 @@ __all__ = [
     "ReviewItem",
     "ReviewQueue",
     "evidence_payload",
+    "no_draft_reason",
 ]

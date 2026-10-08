@@ -53,6 +53,9 @@ _REDACTED = "[REDACTED]"
 # Belt-and-braces for secrets embedded in free text (e.g. an exception message).
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bfn_(sk|pk)_[A-Za-z0-9_\-]{8,}"), "fn_***"),
+    # A credential in an address — `?token=` on the chat socket, a sign-in link.
+    # After the key pattern, so a key reads `token=***` rather than `fn_***`.
+    (re.compile(r"([?&]token=)[^&\s\"']+"), r"\1***"),
     (re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]+\b"), "[EMAIL]"),
     (re.compile(r"\b(?:\d[ -]?){13,19}\b"), "[CARD]"),
 )
@@ -62,6 +65,24 @@ def _scrub_text(value: str) -> str:
     for pattern, replacement in _PATTERNS:
         value = pattern.sub(replacement, value)
     return value
+
+
+class _StdlibRedactionFilter(logging.Filter):
+    """The same scrubbing, for lines that never pass through structlog.
+
+    The web server and the HTTP client log through the standard library, and
+    ``log_config=None`` hands their lines to the root handler as they are. One
+    of them is the request line, which carries the whole address — and the chat
+    socket's address carried the chat box key, printed in full
+    (CONNECTING_A_NEW_SHOP_LOG.md G34). ``redaction_processor`` never saw it.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        scrubbed = _scrub_text(message)
+        if scrubbed != message:
+            record.msg, record.args = scrubbed, None
+        return True
 
 
 def _redact(value: Any, key: str | None = None) -> Any:
@@ -96,6 +117,11 @@ def configure_logging(*, level: str = "INFO", json_output: bool = True) -> None:
     ``json_output=False`` gives a human-readable console renderer for local work.
     """
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
+    # On the handlers, not a logger: a filter on a logger does not see records
+    # propagated from its children, and every library logs from a child.
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, _StdlibRedactionFilter) for f in handler.filters):
+            handler.addFilter(_StdlibRedactionFilter())
 
     renderer: structlog.types.Processor = (
         structlog.processors.JSONRenderer()

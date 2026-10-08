@@ -57,6 +57,11 @@ class GenericClient:
             headers={"Accept": "application/json", "User-Agent": USER_AGENT},
         )
 
+    @property
+    def has_token(self) -> bool:
+        """Whether requests carry a token. Never the token itself."""
+        return bool(self._token)
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

@@ -186,12 +186,26 @@ def _availability(product: Product) -> str:
     Nothing but reading the output catches that: no assertion fails, because
     nothing is false. Evidence is read by a model that will paraphrase it, so a
     phrase with two meanings will eventually be published in the wrong one.
+
+    **And it happened again, with stock.** "available to buy" was decided from
+    the status alone, and a search-result line carries nothing else — so a
+    connected shop's sold-out cardamom was rendered "available to buy" and the
+    agent told a shopper *"Yes, we have it"*, with the fact check passing,
+    because the reply matched its evidence (CONNECTING_A_NEW_SHOP_LOG.md G35).
+    An active product is now available to buy only when a variant is in stock;
+    sold out and unreported are said in words that cannot be read as "yes".
     """
-    if product.status.value == "active":
-        return "available to buy"
     if product.status.value == "unknown":
         return "this store did not report a status for this product"
-    return f"not available to buy ({product.status.value})"
+    if product.status.value != "active":
+        return f"not available to buy ({product.status.value})"
+
+    stock = [variant.in_stock for variant in product.variants]
+    if any(state is True for state in stock):
+        return "available to buy, in stock"
+    if stock and all(state is False for state in stock):
+        return "listed for sale but out of stock, so it cannot be bought right now"
+    return "listed for sale; this store did not report whether it is in stock"
 
 
 def _price_range(product: Product) -> str:

@@ -125,3 +125,38 @@ cases:
       The description says the shoe "runs slightly narrow; consider a half size
       up if you have wide feet". Answering from it is correct; a reassurance the
       description does not support is not, and a shopper buys on the difference.
+
+  - id: product_qa_008
+    intent: product_qa
+    synthetic: true
+    input: "Is the insulated water bottle in stock?"
+    expect:
+      intent: product_qa
+      grounded: true
+      escalated: false
+      must_not_contain: ["yes", "is in stock"]
+    notes: >-
+      Every variant is sold out; the product itself is still active. Found on a
+      real connected shop (CONNECTING_A_NEW_SHOP_LOG.md G35): the search-result
+      line said "available to buy" from the status alone, the agent answered
+      "Yes, we have Green Cardamom Pods available to buy", and the fact check
+      passed — the reply matched its evidence. The evidence was wrong, so this
+      case needs a product sold out in EVERY variant: product_qa_003 has one size
+      out and one in, which never exercised it.
+
+  - id: product_qa_009
+    intent: product_qa
+    synthetic: true
+    input: "Do you sell trekking poles?"
+    expect:
+      intent: product_qa
+      tools_called: [search_products]
+      grounded: true
+      must_not_contain: ["Carbon", "55", "yes"]
+    notes: >-
+      The only trekking poles in the fixture are a DRAFT — not released, not on the
+      shop's own pages. Found on a real connected shop (CONNECTING_A_NEW_SHOP_LOG.md
+      G37): CARE answered "We have Cinnamon Tea Bags listed for 750.00 LKR, but they
+      are not currently available", and the owner graded it Not good — "this
+      product is not in the product list in our shop". The right answer is the
+      same as for a product the store does not have.

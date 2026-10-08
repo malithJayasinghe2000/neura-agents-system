@@ -30,6 +30,7 @@ from neura_core.tenancy.budget import (
     RuntimePolicy,
     resolve_runtime_policy,
 )
+from neura_core.tenancy.handover import HANDOVER_WITHOUT_DETAILS, handover_message
 from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
 from neura_core.tenancy.models import (
     ApiKey,
@@ -44,10 +45,25 @@ from neura_core.tenancy.repository import (
     StoreConnectionRepository,
     TenantRepository,
 )
-from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
+from neura_core.tenancy.schema import (
+    api_keys,
+    shop_checks,
+    shop_tokens,
+    tenant_stores,
+    tenant_usage,
+    tenants,
+)
+from neura_core.tenancy.shop_setup import (
+    SHOP_TOKEN_PREFIX,
+    ShopCheckRepository,
+    ShopTokenRepository,
+    new_shop_token,
+)
 from neura_core.tenancy.usage import UsageDelta, UsageMeter, UsageTotals
 
 __all__ = [
+    "HANDOVER_WITHOUT_DETAILS",
+    "SHOP_TOKEN_PREFIX",
     "Admission",
     "ApiKey",
     "ApiKeyKind",
@@ -57,6 +73,8 @@ __all__ = [
     "IssuedKey",
     "KeyEnvironment",
     "RuntimePolicy",
+    "ShopCheckRepository",
+    "ShopTokenRepository",
     "StoreConnectionRepository",
     "Tenant",
     "TenantConfig",
@@ -68,10 +86,14 @@ __all__ = [
     "UsageTotals",
     "api_keys",
     "authenticate",
+    "handover_message",
+    "new_shop_token",
     "require_agent",
     "require_scopes",
     "resolve_runtime_policy",
     "resolve_turn_mode",
+    "shop_checks",
+    "shop_tokens",
     "tenant_stores",
     "tenant_usage",
     "tenants",

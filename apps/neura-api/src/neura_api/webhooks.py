@@ -26,7 +26,8 @@ from datetime import timedelta
 
 import httpx
 
-from neura_core import Database, get_logger
+from neura_api.addresses import outbound_transport
+from neura_core import Database, get_logger, get_settings
 from neura_core.webhooks import (
     Delivery,
     DeliveryStatus,
@@ -109,9 +110,14 @@ async def deliver(
 class WebhookDrainer:
     """Sends what the outbox holds, one tenant at a time."""
 
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, *, production: bool | None = None) -> None:
         self._db = db
-        self._client = httpx.AsyncClient(follow_redirects=False)
+        production = get_settings().is_production if production is None else production
+        # A shop's own address, so the same rule as its bridge (G78): in
+        # production only public addresses, checked as each delivery connects.
+        self._client = httpx.AsyncClient(
+            follow_redirects=False, transport=outbound_transport(production=production)
+        )
 
     async def drain_tenant(self, tenant_id: str, *, limit: int = 50) -> int:
         """Attempt every due delivery for one tenant. Returns how many were sent.

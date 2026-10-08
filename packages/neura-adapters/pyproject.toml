@@ -21,6 +21,11 @@ neura-conformance = "neura_adapters.generic.cli:main"
 [project.entry-points."neura.adapters"]
 generic = "neura_adapters.generic:GenericAdapter"
 
+# How the developer MCP server finds what it teaches, without importing this
+# package (ADR-0053; the same fence as above).
+[project.entry-points."neura.bridge_teacher"]
+generic = "neura_adapters.generic.teacher"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
