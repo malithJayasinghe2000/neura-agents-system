@@ -57,6 +57,7 @@ from neura_core.tenancy import (
     TenantRepository,
     UsageMeter,
 )
+from neura_core.tenancy.keys import generate
 from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
 from neura_core.webhooks import (
     DeliveryStatus,
@@ -277,6 +278,9 @@ async def _provision(
             kind=kind,
             scopes=scopes
             if scopes is not None
+            # A public key holds only what the chat box uses (G80).
+            else ["care:chat:write", "care:order:read", "care:catalogue:read", "care:escalate"]
+            if kind is ApiKeyKind.PUBLIC
             else [
                 "care:chat:write",
                 "care:conversations:read",
@@ -300,6 +304,27 @@ async def _provision(
                 base_url="https://shop.example/neura/v1",
                 credentials={"token": "shh"},
             )
+    return issued.token
+
+
+async def _public_key_as_issued_before_g80(database: Database, tenant_id: str) -> str:
+    """A chat box key with the runbook's old scopes, written to the table the
+    way ``ApiKeyRepository.issue`` wrote it, because ``issue`` now refuses it.
+    Shops connected before G80 hold keys like this one."""
+    issued = generate(ApiKeyKind.PUBLIC)
+    async with database.tenant_session(tenant_id) as session:
+        await session.execute(
+            api_keys.insert().values(
+                id=f"key_g80_{tenant_id[-6:]}",
+                tenant_id=tenant_id,
+                kind=ApiKeyKind.PUBLIC.value,
+                name="chat box, before G80",
+                token_prefix=issued.token_prefix,
+                token_hash=issued.token_hash,
+                scopes=["care:chat:write", "care:conversations:read", "care:order:read"],
+                allowed_origins=["https://shop.example"],
+            )
+        )
     return issued.token
 
 
@@ -431,6 +456,29 @@ class TestAuthenticationIsWired:
 
         accepted = client.post("/v1/care/chat", json={"message": "hi"}, headers=_auth(token))
         assert accepted.status_code == 200
+
+    @pytest.mark.parametrize("path", ["/v1/care/conversations", "/v1/care/conversations/{id}"])
+    async def test_a_public_key_cannot_read_transcripts(
+        self, client: TestClient, db: Database, path: str
+    ) -> None:
+        """G80: the chat box key is in every page's source, and the runbook gave
+        it ``conversations:read``. With the shop's ``Origin`` (any script can
+        send one), it listed and read every shopper's conversation. A key made
+        that way, written straight to the table as the runbook's were, is now
+        refused; the chat box never reads a transcript."""
+        await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        async with db.tenant_session(TENANT_A) as session:
+            await ConversationRepository(session).start(
+                TENANT_A, conversation_id="cnv_g80_someone_elses", agent_key="care"
+            )
+        token = await _public_key_as_issued_before_g80(db, TENANT_A)
+
+        response = client.get(
+            path.format(id="cnv_g80_someone_elses"),
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+        assert response.status_code == 403
+        assert response.json()["error"]["details"]["missing_scopes"] == ["care:conversations:read"]
 
 
 # ── A turn, end to end ───────────────────────────────────────────────────────

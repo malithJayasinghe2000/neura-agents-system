@@ -176,6 +176,78 @@ class TestApiKeyUsability:
         assert api_key().permits_origin(None)
 
 
+class TestPublicKeyScopes:
+    """G80: a public key sits in every page's source, so it may do only what
+    the chat box does. It used to hold whatever it was issued with, and the
+    runbook issued it with ``conversations:read``: anyone who copied it from a
+    page could read every shopper's transcript."""
+
+    #: What the runbook issued a chat box key with before G80.
+    BEFORE_G80 = frozenset(
+        {
+            "care:chat:write",
+            "care:conversations:read",
+            "care:order:read",
+            "care:catalogue:read",
+            "care:policies:read",
+            "care:escalate",
+            "sell:chat:write",
+            "sell:conversations:read",
+            "sell:catalogue:read",
+            "sell:escalate",
+            "sell:suggest:read",
+        }
+    )
+
+    @staticmethod
+    def _caller(kind: ApiKeyKind, scopes: frozenset[str]) -> AuthenticatedCaller:
+        return AuthenticatedCaller(tenant=tenant(), api_key=api_key(kind=kind, scopes=scopes))
+
+    def test_a_public_key_made_before_g80_loses_the_transcripts(self) -> None:
+        held = self._caller(ApiKeyKind.PUBLIC, self.BEFORE_G80).scopes
+        assert "care:conversations:read" not in held
+        assert "sell:conversations:read" not in held
+        assert held == self.BEFORE_G80 - {"care:conversations:read", "sell:conversations:read"}
+
+    @pytest.mark.parametrize(
+        "scope",
+        [
+            "care:conversations:read",
+            "sell:conversations:read",
+            "care:shadow:read",
+            "care:shadow:write",
+            "sell:shadow:read",
+            "care:knowledge-base:write",
+            "sell:feed:manage",
+            "sell:mcp:connect",
+            "stores:read",
+            "stores:write",
+            "webhooks:read",
+            "webhooks:write",
+            "observe:write",
+        ],
+    )
+    def test_a_public_key_never_holds_what_the_chat_box_does_not_use(self, scope: str) -> None:
+        assert not keys.public_key_may_hold(scope)
+        assert scope not in self._caller(ApiKeyKind.PUBLIC, frozenset({scope})).scopes
+
+    def test_a_secret_key_keeps_every_scope_it_holds(self) -> None:
+        everything = self.BEFORE_G80 | {"stores:write", "care:shadow:read"}
+        assert self._caller(ApiKeyKind.SECRET, everything).scopes == everything
+
+    def test_everything_the_chat_box_is_issued_with_is_allowed(self) -> None:
+        """The provisioning list and the rule must agree, or the chat box loses
+        a part of itself the day its key is made."""
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+        from widget_check import _SCOPES
+
+        for scopes in _SCOPES.values():
+            assert all(keys.public_key_may_hold(scope) for scope in scopes), scopes
+
+
 class TestBudgetLadder:
     @pytest.mark.parametrize(
         ("spend", "expected"),

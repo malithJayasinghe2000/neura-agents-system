@@ -141,7 +141,7 @@ search by meaning covers (*"29 of 38"*).
 
 ```bash
 make key-new TENANT=tn_… NAME=widget PUBLIC=1 ORIGINS=https://shop.example \
-  SCOPES="care:chat:write,care:conversations:read,care:order:read,care:catalogue:read,care:policies:read,care:escalate,sell:chat:write,sell:conversations:read,sell:catalogue:read,sell:escalate,sell:suggest:read"
+  SCOPES="care:chat:write,care:order:read,care:catalogue:read,care:policies:read,care:escalate,sell:chat:write,sell:catalogue:read,sell:escalate,sell:suggest:read"
 ```
 
 - **`ORIGINS` is not optional.** A public key with no allowed address permits nothing, and the
@@ -149,6 +149,9 @@ make key-new TENANT=tn_… NAME=widget PUBLIC=1 ORIGINS=https://shop.example \
   scheme and host, no trailing slash, and `www.` is a different address.
 - `sell:suggest:read` is what the paired suggestions on a basket page need (ADR-0040). Leave the
   `sell:` scopes out for a shop without NEURA-SELL.
+- **Never `conversations:read`, or anything else the chat box doesn't use** (G80, 2026-10-08). The key is in every
+  page's source, so what it can do, anyone can do. NEURA refuses to make such a key, and a key made before the
+  rule loses those scopes when it is used.
 
 The line itself is the one the API serves — `GET <NEURA's address>/v1/widget/snippet`, also shown on
 the console's Help page:

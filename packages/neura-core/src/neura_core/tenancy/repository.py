@@ -29,7 +29,7 @@ from neura_core.errors import ConfigurationError, NotFoundError
 from neura_core.ids import API_KEY, STORE, TENANT, new_id
 from neura_core.observation.models import OBSERVE_WRITE
 from neura_core.tenancy import keys
-from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
+from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment, public_key_may_hold
 from neura_core.tenancy.models import ApiKey, Tenant, TenantConfig, TenantStatus
 from neura_core.tenancy.modes import TurnMode
 from neura_core.tenancy.schema import api_keys, tenant_stores, tenants
@@ -196,6 +196,17 @@ class ApiKeyRepository:
                 "a public (fn_pk_) key must be issued with at least one allowed "
                 "origin — it is served to browsers and is not a secret.",
             )
+
+        if kind is ApiKeyKind.PUBLIC:
+            # G80: a public key is in every page's source. Refused here, where
+            # it is a typo, rather than found in a page where anyone can copy it.
+            refused = sorted(s for s in set(scopes) if not public_key_may_hold(s))
+            if refused:
+                raise ConfigurationError(
+                    "a public (fn_pk_) key may hold only what the chat box uses, because "
+                    f"anyone can read it in the page; not {', '.join(refused)}. Use a "
+                    "secret key on a server for these.",
+                )
 
         if OBSERVE_WRITE in scopes:
             await self._check_observer(tenant_id, kind)

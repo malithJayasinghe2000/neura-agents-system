@@ -36,7 +36,7 @@ Authorization: Bearer fn_sk_live_a1b2c3...
 | `fn_sk_…` | Server-to-server | Full, per assigned scopes |
 | `fn_pk_…` | Browser widget | Chat only, origin-locked |
 
-Stored hashed — verifiable, never retrievable. Scoped (`care:chat:write`, `care:conversations:read`, …), expirable, revocable, with `last_used_at`. `fn_pk_` keys are locked to allowlisted origins because they are, by definition, public.
+Stored hashed — verifiable, never retrievable. Scoped (`care:chat:write`, `care:conversations:read`, …), expirable, revocable, with `last_used_at`. `fn_pk_` keys are locked to allowlisted origins because they are, by definition, public, and they hold only what the chat box does: never `conversations:read` or any other scope a shop owner reads (G80, security-model.md §5).
 
 ---
 

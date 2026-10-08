@@ -666,10 +666,11 @@ async def provision(
 #: What a public widget key may do, per agent. Kept here rather than derived
 #: from the manifest because a demo that silently grants whatever an agent
 #: declares would stop being a check on what a *public* key is allowed to hold.
+#: No ``conversations:read`` (G80): the chat box never reads a transcript, and a
+#: public key that could would hand every shopper's chat to anyone.
 _SCOPES = {
     "care": (
         "care:chat:write",
-        "care:conversations:read",
         "care:order:read",
         "care:catalogue:read",
         "care:policies:read",
@@ -677,7 +678,6 @@ _SCOPES = {
     ),
     "sell": (
         "sell:chat:write",
-        "sell:conversations:read",
         "sell:catalogue:read",
         "sell:escalate",
     ),

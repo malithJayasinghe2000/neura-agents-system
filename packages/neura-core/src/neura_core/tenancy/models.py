@@ -13,7 +13,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from neura_core.tenancy.keys import ApiKeyKind
+from neura_core.tenancy.keys import ApiKeyKind, public_key_may_hold
 from neura_core.tenancy.modes import TurnMode, coerce_mode
 
 
@@ -225,6 +225,12 @@ class AuthenticatedCaller(BaseModel):
 
     @property
     def scopes(self) -> frozenset[str]:
+        """What this caller may do. **A public key never holds more than the
+        chat box does** (G80), whatever it was issued with: keys made before
+        the rule held ``conversations:read``, and lose it here, at the one place
+        every route and the policy engine read scopes from."""
+        if self.api_key.kind is ApiKeyKind.PUBLIC:
+            return frozenset(s for s in self.api_key.scopes if public_key_may_hold(s))
         return self.api_key.scopes
 
     def may_use(self, agent_key: str) -> bool:
