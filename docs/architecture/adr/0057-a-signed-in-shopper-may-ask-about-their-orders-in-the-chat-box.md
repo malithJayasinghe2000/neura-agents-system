@@ -121,13 +121,13 @@ conversation**: a new id, no history carried over, so no earlier reply can reach
 remembers the new id, as it already does. This holds for the shop's own server too (a secret key naming
 customers), which closes G79 for every path.
 
-### 7. What a shopper without a pass is told (owner, Q1 and Q5; the words are the owner's to confirm)
+### 7. What a shopper without a pass is told (owner, Q1 and Q5; the words accepted by the owner, 2026-10-08)
 
 Fixed text, never the AI's, put on the reply where every reply is released (`turns.py`, the same place as
 ADR-0055's handover sentence), for a turn **with no valid pass** that is about an order: its intent is
 `order_status`, or the policy engine stopped an order tool on ownership.
 
-| Case | Proposed words |
+| Case | Words |
 |:--|:--|
 | Not signed in | *"Please sign in to your account so I can help with your orders. Or contact our store: hello@yourshop.example, +94 11 234 5678."* (No contact details set: the sentence ends after *orders*.) |
 | The pass expired | *"Your sign-in on this page has timed out. Please reload the page and ask again."* |
