@@ -1,8 +1,8 @@
 # ADR-0058 · A Shop's Dashboard Has People With Roles, And A Shop Signs Up
 
-**Status:** **Proposed** · owner decisions 2026-10-09 and 2026-10-10, a design session, R1 to R11
+**Status:** **Accepted** · owner decision 2026-10-10 (*"A"* to Claude's nine additions) · not built · owner decisions 2026-10-09 and 2026-10-10, a design session, R1 to R11
 ([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *Roles*). Everything marked
-*(Claude)* is Claude's proposal, for the owner to accept or change · **Date:** 2026-10-10 · **Supersedes:**
+*(Claude)* was Claude's proposal, accepted by the owner with the rest · **Date:** 2026-10-10 · **Supersedes:**
 [ADR-0026](0026-the-merchant-console-and-the-first-human-in-the-system.md) §5 (*one role in v1: owner*), and nothing
 else of it · **Resolves:** [K2](../../open-questions.md) once built · **Related:**
 [ADR-0014](0014-api-keys-and-the-rls-bootstrap.md) (key scopes, the naming copied here),
