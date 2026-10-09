@@ -95,6 +95,24 @@ const ATTRIBUTES: [string, React.ReactNode][] = [
       <code>true</code> lets a suggestion open the panel. See below
     </>,
   ],
+  [
+    "data-neura-customer-pass",
+    <>
+      A signed-in customer&apos;s pass, for order questions. See{" "}
+      <a href="#orders" className="font-medium text-ink underline underline-offset-2">
+        Optional: order questions
+      </a>
+    </>,
+  ],
+  [
+    "data-neura-sign-in-url",
+    <>
+      Your sign-in page, for order questions. See{" "}
+      <a href="#orders" className="font-medium text-ink underline underline-offset-2">
+        Optional: order questions
+      </a>
+    </>,
+  ],
 ];
 
 /**
@@ -121,6 +139,7 @@ const ON_THIS_PAGE: [string, string][] = [
   ["check", "3 · Check your work"],
   ["connect", "4 · Connect your shop"],
   ["chat", "5 · Add the chat box"],
+  ["orders", "Optional: order questions"],
   ["views", "Optional: product views"],
   ["changes", "Webhooks to NEURA"],
   ["trouble", "If something doesn't work"],
@@ -217,6 +236,23 @@ function Defs({ items }: { items: [string, React.ReactNode][] }) {
           <dt>
             <code className="font-mono text-[0.92em]">{name}</code>
           </dt>
+          <dd className="m-0 leading-[1.5] text-body">{what}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** A case and what it means, in plain words: what a shopper sees, what went wrong. */
+function Cases({ rows }: { rows: [React.ReactNode, React.ReactNode][] }) {
+  return (
+    <dl className="m-0 overflow-hidden rounded-[14px] border border-line text-[15px]">
+      {rows.map(([seen, what], i) => (
+        <div
+          key={i}
+          className={`grid gap-1 px-4 py-3.5 md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:px-5 ${i < rows.length - 1 ? "border-b border-[#efefef]" : ""}`}
+        >
+          <dt className="font-medium">{seen}</dt>
           <dd className="m-0 leading-[1.5] text-body">{what}</dd>
         </div>
       ))}
@@ -738,6 +774,197 @@ const PAIRS_RULES: React.ReactNode[] = [
 ];
 
 /**
+ * Optional: order questions (ADR-0057). Part of NEURA-CARE: the owner's
+ * dashboard offers the secret only for a shop with it whose check lists
+ * `order.read` (shops/page.tsx). The secret is `fn_cs_…`, made on Shop
+ * connection (customer-secret.tsx), refused in a page (CUSTOMER_SECRET_IN_PAGE).
+ * The pass rules are `check_customer_pass` (neura_core/tenancy/customer_pass.py):
+ * HS256 only, exactly sub, iat and exp, at most 15 minutes, 60 seconds of clock
+ * leeway, sub as text (G83). Both code samples were run (php-jwt 7.2.1,
+ * jsonwebtoken 9.0.3) and their passes accepted by that function.
+ */
+const ORDER_STEPS: WhoStep[] = [
+  {
+    title: "The shop owner makes the secret",
+    who: "Shop owner",
+    note: (
+      <>
+        On Shop connection in their NEURA dashboard: <em>Make the secret</em>. NEURA shows it once,
+        and they send it to you. It starts with {c("fn_cs_")}.
+      </>
+    ),
+  },
+  {
+    title: "Keep it on your shop's server",
+    who: "You",
+    note: (
+      <>
+        In a setting, for example {c("NEURA_CUSTOMER_SECRET")}, like the shop token. Never in a web
+        page: anyone who has it can make a pass for any customer. NEURA refuses it in a page. A new
+        secret from the owner stops the old one at once, so put it in straight away.
+      </>
+    ),
+  },
+  {
+    title: "Make a pass on every page a signed-in customer opens",
+    who: "You",
+    note: (
+      <>
+        Your server makes a fresh one each time it draws the page, and writes it into the chat box
+        line. Nobody presses anything.
+      </>
+    ),
+  },
+];
+
+/** Run as written: `$customerId` and `customerId` were 385, a number. */
+const PASS_PHP = `use Firebase\\JWT\\JWT; // composer require firebase/php-jwt
+
+// $customerId: from your shop's own sign-in session, never from the request.
+$now = time();
+$pass = JWT::encode([
+    'sub' => (string) $customerId, // text, exactly as your bridge sends it
+    'iat' => $now,
+    'exp' => $now + 15 * 60,       // at most 15 minutes
+], getenv('NEURA_CUSTOMER_SECRET'), 'HS256');`;
+
+const PASS_NODE = `const jwt = require("jsonwebtoken"); // npm install jsonwebtoken
+
+// customerId: from your shop's own sign-in session, never from the request.
+const pass = jwt.sign(
+  { sub: String(customerId) }, // text, exactly as your bridge sends it
+  process.env.NEURA_CUSTOMER_SECRET,
+  { algorithm: "HS256", expiresIn: "15m" }, // adds iat and exp: at most 15 minutes
+);`;
+
+const PASS_FIELDS: [string, React.ReactNode][] = [
+  [
+    "sub",
+    <>
+      The signed-in customer&apos;s id, as text: the same id your bridge sends as each order&apos;s{" "}
+      <code>customer_id</code>, because NEURA asks your bridge for this customer&apos;s orders with
+      it. Write it in quotes, <code>&quot;385&quot;</code>, not <code>385</code>: NEURA refuses a
+      number. Up to 128 characters
+    </>,
+  ],
+  [
+    "iat",
+    <>
+      When you made the pass, in seconds since 1 January 1970 (Unix time). A pass made more than a
+      minute ahead of NEURA&apos;s clock is refused, so keep your server&apos;s clock right
+    </>,
+  ],
+  [
+    "exp",
+    <>
+      When the pass stops working: at most 15 minutes after <code>iat</code>. A shopper who keeps a
+      page open longer is asked to reload it, which makes a new pass
+    </>,
+  ],
+];
+
+/** `configFrom` in widget.js; only an http(s) address becomes a link (SAFE_URL). */
+const ORDER_ATTRIBUTES: [string, React.ReactNode][] = [
+  [
+    "data-neura-customer-pass",
+    <>
+      The pass, only when the shopper is signed in. For everyone else, leave the setting out: no
+      pass means not signed in
+    </>,
+  ],
+  [
+    "data-neura-sign-in-url",
+    <>
+      Optional. Your shop&apos;s sign-in page, as a full address with <code>https://</code>. A
+      shopper who isn&apos;t signed in and asks about an order gets a <em>Sign in</em> link to it. A
+      short address such as <code>/login</code> shows no link
+    </>,
+  ],
+];
+
+/**
+ * ADR-0057's security review, rows 5 and 6: nothing NEURA can check, so they
+ * are the developer's rules.
+ */
+const ORDER_RULES: React.ReactNode[] = [
+  <>
+    {b("Only from your shop's own sign-in session.")} Take the customer&apos;s id from the session
+    your shop already uses to know who is signed in. Never from anything in the request, such as{" "}
+    {c("?customer=385")}, and never build an address that makes a pass for whoever asks: anyone
+    could then read another customer&apos;s orders.
+  </>,
+  <>
+    {b("Never cache a page that carries a pass.")} Send it with{" "}
+    {c("Cache-Control: private, no-store")}, and keep it out of your shop&apos;s own page cache. A
+    cached copy would give one customer&apos;s pass to everyone who opens the page, for up to 15
+    minutes.
+  </>,
+];
+
+/**
+ * The fixed words (neura_core/tenancy/handover.py): sign_in_message, with the
+ * shop's contact details (ADR-0055), and PASS_EXPIRED_MESSAGE. The Sign in
+ * link is the chat box's, under a reply the server marks `sign_in`.
+ */
+const ORDER_SEES: [React.ReactNode, React.ReactNode][] = [
+  [
+    "Signed in",
+    <>
+      Answers about their own orders: status, items and tracking. Another customer&apos;s order
+      number gets the same answer as a number that doesn&apos;t exist.
+    </>,
+  ],
+  [
+    "Not signed in",
+    <>
+      <em>
+        &ldquo;Please sign in to your account so I can help with your orders. Or contact our
+        store:&rdquo;
+      </em>{" "}
+      and the shop&apos;s contact details from the dashboard. With{" "}
+      <code>data-neura-sign-in-url</code>, a <em>Sign in</em> link under it. The same words
+      whatever order number they type, so nobody can find out which orders exist.
+    </>,
+  ],
+  [
+    "Signed in, page open longer than its pass",
+    <>
+      <em>
+        &ldquo;Your sign-in on this page has timed out. Please reload the page and ask again.&rdquo;
+      </em>
+    </>,
+  ],
+];
+
+/**
+ * The reply's `customer_pass` and `customer_pass_reason` (routes/agent.py,
+ * stream.py's `done` frame, in every mode); the warning is `passWarningFor` in
+ * widget.js, once per page, for `invalid` only.
+ */
+const ORDER_WORKS: React.ReactNode[] = [
+  <>
+    Sign in to the shop as a test customer with an order, open a page and ask{" "}
+    <em>Where is my order?</em> The assistant answers about that customer&apos;s orders.
+  </>,
+  <>
+    Each answer says what NEURA made of the pass, in {c("customer_pass")}: {c("valid")},{" "}
+    {c("expired")} or {c("invalid")}, and {c("null")} when the page sent none. Why, in{" "}
+    {c("customer_pass_reason")}. Find it in your
+    browser&apos;s Network tab: the chat&apos;s live connection ({c("stream")}, under Messages), or
+    the {c("chat")} request when there is no live connection.
+  </>,
+  <>
+    {c("invalid")}? The browser&apos;s console says why, once per page, after the first message:{" "}
+    <em>
+      NEURA: the customer pass in data-neura-customer-pass was refused, so this shopper is treated
+      as not signed in:
+    </em>{" "}
+    and the reason.
+  </>,
+  <>Sign out and ask again: you are asked to sign in.</>,
+];
+
+/**
  * Optional: product views (ADR-0044, ADR-0048, ADR-0049). Part of NEURA-SELL:
  * the dashboard lists Sold out only for a shop with it (shop-sidebar.tsx). The
  * switch lives in the shop and governs sending, NEURA has none (0044 §3); the
@@ -951,6 +1178,53 @@ const TROUBLE: { where: string; rows: [React.ReactNode, React.ReactNode][] }[] =
         <>
           Compare your bridge&apos;s answers with the shop by hand (step 3): {c("in_stock")}, and
           a three-letter currency code.
+        </>,
+      ],
+    ],
+  },
+  {
+    where: "Order questions",
+    rows: [
+      [
+        <>
+          The console says <em>the signature does not match</em>
+        </>,
+        <>
+          Your setting doesn&apos;t hold the shop&apos;s current secret. Use the whole secret,{" "}
+          {c("fn_cs_")} included, exactly as the owner sent it. A new secret from the owner replaces
+          the old one at once.
+        </>,
+      ],
+      [
+        <>
+          The console says <em>this shop has no customer sign-in secret yet</em>
+        </>,
+        <>
+          Ask the shop owner to press <em>Make the secret</em> on Shop connection.
+        </>,
+      ],
+      [
+        <>
+          The console says <em>sub must be text</em>
+        </>,
+        <>
+          The customer&apos;s id went in as a number. Turn it into text: {c("(string) $customerId")}{" "}
+          in PHP, {c("String(customerId)")} in Node.js.
+        </>,
+      ],
+      [
+        <>Signed in, but asked to sign in</>,
+        <>
+          {c("customer_pass")} is {c("null")}: the page has no pass. Look for{" "}
+          {c("data-neura-customer-pass")} in the page&apos;s source. Missing on a page you know you
+          added it to? A cache served an old copy.
+        </>,
+      ],
+      [
+        <>Signed in, but the assistant finds no orders</>,
+        <>
+          {c("sub")} isn&apos;t the id your bridge sends as each order&apos;s {c("customer_id")}.
+          Compare the two for your test customer.
         </>,
       ],
     ],
@@ -1267,6 +1541,76 @@ export default function DeveloperGuide() {
         </Section>
 
         <Section
+          id="orders"
+          title={
+            <>
+              Optional: order questions{" "}
+              <span className="font-normal text-quiet">(part of NEURA-CARE)</span>
+            </>
+          }
+        >
+          <P>
+            NEURA-CARE can answer <em>&ldquo;Where is my order?&rdquo;</em> in the chat box for a
+            shopper who is signed in to the shop, and only about their own orders. Your shop&apos;s
+            server tells the chat box who is signed in, with a short-lived {b("pass")} that only
+            your server can make.
+          </P>
+          <P>
+            It needs the order addresses from step 1 (group 3), listed in {c("/health")}. With{" "}
+            {c("order.read")}, the assistant answers about an order by its number. Add{" "}
+            {c("order.search")} and {c("customer.read")}, and it also finds a shopper&apos;s orders
+            when they don&apos;t give one.
+          </P>
+          <WhoSteps steps={ORDER_STEPS} />
+          <div className="flex flex-col gap-2">
+            <span className="text-[15px] font-semibold">Make the pass</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              A pass is a JSON Web Token (JWT), signed with HS256. Sign it with the whole secret,{" "}
+              {c("fn_cs_")} included, exactly as the shop owner sent it. Any JWT library makes one
+              in a few lines:
+            </span>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-[13px] font-medium text-quiet">PHP, with firebase/php-jwt</span>
+            <Pre>{PASS_PHP}</Pre>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-[13px] font-medium text-quiet">Node.js, with jsonwebtoken</span>
+            <Pre>{PASS_NODE}</Pre>
+          </div>
+          <Defs items={PASS_FIELDS} />
+          <P>
+            These three and nothing else: NEURA refuses a pass with any other field, so a name or an
+            email is never sent by mistake. It also refuses a pass signed any way but HS256.
+          </P>
+          <div className="flex flex-col gap-2">
+            <span className="text-[15px] font-semibold">Put it in the chat box line</span>
+            <span className="text-[15px] leading-[1.5] text-body">
+              Two more settings on the line from step 5.
+            </span>
+          </div>
+          <Pre>{`<script src="https://${NEURA_HOST}/v1/widget/widget.js" async
+        data-neura-key="fn_pk_…"
+        data-neura-customer-pass="eyJhbGciOiJIUzI1NiIs…"
+        data-neura-sign-in-url="https://yourshop.example/login"></script>`}</Pre>
+          <Defs items={ORDER_ATTRIBUTES} />
+          <div className="flex flex-col gap-2 rounded-xl border border-ink px-[18px] py-4">
+            <span className="text-[15px] font-semibold">
+              Keep each customer&apos;s orders private
+            </span>
+            <Rules items={ORDER_RULES} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-[15px] font-semibold">What the shopper sees</span>
+            <Cases rows={ORDER_SEES} />
+          </div>
+          <div className="flex flex-col gap-2 rounded-xl border border-line px-[18px] py-4">
+            <span className="text-[15px] font-semibold">How you&apos;ll know it works</span>
+            <Rules items={ORDER_WORKS} />
+          </div>
+        </Section>
+
+        <Section
           id="views"
           title={
             <>
@@ -1345,17 +1689,7 @@ Content-Type: application/json
           {TROUBLE.map((group) => (
             <div key={group.where} className="flex flex-col gap-2">
               <span className="text-[15px] font-semibold">{group.where}</span>
-              <dl className="m-0 overflow-hidden rounded-[14px] border border-line text-[15px]">
-                {group.rows.map(([seen, fix], i) => (
-                  <div
-                    key={i}
-                    className={`grid gap-1 px-4 py-3.5 md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:px-5 ${i < group.rows.length - 1 ? "border-b border-[#efefef]" : ""}`}
-                  >
-                    <dt className="font-medium">{seen}</dt>
-                    <dd className="m-0 leading-[1.5] text-body">{fix}</dd>
-                  </div>
-                ))}
-              </dl>
+              <Cases rows={group.rows} />
             </div>
           ))}
         </Section>

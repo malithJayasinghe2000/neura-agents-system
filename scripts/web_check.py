@@ -55,8 +55,10 @@ PLATFORMS = ("bagisto", "shopify", "woocommerce", "magento")
 TEST_SHOP = ("dispatch test shop", "tn_01", "bagisto.test", "order 86", "cashmere")
 SEEDER = Path.home() / "Developer" / "bagisto" / "database" / "seeders" / "NeuraDemoDataSeeder.php"
 
-#: A real key has a body after its prefix; the pages show `fn_pk_…` and `fn_sk_…` only.
-SECRET = re.compile(r"fn_(?:sk|pk)_(?:live_|test_)?[A-Za-z0-9]{8,}")
+#: A real secret has a body after its prefix; the pages show `fn_pk_…`, `fn_sk_…` and the
+#: bare `fn_cs_` only. Every secret NEURA makes, as the log scrubber knows them (G82):
+#: keys, the shop token and the customer sign-in secret, whose bodies may hold - and _.
+SECRET = re.compile(r"fn_(?:sk|pk|st|cs)_(?:live_|test_)?[A-Za-z0-9_-]{8,}")
 EXTERNAL = re.compile(r"""<(?:script|link|img|iframe)\b[^>]*\b(?:src|href)=["']https?://""", re.I)
 PLACEHOLDER = re.compile(r"\[[A-Z][A-Z ]{3,}\]")
 
