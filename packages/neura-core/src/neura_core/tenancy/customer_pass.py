@@ -102,10 +102,12 @@ def check_customer_pass(
     moment = now or datetime.now(UTC)
 
     try:
-        # The signature and the shape only. Time is judged below, once, against
-        # `moment`, so the rules read in one place and a test's clock is ours.
-        # The signature is always checked first: `expired` is said only of a
-        # pass this shop really signed.
+        # The signature and the shape only. Every claim is judged below, once,
+        # against `moment`, so the rules read in one place, each with its own
+        # reason (a number `sub` would otherwise be the library's *not a
+        # customer pass*, G83), and a test's clock is ours. The signature is
+        # always checked first: `expired` is said only of a pass this shop
+        # really signed.
         claims = jwt.decode(
             token,
             secret,
@@ -117,6 +119,8 @@ def check_customer_pass(
                 "verify_nbf": False,
                 "verify_aud": False,
                 "verify_iss": False,
+                "verify_sub": False,
+                "verify_jti": False,
             },
         )
     except jwt.InvalidAlgorithmError:
@@ -154,9 +158,15 @@ def _judge(claims: dict[str, object], moment: datetime) -> PassCheck:
         return PassCheck(PassStatus.EXPIRED, reason="the pass has expired")
 
     customer = claims["sub"]
+    if not isinstance(customer, str):
+        # Said plainly, because most shops keep the id as a number (G83). An
+        # example, never the pass's own value.
+        return _invalid(
+            'sub must be text: write the customer\'s id in quotes, "385", not 385, '
+            "exactly as the bridge sends it"
+        )
     if (
-        not isinstance(customer, str)
-        or not customer.strip()
+        not customer.strip()
         or len(customer) > MAX_CUSTOMER_ID
         or any(ord(character) < 32 or ord(character) == 127 for character in customer)
     ):

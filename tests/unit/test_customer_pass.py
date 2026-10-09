@@ -127,6 +127,22 @@ class TestRefused:
     def test_an_unusable_customer_id(self, sub: Any) -> None:
         assert check_customer_pass(_pass(sub=sub), SECRET, now=NOW).status is PassStatus.INVALID
 
+    @pytest.mark.parametrize("sub", [385, 3.5, True, ["385"], {"id": "385"}])
+    def test_a_customer_id_that_is_not_text_says_so(self, sub: Any) -> None:
+        """Most shops keep a customer's id as a number, so `'sub' => $id` is the
+        first pass many developers write. The reason must say what to change,
+        not *not a customer pass* (G83)."""
+        result = check_customer_pass(_pass(sub=sub), SECRET, now=NOW)
+        assert result.status is PassStatus.INVALID
+        assert "sub must be text" in result.reason
+        assert '"385", not 385' in result.reason
+
+    def test_an_extra_claim_of_any_type_is_named(self) -> None:
+        """The library checks `jti` too, before our rule would name it."""
+        result = check_customer_pass(_pass({"jti": 7}), SECRET, now=NOW)
+        assert result.status is PassStatus.INVALID
+        assert "jti" in result.reason
+
     def test_a_pass_made_in_the_future(self) -> None:
         issued = int(NOW.timestamp()) + 600
         early = _pass(iat=issued, exp=issued + 300)
