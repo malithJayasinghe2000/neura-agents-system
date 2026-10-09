@@ -38,7 +38,13 @@ from neura_core.tenancy.customer_pass import (
     check_customer_pass,
     new_customer_secret,
 )
-from neura_core.tenancy.handover import HANDOVER_WITHOUT_DETAILS, handover_message
+from neura_core.tenancy.handover import (
+    HANDOVER_WITHOUT_DETAILS,
+    PASS_EXPIRED_MESSAGE,
+    SIGN_IN_WITHOUT_DETAILS,
+    handover_message,
+    sign_in_message,
+)
 from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
 from neura_core.tenancy.models import (
     ApiKey,
@@ -72,7 +78,9 @@ from neura_core.tenancy.usage import UsageDelta, UsageMeter, UsageTotals
 __all__ = [
     "CUSTOMER_SECRET_PREFIX",
     "HANDOVER_WITHOUT_DETAILS",
+    "PASS_EXPIRED_MESSAGE",
     "SHOP_TOKEN_PREFIX",
+    "SIGN_IN_WITHOUT_DETAILS",
     "Admission",
     "ApiKey",
     "ApiKeyKind",
@@ -108,6 +116,7 @@ __all__ = [
     "resolve_turn_mode",
     "shop_checks",
     "shop_tokens",
+    "sign_in_message",
     "tenant_stores",
     "tenant_usage",
     "tenants",

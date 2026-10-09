@@ -45,6 +45,7 @@ from neura_agent_core.audit import AuditEvent, InMemoryAuditLog
 from neura_agent_core.graph import GraphContractError, initial_state
 from neura_agent_core.guard import PiiVault, find_leaks, normalise, scan
 from neura_agent_core.guard.injection import RULES, rule_named
+from neura_agent_core.tools import SessionIdentity
 
 # The CARE suite's stubs, reused rather than duplicated: a second scripted model
 # is a second thing to keep in step with the real one, and the copy is always the
@@ -460,6 +461,12 @@ def _runtime(llm: Any, audit: InMemoryAuditLog | None = None, **kwargs: Any) -> 
     )
 
 
+#: A signed-in shopper. The stub router calls every message an order question,
+#: and since ADR-0057 one from someone not signed in stops at `sign_in`, before
+#: the draft and the reply these tests are about.
+SIGNED_IN = SessionIdentity(customer_external_id="cust_88")
+
+
 def _run(message: str, llm: Any, runtime: Any) -> dict[str, Any]:
     return asyncio.run(
         compile_graph().ainvoke(
@@ -568,7 +575,9 @@ class TestRedactionRoundTripsThroughTheGraph:
             routed=Route(intent="order_status", confidence=0.9, search_query="order status"),
             draft="Thanks — we'll email [EMAIL_1] as soon as it ships.",
         )
-        final = _run("I'm jane@example.com, where is my order?", llm, _runtime(llm))
+        final = _run(
+            "I'm jane@example.com, where is my order?", llm, _runtime(llm, identity=SIGNED_IN)
+        )
 
         routed_text = str(llm.requests[0].messages[-1].content)
         assert "jane@example.com" not in routed_text
@@ -592,7 +601,7 @@ class TestTheOutboundFilter:
         not scrubbed — a sentence with an invented address in it came from
         reasoning that went somewhere it should not have."""
         llm = StubLLM(draft="Sure — just email refunds@not-this-shop.example and they'll sort it.")
-        final = _run("How do I get a refund?", llm, _runtime(llm))
+        final = _run("How do I get a refund?", llm, _runtime(llm, identity=SIGNED_IN))
 
         assert final["escalated"] is True
         assert final["pii_leaks"]
@@ -601,7 +610,7 @@ class TestTheOutboundFilter:
 
     def test_the_shopper_s_own_details_come_back_untouched(self) -> None:
         llm = StubLLM(draft="We'll confirm to [EMAIL_1] shortly.")
-        final = _run("I'm jane@example.com — any update?", llm, _runtime(llm))
+        final = _run("I'm jane@example.com — any update?", llm, _runtime(llm, identity=SIGNED_IN))
         assert final["escalated"] is False
         assert final["reply"] == "We'll confirm to jane@example.com shortly."
 
@@ -617,7 +626,11 @@ class TestTheOutboundFilter:
         be evidence about something nobody ships. Found by running it.
         """
         llm = StubLLM(draft="We'll confirm to jane@example.com shortly.")
-        final = _run("I'm jane@example.com — any update?", llm, _runtime(llm, guard_enabled=False))
+        final = _run(
+            "I'm jane@example.com — any update?",
+            llm,
+            _runtime(llm, guard_enabled=False, identity=SIGNED_IN),
+        )
         assert final["escalated"] is False
         assert final["reply"] == "We'll confirm to jane@example.com shortly."
 

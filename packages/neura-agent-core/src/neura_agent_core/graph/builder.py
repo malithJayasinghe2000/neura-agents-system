@@ -37,6 +37,7 @@ from neura_agent_core.graph.nodes.blocked import blocked
 from neura_agent_core.graph.nodes.escalate import escalate
 from neura_agent_core.graph.nodes.guard import guard
 from neura_agent_core.graph.nodes.retrieve import retrieve
+from neura_agent_core.graph.nodes.sign_in import SIGN_IN, sign_in
 from neura_agent_core.graph.nodes.verify import verify
 from neura_agent_core.graph.state import AgentState
 from neura_core import get_logger
@@ -63,6 +64,8 @@ SHARED_NODES: dict[str, Callable[..., Any]] = {
     ESCALATE: escalate,
     GUARD: guard,
     BLOCKED: blocked,
+    # Opt-in like `guard`: reached only when an agent routes to it (ADR-0057).
+    SIGN_IN: sign_in,
 }
 
 

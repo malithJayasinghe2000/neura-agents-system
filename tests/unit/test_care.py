@@ -48,6 +48,7 @@ from neura_agent_core.graph import CONFIG_KEY, GraphContractError, initial_state
 from neura_agent_core.policy import Outcome
 from neura_agent_core.tools import SessionIdentity, ToolContext
 from neura_commerce import CommerceAdapter
+from neura_core.tenancy import SIGN_IN_WITHOUT_DETAILS
 from neura_domain import Policy, PolicyKind, SideEffect
 from neura_llm import ChatResponse, FinishReason, Usage
 
@@ -571,6 +572,32 @@ class TestRouting:
         assert state["escalated"] is True
         assert "confidence" in state["escalation_reason"]
 
+    def test_an_order_question_from_someone_not_signed_in_asks_them_to_sign_in(self) -> None:
+        """ADR-0057 §7: decided before any lookup, and not a handover: a person
+        cannot answer it either without knowing who is asking."""
+        state = self._route(Route(intent="order_status", confidence=0.95, order_ref="1001"))
+        assert state["needs_sign_in"] is True
+        assert not state.get("escalated")
+
+    def test_a_signed_in_customer_goes_on_to_the_lookup(self) -> None:
+        runtime = build_runtime(
+            tenant_id=TENANT,
+            conversation_id="cnv_t",
+            adapter=load_store(TENANT, []),
+            llm=StubLLM(routed=Route(intent="order_status", confidence=0.95, order_ref="1001")),
+            capabilities=ALL_CAPABILITIES,
+            scopes=TOOL_SCOPES,
+            identity=SessionIdentity(customer_external_id="cust_88"),
+        )
+        state = asyncio.run(
+            route(
+                initial_state(tenant_id=TENANT, conversation_id="c", message="hi"),
+                _config(runtime),
+            )
+        )
+        assert not state.get("needs_sign_in")
+        assert not state.get("escalated")
+
     def test_a_router_that_errors_escalates_rather_than_guessing(self) -> None:
         class Broken(StubLLM):
             async def chat_structured(self, role: Any, request: Any, schema: type) -> Any:
@@ -818,9 +845,47 @@ class TestEvalTarget:
         case = self._case(fixtures=["orders/cust_88_shipped.json"])
         response = asyncio.run(target.run(case))
 
-        assert response.escalated is True
+        # ADR-0057 §7: asked to sign in, before any lookup; not handed over.
+        assert response.escalated is False
+        assert response.reply == SIGN_IN_WITHOUT_DETAILS
+        assert response.tool_names == []
         assert "TRK123456" not in response.reply
         assert response.tool_names == []
+
+
+class TestSignInAfterTheOwnershipGate:
+    """ADR-0057 §7: the router may call an order question something else, and
+    the model may still reach for an order tool. The ownership gate stops it,
+    as before; for someone not signed in, the answer is to sign in."""
+
+    @staticmethod
+    def _misrouted_planner() -> Any:
+        class Planner(StubLLM):
+            async def chat(self, role: Any, request: Any) -> Any:
+                from neura_llm import ToolCall
+
+                response = await super().chat(role, request)
+                if request.tools:
+                    response.tool_calls = [
+                        ToolCall(id="1", name="get_order_status", arguments={"order_ref": "1001"})
+                    ]
+                return response
+
+        return Planner(routed=Route(intent="product_qa", confidence=0.95, search_query="boots"))
+
+    def test_not_signed_in_is_asked_to_sign_in(self) -> None:
+        case = EvalCase(
+            id="t_sign_in",
+            intent=Intent.PRODUCT_QA,
+            input="is my order 1001 here yet, and do you sell boots?",
+            expect=Expectation(),
+            synthetic=True,
+            fixtures=["orders/cust_88_shipped.json"],
+        )
+        response = asyncio.run(CareTarget(self._misrouted_planner()).run(case))
+        assert response.reply == SIGN_IN_WITHOUT_DETAILS
+        assert response.escalated is False
+        assert "TRK123456" not in response.reply
 
 
 class TestPolicyIntegration:

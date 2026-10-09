@@ -179,6 +179,7 @@ def _outcome(final: dict[str, Any]) -> TurnOutcome:
         prompt_revision=usage.get("prompt_revision"),
         handoff=str(final.get("handoff", "")),
         escalation_reason=str(final.get("escalation_reason", "")),
+        needs_sign_in=bool(final.get("needs_sign_in")),
     )
 
 

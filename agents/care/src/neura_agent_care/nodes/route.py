@@ -190,6 +190,14 @@ async def route(state: AgentState, config: RunnableConfig) -> AgentState:
             **_escalate(f"routing confidence {result.confidence:.2f} is below {MIN_CONFIDENCE}"),
         }
 
+    if result.intent == ORDER_STATUS and runtime.ctx.identity.customer_external_id is None:
+        # ADR-0057 §7: nobody is signed in, so no order can be shown, and a
+        # person could not answer either without knowing who is asking. Decided
+        # here, before any lookup or any further model call; the shopper is
+        # asked to sign in, or to contact the shop.
+        log.info("order_question_not_signed_in", conversation_id=state.get("conversation_id"))
+        return {**update, "needs_sign_in": True}
+
     return update
 
 

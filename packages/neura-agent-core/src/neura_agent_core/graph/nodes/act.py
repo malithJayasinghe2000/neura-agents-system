@@ -29,7 +29,7 @@ from typing import Any, cast
 from langchain_core.runnables import RunnableConfig
 
 from neura_agent_core.graph.state import AgentState, runtime_of
-from neura_agent_core.policy.engine import Decision, Outcome
+from neura_agent_core.policy.engine import Check, Decision, Outcome
 from neura_agent_core.tools.executor import ToolInvocation, execute
 from neura_core import get_logger
 
@@ -101,6 +101,16 @@ async def act(state: AgentState, config: RunnableConfig) -> AgentState:
     if escalate_reason is not None:
         update["escalated"] = True
         update["escalation_reason"] = escalate_reason
+        # Refused on ownership to a session with no customer: what this
+        # shopper can do is sign in (ADR-0057 §7). An agent that routes this
+        # flag to `sign_in` says so; one that does not hands over, as before.
+        stopped = decisions[-1] if decisions else None
+        if (
+            stopped is not None
+            and stopped.check is Check.OWNERSHIP
+            and runtime.ctx.identity.customer_external_id is None
+        ):
+            update["needs_sign_in"] = True
     return update
 
 

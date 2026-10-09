@@ -2058,6 +2058,113 @@ class TestCustomerPass:
         assert await self._customer_of(db, expired["conversation_id"]) is None
 
 
+class TestTheSignInSentence:
+    """ADR-0057 §7: a turn about an order from someone not signed in is
+    answered with the owner's words, in the shop's contact details, and a mark
+    that tells the chat box to show the *Sign in* link. Driven by a stand-in
+    agent that reports *needs sign-in*, so no model is involved."""
+
+    class _NeedsSignIn:
+        async def run(self, request: Any) -> Any:
+            from neura_agent_core.serving import TurnOutcome
+
+            return TurnOutcome(
+                reply="Please sign in to your account so I can help with your orders.",
+                state=ConversationState.RESOLVED,
+                needs_sign_in=True,
+                intent="order_status",
+            )
+
+    @staticmethod
+    def _service(db: Database) -> Any:
+        """A turn service on this test's own event loop and database. The app's
+        own lives on the test client's loop, which these awaits cannot share."""
+        from neura_api.stores import StoreDirectory
+        from neura_api.turns import TurnService
+
+        return TurnService(db, StubLLM(), StoreDirectory(db))
+
+    async def _turn(
+        self, client: TestClient, db: Database, *, config: TenantConfig, customer_pass: str | None
+    ) -> Any:
+        from neura_api.turns import TurnInput
+        from neura_core.tenancy import authenticate
+
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC, config=config)
+        caller = await authenticate(db, token, origin="https://shop.example")
+        return await self._service(db).run(
+            self._NeedsSignIn(),
+            TurnInput(
+                caller=caller,
+                agent_key="care",
+                message="where is my order?",
+                customer_pass=customer_pass,
+            ),
+        )
+
+    async def test_not_signed_in_reads_the_sentence_with_the_shops_details(
+        self, client: TestClient, db: Database
+    ) -> None:
+        config = TenantConfig(
+            contact_email="hello@yourshop.example", contact_phone="+94 11 234 5678"
+        )
+        result = await self._turn(client, db, config=config, customer_pass=None)
+        assert result.reply == (
+            "Please sign in to your account so I can help with your orders. "
+            "Or contact our store: hello@yourshop.example, +94 11 234 5678."
+        )
+        assert result.sign_in is True
+
+    async def test_an_expired_pass_reads_reload_the_page_and_no_link(
+        self, client: TestClient, db: Database
+    ) -> None:
+        import time
+
+        import jwt
+
+        from neura_api.turns import TurnInput
+        from neura_core.tenancy import CustomerSecretRepository, authenticate
+
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        async with db.tenant_session(TENANT_A) as session:
+            secret = await CustomerSecretRepository(session).make(TENANT_A, made_by="usr_owner")
+        issued = int(time.time()) - 900
+        expired = jwt.encode(
+            {"sub": "385", "iat": issued, "exp": issued + 600}, secret, algorithm="HS256"
+        )
+        caller = await authenticate(db, token, origin="https://shop.example")
+        result = await self._service(db).run(
+            self._NeedsSignIn(),
+            TurnInput(
+                caller=caller, agent_key="care", message="where is my order?", customer_pass=expired
+            ),
+        )
+        assert result.reply == (
+            "Your sign-in on this page has timed out. Please reload the page and ask again."
+        )
+        assert result.sign_in is False
+
+    async def test_in_practice_mode_nothing_is_shown_and_no_link(
+        self, client: TestClient, db: Database
+    ) -> None:
+        result = await self._turn(
+            client, db, config=TenantConfig(mode="shadow"), customer_pass=None
+        )
+        assert result.reply == ""
+        assert result.sign_in is False
+
+    async def test_the_reply_says_whether_to_show_the_link(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "hi"},
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+        assert response.json()["data"]["sign_in"] is False
+
+
 class TestStoreSync:
     """``POST /v1/stores/{id}/sync`` — specified in 1.14, buildable only now.
 

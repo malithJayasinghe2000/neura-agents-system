@@ -147,6 +147,9 @@ class ChatData(BaseModel):
     #: Why the pass was not accepted, in words for the developer; empty when it
     #: was, or when there was none. Never repeats the pass.
     customer_pass_reason: str = ""
+    #: Show the shop's *Sign in* link under this reply (ADR-0057 §7). Set by
+    #: the server, so the chat box never guesses from the words.
+    sign_in: bool = False
 
 
 def build_router(agent_key: str) -> APIRouter:
@@ -509,6 +512,7 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
             products=outcome.cards,
             customer_pass=result.customer_pass.value if result.customer_pass else None,
             customer_pass_reason=result.customer_pass_reason,
+            sign_in=result.sign_in,
         ).model_dump(mode="json"),
         request_id=str(getattr(getattr(request, "state", None), "request_id", "") or ""),
     )

@@ -77,7 +77,7 @@ from __future__ import annotations
 from typing import Any
 
 from neura_agent_care.nodes import OUT_OF_SCOPE, compose, decline, plan, respond, route, triage
-from neura_agent_core.graph import AgentGraph, AgentState
+from neura_agent_core.graph import SIGN_IN, AgentGraph, AgentState
 
 GUARD = "guard"
 BLOCKED = "blocked"
@@ -114,11 +114,15 @@ def build_graph() -> AgentGraph:
         # the message is redaction of something already disclosed.
         .entry(GUARD)
         .branch(GUARD, _after_guard, {ROUTE: ROUTE, BLOCKED: BLOCKED})
-        .branch(ROUTE, _after_route, {RETRIEVE: RETRIEVE, DECLINE: DECLINE, ESCALATE: ESCALATE})
+        .branch(
+            ROUTE,
+            _after_route,
+            {RETRIEVE: RETRIEVE, DECLINE: DECLINE, ESCALATE: ESCALATE, SIGN_IN: SIGN_IN},
+        )
         .edge(RETRIEVE, PLAN)
         .branch(PLAN, _after_plan, {ACT: ACT, ESCALATE: ESCALATE})
         .edge(ACT, TRIAGE)
-        .branch(TRIAGE, _after_triage, {COMPOSE: COMPOSE, ESCALATE: ESCALATE})
+        .branch(TRIAGE, _after_triage, {COMPOSE: COMPOSE, ESCALATE: ESCALATE, SIGN_IN: SIGN_IN})
         .edge(COMPOSE, VERIFY)
         .branch(VERIFY, _after_verify, {RESPOND: RESPOND, ESCALATE: ESCALATE})
     )
@@ -158,6 +162,9 @@ def _after_route(state: AgentState) -> str:
     """
     if state.get("escalated"):
         return ESCALATE
+    if state.get("needs_sign_in"):
+        # ADR-0057 §7: an order question from someone not signed in.
+        return SIGN_IN
     if state.get("intent") == OUT_OF_SCOPE:
         return DECLINE
     return RETRIEVE
@@ -175,6 +182,10 @@ def _after_triage(state: AgentState) -> str:
     forced by the ownership gate in ``act`` or chosen by a model calling
     ``escalate_to_human`` — one code path is one thing to get right.
     """
+    if state.get("needs_sign_in"):
+        # The ownership gate refused an order tool to someone not signed in:
+        # asking them to sign in beats handing over (ADR-0057 §7).
+        return SIGN_IN
     return ESCALATE if state.get("escalated") else COMPOSE
 
 

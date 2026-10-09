@@ -52,6 +52,7 @@ from neura_api.stores import StoreDirectory
 from neura_core import Database, get_logger, get_settings, new_id
 from neura_core.ids import CONVERSATION
 from neura_core.tenancy import (
+    PASS_EXPIRED_MESSAGE,
     Admission,
     AuthenticatedCaller,
     CustomerSecretRepository,
@@ -65,6 +66,7 @@ from neura_core.tenancy import (
     handover_message,
     resolve_runtime_policy,
     resolve_turn_mode,
+    sign_in_message,
 )
 from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
 from neura_llm import RoleNotConfiguredError
@@ -117,6 +119,10 @@ class TurnResult:
     customer_pass: PassStatus | None = None
     #: Why a pass was not accepted, for the developer. Never the pass.
     customer_pass_reason: str = ""
+    #: Whether the chat box shows its *Sign in* link under the reply (ADR-0057
+    #: §7): an order question from someone not signed in, on a reply the
+    #: shopper actually sees. Never for an expired pass (they are signed in).
+    sign_in: bool = False
 
     @property
     def is_shadowed(self) -> bool:
@@ -338,6 +344,18 @@ class TurnService:
             # transports; a handover is fixed text, sent whole, never streamed.
             if outcome.escalated:
                 outcome = replace(outcome, reply=handover_message(config))
+            # An order question from someone not signed in (ADR-0057 §7): the
+            # owner's sentence and the shop's contact details, or *reload the
+            # page* when the shopper's own pass had expired. Fixed text, put on
+            # here for both assistants and both transports, after the handover
+            # sentence so that it wins.
+            show_sign_in = False
+            if outcome.needs_sign_in and customer_external_id is None:
+                if pass_status is PassStatus.EXPIRED:
+                    outcome = replace(outcome, reply=PASS_EXPIRED_MESSAGE)
+                else:
+                    outcome = replace(outcome, reply=sign_in_message(config))
+                    show_sign_in = True
 
             if mode is TurnMode.SHADOW:
                 # The shopper's words are history; the agent's are not. The
@@ -464,6 +482,7 @@ class TurnService:
             ),
             customer_pass=pass_status,
             customer_pass_reason=pass_reason,
+            sign_in=show_sign_in and mode is not TurnMode.SHADOW,
         )
 
     def _retriever(self, tenant_id: str, llm: object) -> Retriever | None:

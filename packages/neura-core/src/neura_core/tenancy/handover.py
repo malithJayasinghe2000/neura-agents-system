@@ -31,4 +31,32 @@ def handover_message(config: TenantConfig) -> str:
     return f"{HANDOVER_WITHOUT_DETAILS[:-1]}: {', '.join(details)}."
 
 
-__all__ = ["HANDOVER_WITHOUT_DETAILS", "handover_message"]
+#: What a shopper who is not signed in reads about an order (ADR-0057 §7, the
+#: owner's words, accepted 2026-10-08). Not a handover: a person could not answer
+#: it either without knowing who is asking.
+SIGN_IN_WITHOUT_DETAILS = "Please sign in to your account so I can help with your orders."
+
+#: What a signed-in shopper reads when their page's pass has run out (§5). No
+#: link: they are signed in already, and a fresh page brings a fresh pass.
+# S105 reads "PASS" as a password; these are words a shopper reads.
+PASS_EXPIRED_MESSAGE = (
+    "Your sign-in on this page has timed out. Please reload the page and ask again."  # noqa: S105
+)
+
+
+def sign_in_message(config: TenantConfig) -> str:
+    """The sign-in sentence, then the shop's email and phone as the owner set
+    them, so a shopper with no account (a guest) still has a way to ask."""
+    details = [value for value in (config.contact_email, config.contact_phone) if value]
+    if not details:
+        return SIGN_IN_WITHOUT_DETAILS
+    return f"{SIGN_IN_WITHOUT_DETAILS} Or contact our store: {', '.join(details)}."
+
+
+__all__ = [
+    "HANDOVER_WITHOUT_DETAILS",
+    "PASS_EXPIRED_MESSAGE",
+    "SIGN_IN_WITHOUT_DETAILS",
+    "handover_message",
+    "sign_in_message",
+]
