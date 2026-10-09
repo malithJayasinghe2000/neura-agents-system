@@ -201,6 +201,16 @@ export function replaceShopToken(
   });
 }
 
+/** When the customer sign-in secret was made (ADR-0057 §3). Never the secret. */
+export type CustomerSecretView = { made_at: string | null };
+
+/** Make the customer sign-in secret, or a new one. Returned **once**. */
+export function makeCustomerSecret(
+  tenantId: string,
+): Promise<{ secret: string; made_at: string }> {
+  return call(`${shopPath(tenantId)}/customer-secret`, { method: "POST" });
+}
+
 /** Start the full check: of a typed address, or of a connection. Returns at once. */
 export function startShopCheck(
   tenantId: string,

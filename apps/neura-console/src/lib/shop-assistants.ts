@@ -38,3 +38,11 @@ export async function shopAssistants(tenantId: string): Promise<string[] | null>
 export function hasSell(assistants: string[] | null): boolean {
   return assistants === null || assistants.includes(SELL);
 }
+
+/** NEURA-CARE's key in `enabled_agents`. It answers order questions (ADR-0057). */
+export const CARE = "care";
+
+/** Whether to show NEURA-CARE's parts. Unknown shows them, as `hasSell`. */
+export function hasCare(assistants: string[] | null): boolean {
+  return assistants === null || assistants.includes(CARE);
+}
