@@ -897,7 +897,7 @@ const ORDER_RULES: React.ReactNode[] = [
     {b("Never cache a page that carries a pass.")} Send it with{" "}
     {c("Cache-Control: private, no-store")}, and keep it out of your shop&apos;s own page cache. A
     cached copy would give one customer&apos;s pass to everyone who opens the page, for up to 15
-    minutes.
+    minutes, or keep showing the same customer a pass that has stopped working.
   </>,
 ];
 
@@ -943,8 +943,9 @@ const ORDER_SEES: [React.ReactNode, React.ReactNode][] = [
  */
 const ORDER_WORKS: React.ReactNode[] = [
   <>
-    Sign in to the shop as a test customer with an order, open a page and ask{" "}
-    <em>Where is my order?</em> The assistant answers about that customer&apos;s orders.
+    On a shop that is live, sign in as a test customer with an order, open a page and ask{" "}
+    <em>Where is my order?</em> The assistant answers about that customer&apos;s orders. In
+    practice mode the shopper sees only the <em>received</em> note (step 5).
   </>,
   <>
     Each answer says what NEURA made of the pass, in {c("customer_pass")}: {c("valid")},{" "}
