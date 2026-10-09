@@ -40,6 +40,7 @@ TENANT_STORES = "tenant_stores"
 TENANT_USAGE = "tenant_usage"
 SHOP_TOKENS = "shop_tokens"
 SHOP_CHECKS = "shop_checks"
+CUSTOMER_SECRETS = "customer_secrets"
 
 
 #: One merchant. The row that has to exist before anything else in the system
@@ -145,6 +146,21 @@ shop_tokens = Table(
     metadata,
     Column("tenant_id", String(64), primary_key=True),
     Column("credentials", Text, nullable=False),
+    Column("wrapped_dek", Text, nullable=False),
+    #: The console user who made it. A person, never a shopper.
+    Column("made_by", String(64), nullable=False),
+    Column("made_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+
+#: The secret the shop's server signs customer passes with (ADR-0057 §3). One
+#: per tenant, sealed like the shop token: NEURA must use it to check a
+#: signature, so a hash would not do.
+customer_secrets = Table(
+    CUSTOMER_SECRETS,
+    metadata,
+    Column("tenant_id", String(64), primary_key=True),
+    Column("secret", Text, nullable=False),
     Column("wrapped_dek", Text, nullable=False),
     #: The console user who made it. A person, never a shopper.
     Column("made_by", String(64), nullable=False),

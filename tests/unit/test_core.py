@@ -44,6 +44,28 @@ class TestRedaction:
         assert "jane@example.com" not in scrubbed
         assert "fn_sk_abcdefgh123" not in scrubbed
 
+    def test_the_shop_token_and_the_customer_secret_are_scrubbed(self) -> None:
+        """Both are secrets NEURA makes (ADR-0052, ADR-0057); the pattern knew
+        only the API keys."""
+        shop_token = "fn_st_" + "a" * 43
+        customer_secret = "fn_cs_" + "b" * 43
+        scrubbed = _redact(f"bad {shop_token} and {customer_secret}", "detail")
+        assert shop_token not in scrubbed
+        assert customer_secret not in scrubbed
+
+    def test_a_customer_pass_is_scrubbed(self) -> None:
+        """A pass is a signed claim about a customer (ADR-0057): it must never
+        reach a log, whatever field it travels in."""
+        customer_pass = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiIzODUiLCJpYXQiOjE3OTE0ODE1MjgsImV4cCI6MTc5MTQ4MjEyOH0."
+            "Qm9vbXNpZ25hdHVyZV9oZXJlX2Zvcl90ZXN0aW5nXzEyMzQ"
+        )
+        scrubbed = _redact(f"refused pass {customer_pass} for tn_x", "detail")
+        assert customer_pass not in scrubbed
+        assert "eyJzdWIi" not in scrubbed
+        assert "tn_x" in scrubbed
+
 
 class TestStdlibRedaction:
     """G34 in CONNECTING_A_NEW_SHOP_LOG.md: the web server's request line printed

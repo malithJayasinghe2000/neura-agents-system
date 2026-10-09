@@ -139,7 +139,8 @@ class TenantCorsMiddleware(BaseHTTPMiddleware):
         to the platform list, which is what that setting is now for.
 
         **One kind of refusal is readable: a secret sent from a web page**, a
-        secret key (G55) or the shop token (G57). It is decided from the shape
+        secret key (G55), the shop token (G57) or the customer sign-in secret
+        (ADR-0057). It is decided from the shape
         of the string the page itself sent, before any lookup, so reading it
         tells the page nothing it did not already hold, and it is no oracle for
         whether the key exists. Unreadable, the chat box could only show the

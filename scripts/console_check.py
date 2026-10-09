@@ -220,6 +220,7 @@ async def main() -> int:
                 print(f"\n  {BOLD}shop and usage — connection, and honest numbers{OFF}")
                 await _check_shop_and_usage(browser, console, seeded, failures)
                 await _check_contact(browser, console, seeded, failures)
+                await _check_customer_secret(browser, console, seeded, failures)
 
                 print(f"\n  {BOLD}help — connecting your shop{OFF}")
                 await _check_help(browser, console, seeded, failures)
@@ -1208,6 +1209,120 @@ async def _check_contact(
     finally:
         await put_back(*original)
         await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _check_customer_secret(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """*Order questions from signed-in shoppers* on Shop connection (ADR-0057 §3).
+
+    Pressed only on a shop with **no** secret yet, and that secret deleted again
+    after: this runs against a developer's own database, and replacing a real
+    shop's secret would sign out every one of its shoppers at once.
+    """
+    from neura_core.tenancy import CustomerSecretRepository
+    from neura_core.tenancy.schema import customer_secrets
+
+    tenant = seeded["tenant"]
+
+    async def stored() -> str | None:
+        db = Database.from_settings()
+        try:
+            async with db.tenant_session(tenant) as session:
+                return await CustomerSecretRepository(session).secret(tenant)
+        finally:
+            await db.dispose()
+
+    async def secret_shown() -> str:
+        return str(
+            await browser.evaluate(
+                "(document.querySelector('[data-secret-once] code') || {}).innerText || ''"
+            )
+        )
+
+    await browser.goto(f"{console}/console/{tenant}/shops")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    _check(
+        "Shop connection offers order questions for signed-in shoppers",
+        "Order questions from signed-in shoppers" in page
+        and await browser.evaluate("!!document.querySelector('[data-customer-secret]')"),
+        failures,
+    )
+    if not await browser.evaluate(
+        "!!document.querySelector('[data-make-secret], [data-new-secret]')"
+    ):
+        return
+    if await stored() is not None:
+        print(f"  {DIM}this shop already has a secret: the buttons are not pressed{OFF}")
+        return
+
+    try:
+        _check(
+            "with no secret, it says shoppers are asked to sign in",
+            "Not set up yet" in page and "asked to sign in" in page,
+            failures,
+        )
+        await browser.evaluate("document.querySelector('[data-make-secret]').click() || true")
+        await asyncio.sleep(2)
+        first = await secret_shown()
+        _check(
+            "Make the secret shows it once, with a Copy button, and it is the one stored",
+            first.startswith("fn_cs_") and first == await stored(),
+            failures,
+        )
+
+        await browser.goto(f"{console}/console/{tenant}/shops")
+        await asyncio.sleep(3)
+        page = await browser.evaluate("document.body.innerText")
+        _check(
+            "after a reload it says when it was made, and never shows the secret",
+            "Made" in page and "fn_cs_" not in page,
+            failures,
+        )
+
+        await browser.evaluate("document.querySelector('[data-new-secret]').click() || true")
+        await asyncio.sleep(1)
+        asked = await browser.evaluate(
+            "(document.querySelector('[data-new-secret-ask]') || {}).innerText || ''"
+        )
+        _check(
+            "Make a new secret asks first, and says the old one stops at once",
+            "stops working at once" in asked,
+            failures,
+        )
+        await browser.evaluate(
+            "document.querySelector('[data-new-secret-confirm]').click() || true"
+        )
+        await asyncio.sleep(2)
+        second = await secret_shown()
+        _check(
+            "a new secret replaces the old one",
+            second.startswith("fn_cs_") and second != first and second == await stored(),
+            failures,
+        )
+
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390,
+            height=844,
+            deviceScaleFactor=1,
+            mobile=True,
+        )
+        await asyncio.sleep(1)
+        _check(
+            "on a phone the secret does not scroll sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+        db = Database.from_settings()
+        try:
+            async with db.tenant_session(tenant) as session:
+                await session.execute(delete(customer_secrets))
+        finally:
+            await db.dispose()
 
 
 async def _check_mode_switch(

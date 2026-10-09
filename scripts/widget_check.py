@@ -79,6 +79,8 @@ READ_ROWS = """
     role: r.dataset.role,
     text: (r.querySelector(".bubble") || {}).textContent || "",
     note: (r.querySelector(".note") || {}).textContent || "",
+    link: (r.querySelector("a.signin") || {}).href || "",
+    linkText: (r.querySelector("a.signin") || {}).textContent || "",
   }));
   const status = sr.querySelector(".status");
   return JSON.stringify({
@@ -122,6 +124,10 @@ class Scenario:
     unreachable: bool = False
     #: A failure case: every message must get exactly this one error row (G56).
     expect_error: str | None = None
+    #: ADR-0057: a signed-in shopper's pass and the shop's sign-in page, as the
+    #: shop's server writes them into the line.
+    customer_pass: str | None = None
+    sign_in_url: str | None = None
     why: str = ""
 
 
@@ -176,7 +182,20 @@ def build_stub() -> Any:
         },
         # Must never happen in production, and must be visible when it does.
         "empty": {"reply": "", "state": "shadowed", "fallback_message": ""},
+        # ADR-0057 §7: an order question from someone not signed in.
+        "sign_in": {
+            "reply": SIGN_IN_SENTENCE,
+            "state": "resolved",
+            "fallback_message": "",
+            "sign_in": True,
+        },
     }
+    payloads["sign_in_refuse"] = payloads["sign_in"]
+
+    #: The customer pass the last message carried, on either transport, so a
+    #: scenario can prove the chat box sent it (and in the message, not the
+    #: address).
+    received: dict[str, str] = {"customer_pass": "", "address": ""}
 
     def _done(script: str) -> dict[str, Any]:
         body = payloads.get(script, payloads["answer"])
@@ -205,7 +224,7 @@ def build_stub() -> Any:
 
     @app.get("/served")
     async def which() -> dict[str, str]:
-        return served
+        return {**served, **received}
 
     def _script_from(token: str) -> str:
         """Which turn shape to play, carried on the credential.
@@ -236,11 +255,13 @@ def build_stub() -> Any:
             return
         await websocket.accept()
         served["transport"] = "websocket"
+        received["address"] = str(websocket.url)
         while True:
             try:
-                await websocket.receive_json()
+                frame = await websocket.receive_json()
             except Exception:
                 return
+            received["customer_pass"] = str(frame.get("customer_pass") or "")
             await websocket.send_json({"type": "accepted", "conversation_id": "cnv_stub"})
             for node in ("guard", "route", "retrieve", "compose", "verify"):
                 await websocket.send_json({"type": "step", "name": node})
@@ -267,6 +288,9 @@ def build_stub() -> Any:
     @app.post("/v1/care/chat")
     async def chat(request: Request) -> Any:
         served["transport"] = "rest"
+        received["address"] = str(request.url)
+        with contextlib.suppress(Exception):
+            received["customer_pass"] = str((await request.json()).get("customer_pass") or "")
         bearer = request.headers.get("authorization", "").removeprefix("Bearer ")
         script = _script_from(bearer)
         if script == "refused_key":
@@ -405,17 +429,40 @@ class Chrome:
 
 #: The widget's own words when a message could not be answered.
 TRANSPORT_ERROR = "We could not reach the assistant. Please check your connection and try again."
+#: ADR-0057 §7, the owner's words, as the server sends them.
+SIGN_IN_SENTENCE = "Please sign in to your account so I can help with your orders."
+#: A pass's shape only; the stub checks nothing about it.
+STUB_PASS = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIzODUifQ.c2lnbmF0dXJl"  # noqa: S105 - made up, signed by nothing
+STUB_SIGN_IN_URL = "https://shop.example/account/login"
+
 #: The API's sentence for a secret key used from a page (G55).
 REFUSAL_SENTENCE = (
     "A secret key may not be used from a web page, where anyone can read it. Use the "
     "shop's public key (fn_pk_…) in the page, and keep secret keys on your server."
 )
 #: Scripts whose socket is refused at the handshake, so REST is tried.
-REFUSING = frozenset({"refuse", "refused_key", "html_error"})
+REFUSING = frozenset({"refuse", "refused_key", "html_error", "sign_in_refuse"})
 #: A browser's or a parser's own words, which must never reach a shopper (G56).
 RAW_WORDS = ("Failed to fetch", "Load failed", "NetworkError", "Unexpected token", "request_failed")
 
 STUB_SCENARIOS = (
+    Scenario(
+        name="a signed-in shopper's pass goes with the message, and Sign in is a link",
+        message="where is my order?",
+        script="sign_in",
+        customer_pass=STUB_PASS,
+        sign_in_url=STUB_SIGN_IN_URL,
+        why="ADR-0057: the pass in the message, never the address; the link the server asks for",
+    ),
+    Scenario(
+        name="over the plain-request fallback too",
+        message="where is my order?",
+        script="sign_in_refuse",
+        transport="rest",
+        customer_pass=STUB_PASS,
+        sign_in_url=STUB_SIGN_IN_URL,
+        why="ADR-0057 §4: both transports carry the pass the same way",
+    ),
     Scenario(
         name="an answered turn draws the reply",
         message="where is my order 1001?",
@@ -477,7 +524,12 @@ STUB_SCENARIOS = (
 )
 
 
-def check(scenario: Scenario, state: dict[str, Any], transport: str | None = None) -> Result:
+def check(
+    scenario: Scenario,
+    state: dict[str, Any],
+    transport: str | None = None,
+    received: dict[str, str] | None = None,
+) -> Result:
     """What must be true on screen. Written as prose, because a failure here is
     read by somebody who has not got the widget open in front of them."""
     if state.get("timed_out"):
@@ -521,6 +573,8 @@ def check(scenario: Scenario, state: dict[str, Any], transport: str | None = Non
         "empty": "error",
         "refuse": "assistant",
         "die": "assistant",
+        "sign_in": "assistant",
+        "sign_in_refuse": "assistant",
     }
     wanted = expected_role[scenario.script]
     if reply["role"] != wanted:
@@ -541,8 +595,27 @@ def check(scenario: Scenario, state: dict[str, Any], transport: str | None = Non
             rows,
         )
 
+    if scenario.customer_pass:
+        sent = (received or {}).get("customer_pass", "")
+        if sent != scenario.customer_pass:
+            return Result(
+                scenario.name, False, "the customer pass was not sent with the message", rows
+            )
+        if scenario.customer_pass in (received or {}).get("address", ""):
+            return Result(scenario.name, False, "THE PASS WAS PUT IN THE ADDRESS", rows)
+        if reply.get("link") != scenario.sign_in_url or reply.get("linkText") != "Sign in":
+            return Result(
+                scenario.name,
+                False,
+                f"no Sign in link under the reply ({reply.get('link')!r})",
+                rows,
+            )
+
     served = f" (over {transport})" if transport else ""
-    return Result(scenario.name, True, f"`{reply['role']}`: {reply['text'][:70]}{served}", rows)
+    link = " + Sign in link" if reply.get("link") else ""
+    return Result(
+        scenario.name, True, f"`{reply['role']}`: {reply['text'][:60]}{link}{served}", rows
+    )
 
 
 def _check_failure(
@@ -594,9 +667,15 @@ async def run_stub(chrome_binary: str) -> list[Result]:
                     if scenario.unreachable
                     else ""
                 )
+                signed_in = (
+                    f" e.config.customerPass = '{scenario.customer_pass}';"
+                    f" e.config.signInUrl = '{scenario.sign_in_url}';"
+                    if scenario.customer_pass
+                    else ""
+                )
                 await chrome.evaluate(
                     "(() => { const e = document.querySelector('neura-chat');"
-                    f" e.config.key = 'fn_pk_test_harness:{scenario.script}';{base}"
+                    f" e.config.key = 'fn_pk_test_harness:{scenario.script}';{base}{signed_in}"
                     " return 'ok'; })()"
                 )
                 await chrome.send_message(scenario.message)
@@ -606,7 +685,7 @@ async def run_stub(chrome_binary: str) -> list[Result]:
                     state = await chrome.wait_until_idle(timeout=30)
                 async with httpx.AsyncClient() as http:
                     served = (await http.get(f"http://127.0.0.1:{port}/served")).json()
-                results.append(check(scenario, state, served["transport"]))
+                results.append(check(scenario, state, served["transport"], served))
     finally:
         server.should_exit = True
         with contextlib.suppress(Exception):
@@ -775,6 +854,7 @@ def tenant_tables() -> list[Any]:
     from neura_core.observation.schema import observed_events
     from neura_core.tenancy.schema import (
         api_keys,
+        customer_secrets,
         shop_checks,
         shop_tokens,
         tenant_stores,
@@ -809,6 +889,8 @@ def tenant_tables() -> list[Any]:
         shop_checks,
         # The shop token, sealed: no shop should leave one behind.
         shop_tokens,
+        # The customer sign-in secret, sealed, likewise (ADR-0057).
+        customer_secrets,
         tenant_stores,
         api_keys,
         tenants,

@@ -27,6 +27,12 @@ from neura_adapters.generic.wire import SPEC_VERSION
 from neura_agent_care.tools import build_registry as care_registry
 from neura_agent_sell.tools import build_registry as sell_registry
 from neura_commerce import SyncQuery
+from neura_core.tenancy.customer_pass import (
+    CUSTOMER_SECRET_PREFIX,
+    MAX_PASS_LIFETIME,
+    PASS_ALGORITHM,
+    PASS_CLAIMS,
+)
 from neura_domain import (
     Capability,
     FulfillmentStatus,
@@ -274,6 +280,72 @@ def test_it_says_not_to_build_webhooks_to_neura_yet() -> None:
     webhook = build_openapi()["webhooks"]["entityChanged"]["post"]
     assert webhook["description"].startswith("Not used yet")
     assert "events.realtime" in json.dumps(teacher.get_rules("webhooks"))
+
+
+# ── Order questions from signed-in shoppers (ADR-0057) ───────────────────────
+
+
+def _customer_pass_rule() -> str:
+    answer = teacher.get_rules("customer-pass")
+    return str(answer["rules"][0]["text"])
+
+
+def test_it_teaches_the_customer_pass_as_neura_checks_it() -> None:
+    """Every number and name in the rule is the one `check_customer_pass` uses:
+    a developer's AI tool that makes a pass from this rule makes one NEURA
+    accepts."""
+    text = _customer_pass_rule()
+    assert PASS_ALGORITHM in text
+    for claim in PASS_CLAIMS:
+        assert f'"{claim}"' in text, claim
+    assert f"{int(MAX_PASS_LIFETIME.total_seconds() // 60)} minutes" in text
+    assert CUSTOMER_SECRET_PREFIX in text
+    # A number is refused (G83), and the reason says so the same way.
+    assert '"385", not 385' in text
+
+
+def test_it_names_the_chat_box_settings_the_chat_box_reads() -> None:
+    text = _customer_pass_rule()
+    widget = (REPO_ROOT / "apps/neura-api/src/neura_api/widget/widget.js").read_text()
+    for attribute, read_as in (
+        ("data-neura-customer-pass", "data.neuraCustomerPass"),
+        ("data-neura-sign-in-url", "data.neuraSignInUrl"),
+    ):
+        assert attribute in text, attribute
+        assert read_as in widget, read_as
+
+
+def test_it_carries_the_security_reviews_two_rules_as_the_guide_does() -> None:
+    """ADR-0057's security review, rows 5 and 6: nothing NEURA can check, so
+    they are rules for the developer, here and in the guide."""
+    text = _customer_pass_rule().lower()
+    guide = (REPO_ROOT / "apps/neura-web/src/app/docs/developers/page.tsx").read_text().lower()
+    for rule in ("cache-control: private, no-store", "never from anything in the request"):
+        assert rule in text, rule
+        assert rule in guide, rule
+
+
+def test_it_names_the_order_field_sub_must_equal() -> None:
+    """NEURA keeps an order only if its `customer_external_id` equals the
+    pass's `sub`. `customer_id` is only /orders' search option, so a rule or a
+    guide that calls it the order's field sends a developer looking for a field
+    that does not exist (G84)."""
+    field = "customer_external_id"
+    assert field in _sample("/orders/{id}")
+    text = _customer_pass_rule()
+    assert f'"{field}"' in text
+    assert 'as "customer_id" on' not in text
+    guide = (REPO_ROOT / "apps/neura-web/src/app/docs/developers/page.tsx").read_text()
+    orders = guide.split('id="orders"', 1)[0].split("const PASS_FIELDS", 1)[1]
+    assert field in orders
+    assert 'order&apos;s{" "}\n      <code>customer_id</code>' not in guide
+    assert 'each order&apos;s {c("customer_id")}' not in guide
+
+
+@pytest.mark.parametrize("path", ["/orders", "/orders/{id}", "/customers/{id}"])
+def test_the_order_addresses_point_to_the_customer_pass(path: str) -> None:
+    topics = [rule["topic"] for rule in teacher.get_address(path)["rules"]]
+    assert "customer-pass" in topics
 
 
 # ── Versions and unknown questions ───────────────────────────────────────────

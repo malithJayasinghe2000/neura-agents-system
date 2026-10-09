@@ -12,6 +12,7 @@ from neura_agent_core.graph.builder import (
     GraphContractError,
 )
 from neura_agent_core.graph.nodes import (
+    SIGN_IN,
     Groundedness,
     act,
     blocked,
@@ -20,6 +21,7 @@ from neura_agent_core.graph.nodes import (
     proposals_of,
     propose,
     retrieve,
+    sign_in,
     verify,
 )
 from neura_agent_core.graph.state import (
@@ -39,6 +41,7 @@ __all__ = [
     "CONFIG_KEY",
     "GUARD_ENV_VAR",
     "SHARED_NODES",
+    "SIGN_IN",
     "AgentGraph",
     "AgentState",
     "GraphContractError",
@@ -56,6 +59,7 @@ __all__ = [
     "propose",
     "retrieve",
     "runtime_of",
+    "sign_in",
     "total_cost",
     "total_tokens",
     "unreachable_provider",

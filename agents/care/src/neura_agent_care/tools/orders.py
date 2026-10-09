@@ -16,6 +16,8 @@ note above :func:`find_orders_for_customer` for why the obvious signature — an
 
 from __future__ import annotations
 
+import re
+
 from neura_agent_care.tools.render import order_evidence, order_summary
 from neura_agent_core.tools import ToolContext, tool
 from neura_commerce import AdapterError
@@ -36,6 +38,30 @@ NOT_FOUND = (
     "speculate about whether it exists — ask the shopper to check the number, or "
     "offer to pass them to a colleague."
 )
+
+#: What may be repeated back as an order reference: one word of letters,
+#: digits and the marks order numbers use (# - _ / .), with at least one digit,
+#: at most 64 characters. Anything else came from whoever is typing and is not
+#: repeated into the evidence.
+_REFERENCE = re.compile(r"(?=[^0-9]*[0-9])[A-Za-z0-9#][A-Za-z0-9#\-_/.]{0,63}")
+
+
+def not_found(order_ref: str) -> str:
+    """:data:`NOT_FOUND`, naming the reference the shopper gave (G87).
+
+    Without the number, ``verify`` called *"we could not find an order with the
+    reference 9999"* unsupported, and a shopper with one wrong digit got the
+    handover. Still uniform: it repeats what the shopper typed, the same for an
+    order that does not exist and one that is not theirs, so it tells nobody
+    which orders exist. Text not shaped like an order number gets the plain form.
+    """
+    ref = order_ref.strip()
+    if not _REFERENCE.fullmatch(ref):
+        return NOT_FOUND
+    return NOT_FOUND.replace(
+        "No order with that reference", f"No order with the reference {ref}", 1
+    )
+
 
 #: A shopper asking "where are my orders?" wants the recent ones, not an archive.
 MAX_ORDERS_LISTED = 5
@@ -69,7 +95,7 @@ async def get_order_status(order_ref: str, ctx: ToolContext) -> str:
             conversation_id=ctx.conversation_id,
             found=order is not None,
         )
-        return NOT_FOUND
+        return not_found(order_ref)
 
     return order_evidence(order)
 

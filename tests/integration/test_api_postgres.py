@@ -58,7 +58,13 @@ from neura_core.tenancy import (
     UsageMeter,
 )
 from neura_core.tenancy.keys import generate
-from neura_core.tenancy.schema import api_keys, tenant_stores, tenant_usage, tenants
+from neura_core.tenancy.schema import (
+    api_keys,
+    customer_secrets,
+    tenant_stores,
+    tenant_usage,
+    tenants,
+)
 from neura_core.webhooks import (
     DeliveryStatus,
     EndpointStatus,
@@ -81,6 +87,7 @@ PLATFORM = "itest-stub"
 KEK = "iC0hbmk6b18lBhVRDDeQZ6mXpvNhpjJUM7ScE3wp0Ss="
 
 ALL_TENANT_TABLES = (
+    customer_secrets,
     conversations,
     conversation_messages,
     idempotency_keys,
@@ -531,6 +538,67 @@ class TestAChatTurn:
             )
         assert [h["role"] for h in history[:2]] == ["shopper", "agent"]
         assert history[0]["content"] == "do you ship to France?"
+
+    @pytest.mark.parametrize(
+        ("first", "then"),
+        [("385", "386"), ("385", None), (None, "385")],
+        ids=["another-customer", "signed-out", "signed-in"],
+    )
+    async def test_a_conversation_belongs_to_the_customer_it_started_with(
+        self, client: TestClient, db: Database, first: str | None, then: str | None
+    ) -> None:
+        """G79, ADR-0057 §6: a conversation took its customer from its first
+        message and never checked it again, so a message naming another
+        customer, or none, went on with the first one's history, orders and
+        all. Now it starts a new conversation and carries nothing over."""
+        token = await _provision(db, TENANT_A)
+
+        def say(message: str, customer: str | None, conversation_id: str | None = None) -> str:
+            body: dict[str, Any] = {"message": message}
+            if customer is not None:
+                body["customer"] = {"external_id": customer}
+            if conversation_id is not None:
+                body["conversation_id"] = conversation_id
+            response = client.post("/v1/care/chat", json=body, headers=_auth(token))
+            assert response.status_code == 200
+            return str(response.json()["data"]["conversation_id"])
+
+        started = say("where is my order 1001?", first)
+        continued = say("and what did you tell me before?", then, started)
+
+        assert continued != started
+        async with db.tenant_session(TENANT_A) as session:
+            repository = ConversationRepository(session)
+            old = await repository.get(TENANT_A, started)
+            new = await repository.get(TENANT_A, continued)
+            old_messages = await repository.messages(TENANT_A, started)
+            new_messages = await repository.messages(TENANT_A, continued)
+        assert old is not None and old.customer_external_id == first
+        assert new is not None and new.customer_external_id == then
+        # Nothing of the first person's conversation reached the second.
+        assert [m.content for m in old_messages if m.role.value == "shopper"] == [
+            "where is my order 1001?"
+        ]
+        assert [m.content for m in new_messages if m.role.value == "shopper"] == [
+            "and what did you tell me before?"
+        ]
+
+    async def test_the_same_customer_continues_their_conversation(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A)
+        customer = {"external_id": "385"}
+        first = client.post(
+            "/v1/care/chat",
+            json={"message": "where is my order 1001?", "customer": customer},
+            headers=_auth(token),
+        ).json()["data"]["conversation_id"]
+        second = client.post(
+            "/v1/care/chat",
+            json={"message": "thanks", "customer": customer, "conversation_id": first},
+            headers=_auth(token),
+        ).json()["data"]["conversation_id"]
+        assert second == first
 
     async def test_a_client_supplied_conversation_id_is_refused(
         self, client: TestClient, db: Database
@@ -1820,6 +1888,281 @@ def _drain(socket: Any, *, limit: int = 200) -> list[dict[str, Any]]:
         if frame["type"] in {"done", "error"}:
             return frames
     raise AssertionError("the socket never finished the turn")
+
+
+class TestCustomerPass:
+    """ADR-0057 §4, §5: the shop's server writes a signed pass into the page for
+    a signed-in customer, the chat box sends it with every message, and a pass
+    NEURA accepts names the turn's customer. A pass that fails never breaks the
+    chat: the message is answered as not signed in, and the reply says why."""
+
+    ORIGIN: ClassVar[dict[str, str]] = {"Origin": "https://shop.example"}
+
+    @staticmethod
+    async def _secret(db: Database) -> str:
+        from neura_core.tenancy import CustomerSecretRepository
+
+        async with db.tenant_session(TENANT_A) as session:
+            return await CustomerSecretRepository(session).make(TENANT_A, made_by="usr_owner")
+
+    @staticmethod
+    def _pass(secret: str, *, customer: str = "385", age_s: int = 0, life_s: int = 600) -> str:
+        import time
+
+        import jwt
+
+        issued = int(time.time()) - age_s
+        return jwt.encode(
+            {"sub": customer, "iat": issued, "exp": issued + life_s}, secret, algorithm="HS256"
+        )
+
+    @staticmethod
+    async def _customer_of(db: Database, conversation_id: str) -> str | None:
+        async with db.tenant_session(TENANT_A) as session:
+            conversation = await ConversationRepository(session).get(TENANT_A, conversation_id)
+        assert conversation is not None
+        return conversation.customer_external_id
+
+    async def test_a_valid_pass_names_the_customer(self, client: TestClient, db: Database) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        secret = await self._secret(db)
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "where is my order?", "customer_pass": self._pass(secret)},
+            headers={**_auth(token), **self.ORIGIN},
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["customer_pass"] == "valid"
+        assert data["customer_pass_reason"] == ""
+        assert await self._customer_of(db, data["conversation_id"]) == "385"
+
+    @pytest.mark.parametrize(
+        ("case", "expected"),
+        [
+            ("another shop's secret", "invalid"),
+            ("expired", "expired"),
+            ("no secret made", "invalid"),
+        ],
+    )
+    async def test_a_failing_pass_is_answered_as_not_signed_in(
+        self, client: TestClient, db: Database, case: str, expected: str
+    ) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        if case == "another shop's secret":
+            await self._secret(db)
+            customer_pass = self._pass("fn_cs_" + "z" * 43)
+        elif case == "expired":
+            customer_pass = self._pass(await self._secret(db), age_s=900)
+        else:
+            customer_pass = self._pass("fn_cs_" + "z" * 43)
+
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "where is my order?", "customer_pass": customer_pass},
+            headers={**_auth(token), **self.ORIGIN},
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["customer_pass"] == expected
+        # The developer is told why, in words that never repeat the pass.
+        assert data["customer_pass_reason"]
+        assert customer_pass not in data["customer_pass_reason"]
+        assert await self._customer_of(db, data["conversation_id"]) is None
+
+    async def test_a_replaced_secret_stops_the_old_passes_at_once(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        old = self._pass(await self._secret(db))
+        await self._secret(db)
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "where is my order?", "customer_pass": old},
+            headers={**_auth(token), **self.ORIGIN},
+        )
+        assert response.json()["data"]["customer_pass"] == "invalid"
+
+    async def test_no_pass_says_nothing_about_one(self, client: TestClient, db: Database) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "hi"},
+            headers={**_auth(token), **self.ORIGIN},
+        )
+        assert response.json()["data"]["customer_pass"] is None
+
+    async def test_a_page_still_cannot_name_a_customer_directly(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "hi", "customer": {"external_id": "385"}},
+            headers={**_auth(token), **self.ORIGIN},
+        )
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "IDENTITY_NOT_PERMITTED"
+
+    async def test_a_customer_and_a_pass_together_are_refused(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """A server names a customer, or a page carries a pass; never both, so
+        nobody has to guess which one won."""
+        token = await _provision(db, TENANT_A)
+        secret = await self._secret(db)
+        response = client.post(
+            "/v1/care/chat",
+            json={
+                "message": "hi",
+                "customer": {"external_id": "385"},
+                "customer_pass": self._pass(secret, customer="386"),
+            },
+            headers=_auth(token),
+        )
+        assert response.status_code == 400
+
+    async def test_the_socket_carries_the_pass_in_each_message(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """Checked on every message, not at the handshake (the G72 lesson): a
+        connection stays open longer than a pass lasts."""
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        secret = await self._secret(db)
+        with client.websocket_connect(
+            f"/v1/care/stream?token={token}", headers=self.ORIGIN
+        ) as socket:
+            socket.send_json(
+                {
+                    "type": "message",
+                    "content": "where is my order?",
+                    "customer_pass": self._pass(secret),
+                }
+            )
+            signed_in = _drain(socket)[-1]
+            socket.send_json(
+                {
+                    "type": "message",
+                    "content": "and now?",
+                    "conversation_id": signed_in["conversation_id"],
+                    "customer_pass": self._pass(secret, age_s=900),
+                }
+            )
+            expired = _drain(socket)[-1]
+
+        assert signed_in["customer_pass"] == "valid"
+        assert await self._customer_of(db, signed_in["conversation_id"]) == "385"
+        assert expired["customer_pass"] == "expired"
+        # Signed out by expiry: a new conversation, nothing carried over (G79).
+        assert expired["conversation_id"] != signed_in["conversation_id"]
+        assert await self._customer_of(db, expired["conversation_id"]) is None
+
+
+class TestTheSignInSentence:
+    """ADR-0057 §7: a turn about an order from someone not signed in is
+    answered with the owner's words, in the shop's contact details, and a mark
+    that tells the chat box to show the *Sign in* link. Driven by a stand-in
+    agent that reports *needs sign-in*, so no model is involved."""
+
+    class _NeedsSignIn:
+        async def run(self, request: Any) -> Any:
+            from neura_agent_core.serving import TurnOutcome
+
+            return TurnOutcome(
+                reply="Please sign in to your account so I can help with your orders.",
+                state=ConversationState.RESOLVED,
+                needs_sign_in=True,
+                intent="order_status",
+            )
+
+    @staticmethod
+    def _service(db: Database) -> Any:
+        """A turn service on this test's own event loop and database. The app's
+        own lives on the test client's loop, which these awaits cannot share."""
+        from neura_api.stores import StoreDirectory
+        from neura_api.turns import TurnService
+
+        return TurnService(db, StubLLM(), StoreDirectory(db))
+
+    async def _turn(
+        self, client: TestClient, db: Database, *, config: TenantConfig, customer_pass: str | None
+    ) -> Any:
+        from neura_api.turns import TurnInput
+        from neura_core.tenancy import authenticate
+
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC, config=config)
+        caller = await authenticate(db, token, origin="https://shop.example")
+        return await self._service(db).run(
+            self._NeedsSignIn(),
+            TurnInput(
+                caller=caller,
+                agent_key="care",
+                message="where is my order?",
+                customer_pass=customer_pass,
+            ),
+        )
+
+    async def test_not_signed_in_reads_the_sentence_with_the_shops_details(
+        self, client: TestClient, db: Database
+    ) -> None:
+        config = TenantConfig(
+            contact_email="hello@yourshop.example", contact_phone="+94 11 234 5678"
+        )
+        result = await self._turn(client, db, config=config, customer_pass=None)
+        assert result.reply == (
+            "Please sign in to your account so I can help with your orders. "
+            "Or contact our store: hello@yourshop.example, +94 11 234 5678."
+        )
+        assert result.sign_in is True
+
+    async def test_an_expired_pass_reads_reload_the_page_and_no_link(
+        self, client: TestClient, db: Database
+    ) -> None:
+        import time
+
+        import jwt
+
+        from neura_api.turns import TurnInput
+        from neura_core.tenancy import CustomerSecretRepository, authenticate
+
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        async with db.tenant_session(TENANT_A) as session:
+            secret = await CustomerSecretRepository(session).make(TENANT_A, made_by="usr_owner")
+        issued = int(time.time()) - 900
+        expired = jwt.encode(
+            {"sub": "385", "iat": issued, "exp": issued + 600}, secret, algorithm="HS256"
+        )
+        caller = await authenticate(db, token, origin="https://shop.example")
+        result = await self._service(db).run(
+            self._NeedsSignIn(),
+            TurnInput(
+                caller=caller, agent_key="care", message="where is my order?", customer_pass=expired
+            ),
+        )
+        assert result.reply == (
+            "Your sign-in on this page has timed out. Please reload the page and ask again."
+        )
+        assert result.sign_in is False
+
+    async def test_in_practice_mode_nothing_is_shown_and_no_link(
+        self, client: TestClient, db: Database
+    ) -> None:
+        result = await self._turn(
+            client, db, config=TenantConfig(mode="shadow"), customer_pass=None
+        )
+        assert result.reply == ""
+        assert result.sign_in is False
+
+    async def test_the_reply_says_whether_to_show_the_link(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        response = client.post(
+            "/v1/care/chat",
+            json={"message": "hi"},
+            headers={**_auth(token), "Origin": "https://shop.example"},
+        )
+        assert response.json()["data"]["sign_in"] is False
 
 
 class TestStoreSync:

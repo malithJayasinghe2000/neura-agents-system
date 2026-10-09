@@ -237,6 +237,11 @@ class AgentState(TypedDict, total=False):
     escalation_reason: str
     handoff: str
 
+    #: An order question from someone not signed in (ADR-0057 §7). Not a
+    #: handover: the turn ends asking the shopper to sign in, and the turn
+    #: service puts on the shop's words.
+    needs_sign_in: bool
+
     #: The agent answered by declining — the question was outside its scope and
     #: no person was needed. Distinct from ``escalated``, and the distinction is
     #: the point: both end the turn without an answer, but only one occupies a

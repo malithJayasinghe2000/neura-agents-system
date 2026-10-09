@@ -50,6 +50,7 @@ from neura_core import (
     get_logger,
 )
 from neura_core.tenancy import ApiKeyKind, AuthenticatedCaller
+from neura_core.tenancy.customer_pass import MAX_PASS_CHARS
 
 log = get_logger(__name__)
 
@@ -102,6 +103,11 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     external_ref: str | None = Field(default=None, max_length=128)
     customer: CustomerRef | None = None
+    #: A signed-in customer's pass, written into the page by the shop's server
+    #: and sent by the chat box with every message (ADR-0057 §4). Checked in
+    #: the turn service against the shop's secret; the only way a page may name
+    #: a customer. Never in an address, and never repeated in a log.
+    customer_pass: str | None = Field(default=None, max_length=MAX_PASS_CHARS)
     channel: str = Field(default="web", max_length=32)
     locale: str = Field(default="en", max_length=16)
 
@@ -133,6 +139,17 @@ class ChatData(BaseModel):
     #: that recommended nothing — so a client may render it unconditionally, and
     #: one that ignores the field entirely still shows the text it always did.
     products: list[dict[str, str]] = Field(default_factory=list)
+    #: What NEURA made of the customer pass the message carried: ``valid``,
+    #: ``expired`` or ``invalid``; ``None`` when it carried none (ADR-0057 §5).
+    #: Tells the page about its own pass only, so it says nothing new; the chat
+    #: box shows the developer a warning for ``invalid``.
+    customer_pass: str | None = None
+    #: Why the pass was not accepted, in words for the developer; empty when it
+    #: was, or when there was none. Never repeats the pass.
+    customer_pass_reason: str = ""
+    #: Show the shop's *Sign in* link under this reply (ADR-0057 §7). Set by
+    #: the server, so the chat box never guesses from the words.
+    sign_in: bool = False
 
 
 def build_router(agent_key: str) -> APIRouter:
@@ -425,6 +442,14 @@ def _turn_input(
             code="IDENTITY_NOT_PERMITTED",
         )
 
+    if customer_external_id and body.customer_pass:
+        # One way to name a customer per message, so nobody has to guess which
+        # one won (ADR-0057 §4).
+        raise ValidationError(
+            "Send either customer, from your server, or customer_pass, not both.",
+            details={"field": "customer_pass"},
+        )
+
     if body.conversation_id and not body.conversation_id.startswith("cnv_"):
         raise ValidationError(
             "conversation_id must be a value this API issued.",
@@ -437,6 +462,7 @@ def _turn_input(
         message=body.message,
         conversation_id=body.conversation_id,
         customer_external_id=customer_external_id,
+        customer_pass=body.customer_pass or None,
         external_ref=body.external_ref,
         channel=body.channel,
         locale=body.locale,
@@ -484,6 +510,9 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
             # `reply` and must have no products either, and `outcome.cards` is
             # empty for it because `respond` never ran ([ADR-0030], ADR-0020).
             products=outcome.cards,
+            customer_pass=result.customer_pass.value if result.customer_pass else None,
+            customer_pass_reason=result.customer_pass_reason,
+            sign_in=result.sign_in,
         ).model_dump(mode="json"),
         request_id=str(getattr(getattr(request, "state", None), "request_id", "") or ""),
     )

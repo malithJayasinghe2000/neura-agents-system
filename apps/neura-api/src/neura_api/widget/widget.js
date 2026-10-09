@@ -296,7 +296,60 @@
       // else and costs nothing on the rest of the storefront.
       productIds: productIdsFrom(data.neuraProducts),
       pairsAutoOpen: data.neuraPairsAutoOpen === "true",
+      // ADR-0057: written by the shop's server only for a signed-in customer,
+      // and sent with every message. Absent means not signed in.
+      customerPass: data.neuraCustomerPass || "",
+      // Where the Sign in link goes. Only a plain web address becomes a link.
+      signInUrl: SAFE_URL.test(data.neuraSignInUrl || "") ? data.neuraSignInUrl : "",
     };
+  }
+
+  /**
+   * One message, as both transports send it. [ADR-0057] §4
+   *
+   * The customer pass travels **in the message, never in an address**: the
+   * socket's address is written into logs (G34), and the server checks the
+   * pass on every message because a connection outlives a pass.
+   */
+  function messageBody(message, conversationId, config) {
+    var body = { message: message };
+    if (conversationId) {
+      body.conversation_id = conversationId;
+    }
+    if (config && config.customerPass) {
+      body.customer_pass = config.customerPass;
+    }
+    return body;
+  }
+
+  /**
+   * Where the *Sign in* link under a reply goes, or "" for none. [ADR-0057] §7
+   *
+   * The server says when (`sign_in`), so the widget never guesses from the
+   * words; the shop's page says where, and only a checked web address counts.
+   */
+  function signInLinkFor(payload, config) {
+    if (!payload || payload.sign_in !== true || !config) {
+      return "";
+    }
+    return config.signInUrl || "";
+  }
+
+  /**
+   * The developer's warning for a refused pass, or "". [ADR-0057] §5
+   *
+   * Only for `invalid`: an expired pass is a page left open, not a mistake.
+   * The reason comes from the server, which never repeats the pass in it.
+   */
+  function passWarningFor(payload) {
+    if (!payload || payload.customer_pass !== "invalid") {
+      return "";
+    }
+    var reason = payload.customer_pass_reason || "no reason given";
+    return (
+      "NEURA: the customer pass in data-neura-customer-pass was refused, so this " +
+      "shopper is treated as not signed in: " + reason + "."
+    );
   }
 
   /**
@@ -395,11 +448,13 @@
   };
 
   StreamTransport.prototype.send = function (message, conversationId) {
+    var body = messageBody(message, conversationId, this.config);
     this.socket.send(
       JSON.stringify({
         type: "message",
-        content: message,
-        conversation_id: conversationId || undefined,
+        content: body.message,
+        conversation_id: body.conversation_id,
+        customer_pass: body.customer_pass,
       })
     );
   };
@@ -430,10 +485,7 @@
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
       headers["Idempotency-Key"] = crypto.randomUUID();
     }
-    var body = { message: message };
-    if (conversationId) {
-      body.conversation_id = conversationId;
-    }
+    var body = messageBody(message, conversationId, this.config);
     return fetch(endpointFor(this.config.base, this.config.agent, "chat"), {
       method: "POST",
       headers: headers,
@@ -481,6 +533,10 @@
     "[data-role='system'] .bubble{background:#fff8e6;border:1px solid #f0dfae;color:#6b5726;}",
     "[data-role='error'] .bubble{background:#fdecec;border:1px solid #f2c3c3;color:#8c2b2b;}",
     ".note{font-size:10.5px;color:#79839a;}",
+    ".signin{align-self:flex-start;margin-top:4px;padding:7px 14px;border-radius:9px;background:#1b2333;",
+    "color:#fff;font-size:13px;font-weight:600;text-decoration:none;}",
+    ".signin:hover{background:#2c3850;}",
+    ".signin:focus-visible{outline:2px solid #7aa2ff;outline-offset:1px;}",
     // Product cards ([ADR-0030]). A stacked list of wide rows rather than a
     // strip of tall tiles: a chat panel is ~340px, most merchants publish no
     // image at all (the test shop publishes none for any product), and a tile
@@ -912,11 +968,37 @@
         this.disclosure.textContent = payload.ai_disclosure;
       }
       var rows = messagesForTurn(payload);
+      var last = null;
       for (var i = 0; i < rows.length; i += 1) {
-        this.render(rows[i]);
+        last = this.render(rows[i]);
+      }
+      var signIn = signInLinkFor(payload, this.config);
+      if (signIn && last) {
+        last.appendChild(this.signInLink(signIn));
+      }
+      var warning = passWarningFor(payload);
+      if (warning && !this.warnedAboutPass && typeof console !== "undefined") {
+        // Once per page: the developer needs to see it, the console does not
+        // need it on every message.
+        this.warnedAboutPass = true;
+        console.warn(warning);
       }
       this.renderProducts(productsForTurn(payload));
       this.setBusy(false);
+    };
+
+    /**
+     * The *Sign in* link. [ADR-0057] §7, Q5
+     *
+     * The widget owns the tag and the words; the one value from outside, the
+     * address, was checked against `SAFE_URL` in `configFrom`. The shop's own
+     * sign-in page, so it opens in the same tab, where the shopper comes back
+     * signed in.
+     */
+    NeuraChat.prototype.signInLink = function (url) {
+      var link = element("a", "signin", "Sign in");
+      link.href = url;
+      return link;
     };
 
     /**
@@ -1054,11 +1136,14 @@
       endpointFor: endpointFor,
       errorTextFor: errorTextFor,
       labelForStep: labelForStep,
+      messageBody: messageBody,
       messagesForTurn: messagesForTurn,
       pairsFor: pairsFor,
+      passWarningFor: passWarningFor,
       productIdsFrom: productIdsFrom,
       productsForTurn: productsForTurn,
       shouldAutoOpenPairs: shouldAutoOpenPairs,
+      signInLinkFor: signInLinkFor,
       withoutEmphasis: withoutEmphasis,
     };
   }

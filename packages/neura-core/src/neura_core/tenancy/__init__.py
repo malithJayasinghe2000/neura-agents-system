@@ -30,7 +30,21 @@ from neura_core.tenancy.budget import (
     RuntimePolicy,
     resolve_runtime_policy,
 )
-from neura_core.tenancy.handover import HANDOVER_WITHOUT_DETAILS, handover_message
+from neura_core.tenancy.customer_pass import (
+    CUSTOMER_SECRET_PREFIX,
+    CustomerSecretRepository,
+    PassCheck,
+    PassStatus,
+    check_customer_pass,
+    new_customer_secret,
+)
+from neura_core.tenancy.handover import (
+    HANDOVER_WITHOUT_DETAILS,
+    PASS_EXPIRED_MESSAGE,
+    SIGN_IN_WITHOUT_DETAILS,
+    handover_message,
+    sign_in_message,
+)
 from neura_core.tenancy.keys import ApiKeyKind, IssuedKey, KeyEnvironment
 from neura_core.tenancy.models import (
     ApiKey,
@@ -62,16 +76,22 @@ from neura_core.tenancy.shop_setup import (
 from neura_core.tenancy.usage import UsageDelta, UsageMeter, UsageTotals
 
 __all__ = [
+    "CUSTOMER_SECRET_PREFIX",
     "HANDOVER_WITHOUT_DETAILS",
+    "PASS_EXPIRED_MESSAGE",
     "SHOP_TOKEN_PREFIX",
+    "SIGN_IN_WITHOUT_DETAILS",
     "Admission",
     "ApiKey",
     "ApiKeyKind",
     "ApiKeyRepository",
     "AuthenticatedCaller",
     "BudgetLimits",
+    "CustomerSecretRepository",
     "IssuedKey",
     "KeyEnvironment",
+    "PassCheck",
+    "PassStatus",
     "RuntimePolicy",
     "ShopCheckRepository",
     "ShopTokenRepository",
@@ -86,7 +106,9 @@ __all__ = [
     "UsageTotals",
     "api_keys",
     "authenticate",
+    "check_customer_pass",
     "handover_message",
+    "new_customer_secret",
     "new_shop_token",
     "require_agent",
     "require_scopes",
@@ -94,6 +116,7 @@ __all__ = [
     "resolve_turn_mode",
     "shop_checks",
     "shop_tokens",
+    "sign_in_message",
     "tenant_stores",
     "tenant_usage",
     "tenants",

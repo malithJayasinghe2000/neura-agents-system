@@ -52,7 +52,11 @@ _REDACTED = "[REDACTED]"
 
 # Belt-and-braces for secrets embedded in free text (e.g. an exception message).
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bfn_(sk|pk)_[A-Za-z0-9_\-]{8,}"), "fn_***"),
+    # Every secret NEURA makes: API keys, the shop token (ADR-0052) and the
+    # customer sign-in secret (ADR-0057).
+    (re.compile(r"\bfn_(sk|pk|st|cs)_[A-Za-z0-9_\-]{8,}"), "fn_***"),
+    # A customer pass, or any JSON Web Token: a signed claim about a customer.
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*"), "[PASS]"),
     # A credential in an address — `?token=` on the chat socket, a sign-in link.
     # After the key pattern, so a key reads `token=***` rather than `fn_***`.
     (re.compile(r"([?&]token=)[^&\s\"']+"), r"\1***"),

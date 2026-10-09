@@ -37,13 +37,14 @@ import { redirect } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { AllowedList, CheckItem, ShopChecks } from "@/components/shop/full-check";
 import { ConnectShop } from "@/components/shop/connect-shop";
+import { CustomerSecret } from "@/components/shop/customer-secret";
 import { ShopContact } from "@/components/shop/shop-contact";
 import { ShopToken } from "@/components/shop/shop-token";
 import { SetupItem } from "@/components/shop/setup-item";
-import { hasSell, shopAssistants } from "@/lib/shop-assistants";
+import { hasCare, hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { SyncNow } from "@/components/shop/sync-now";
 import { When } from "@/components/when";
-import type { ShopContactView } from "@/lib/api";
+import type { CustomerSecretView, ShopContactView } from "@/lib/api";
 import { fromApi, hasSession } from "@/lib/server-api";
 import {
   ENTITY_LABELS,
@@ -61,12 +62,24 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
-  const [view, assistants, contact] = await Promise.all([
+  const [view, assistants, contact, secret] = await Promise.all([
     fromApi<ShopView>(`/shops/${encodeURIComponent(tenantId)}/store`),
     shopAssistants(tenantId),
     fromApi<ShopContactView>(`/shops/${encodeURIComponent(tenantId)}/contact`),
+    fromApi<CustomerSecretView>(`/shops/${encodeURIComponent(tenantId)}/customer-secret`),
   ]);
   const sell = hasSell(assistants);
+  // ADR-0057 §3: for a shop that can answer order questions, NEURA-CARE with a
+  // bridge that looks orders up. A shop whose last check is unknown shows it,
+  // as `hasSell` does: hiding a part because a read failed loses it silently.
+  const answersOrders =
+    view.ok &&
+    view.data.connected &&
+    hasCare(assistants) &&
+    view.data.stores.some(
+      (store) =>
+        !store.last_check?.result || store.last_check.result.capabilities.includes("order.read"),
+    );
 
   return (
     <>
@@ -98,6 +111,9 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
           )}
           <GetSetUp tenantId={tenantId} view={view.data} sell={sell} />
           <ShopContact tenantId={tenantId} initial={contact.ok ? contact.data : null} />
+          {answersOrders && secret.ok ? (
+            <CustomerSecret tenantId={tenantId} madeAt={secret.data.made_at} />
+          ) : null}
           {view.data.connected ? (
             <>
               {view.data.stores.map((store) => (

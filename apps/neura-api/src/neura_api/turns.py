@@ -52,16 +52,21 @@ from neura_api.stores import StoreDirectory
 from neura_core import Database, get_logger, get_settings, new_id
 from neura_core.ids import CONVERSATION
 from neura_core.tenancy import (
+    PASS_EXPIRED_MESSAGE,
     Admission,
     AuthenticatedCaller,
+    CustomerSecretRepository,
+    PassStatus,
     RuntimePolicy,
     TenantRepository,
     TurnMode,
     UsageDelta,
     UsageMeter,
+    check_customer_pass,
     handover_message,
     resolve_runtime_policy,
     resolve_turn_mode,
+    sign_in_message,
 )
 from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
 from neura_llm import RoleNotConfiguredError
@@ -83,6 +88,9 @@ class TurnInput:
     #: customer id, and a session that could would make every order in the shop
     #: readable by anyone who guessed a number.
     customer_external_id: str | None = None
+    #: A signed-in customer's pass from the page (ADR-0057). Checked by the
+    #: turn service against the shop's secret; a valid one names the customer.
+    customer_pass: str | None = None
     external_ref: str | None = None
     channel: str = "web"
     locale: str = "en"
@@ -106,6 +114,15 @@ class TurnResult:
     #: rule "a withheld reply is never empty-handed" lives in one object with
     #: the withholding itself.
     withheld_message: str = ""
+    #: What became of the customer pass the message carried, or ``None`` when
+    #: it carried none (ADR-0057 §5). Never the pass itself.
+    customer_pass: PassStatus | None = None
+    #: Why a pass was not accepted, for the developer. Never the pass.
+    customer_pass_reason: str = ""
+    #: Whether the chat box shows its *Sign in* link under the reply (ADR-0057
+    #: §7): an order question from someone not signed in, on a reply the
+    #: shopper actually sees. Never for an expired pass (they are signed in).
+    sign_in: bool = False
 
     @property
     def is_shadowed(self) -> bool:
@@ -169,12 +186,52 @@ class TurnService:
         async with self._db.tenant_session(tenant_id) as session:
             spend = await UsageMeter(session).spend_today(tenant_id)
             conversations = ConversationRepository(session)
+            # Who the shopper is, decided here, in code, on every message
+            # (ADR-0057 §4, Rule 3): a server's secret key names a customer
+            # (`_turn_input` allows that on a secret key only), or the page
+            # carries a pass the shop's server signed. A pass that fails makes
+            # the message *not signed in*; it never breaks the chat (§5).
+            customer_external_id = turn.customer_external_id
+            pass_status: PassStatus | None = None
+            pass_reason = ""
+            if turn.customer_pass is not None:
+                checked = check_customer_pass(
+                    turn.customer_pass,
+                    await CustomerSecretRepository(session).secret(tenant_id),
+                )
+                pass_status = checked.status
+                pass_reason = checked.reason
+                customer_external_id = checked.customer_external_id
+                if checked.status is not PassStatus.VALID:
+                    # The reason, for the developer; never the pass.
+                    log.info(
+                        "customer_pass_refused",
+                        tenant_id=tenant_id,
+                        status=checked.status.value,
+                        reason=checked.reason,
+                    )
+            # One conversation, one customer (G79, ADR-0057 §6). A conversation
+            # keeps the customer of its first message, and its history goes to
+            # the model on every later turn; a turn that names anyone else, or
+            # nobody, would read the first person's replies, orders included.
+            # So it starts a new conversation and carries nothing over. The
+            # caller learns the new id from the reply (the socket's `accepted`
+            # frame has already named the old one; `done` names this one).
+            if turn.conversation_id is not None:
+                existing = await conversations.get(tenant_id, conversation_id)
+                if existing is not None and existing.customer_external_id != customer_external_id:
+                    log.info(
+                        "conversation_customer_changed",
+                        tenant_id=tenant_id,
+                        previous_conversation_id=conversation_id,
+                    )
+                    conversation_id = new_id(CONVERSATION)
             started = await conversations.start(
                 tenant_id,
                 conversation_id=conversation_id,
                 agent_key=turn.agent_key,
                 external_ref=turn.external_ref,
-                customer_external_id=turn.customer_external_id,
+                customer_external_id=customer_external_id,
                 channel=turn.channel,
                 locale=turn.locale,
             )
@@ -242,7 +299,7 @@ class TurnService:
                     # fewer scopes than the agent declares must be able to do
                     # less, or scoping a key would be decorative.
                     scopes=turn.caller.scopes,
-                    identity=SessionIdentity(customer_external_id=turn.customer_external_id),
+                    identity=SessionIdentity(customer_external_id=customer_external_id),
                     history=history,
                     retriever=retriever,
                     audit=TenantAuditLog(self._db, tenant_id),
@@ -287,6 +344,18 @@ class TurnService:
             # transports; a handover is fixed text, sent whole, never streamed.
             if outcome.escalated:
                 outcome = replace(outcome, reply=handover_message(config))
+            # An order question from someone not signed in (ADR-0057 §7): the
+            # owner's sentence and the shop's contact details, or *reload the
+            # page* when the shopper's own pass had expired. Fixed text, put on
+            # here for both assistants and both transports, after the handover
+            # sentence so that it wins.
+            show_sign_in = False
+            if outcome.needs_sign_in and customer_external_id is None:
+                if pass_status is PassStatus.EXPIRED:
+                    outcome = replace(outcome, reply=PASS_EXPIRED_MESSAGE)
+                else:
+                    outcome = replace(outcome, reply=sign_in_message(config))
+                    show_sign_in = True
 
             if mode is TurnMode.SHADOW:
                 # The shopper's words are history; the agent's are not. The
@@ -411,6 +480,9 @@ class TurnService:
             withheld_message=(
                 turn.caller.tenant.config.withheld_message or settings.widget_withheld_message
             ),
+            customer_pass=pass_status,
+            customer_pass_reason=pass_reason,
+            sign_in=show_sign_in and mode is not TurnMode.SHADOW,
         )
 
     def _retriever(self, tenant_id: str, llm: object) -> Retriever | None:

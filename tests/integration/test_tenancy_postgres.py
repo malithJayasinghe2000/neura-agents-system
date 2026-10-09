@@ -79,6 +79,9 @@ async def _purge(database: Database) -> None:
         async with database.tenant_session(tenant_id) as session:
             for table in (tenant_usage, tenant_stores, api_keys, tenants):
                 await session.execute(delete(table))
+            from neura_core.tenancy.schema import customer_secrets
+
+            await session.execute(delete(customer_secrets))
 
 
 async def _make_tenant(database: Database, tenant_id: str, **kwargs):
@@ -320,6 +323,43 @@ class TestAuthentication:
                     scopes=["care:chat:write", "care:conversations:read"],
                 )
         assert "care:conversations:read" in str(exc.value)
+
+
+class TestCustomerSecret:
+    """ADR-0057 §3: one per shop, shown once, sealed, replaced at once."""
+
+    async def test_made_once_kept_sealed_and_replaced(self, db: Database) -> None:
+        from neura_core.tenancy import CustomerSecretRepository
+        from neura_core.tenancy.schema import customer_secrets
+
+        await _make_tenant(db, TENANT_A)
+        async with db.tenant_session(TENANT_A) as session:
+            first = await CustomerSecretRepository(session).make(TENANT_A, made_by="usr_owner")
+        assert first.startswith("fn_cs_")
+
+        async with db.tenant_session(TENANT_A) as session:
+            repository = CustomerSecretRepository(session)
+            assert await repository.secret(TENANT_A) == first
+            assert await repository.made_at(TENANT_A) is not None
+            stored = (await session.execute(customer_secrets.select())).one()
+        # Sealed: the row never holds the secret as it was shown.
+        assert first not in stored.secret
+
+        async with db.tenant_session(TENANT_A) as session:
+            second = await CustomerSecretRepository(session).make(TENANT_A, made_by="usr_owner")
+        async with db.tenant_session(TENANT_A) as session:
+            assert await CustomerSecretRepository(session).secret(TENANT_A) == second
+        assert second != first
+
+    async def test_another_shop_cannot_read_it(self, db: Database) -> None:
+        from neura_core.tenancy import CustomerSecretRepository
+
+        await _make_tenant(db, TENANT_A)
+        await _make_tenant(db, TENANT_B)
+        async with db.tenant_session(TENANT_A) as session:
+            await CustomerSecretRepository(session).make(TENANT_A, made_by="usr_owner")
+        async with db.tenant_session(TENANT_B) as session:
+            assert await CustomerSecretRepository(session).secret(TENANT_A) is None
 
 
 class TestUsageMetering:

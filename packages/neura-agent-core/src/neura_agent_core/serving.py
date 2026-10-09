@@ -209,6 +209,9 @@ class TurnOutcome:
     #: The handoff packet, present only when a person is now involved.
     handoff: str = ""
     escalation_reason: str = ""
+    #: An order question from someone not signed in (ADR-0057 §7). The turn
+    #: service replaces ``reply`` with the shop's sign-in sentence.
+    needs_sign_in: bool = False
 
     @property
     def is_answer(self) -> bool:

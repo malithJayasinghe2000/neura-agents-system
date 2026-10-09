@@ -211,9 +211,10 @@ That is the whole front-end integration. A chat bubble appears in the bottom-rig
 - **The key is public and that is fine.** It is locked to the merchant's own domain. Copied onto
   another site, it is refused before the agent runs
   ([ADR-0014](architecture/adr/0014-api-keys-and-the-rls-bootstrap.md)).
-- **It cannot claim to be a customer.** A browser saying "I am customer 385" is refused. If you
-  want the agent to know who is logged in, that must come from *your server* using a secret
-  key, never from the page.
+- **It cannot claim to be a customer by itself.** A browser saying "I am customer 385" is
+  refused (`IDENTITY_NOT_PERMITTED`). A signed-in customer is named only by a **customer pass**
+  your server signs and writes into the page ([below](#order-questions-from-signed-in-shoppers-optional)),
+  or by your server calling with a secret key.
 - **It brings no dependencies.** One file, no framework, no build step. It draws itself inside a
   Shadow root, so your CSS cannot break it and it cannot leak into your page
   ([ADR-0019](architecture/adr/0019-widget-no-build-step.md)).
@@ -229,6 +230,37 @@ Optional attributes:
 | `data-neura-agent` | *(none — the server chooses)* | Pin the widget to **one** agent. Leave it out and every message is routed to whichever of the merchant's enabled agents declares that it answers that kind of question ([ADR-0031]) — which is what a shop running two agents wants, because a shopper does not know which of your services owns their question. Set it only to pin a page to one service. |
 | `data-neura-title` | `Chat with us` | The panel heading |
 | `data-neura-open` | `false` | Start with the panel open |
+| `data-neura-customer-pass` | *(none: not signed in)* | A signed-in customer's pass, written by your server ([below](#order-questions-from-signed-in-shoppers-optional)) |
+| `data-neura-sign-in-url` | *(none: no link)* | Your sign-in page, as a full `https://` address: a **Sign in** link under the reply that asks a shopper to sign in. A relative `/login` shows no link |
+
+### Order questions from signed-in shoppers (optional)
+
+[ADR-0057](architecture/adr/0057-a-signed-in-shopper-may-ask-about-their-orders-in-the-chat-box.md).
+Without it, every order question in the chat box gets a fixed sentence: sign in, or contact the
+shop. The developer guide's *Optional: order questions* has the same, with PHP and Node.js samples.
+
+1. **The secret.** The shop owner makes it on Shop connection (`fn_cs_…`, shown once). You keep it
+   in a server setting, never in a page: NEURA refuses it there (`CUSTOMER_SECRET_IN_PAGE`).
+   *Make a new secret* stops the old one at once.
+2. **The pass.** Each time your server draws a page for a signed-in customer: a JWT, `HS256`,
+   signed with the whole secret, carrying exactly `sub` (the customer's id **as text**, equal to
+   the `customer_external_id` the bridge sends on their orders; NEURA asks `/orders?customer_id=`
+   with it and keeps only the orders that match), `iat` and `exp` (at most 15 minutes after
+   `iat`; NEURA allows 60 seconds of clock difference). Anything else is refused. Written into the
+   line as `data-neura-customer-pass`, only for a signed-in customer.
+3. **How it travels.** The chat box sends it as `customer_pass` in every message's body, on both
+   transports, never in an address. NEURA checks it on every message, before the turn; a valid
+   pass names the turn's customer, and the AI never sees it. A server call with a secret key may
+   send `customer` or `customer_pass`, not both (400).
+4. **A failing pass never breaks the chat.** The message is treated as not signed in. Every reply
+   says `customer_pass`: `valid`, `expired`, `invalid`, or `null` when none was sent, with
+   `customer_pass_reason` for the developer; the chat box warns once per page in the browser
+   console when it is `invalid`. `sign_in: true` marks the reply that asks the shopper to sign in.
+5. **One conversation, one customer.** A message whose customer differs from its conversation's
+   (another customer, signed out, or newly signed in) starts a new conversation with no history.
+6. **Two rules NEURA cannot check:** send a page that carries a pass with
+   `Cache-Control: private, no-store`, and keep it out of any page cache; and take the customer's
+   id only from the shop's own sign-in session, never from anything in the request.
 
 ---
 
