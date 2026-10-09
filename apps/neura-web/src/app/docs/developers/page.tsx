@@ -841,10 +841,10 @@ const PASS_FIELDS: [string, React.ReactNode][] = [
   [
     "sub",
     <>
-      The signed-in customer&apos;s id, as text: the same id your bridge sends as each order&apos;s{" "}
-      <code>customer_id</code>, because NEURA asks your bridge for this customer&apos;s orders with
-      it. Write it in quotes, <code>&quot;385&quot;</code>, not <code>385</code>: NEURA refuses a
-      number. Up to 128 characters
+      The signed-in customer&apos;s id, as text: the same id your bridge sends as{" "}
+      <code>customer_external_id</code> on their orders, because NEURA keeps only the orders whose
+      id matches. Write it in quotes, <code>&quot;385&quot;</code>, not <code>385</code>: NEURA
+      refuses a number. Up to 128 characters
     </>,
   ],
   [
@@ -1223,8 +1223,8 @@ const TROUBLE: { where: string; rows: [React.ReactNode, React.ReactNode][] }[] =
       [
         <>Signed in, but the assistant finds no orders</>,
         <>
-          {c("sub")} isn&apos;t the id your bridge sends as each order&apos;s {c("customer_id")}.
-          Compare the two for your test customer.
+          {c("sub")} isn&apos;t the id your bridge sends as {c("customer_external_id")} on that
+          customer&apos;s orders. Compare the two for your test customer.
         </>,
       ],
     ],

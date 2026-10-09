@@ -447,8 +447,9 @@ RULES: tuple[Rule, ...] = (
         "a signed-in customer, it makes a fresh pass: a JSON Web Token signed with "
         f"{PASS_ALGORITHM}, using the whole secret, {CUSTOMER_SECRET_PREFIX} included, as the key. "
         'It carries exactly three claims: "sub", the customer\'s id as text ("385", not 385: a '
-        'number is refused), the same id the bridge sends as "customer_id" on that customer\'s '
-        'orders; "iat"; and "exp", at most '
+        'number is refused), the same id the bridge sends as "customer_external_id" on that '
+        "customer's orders (NEURA asks /orders?customer_id= with it, and keeps only the orders "
+        'whose customer_external_id matches); "iat"; and "exp", at most '
         f"{int(MAX_PASS_LIFETIME.total_seconds() // 60)} minutes after iat. Any other claim, or "
         f"any algorithm but {PASS_ALGORITHM}, is refused. Write it into the chat box line as "
         "data-neura-customer-pass, only for a signed-in customer. Optional: "

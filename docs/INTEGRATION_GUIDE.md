@@ -244,7 +244,8 @@ shop. The developer guide's *Optional: order questions* has the same, with PHP a
    *Make a new secret* stops the old one at once.
 2. **The pass.** Each time your server draws a page for a signed-in customer: a JWT, `HS256`,
    signed with the whole secret, carrying exactly `sub` (the customer's id **as text**, equal to
-   the `customer_id` the bridge sends on their orders), `iat` and `exp` (at most 15 minutes after
+   the `customer_external_id` the bridge sends on their orders; NEURA asks `/orders?customer_id=`
+   with it and keeps only the orders that match), `iat` and `exp` (at most 15 minutes after
    `iat`; NEURA allows 60 seconds of clock difference). Anything else is refused. Written into the
    line as `data-neura-customer-pass`, only for a signed-in customer.
 3. **How it travels.** The chat box sends it as `customer_pass` in every message's body, on both

@@ -325,6 +325,23 @@ def test_it_carries_the_security_reviews_two_rules_as_the_guide_does() -> None:
         assert rule in guide, rule
 
 
+def test_it_names_the_order_field_sub_must_equal() -> None:
+    """NEURA keeps an order only if its `customer_external_id` equals the
+    pass's `sub`. `customer_id` is only /orders' search option, so a rule or a
+    guide that calls it the order's field sends a developer looking for a field
+    that does not exist (G84)."""
+    field = "customer_external_id"
+    assert field in _sample("/orders/{id}")
+    text = _customer_pass_rule()
+    assert f'"{field}"' in text
+    assert 'as "customer_id" on' not in text
+    guide = (REPO_ROOT / "apps/neura-web/src/app/docs/developers/page.tsx").read_text()
+    orders = guide.split('id="orders"', 1)[0].split("const PASS_FIELDS", 1)[1]
+    assert field in orders
+    assert 'order&apos;s{" "}\n      <code>customer_id</code>' not in guide
+    assert 'each order&apos;s {c("customer_id")}' not in guide
+
+
 @pytest.mark.parametrize("path", ["/orders", "/orders/{id}", "/customers/{id}"])
 def test_the_order_addresses_point_to_the_customer_pass(path: str) -> None:
     topics = [rule["topic"] for rule in teacher.get_address(path)["rules"]]
