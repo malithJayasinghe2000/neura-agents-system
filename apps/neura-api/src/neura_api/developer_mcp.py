@@ -205,7 +205,8 @@ def build_server(teacher: ModuleType | None = None) -> MCPServer:
     @server.tool(
         title="The rules",
         description="The rules bridges get wrong: the token, /health, paging, statuses, prices, "
-        "customers only, and what to leave out. All of them, or one topic.",
+        "customers only, and what to leave out; and the customer pass for signed-in shoppers' "
+        "order questions. All of them, or one topic.",
         annotations=READ_ONLY,
     )
     def get_rules(

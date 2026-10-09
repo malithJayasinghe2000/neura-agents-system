@@ -26,7 +26,10 @@ the content goes to anyone, and Rule 1's names never appear in it (tested).
 **The rules are the ones real bridges got wrong** on 2026-09-30 and after
 (``docs/CONNECTING_A_NEW_SHOP_LOG.md``): staff sent as customers (G7), a draft
 told to shoppers (G37), a status other than ``"ok"`` (G14), a missing product
-status (G69), webhooks NEURA cannot receive (G66). The owner kept the long
+status (G69), webhooks NEURA cannot receive (G66). One is not about the bridge:
+the customer pass (ADR-0057), tied to the order addresses because a pass is
+useless without them, built from ``check_customer_pass``'s own constants, and
+carrying its security review's two rules as the developer guide does. The owner kept the long
 "fit your data" list off the guide page, where a person reads every line (G4);
 here an AI reads it.
 """
@@ -52,6 +55,11 @@ from neura_adapters.generic.adapter import (
 from neura_adapters.generic.spec import build_openapi
 from neura_adapters.generic.wire import SPEC_VERSION
 from neura_commerce import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from neura_core.tenancy.customer_pass import (
+    CUSTOMER_SECRET_PREFIX,
+    MAX_PASS_LIFETIME,
+    PASS_ALGORITHM,
+)
 from neura_domain import (
     Capability,
     FulfillmentStatus,
@@ -428,6 +436,31 @@ RULES: tuple[Rule, ...] = (
         "dashboard and sends you the full result. When one cause explains every failure, the first "
         "line names it.",
     ),
+    Rule(
+        "customer-pass",
+        "Order questions from signed-in shoppers: the customer pass",
+        "Optional, and built in the shop's pages, not the bridge. Without it, every order question "
+        "in the chat box is answered with a fixed sentence: sign in, or contact the shop. The shop "
+        f"owner makes the customer sign-in secret ({CUSTOMER_SECRET_PREFIX}…) on Shop connection in "
+        "their NEURA dashboard and sends it to you. Keep it in a server setting, for example "
+        "NEURA_CUSTOMER_SECRET, never in a web page. Each time the shop's server draws a page for "
+        "a signed-in customer, it makes a fresh pass: a JSON Web Token signed with "
+        f"{PASS_ALGORITHM}, using the whole secret, {CUSTOMER_SECRET_PREFIX} included, as the key. "
+        'It carries exactly three claims: "sub", the customer\'s id as text ("385", not 385: a '
+        'number is refused), the same id the bridge sends as "customer_id" on that customer\'s '
+        'orders; "iat"; and "exp", at most '
+        f"{int(MAX_PASS_LIFETIME.total_seconds() // 60)} minutes after iat. Any other claim, or "
+        f"any algorithm but {PASS_ALGORITHM}, is refused. Write it into the chat box line as "
+        "data-neura-customer-pass, only for a signed-in customer. Optional: "
+        "data-neura-sign-in-url, the sign-in page as a full https:// address, adds a Sign in link "
+        "for a shopper who is not signed in. Two rules NEURA cannot check for you: take the "
+        "customer's id only from the shop's own sign-in session, never from anything in the "
+        "request, and never build an address that makes a pass on request; and send a page that "
+        "carries a pass with Cache-Control: private, no-store, kept out of any page cache. Each "
+        'chat reply says "customer_pass": "valid", "expired" or "invalid", with '
+        '"customer_pass_reason"; the browser console warns once per page when it is invalid. The '
+        "developer guide's Optional: order questions shows samples in PHP and Node.js.",
+    ),
 )
 
 _RULES_BY_TOPIC = {rule.topic: rule for rule in RULES}
@@ -497,7 +530,7 @@ ADDRESSES: tuple[Address, ...] = (
         (Capability.ORDER_SEARCH,),
         "/orders?email=ana@example.com",
         {"items": [SAMPLE_ORDER], "next_cursor": None},
-        ("token", "paging", "orders", "money"),
+        ("token", "paging", "orders", "money", "customer-pass"),
     ),
     Address(
         PATH_ORDER,
@@ -506,7 +539,7 @@ ADDRESSES: tuple[Address, ...] = (
         (Capability.ORDER_READ,),
         "/orders/5001",
         SAMPLE_ORDER,
-        ("token", "not-found", "orders", "money"),
+        ("token", "not-found", "orders", "money", "customer-pass"),
     ),
     Address(
         PATH_CUSTOMER,
@@ -515,7 +548,7 @@ ADDRESSES: tuple[Address, ...] = (
         (Capability.CUSTOMER_READ,),
         "/customers/77",
         SAMPLE_CUSTOMER,
-        ("token", "not-found", "customers"),
+        ("token", "not-found", "customers", "customer-pass"),
     ),
 )
 
