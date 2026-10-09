@@ -388,3 +388,77 @@ test("a refusal with no words of its own, or nothing at all, reads as the plain 
   assert.strictEqual(widget.errorTextFor(new Error("request_failed")), widget.TRANSPORT_ERROR_MESSAGE);
   assert.strictEqual(widget.errorTextFor(undefined), widget.TRANSPORT_ERROR_MESSAGE);
 });
+
+// ─── ADR-0057: a signed-in customer's pass, and the Sign in link ─────────────
+
+const PASS = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIzODUifQ.c2ln";
+
+function configWith(dataset) {
+  return widget.configFrom(
+    { dataset: Object.assign({ neuraKey: "fn_pk_x" }, dataset), src: "https://api.example.com/v1/widget/widget.js" },
+    null
+  );
+}
+
+test("the pass and the sign-in address come off the script tag", () => {
+  const config = configWith({
+    neuraCustomerPass: PASS,
+    neuraSignInUrl: "https://shop.example/account/login",
+  });
+  assert.strictEqual(config.customerPass, PASS);
+  assert.strictEqual(config.signInUrl, "https://shop.example/account/login");
+});
+
+test("no pass and no sign-in address is the ordinary chat box", () => {
+  const config = configWith({});
+  assert.strictEqual(config.customerPass, "");
+  assert.strictEqual(config.signInUrl, "");
+});
+
+test("a sign-in address that is not a web address is dropped", () => {
+  for (const unsafe of ["javascript:alert(1)", "data:text/html,hi", "/account/login", "ftp://x"]) {
+    assert.strictEqual(configWith({ neuraSignInUrl: unsafe }).signInUrl, "", unsafe);
+  }
+});
+
+test("each message carries the pass, never the address", () => {
+  const config = configWith({ neuraCustomerPass: PASS });
+  assert.deepStrictEqual(widget.messageBody("where is my order?", "cnv_1", config), {
+    message: "where is my order?",
+    conversation_id: "cnv_1",
+    customer_pass: PASS,
+  });
+  // The socket's address holds the public key only (G34): a pass in an
+  // address is written into logs.
+  assert.ok(!widget.endpointFor(config.base, config.agent, "stream").includes(PASS));
+});
+
+test("a message without a pass says nothing about one", () => {
+  const body = widget.messageBody("hi", null, configWith({}));
+  assert.deepStrictEqual(body, { message: "hi" });
+});
+
+test("the Sign in link shows only when the server asks and the shop gave an address", () => {
+  const withUrl = configWith({ neuraSignInUrl: "https://shop.example/login" });
+  assert.strictEqual(widget.signInLinkFor({ sign_in: true }, withUrl), "https://shop.example/login");
+  assert.strictEqual(widget.signInLinkFor({ sign_in: false }, withUrl), "");
+  assert.strictEqual(widget.signInLinkFor({}, withUrl), "");
+  // Words only, as the owner decided, when the line has no address.
+  assert.strictEqual(widget.signInLinkFor({ sign_in: true }, configWith({})), "");
+});
+
+test("a refused pass warns the developer, with the reason and never the pass", () => {
+  const warning = widget.passWarningFor({
+    customer_pass: "invalid",
+    customer_pass_reason: "the signature does not match this shop's customer sign-in secret",
+  });
+  assert.ok(warning.includes("the signature does not match"));
+  assert.ok(warning.includes("customer pass"));
+  assert.ok(!warning.includes(PASS));
+});
+
+test("a good pass, an expired one, or none warns nobody", () => {
+  for (const state of ["valid", "expired", null, undefined]) {
+    assert.strictEqual(widget.passWarningFor({ customer_pass: state }), "", String(state));
+  }
+});
