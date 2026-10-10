@@ -44,8 +44,12 @@ from tests.integration.console_fixtures import drop_shop, make_shop
 
 pytestmark = pytest.mark.integration
 
-#: What a refused link says, whatever was wrong with it.
-NO_LONGER_VALID = "That invite link is no longer valid. Ask the shop's owner to send it again."
+#: What a refused link says, whatever was wrong with it. It sends someone who
+#: already joined to sign in, not back to the owner (G96).
+NO_LONGER_VALID = (
+    "That invite link has already been used, or it no longer works. "
+    "If you already joined, sign in. If not, ask the shop's owner to send it again."
+)
 
 
 @pytest.fixture

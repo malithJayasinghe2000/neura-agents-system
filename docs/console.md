@@ -640,7 +640,8 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
 - **An invite link signs in only a new account (R13, the owner: A).** Someone who already uses NEURA is added and
   signs in as usual, so a forwarded invite cannot open their other shops. The invite page: *"You've joined"*,
   *"You've joined [shop]. Sign in to open it."*, **Sign in**; a link that no longer works: *"That link didn't work"*,
-  *"That invite link is no longer valid. Ask the shop's owner to send it again."*
+  *"That invite link has already been used, or it no longer works. If you already joined, sign in. If not, ask the
+  shop's owner to send it again."*, with **Sign in** (G96: a link works once, so this is usually someone who joined)
 - **The Developer's card** says, as R10's B allowed: *"Shop connection and Help: connects your shop, makes its
   secrets and edits its contact details. Never sees shoppers' chats."*
 - **When the email could not be sent:** *"The invite for [email] is ready, but the email could not be sent. Try Send

@@ -8,7 +8,8 @@
  * - **someone who already has an account** is added, and signs in as usual
  *   (R13): the link must not open their other shops for whoever holds it;
  * - **a link that no longer works**, whatever the reason, gets one message, as
- *   the API gives one answer for all of them.
+ *   the API gives one answer for all of them, and a **Sign in** button: a link
+ *   works once, so the most common case is someone who already joined (G96).
  *
  * The token is read from the address and never stored. `replace`, not `push`,
  * so the credential does not stay in the back button.
@@ -22,7 +23,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Outcome = { kind: "joined" | "failed"; message: string } | null;
 
-const NOT_VALID = "That invite link is no longer valid. Ask the shop's owner to send it again.";
+/** The API's words for a refused link (it gives one answer for every reason). */
+const NOT_VALID =
+  "That invite link has already been used, or it no longer works. If you already joined, sign in. If not, ask the shop's owner to send it again.";
 
 export function AcceptInvite() {
   const params = useSearchParams();
@@ -67,13 +70,11 @@ export function AcceptInvite() {
           <CardDescription>{outcome?.message ?? NOT_VALID}</CardDescription>
         </div>
       </CardHeader>
-      {joined ? (
-        <CardContent>
-          <Button className="h-11 w-full" onClick={() => router.replace("/")}>
-            Sign in
-          </Button>
-        </CardContent>
-      ) : null}
+      <CardContent>
+        <Button className="h-11 w-full" data-invite-sign-in onClick={() => router.replace("/")}>
+          Sign in
+        </Button>
+      </CardContent>
     </Card>
   );
 }

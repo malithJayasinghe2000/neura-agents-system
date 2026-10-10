@@ -2435,6 +2435,17 @@ async def _check_people_and_roles(
             )
             page = await opened(support, f"{base}/people")
             _check("Support: People is refused too", "You can't open this page" in page, failures)
+            # The link works once. Opened again by someone who joined, it sends
+            # them to sign in, not back to the owner (G96).
+            page = await opened(support, links["support"], wait=4)
+            _check(
+                "Support: the used link says to sign in, with a Sign in button",
+                "If you already joined, sign in" in page
+                and bool(
+                    await support.evaluate("!!document.querySelector('[data-invite-sign-in]')")
+                ),
+                failures,
+            )
             await phone(support, True)
             await opened(support, base)
             _check(

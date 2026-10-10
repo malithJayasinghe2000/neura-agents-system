@@ -66,9 +66,12 @@ SENT_MESSAGE = "If that address has an account, a sign-in link is on its way."
 SIGN_IN_SUBJECT = "Your FiveNeurals sign-in link"
 
 #: What a refused invite link says, whatever was wrong with it: unknown, used,
-#: cancelled, sent again, run out, or naming another shop (ADR-0058 §4).
+#: cancelled, sent again, run out, or naming another shop (ADR-0058 §4). It
+#: cannot say which, so it gives both next steps: someone who already joined
+#: signs in (the link works once); anyone else asks the owner (G96).
 INVITE_NO_LONGER_VALID = (
-    "That invite link is no longer valid. Ask the shop's owner to send it again."
+    "That invite link has already been used, or it no longer works. "
+    "If you already joined, sign in. If not, ask the shop's owner to send it again."
 )
 
 
