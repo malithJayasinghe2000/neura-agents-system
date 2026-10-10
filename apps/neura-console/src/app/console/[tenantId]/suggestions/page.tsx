@@ -41,6 +41,8 @@ import {
 import { CategorySelect } from "@/components/suggestions/category-select";
 import { KeepInView } from "@/components/suggestions/keep-in-view";
 import { fromApi, hasSession } from "@/lib/server-api";
+import { PERMISSION, refusal } from "@/lib/roles";
+import { NotAllowed } from "@/components/not-allowed";
 import {
   MODE_FILTERS,
   MODE_LABEL,
@@ -74,6 +76,9 @@ export default async function SuggestionsScreen({
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
+  // A role that does not include this screen sees why, not an error (ADR-0058).
+  const refused = await refusal(tenantId, PERMISSION.suggestions);
+  if (refused) return <NotAllowed refusal={refused} what="Suggestions" />;
   const raw = await searchParams;
   const view: View = {
     q: raw.q ?? "",

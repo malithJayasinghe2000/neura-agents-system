@@ -225,6 +225,9 @@ async def main() -> int:
                 print(f"\n  {BOLD}help — connecting your shop{OFF}")
                 await _check_help(browser, console, seeded, failures)
 
+                print(f"\n  {BOLD}people — each role sees only its screens{OFF}")
+                await _check_people_and_roles(browser, console, seeded, minted.user_id, failures)
+
                 print(f"\n  {BOLD}a shop not connected yet — Home and a passed check{OFF}")
                 await _check_before_connecting(browser, console, minted.user_id, failures)
 
@@ -2324,6 +2327,232 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
             .where(tenant_usage.c.usage_date == today())
             .where(tenant_usage.c.agent_key == SEEDED_AGENT)
         )
+
+
+async def _check_people_and_roles(
+    browser: Chrome, console: str, seeded: dict[str, str], owner: str, failures: list[str]
+) -> None:
+    """People, and what Support and the Developer see (ADR-0058, console.md §3.8).
+
+    Two made-up people are invited **in the database** (`PeopleRepository`), so
+    this check never sends an email, whatever mail server the API has. Their
+    links are opened in two more browsers, each its own person, on desktop and
+    phone. The Owner then changes a role and removes both on the People screen,
+    and every row this made is removed by its email afterwards. The invite
+    *form* is held by `tests/integration/test_console_people.py`, through the API.
+    """
+    from neura_core.identity.people import PeopleRepository
+    from neura_core.identity.schema import login_tokens, membership_invites, memberships, users
+
+    tenant = seeded["tenant"]
+    base = f"{console}/console/{tenant}"
+    suffix = ids.new_id(ids.USER).lower()
+    support_email = f"people-check-support-{suffix}@example.com"
+    developer_email = f"people-check-developer-{suffix}@example.com"
+    db = Database.from_settings()
+
+    async def menu(page: Chrome) -> list[str]:
+        return list(
+            await page.evaluate(
+                "[...document.querySelectorAll('nav[aria-label=Screens] a')]"
+                ".map(a => a.innerText.trim().split('\\n')[0])"
+            )
+        )
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def opened(page: Chrome, url: str, wait: float = 3) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    try:
+        # Desktop first: an earlier section may have left the window at phone
+        # size, where the menu is folded away and the switcher is not read.
+        await phone(browser, False)
+        page = await opened(browser, f"{base}/people")
+        _check("Owner: People is in the menu", "People" in await menu(browser), failures)
+        _check("Owner: the switcher says You're the Owner", "You're the Owner" in page, failures)
+        _check(
+            "Owner: People says who can open the dashboard",
+            "Who can open" in page and "What each role can do" in page,
+            failures,
+        )
+
+        links: dict[str, str] = {}
+        async with db.tenant_session(tenant) as session:
+            people = PeopleRepository(session)
+            for role, email in (("support", support_email), ("developer", developer_email)):
+                sent = await people.invite(
+                    tenant, email=email, role=role, by=owner, console_base_url=console
+                )
+                links[role] = sent.url
+        page = await opened(browser, f"{base}/people")
+        _check(
+            "Owner: two invites wait, each with Send again and Cancel",
+            page.count("Waiting · the link works until") == 2 and page.count("Send again") == 2,
+            failures,
+        )
+
+        async with Chrome(find_chrome()) as support:
+            await phone(support, False)
+            page = await opened(support, links["support"], wait=4)
+            _check(
+                "Support: the link lands in the shop",
+                await support.evaluate("location.pathname") == f"/console/{tenant}",
+                failures,
+            )
+            _check(
+                "Support: the menu is Home, Review, Conversations, Help",
+                await menu(support) == ["Home", "Review", "Conversations", "Help"],
+                failures,
+            )
+            _check(
+                "Support: Home says the mode, with no Go live and no 7 days",
+                ("Practice mode is on" in page or "Your assistant is live" in page)
+                and "Go live" not in page
+                and "Last 7 days" not in page,
+                failures,
+            )
+            page = await opened(support, f"{base}/usage")
+            _check(
+                "Support: Usage says You can't open this page, the role and what it lacks",
+                "You can't open this page" in page
+                and "is Support, which doesn't include Usage and cost" in page,
+                failures,
+            )
+            page = await opened(support, f"{base}/people")
+            _check("Support: People is refused too", "You can't open this page" in page, failures)
+            await phone(support, True)
+            await opened(support, base)
+            _check(
+                "Support: Home on a phone does not scroll sideways", await fits(support), failures
+            )
+
+        async with Chrome(find_chrome()) as developer:
+            await phone(developer, False)
+            page = await opened(developer, links["developer"], wait=4)
+            _check(
+                "Developer: the menu is Home, Shop connection, Help",
+                await menu(developer) == ["Home", "Shop connection", "Help"],
+                failures,
+            )
+            _check(
+                "Developer: Home has no Go live and no Review count",
+                "Go live" not in page and "waiting for your review" not in page,
+                failures,
+            )
+            page = await opened(developer, f"{base}/conversations")
+            _check(
+                "Developer: shoppers' chats are refused, with a way to Shop connection",
+                "is Developer, which doesn't include shoppers' chats" in page
+                and "Go to Shop connection" in page,
+                failures,
+            )
+            page = await opened(developer, f"{base}/shops", wait=4)
+            _check(
+                "Developer: Shop connection opens, the same page as the Owner's",
+                "You can't open this page" not in page and "Your shop's contact details" in page,
+                failures,
+            )
+            await phone(developer, True)
+            await opened(developer, f"{base}/conversations")
+            _check(
+                "Developer: the refusal on a phone does not scroll sideways",
+                await fits(developer),
+                failures,
+            )
+
+        async with db.identity_session() as session:
+            made = {
+                str(row.email): str(row.id)
+                for row in (
+                    await session.execute(
+                        select(users.c.id, users.c.email).where(
+                            users.c.email.in_([support_email, developer_email])
+                        )
+                    )
+                ).all()
+            }
+        page = await opened(browser, f"{base}/people")
+        _check("Owner: both people joined", page.count("Joined") == 2, failures)
+
+        # A role changed on the screen, then read back from the server.
+        await browser.evaluate(
+            f"""(() => {{
+              const box = document.querySelector('[data-role-of="{made[support_email]}"]');
+              Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
+                .set.call(box, 'developer');
+              box.dispatchEvent(new Event('change', {{ bubbles: true }}));
+              return true;
+            }})()"""
+        )
+        await asyncio.sleep(2.5)
+        async with db.tenant_session(tenant) as session:
+            changed = await session.scalar(
+                select(memberships.c.role).where(
+                    memberships.c.tenant_id == tenant,
+                    memberships.c.user_id == made[support_email],
+                    memberships.c.revoked_at.is_(None),
+                )
+            )
+        _check("Owner: a role changed on the screen is saved", changed == "developer", failures)
+
+        await phone(browser, True)
+        await opened(browser, f"{base}/people")
+        _check("Owner: People on a phone does not scroll sideways", await fits(browser), failures)
+        await phone(browser, False)
+        await opened(browser, f"{base}/people")
+
+        for email in (support_email, developer_email):
+            await browser.evaluate(
+                f"document.querySelector('[data-remove=\"{made[email]}\"]').click(), true"
+            )
+            await asyncio.sleep(0.6)
+            asked = str(await browser.evaluate("document.body.innerText"))
+            _check(
+                "Owner: Remove asks first",
+                "can't open this shop's dashboard from the next click" in asked,
+                failures,
+            )
+            await browser.evaluate("document.querySelector('[data-confirm-remove]').click(), true")
+            await asyncio.sleep(2.5)
+        page = str(await browser.evaluate("document.body.innerText"))
+        _check("Owner: after removing both, nobody else is listed", "Joined" not in page, failures)
+    finally:
+        async with db.identity_session() as session:
+            gone = list(
+                (
+                    await session.execute(
+                        select(users.c.id).where(
+                            users.c.email.in_([support_email, developer_email])
+                        )
+                    )
+                ).scalars()
+            )
+        async with db.tenant_session(tenant) as session:
+            await session.execute(delete(memberships).where(memberships.c.user_id.in_(gone)))
+            await session.execute(
+                delete(membership_invites).where(
+                    membership_invites.c.email.in_([support_email, developer_email])
+                )
+            )
+        async with db.identity_session() as session:
+            await session.execute(delete(login_tokens).where(login_tokens.c.user_id.in_(gone)))
+            await session.execute(delete(users).where(users.c.id.in_(gone)))
+        await db.dispose()
 
 
 def _check(what: str, passed: bool, failures: list[str]) -> None:

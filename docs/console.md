@@ -585,7 +585,7 @@ product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), 
 `reason`: `unreachable` · `not_supported`) — `null` unless `?stock=now`, the only value it takes (400 otherwise).
 `ObservedEventRepository.any_views_since` answers *receiving* with an `EXISTS`, never a count.
 
-### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (being built: piece 1 of 4, the permissions, built 2026-10-10)
+### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (People and roles built 2026-10-10; Create an account not built)
 
 [ADR-0058](architecture/adr/0058-a-shops-dashboard-has-people-with-roles-and-a-shop-signs-up.md), accepted 2026-10-10; mockups approved the same day (canvas rows 12 and 13, boards 38 to 45, version 31). **Build from this section and the ADR; do not redesign.**
 
@@ -612,6 +612,7 @@ console serves names no agent (G88).
 
 | Permission | Opens | Owner | Support | Developer |
 |:--|:--|:--|:--|:--|
+| `shop:home:read` | Home's own facts: the mode, and the handed-over count for a role that reads chats (R12) | ✅ | ✅ | ✅ |
 | `shop:conversations:read` | Conversations (CARE's and SELL's chats) | ✅ | ✅ | ❌ |
 | `shop:review:write` | Review: read and grade | ✅ | ✅ | ❌ |
 | `sell:suggestions:write` | Suggestions (SELL's own permission, on SELL's routes) | ✅ | ❌ | ❌ |
@@ -625,9 +626,28 @@ console serves names no agent (G88).
 
 Every dashboard route and its permission is also written, from this table, in `tests/console_permissions.py`; a
 route missing from it, or declaring another permission, fails `tests/unit/test_console_roles.py`, and
-`tests/integration/test_console_roles.py` calls every route as each role and as a stranger. **Not yet:** the dashboard
-still shows every screen to every member (piece 2 hides them), and Home reads Usage, Review, Shop connection, Sold
-out and Suggestions, so Home for Support or a Developer needs piece 2 before anyone has those roles.
+`tests/integration/test_console_roles.py` calls every route as each role and as a stranger.
+
+**As built in piece 2 (2026-10-10; what the build decided is [ADR-0059](architecture/adr/0059-people-and-roles-what-the-build-decided.md)):**
+
+- **The menu per role** comes from `/me`, which gives each membership its `permissions` (the API's own map; the
+  dashboard keeps no copy, `lib/roles.ts`). A screen the role may not open is not listed; opened by a link it shows
+  *You can't open this page* (`components/not-allowed.tsx`) with *Go to* the first screen the role can open.
+  [what] is the screen's name, and *shoppers' chats* for Conversations (board 40).
+- **Home for Support and the Developer (R12, the owner: A):** Support sees the mode as a sentence with no button,
+  replies waiting for review and chats handed to a person; the Developer the same mode sentence, *your shop isn't
+  connected yet* when true, and the Catalogue card. No 7-day numbers, money or *Go live* (`GET /home`).
+- **An invite link signs in only a new account (R13, the owner: A).** Someone who already uses NEURA is added and
+  signs in as usual, so a forwarded invite cannot open their other shops. The invite page: *"You've joined"*,
+  *"You've joined [shop]. Sign in to open it."*, **Sign in**; a link that no longer works: *"That link didn't work"*,
+  *"That invite link is no longer valid. Ask the shop's owner to send it again."*
+- **The Developer's card** says, as R10's B allowed: *"Shop connection and Help: connects your shop, makes its
+  secrets and edits its contact details. Never sees shoppers' chats."*
+- **When the email could not be sent:** *"The invite for [email] is ready, but the email could not be sent. Try Send
+  again in a moment."* Locally, `make invite-link EMAIL=… TENANT=…` prints a new link.
+- **Checked:** `make console-check` signs in as the Owner, invites two people in the database (no email is sent),
+  opens their links in two more browsers, and checks each role's menu, Home and refusals on desktop and phone, then
+  changes a role and removes both on the People screen.
 
 **People** (board 38; Owner only): heading *People*, *"Who can open [shop]'s dashboard, and what each person can do."*, button **Invite a person**. A list: Person (name and email), Role (a choice: Owner, Support, Developer), Status, actions.
 - The Owner's own row: *"[name] (you)"*, role as text; when they are the only Owner: *"The only Owner, so this can't be removed"*, no Remove.

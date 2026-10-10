@@ -32,6 +32,8 @@ import { EyeOff, Info, Sparkles } from "lucide-react";
 import { assistantName, assistantPurpose } from "@/lib/assistants";
 import { dayWords } from "@/lib/days";
 import { fromApi, hasSession } from "@/lib/server-api";
+import { PERMISSION, refusal } from "@/lib/roles";
+import { NotAllowed } from "@/components/not-allowed";
 import { PERIODS, type Cost, type Totals, type Usage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -46,6 +48,9 @@ export default async function UsagePage({
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
+  // A role that does not include this screen sees why, not an error (ADR-0058).
+  const refused = await refusal(tenantId, PERMISSION.usage);
+  if (refused) return <NotAllowed refusal={refused} what="Usage and cost" />;
   const { period = "30d" } = await searchParams;
   const chosen = PERIODS.some((p) => p.key === period) ? period : "30d";
 

@@ -14,6 +14,10 @@ export type Membership = {
   tenant_id: string;
   name: string | null;
   assistants?: string[];
+  /** `owner`, `support` or `developer` (ADR-0058). */
+  role?: string;
+  /** What the role may open, worked out by the API from its own map. */
+  permissions?: string[];
 };
 export type Me = { memberships?: Membership[] };
 

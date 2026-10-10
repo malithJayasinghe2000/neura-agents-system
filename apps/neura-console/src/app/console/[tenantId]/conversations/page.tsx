@@ -28,6 +28,8 @@ import { When } from "@/components/when";
 import { ASSISTANT_CHOICES, assistantName } from "@/lib/assistants";
 import { STATE_FILTERS, questions, type ConversationRow } from "@/lib/conversations";
 import { fromApi, hasSession, type PageMeta } from "@/lib/server-api";
+import { PERMISSION, refusal } from "@/lib/roles";
+import { NotAllowed } from "@/components/not-allowed";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,6 +47,9 @@ export default async function ConversationsPage({
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
+  // A role that does not include this screen sees why, not an error (ADR-0058).
+  const refused = await refusal(tenantId, PERMISSION.conversations);
+  if (refused) return <NotAllowed refusal={refused} what="shoppers' chats" />;
   const { state = "", agent = "", q = "", cursor } = await searchParams;
   const filters: Filters = { state, agent, q: q.trim() };
 

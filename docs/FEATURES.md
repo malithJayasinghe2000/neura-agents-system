@@ -85,16 +85,16 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | Screen | What the owner does there | Status |
 |:--|:--|:--|
 | **Sign in** | A one-time link by email. No password. | ✅ Built |
-| **Home** | One shop at a glance. | ✅ Built |
+| **Home** | One shop at a glance. Support and the Developer see only the parts about their own work, and never money or *Go live*. | ✅ Built |
 | **Conversations** | Read every chat, search, filter by assistant. | ✅ Built |
 | **Review** | Grade replies — the ones held in practice mode, and sent ones. | ✅ Built |
 | **Suggestions** (NEURA-SELL) | See and choose what shows with each product. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Sold out** (NEURA-SELL) | Sold-out products people kept looking at. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Usage and cost** | Chats, AI use and its cost, by assistant. | ✅ Built |
-| **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words, with any *things to look at*, such as products that don't say they are on sale) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. **The shop's contact details** (email, phone), named to a shopper the assistant cannot help, with the exact sentence they read. **The secret for order questions from signed-in shoppers** (shown once, *make a new one*), which the owner gives their developer. | ✅ Built (ADR-0052, ADR-0055, ADR-0057) |
+| **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words, with any *things to look at*, such as products that don't say they are on sale) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. **The shop's contact details** (email, phone), named to a shopper the assistant cannot help, with the exact sentence they read. **The secret for order questions from signed-in shoppers** (shown once, *make a new one*), which the owner gives their developer. **Each secret says who made it.** The shop's developer, invited as Developer, sees and does everything on this page, except *Go live*. | ✅ Built (ADR-0052, ADR-0055, ADR-0057) |
 | **Help** | *Connecting your shop*, step by step, and what to send your developer: the guide for developers, the address for an AI coding tool, and the chat box line. | ✅ Built |
 | Settings and keys (the owner makes the chat box key) | — | ⬜ Not designed (needs an ADR) |
-| **People and roles** (Owner, Support, Developer; invite by email) | The owner adds people to the shop's dashboard, each seeing only what their role allows; a developer never sees shoppers' chats. | ⬜ Decided, not built (ADR-0058). Being built: the check of each role on every request is built (2026-10-10); inviting people, the People screen and the menu per role are not, so a shop still has only its owner |
+| **People and roles** (Owner, Support, Developer; invite by email) | The owner adds people to the shop's dashboard by email, each seeing only what their role allows, checked on every click; a developer never sees shoppers' chats. The owner changes a role or removes a person at any time, and a shop always keeps one Owner. Every change is kept in the shop's record, with who did it. | ✅ Built (ADR-0058, ADR-0059) |
 | **Create an account** (sign up, then FiveNeurals approves) | A new shop owner signs up with their email, shop name and website, and waits for approval; nothing runs until then. | ⬜ Decided, not built (ADR-0058) |
 
 ---
@@ -103,6 +103,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 
 | Feature | What it does | Status | Where | Source |
 |:--|:--|:--|:--|:--|
+| **A developer account** | The shop owner invites the developer by email, as Developer. The developer then opens Shop connection and Help themselves: makes the shop token and the sign-in secret and puts them straight into the shop's settings, presses Check and Connect. Never shoppers' chats, Review, Usage or *Go live*. | ✅ Built | Dashboard | `console_people.py`, ADR-0058, ADR-0059 |
 | **Help for AI coding tools (MCP)** | The developer adds one NEURA address to their AI coding tool. The tool can then ask what each of the nine addresses must answer, see a working sample for each, and read the rules bridges get wrong, and help write the bridge. Since 2026-10-09 the rules also teach the **customer pass** a shop's pages make for order questions from signed-in shoppers (ADR-0057), with the same two safety rules as the developer guide. It only teaches: it never calls a shop, needs no account and no token, and is limited per visitor. Checking a bridge stays the shop owner's, in the dashboard. The address is in the developer guide, and on the shop owner's Help, which copies it for the developer. | ✅ Built | For developers | `developer_mcp.py`, `generic/teacher.py`, ADR-0053 |
 
 ---

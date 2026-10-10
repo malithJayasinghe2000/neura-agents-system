@@ -30,6 +30,8 @@ import { StateBadge } from "@/components/shop/state-badge";
 import { TokenNote, hasToken } from "@/components/shop/token-note";
 import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
+import { PERMISSION, refusal } from "@/lib/roles";
+import { NotAllowed } from "@/components/not-allowed";
 import { assistantName } from "@/lib/assistants";
 import {
   HELD_OUTCOME,
@@ -61,6 +63,9 @@ export default async function ChatPage({
   if (!(await hasSession())) redirect("/");
 
   const { tenantId, conversationId } = await params;
+  // A role that does not include this screen sees why, not an error (ADR-0058).
+  const refused = await refusal(tenantId, PERMISSION.conversations);
+  if (refused) return <NotAllowed refusal={refused} what="shoppers' chats" />;
   const shop = encodeURIComponent(tenantId);
   const [result, me] = await Promise.all([
     fromApi<Transcript>(`/shops/${shop}/conversations/${encodeURIComponent(conversationId)}`),

@@ -34,6 +34,7 @@ import {
   PackageX,
   Plug,
   ShoppingBag,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -42,13 +43,31 @@ import { SignOutButton } from "@/components/sign-out-button";
 import { readScorecard } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type Item = { href: string; label: string; icon: LucideIcon; waiting?: number };
+type Item = { href: string; label: string; icon: LucideIcon; waiting?: number; shown: boolean };
+
+/** Which screens the person's role may open, by name (`lib/roles.ts`). */
+type Opens = Record<
+  | "home"
+  | "conversations"
+  | "review"
+  | "suggestions"
+  | "soldOut"
+  | "connection"
+  | "connect"
+  | "contact"
+  | "mode"
+  | "usage"
+  | "people",
+  boolean
+>;
 
 export function ShopSidebar({
   tenantId,
   shopName,
   waiting,
   sell,
+  role,
+  opens,
 }: {
   tenantId: string;
   shopName: string;
@@ -56,6 +75,10 @@ export function ShopSidebar({
   sell: boolean;
   /** Replies waiting in Review. `null` when it could not be read — then no badge, not a 0. */
   waiting: number | null;
+  /** *Owner*, *Support* or *Developer*, for *You're the …* (ADR-0058). Empty: unknown. */
+  role: string;
+  /** What the role may open. A screen it may not open is not listed (the API still refuses it). */
+  opens: Opens;
 }) {
   const pathname = usePathname();
   const search = useSearchParams().toString();
@@ -72,7 +95,9 @@ export function ShopSidebar({
   }
 
   // And on every move — another screen, or another reply opened in Review.
+  // Not for a role without Review: the count would be a refusal.
   useEffect(() => {
+    if (!opens.review) return;
     let current = true;
     readScorecard(tenantId)
       .then((card) => {
@@ -82,24 +107,38 @@ export function ShopSidebar({
     return () => {
       current = false;
     };
-  }, [tenantId, pathname, search]);
+  }, [tenantId, pathname, search, opens.review]);
 
   const everyday: Item[] = [
-    { href: base, label: "Home", icon: House },
-    { href: `${base}/review`, label: "Review", icon: ClipboardCheck, waiting: count ?? 0 },
-    { href: `${base}/conversations`, label: "Conversations", icon: MessageSquare },
-    ...(sell
-      ? [
-          { href: `${base}/suggestions`, label: "Suggestions", icon: ShoppingBag },
-          { href: `${base}/sold-out`, label: "Sold out", icon: PackageX },
-        ]
-      : []),
-  ];
+    { href: base, label: "Home", icon: House, shown: true },
+    {
+      href: `${base}/review`,
+      label: "Review",
+      icon: ClipboardCheck,
+      waiting: count ?? 0,
+      shown: opens.review,
+    },
+    {
+      href: `${base}/conversations`,
+      label: "Conversations",
+      icon: MessageSquare,
+      shown: opens.conversations,
+    },
+    {
+      href: `${base}/suggestions`,
+      label: "Suggestions",
+      icon: ShoppingBag,
+      shown: sell && opens.suggestions,
+    },
+    { href: `${base}/sold-out`, label: "Sold out", icon: PackageX, shown: sell && opens.soldOut },
+  ].filter((item) => item.shown);
   const setup: Item[] = [
-    { href: `${base}/shops`, label: "Shop connection", icon: Plug },
-    { href: `${base}/usage`, label: "Usage and cost", icon: BarChart3 },
-    { href: `${base}/help`, label: "Help", icon: CircleQuestionMark },
-  ];
+    { href: `${base}/shops`, label: "Shop connection", icon: Plug, shown: opens.connection },
+    { href: `${base}/usage`, label: "Usage and cost", icon: BarChart3, shown: opens.usage },
+    // Who can open the shop: the Owner's alone (ADR-0058 §4).
+    { href: `${base}/people`, label: "People", icon: Users, shown: opens.people },
+    { href: `${base}/help`, label: "Help", icon: CircleQuestionMark, shown: true },
+  ].filter((item) => item.shown);
 
   // Home is the shop's own address, so it is current only on exactly that
   // address — otherwise it would be lit on every screen beneath it.
@@ -140,7 +179,9 @@ export function ShopSidebar({
           >
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold">{shopName}</span>
-              <span className="block text-xs text-muted-foreground">Switch shop</span>
+              <span className="block text-xs text-muted-foreground" data-your-role>
+                {role ? `You're the ${role} · Switch shop` : "Switch shop"}
+              </span>
             </span>
             <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           </Link>

@@ -187,7 +187,9 @@ export async function saveContact(
 const shopPath = (tenantId: string) => `/shops/${encodeURIComponent(tenantId)}`;
 
 /** Make the shop token. Returned **once**; nothing reads it back. */
-export function makeShopToken(tenantId: string): Promise<{ token: string; made_at: string }> {
+export function makeShopToken(
+  tenantId: string,
+): Promise<{ token: string; made_at: string; made_by?: MadeBy }> {
   return call(`${shopPath(tenantId)}/token`, { method: "POST" });
 }
 
@@ -195,20 +197,92 @@ export function makeShopToken(tenantId: string): Promise<{ token: string; made_a
 export function replaceShopToken(
   tenantId: string,
   storeId: string,
-): Promise<{ token: string; made_at: string }> {
+): Promise<{ token: string; made_at: string; made_by?: MadeBy }> {
   return call(`${shopPath(tenantId)}/store/${encodeURIComponent(storeId)}/token`, {
     method: "POST",
   });
 }
 
-/** When the customer sign-in secret was made (ADR-0057 §3). Never the secret. */
-export type CustomerSecretView = { made_at: string | null };
+/** Who made a secret: a name (or an email when they never gave one) and their
+ * role now, `null` when they are no longer in the shop (ADR-0058 §6). */
+export type MadeBy = { name: string; role: string | null } | null;
+
+/** When the customer sign-in secret was made, and by whom (ADR-0057 §3). Never the secret. */
+export type CustomerSecretView = { made_at: string | null; made_by?: MadeBy };
 
 /** Make the customer sign-in secret, or a new one. Returned **once**. */
 export function makeCustomerSecret(
   tenantId: string,
-): Promise<{ secret: string; made_at: string }> {
+): Promise<{ secret: string; made_at: string; made_by?: MadeBy }> {
   return call(`${shopPath(tenantId)}/customer-secret`, { method: "POST" });
+}
+
+// People (ADR-0058 §4): the Owner's alone. The invite link is never in an
+// answer; it goes by email only.
+
+export type Invite = {
+  id: string;
+  email: string;
+  role: string;
+  sent_at: string;
+  expires_at: string;
+  expired: boolean;
+};
+
+/** Invite an email with a role. `emailed`: whether the email could be sent. */
+export function sendInvite(
+  tenantId: string,
+  email: string,
+  role: string,
+): Promise<{ invite: Invite; emailed: boolean }> {
+  return call(`${shopPath(tenantId)}/invites`, {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+/** A new link for a waiting invite; the old one stops. */
+export function sendInviteAgain(
+  tenantId: string,
+  inviteId: string,
+): Promise<{ invite: Invite; emailed: boolean }> {
+  return call(`${shopPath(tenantId)}/invites/${encodeURIComponent(inviteId)}/send-again`, {
+    method: "POST",
+  });
+}
+
+export function cancelInvite(tenantId: string, inviteId: string): Promise<{ cancelled: boolean }> {
+  return call(`${shopPath(tenantId)}/invites/${encodeURIComponent(inviteId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function changeRole(
+  tenantId: string,
+  userId: string,
+  role: string,
+): Promise<{ user_id: string; role: string }> {
+  return call(`${shopPath(tenantId)}/people/${encodeURIComponent(userId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function removePerson(tenantId: string, userId: string): Promise<{ removed: boolean }> {
+  return call(`${shopPath(tenantId)}/people/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Use an invite link. A new account is signed in by the response's cookie; an
+ * account that already exists is added and signs in as usual (R13).
+ */
+export function acceptInvite(
+  shop: string,
+  token: string,
+): Promise<{ signed_in: boolean; joined?: boolean; tenant_id?: string; message?: string }> {
+  return call("/auth/accept-invite", { method: "POST", body: JSON.stringify({ shop, token }) });
 }
 
 /** Start the full check: of a typed address, or of a connection. Returns at once. */
