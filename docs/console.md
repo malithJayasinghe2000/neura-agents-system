@@ -585,6 +585,42 @@ product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), 
 `reason`: `unreachable` · `not_supported`) — `null` unless `?stock=now`, the only value it takes (400 otherwise).
 `ObservedEventRepository.any_views_since` answers *receiving* with an `EXISTS`, never a count.
 
+### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (not built)
+
+[ADR-0058](architecture/adr/0058-a-shops-dashboard-has-people-with-roles-and-a-shop-signs-up.md), accepted 2026-10-10; mockups approved the same day (canvas rows 12 and 13, boards 38 to 45, version 31). **Build from this section and the ADR; do not redesign.**
+
+**Roles (checked in code, per shop, on every request; the dashboard only hides what the API refuses):**
+
+| Role | Menu | Can | Cannot |
+|:--|:--|:--|:--|
+| **Owner** | everything, plus **People** under Setup | everything | |
+| **Support** | Home, Review, Conversations, Help | read chats (CARE and SELL), grade replies | Suggestions, Sold out, Shop connection, Usage, People, *Go live* |
+| **Developer** | Home, Shop connection, Help | **all of Shop connection, the same page as the Owner's** (setup list, Check, Connect, Sync now, the shop token, the sign-in secret, the contact details: R10, the owner's B) | shoppers' chats, Review, Suggestions, Sold out, Usage, People, *Go live* |
+
+- **The shop switcher** says the role: *"You're the Owner · Switch shop"* (Support, Developer likewise).
+- **A page the role cannot open** (a link, a typed address): *"You can't open this page"*, *"Your role in [shop] is [role], which doesn't include [what]. If you need it, ask the shop's owner."*, and a link to a page the role can open. The API answers 403 for a member without the permission; **404 for a stranger**, as today.
+- **Home** shows *Go live* / back to practice to the Owner only.
+- **Shop connection's secrets** say who made them: *"Made Oct 10 by Nimal Perera (Developer)."*
+
+**People** (board 38; Owner only): heading *People*, *"Who can open [shop]'s dashboard, and what each person can do."*, button **Invite a person**. A list: Person (name and email), Role (a choice: Owner, Support, Developer), Status, actions.
+- The Owner's own row: *"[name] (you)"*, role as text; when they are the only Owner: *"The only Owner, so this can't be removed"*, no Remove.
+- A member: the role choice, *"Joined [date]"*, **Remove**, which asks first: *"Remove [name]?"* *"[name] can't open this shop's dashboard from the next click. Everything done before stays in the record. You can invite them again later."* **Remove** / **Keep**.
+- An invite: the email, *"Invite sent [date]"*, *"Waiting · the link works until [date]"*, **Send again**, **Cancel**.
+- **What each role can do**, three cards: **Owner** *"Everything, including inviting and removing people. A shop always keeps at least one Owner."* **Support** *"Reads chats and grades replies in Review. Can't open settings, keys, Usage, Suggestions or Sold out."* **Developer** *"Shop connection and Help: connects your shop and makes its secrets. Never sees shoppers' chats."* (Since R10's B the Developer also edits the contact details; the card's words may say so at the build, plainly.)
+- Under it: *"Every invite, role change and removal is kept in your shop's record, with who did it."*
+
+**Invite a person** (board 39): a box *Invite a person*: *"Their email address"*; *"Their role"* as three choices, each with its card's words; Owner's: *"Everything you can do, including removing you. Choose it only for a partner."*; *"We email them a link. It works once, for 7 days. They see only what their role allows, and you can change it or remove them at any time."*; **Send invite** / **Cancel**. After: *"Invite sent to [email] as [role]. The link works for 7 days."*, and the invite in the list.
+
+**Phone** (board 41): each person is a card; **Invite a person** full width at the top; buttons 44px.
+
+**Sign in** (board 42): today's card, and under it *"New to NEURA? Create an account"*.
+
+**Create an account** (board 43): the sign-in card's look. *Create an account*, *"Tell us about your shop. We'll email you a link to confirm. No password to remember."*; fields *"Your email address"*, *"Your shop's name"*, *"Your shop's website"*; **Create my account**; *"FiveNeurals looks at every new shop before its assistant starts."*; under the card *"Already have an account? Sign in"*. After: *Check your email*, *"A link is on its way to [email]. It works once and expires in 15 minutes."*, **Use a different address**. **The same words whether or not the email already has an account.**
+
+**Waiting for approval** (board 44; the only screen of a waiting shop): *"[shop] is waiting for approval"*, *"Thanks for signing up. FiveNeurals looks at every new shop before its assistant starts. We'll email [email] when it's ready."*, *"Until then nothing runs and nothing costs anything."*, a link *"While you wait: the guide for shop owners"*, **Sign out**. No time is promised.
+
+**FiveNeurals approves** with a command for now (`make tenant-approve`, and a refusal), the admin dashboard later (the log's *Admin needs*, AD1 to AD6).
+
 ## 4. Identity — the part that is genuinely new
 
 ### 4.1 Three tables

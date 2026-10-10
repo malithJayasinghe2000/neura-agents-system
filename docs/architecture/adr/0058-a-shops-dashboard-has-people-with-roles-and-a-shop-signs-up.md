@@ -72,7 +72,7 @@ The first permissions, from today's screens *(Claude; the exact names are fixed 
 | Suggestions (choose) | `sell:suggestions:write` | ✅ | ❌ | ❌ |
 | Sold out | `sell:sold_out:read` | ✅ | ❌ | ❌ |
 | Shop connection: read, Check, tokens and secrets | `shop:connection:write` | ✅ | ❌ | ✅ |
-| Shop connection: Connect, contact details | `shop:connect:write`, `shop:contact:write` | ✅ | ❌ | settled at the mockup (R10) |
+| Shop connection: Connect, contact details | `shop:connect:write`, `shop:contact:write` | ✅ | ❌ | ✅ (settled at the mockup, the owner, 2026-10-10: B) |
 | *Go live* and back to practice | `shop:mode:write` | ✅ | ❌ | ❌ |
 | Usage and cost | `usage:read` | ✅ | ❌ | ❌ |
 | People: invite, change a role, remove | `people:write` | ✅ | ❌ | ❌ |
@@ -113,7 +113,8 @@ Shop B for anyone. This is how `users` and `memberships` already work.
 
 The Developer may make the **shop token** and the **customer sign-in secret**, and put them straight into the shop's
 settings, so **a secret never travels by email or chat**. Each make is audited with who made it, and Shop connection
-shows the owner *Made [date] by [name]* *(Claude)*. With D3, the Developer presses **Check**. **Go live** stays the
+shows the owner *Made [date] by [name]* *(Claude)*. With D3, the Developer presses **Check**; settled at the mockup (the owner, 2026-10-10: B), the Developer
+also presses **Connect** and edits the **contact details**: Shop connection is the same page for both. **Go live** stays the
 Owner's. When this is built, the developer guide's *Shop owner* lines for Check (step 3) become *You* (D3).
 
 ### 7. Signing up (R7)
