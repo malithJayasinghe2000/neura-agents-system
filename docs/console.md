@@ -704,6 +704,9 @@ The last two steps are the ones that already exist and are already trusted. **Th
 2. **The tenant comes from the membership, never from the request.** A `?tenant=` parameter the browser can edit is not authorisation, it is a suggestion. `AGENTS.md` rule 3.
 3. **Login tokens are single-use, hashed at rest, and consumed in the same transaction that creates the session.**
 4. **Sign-in reveals nothing about who has an account.**
+5. **Asking for a sign-in link is limited**, per network address and per email, over an hour (G97, 2026-10-10;
+   `RATE_LIMIT_SIGN_IN_*`, guesses until real use). Checked before anything is looked up, so the limit, too, says
+   nothing about who has an account; neither the address nor the email is stored, only keyed hashes that expire.
 
 ---
 

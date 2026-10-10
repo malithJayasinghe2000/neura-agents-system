@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     #: real use (CLAUDE.md §4): an AI tool building a bridge asks a few dozen
     #: questions, not hundreds a minute.
     rate_limit_developer_mcp: int = Field(default=60, alias="RATE_LIMIT_DEVELOPER_MCP")
+    #: Asking for a sign-in link (G97), counted over an hour per network address
+    #: and per email. **Guesses**, to be set from real use (CLAUDE.md §4): a person
+    #: asks for a link or two; an office shares one address. Without them anyone
+    #: could make NEURA send any number of emails to one inbox.
+    rate_limit_sign_in_window_s: int = Field(default=3600, alias="RATE_LIMIT_SIGN_IN_WINDOW_S")
+    rate_limit_sign_in_per_client: int = Field(default=20, alias="RATE_LIMIT_SIGN_IN_PER_CLIENT")
+    rate_limit_sign_in_per_email: int = Field(default=5, alias="RATE_LIMIT_SIGN_IN_PER_EMAIL")
 
     #: How many proxies sit in front of this deployment. **Zero means
     #: ``X-Forwarded-For`` is ignored entirely**, which is the only safe default:

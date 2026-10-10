@@ -37,9 +37,10 @@ from fastapi import APIRouter, Cookie, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
-from neura_api.dependencies import DatabaseDep
+from neura_api.dependencies import DatabaseDep, client_address
 from neura_api.envelopes import envelope
-from neura_core import Database, get_logger, get_settings
+from neura_api.ratelimit import RateLimiter, anonymous_client
+from neura_core import Database, RateLimitError, get_logger, get_settings
 from neura_core.email import Mailer
 from neura_core.identity import (
     COOKIE_NAME,
@@ -64,6 +65,11 @@ router = APIRouter(prefix="/console", tags=["console"])
 SENT_MESSAGE = "If that address has an account, a sign-in link is on its way."
 
 SIGN_IN_SUBJECT = "Your FiveNeurals sign-in link"
+
+#: What someone who asked for too many links is told (G97). The same words
+#: whether or not the email has an account: the limit counts the email as typed,
+#: never what it belongs to.
+SIGN_IN_LIMITED = "Too many sign-in links were asked for. Please wait a while, then try again."
 
 #: What a refused invite link says, whatever was wrong with it: unknown, used,
 #: cancelled, sent again, run out, or naming another shop (ADR-0058 §4). It
@@ -119,6 +125,7 @@ class AcceptInvite(BaseModel):
 @router.post("/auth/request-link", summary="Email a one-time sign-in link")
 async def request_link(body: RequestLink, request: Request, db: DatabaseDep) -> dict[str, object]:
     settings = get_settings()
+    await _limit_sign_in(request, str(body.email))
 
     # No `app.tenant_id` and no user id: the person has proved nothing yet, and
     # this call is what begins to change that. The transaction can see `users`
@@ -301,6 +308,34 @@ async def sign_out(response: Response) -> dict[str, object]:
     """
     response.delete_cookie(COOKIE_NAME, path="/", secure=True, httponly=True, samesite="lax")
     return envelope({"signed_out": True})
+
+
+async def _limit_sign_in(request: Request, email: str) -> None:
+    """At most so many links an hour per network address and per email (G97).
+
+    Checked **before** anything is looked up, so the answer cannot depend on
+    whether the email has an account. Both are counted as keyed hashes that
+    expire with their hour (`ratelimit.anonymous_client`): neither the address
+    nor the email is stored. Without Redis the limiter lets the request through
+    and logs that it did, as every limit here does.
+    """
+    settings = get_settings()
+    limiter = RateLimiter(
+        getattr(request.app.state, "redis", None), window_s=settings.rate_limit_sign_in_window_s
+    )
+    verdict = await limiter.check(
+        [
+            anonymous_client(
+                "sign_in_client", client_address(request), settings.rate_limit_sign_in_per_client
+            ),
+            anonymous_client(
+                "sign_in_email", email.strip().lower(), settings.rate_limit_sign_in_per_email
+            ),
+        ]
+    )
+    if not verdict.allowed:
+        log.info("sign_in_rate_limited", subject=verdict.subject)
+        raise RateLimitError(SIGN_IN_LIMITED, details={"retry_after": verdict.retry_after})
 
 
 def _set_session_cookie(response: Response, value: str) -> None:
