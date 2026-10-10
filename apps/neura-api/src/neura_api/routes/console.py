@@ -166,16 +166,32 @@ async def verify_link(
     return envelope({"signed_in": True})
 
 
-@router.post("/auth/accept-invite", summary="Use an invite link: join the shop and sign in")
+@router.post("/auth/accept-invite", summary="Use an invite link: join the shop")
 async def accept_invite(
-    body: AcceptInvite, response: Response, request: Request, db: DatabaseDep
+    body: AcceptInvite,
+    response: Response,
+    request: Request,
+    db: DatabaseDep,
+    session_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> dict[str, object]:
     """ADR-0058 §4: the link adds the person to **that shop only**, with the
-    invite's role, making their account when the email has none, and signs them
-    in. Used once; the audit entry is written in the same transaction."""
+    invite's role, making their account when the email has none. Used once; the
+    audit entry is written in the same transaction.
+
+    **It signs in only a brand-new account** (R13, the owner, 2026-10-10;
+    ADR-0059). A session opens every shop a person is in, so for someone who
+    already has an account the link would be a 7-day sign-in to their other shops
+    too, for whoever the email was forwarded to. So they are added, and sign in
+    as usual; someone already signed in as that very person goes straight in,
+    and a browser signed in as somebody else is left as it is. A new account is
+    signed in wherever the link is opened: the link is its only way in.
+    """
     async with db.tenant_session(body.shop) as session:
         joined = await PeopleRepository(session).accept(body.shop, token=body.token)
+        shop_name = None
         if joined is not None:
+            tenant = await TenantRepository(session).get(body.shop)
+            shop_name = tenant.name if tenant else None
             await PostgresAuditLog(session).record(
                 AuditEntry(
                     tenant_id=body.shop,
@@ -194,8 +210,20 @@ async def accept_invite(
         log.info("console_invite_failed", ip=_peer(request))
         return envelope({"signed_in": False, "message": INVITE_NO_LONGER_VALID})
 
-    _set_session_cookie(response, issue(joined.user_id, get_settings().secret_key))
     log.info("console_invite_accepted", user_id=joined.user_id, tenant_id=body.shop)
+    secret = get_settings().secret_key
+    already = verify(session_cookie or "", secret)
+    if joined.made_account:
+        _set_session_cookie(response, issue(joined.user_id, secret))
+    elif already is None or already.user_id != joined.user_id:
+        return envelope(
+            {
+                "signed_in": False,
+                "joined": True,
+                "tenant_id": body.shop,
+                "message": f"You've joined {shop_name or 'the shop'}. Sign in to open it.",
+            }
+        )
     return envelope({"signed_in": True, "tenant_id": body.shop, "user_id": joined.user_id})
 
 

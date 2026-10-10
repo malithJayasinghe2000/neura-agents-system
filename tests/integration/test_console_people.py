@@ -405,8 +405,64 @@ class TestTheLink:
         assert await active_role(db, shop.tenant, user) is None
 
         invite(client, shop, email, DEVELOPER)
-        assert accept(client, *link_in(mail[-1])).json()["data"]["user_id"] == user
+        # Their account exists now, so the link adds the shop and does not sign
+        # them in (R13).
+        assert accept(client, *link_in(mail[-1])).json()["data"]["joined"] is True
         assert await active_role(db, shop.tenant, user) == DEVELOPER
+
+    async def test_someone_who_already_has_an_account_is_added_but_not_signed_in(
+        self,
+        client: TestClient,
+        db: Database,
+        shop: Shop,
+        other_shop: Shop,
+        mail: list[dict[str, str]],
+    ) -> None:
+        """R13: Amali works in Shop X; Shop Y's invite, if forwarded, must not open
+        Shop X. So the link adds Shop Y, and she signs in as usual."""
+        invite(client, shop, other_shop.owner_email, SUPPORT)
+        accepted = accept(client, *link_in(mail[-1]))
+
+        assert accepted.json()["data"] == {
+            "signed_in": False,
+            "joined": True,
+            "tenant_id": shop.tenant,
+            "message": "You've joined People Test Shop. Sign in to open it.",
+        }
+        assert COOKIE_NAME not in accepted.cookies
+        assert await active_role(db, shop.tenant, other_shop.owner) == SUPPORT
+
+        me = client.get("/v1/console/me", cookies=signed_in(other_shop.owner)).json()["data"]
+        assert {m["tenant_id"] for m in me["memberships"]} == {shop.tenant, other_shop.tenant}
+
+    async def test_signed_in_already_as_that_person_goes_straight_in(
+        self, client: TestClient, shop: Shop, other_shop: Shop, mail: list[dict[str, str]]
+    ) -> None:
+        invite(client, shop, other_shop.owner_email, DEVELOPER)
+        _, token = link_in(mail[-1])
+        accepted = client.post(
+            "/v1/console/auth/accept-invite",
+            json={"shop": shop.tenant, "token": token},
+            cookies=signed_in(other_shop.owner),
+        )
+        assert accepted.json()["data"]["signed_in"] is True
+        assert accepted.json()["data"]["tenant_id"] == shop.tenant
+
+    async def test_signed_in_as_someone_else_is_not_switched(
+        self, client: TestClient, shop: Shop, other_shop: Shop, mail: list[dict[str, str]]
+    ) -> None:
+        """A link for Amali, opened where Pat is signed in, adds Amali and leaves
+        Pat signed in as Pat: no cookie is written over Pat's."""
+        invite(client, shop, other_shop.owner_email, DEVELOPER)
+        _, token = link_in(mail[-1])
+        accepted = client.post(
+            "/v1/console/auth/accept-invite",
+            json={"shop": shop.tenant, "token": token},
+            cookies=signed_in(shop.owner),
+        )
+        assert accepted.json()["data"]["signed_in"] is False
+        assert accepted.json()["data"]["joined"] is True
+        assert COOKIE_NAME not in accepted.cookies
 
 
 class TestRolesAndRemoval:

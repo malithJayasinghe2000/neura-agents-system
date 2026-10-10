@@ -1,6 +1,6 @@
 # ADR-0058 · A Shop's Dashboard Has People With Roles, And A Shop Signs Up
 
-**Status:** **Accepted** · owner decision 2026-10-10 (*"A"* to Claude's nine additions) · not built · owner decisions 2026-10-09 and 2026-10-10, a design session, R1 to R11
+**Status:** **Accepted** · owner decision 2026-10-10 (*"A"* to Claude's nine additions) · **§1 to §6 built 2026-10-10**; what the build decided, and §4 amended for an account that already exists, is [ADR-0059](0059-people-and-roles-what-the-build-decided.md); §7 (sign up) not built · owner decisions 2026-10-09 and 2026-10-10, a design session, R1 to R11
 ([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *Roles*). Everything marked
 *(Claude)* was Claude's proposal, accepted by the owner with the rest · **Date:** 2026-10-10 · **Supersedes:**
 [ADR-0026](0026-the-merchant-console-and-the-first-human-in-the-system.md) §5 (*one role in v1: owner*), and nothing
