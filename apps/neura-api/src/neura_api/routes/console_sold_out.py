@@ -34,15 +34,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.routes.console_shop import _close
 from neura_commerce.identity import EntityType
 from neura_commerce.sync.schema import synced_entities
 from neura_core import ValidationError, get_logger, get_settings
+from neura_core.identity.roles import SOLD_OUT_READ
 from neura_core.observation import ObservedEventRepository, SoldOutDemand
 from neura_core.tenancy import TenantRepository
 from neura_domain import Capability, InventoryLevel
@@ -84,10 +85,9 @@ class StockNow:
 @router.get("/sold-out", summary="Products viewed while they could not be bought")
 async def sold_out(
     request: Request,
-    tenant_id: str,
+    actor: Annotated[ConsoleActor, Depends(Permitted(SOLD_OUT_READ))],
     stock: Annotated[str | None, Query(max_length=16)] = None,
 ) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
     if stock not in (None, "", STOCK_NOW):
         raise ValidationError(
             "Unknown stock parameter.", details={"stock": stock, "expected": [STOCK_NOW]}

@@ -585,7 +585,7 @@ product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), 
 `reason`: `unreachable` · `not_supported`) — `null` unless `?stock=now`, the only value it takes (400 otherwise).
 `ObservedEventRepository.any_views_since` answers *receiving* with an `EXISTS`, never a count.
 
-### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (not built)
+### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (being built: piece 1 of 4, the permissions, built 2026-10-10)
 
 [ADR-0058](architecture/adr/0058-a-shops-dashboard-has-people-with-roles-and-a-shop-signs-up.md), accepted 2026-10-10; mockups approved the same day (canvas rows 12 and 13, boards 38 to 45, version 31). **Build from this section and the ADR; do not redesign.**
 
@@ -601,6 +601,33 @@ product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), 
 - **A page the role cannot open** (a link, a typed address): *"You can't open this page"*, *"Your role in [shop] is [role], which doesn't include [what]. If you need it, ask the shop's owner."*, and a link to a page the role can open. The API answers 403 for a member without the permission; **404 for a stranger**, as today.
 - **Home** shows *Go live* / back to practice to the Owner only.
 - **Shop connection's secrets** say who made them: *"Made Oct 10 by Nimal Perera (Developer)."*
+
+**The permissions, as built (piece 1, 2026-10-10).** The map is `neura_core/identity/roles.py`; each route states its
+permission on the route (`Depends(Permitted(...))` in `neura_api/dependencies.py`), checked before the request's body
+is read. A stranger gets **404** *No such shop.*; a member without the permission **403** `ROLE_NOT_ALLOWED`, with
+`details.role` and `details.permission`. The Owner holds every permission, also one an agent brings later; a role or a
+permission the code does not know opens nothing; the database refuses any role but these three
+(`ck_memberships_role`). **The names differ from the ADR's draft** (it said *fixed in the build*): a screen the
+console serves names no agent (G88).
+
+| Permission | Opens | Owner | Support | Developer |
+|:--|:--|:--|:--|:--|
+| `shop:conversations:read` | Conversations (CARE's and SELL's chats) | ✅ | ✅ | ❌ |
+| `shop:review:write` | Review: read and grade | ✅ | ✅ | ❌ |
+| `sell:suggestions:write` | Suggestions (SELL's own permission, on SELL's routes) | ✅ | ❌ | ❌ |
+| `shop:sold_out:read` | Sold out | ✅ | ❌ | ❌ |
+| `shop:connection:write` | Shop connection: read, Check, Sync now, the shop token, the sign-in secret | ✅ | ❌ | ✅ |
+| `shop:connect:write` | Shop connection: Connect | ✅ | ❌ | ✅ |
+| `shop:contact:write` | Shop connection: the contact details | ✅ | ❌ | ✅ |
+| `shop:mode:write` | *Go live* and back to practice | ✅ | ❌ | ❌ |
+| `usage:cost:read` | Usage and cost | ✅ | ❌ | ❌ |
+| `people:members:write` | People (its routes come in piece 2) | ✅ | ❌ | ❌ |
+
+Every dashboard route and its permission is also written, from this table, in `tests/console_permissions.py`; a
+route missing from it, or declaring another permission, fails `tests/unit/test_console_roles.py`, and
+`tests/integration/test_console_roles.py` calls every route as each role and as a stranger. **Not yet:** the dashboard
+still shows every screen to every member (piece 2 hides them), and Home reads Usage, Review, Shop connection, Sold
+out and Suggestions, so Home for Support or a Developer needs piece 2 before anyone has those roles.
 
 **People** (board 38; Owner only): heading *People*, *"Who can open [shop]'s dashboard, and what each person can do."*, button **Invite a person**. A list: Person (name and email), Role (a choice: Owner, Support, Developer), Status, actions.
 - The Owner's own row: *"[name] (you)"*, role as text; when they are the only Owner: *"The only Owner, so this can't be removed"*, no Remove.
@@ -630,7 +657,7 @@ users                       (NOT tenant-scoped — see ADR-0026 §4)
   id, email (citext, unique), name, created_at, last_seen_at
 
 memberships                 (tenant-scoped, forced RLS)
-  id, tenant_id, user_id, role='owner', created_at, revoked_at
+  id, tenant_id, user_id, role='owner' (or 'support', 'developer': ADR-0058), created_at, revoked_at
 
 login_tokens                (NOT tenant-scoped)
   id, user_id, token_hash, expires_at, consumed_at, requested_ip

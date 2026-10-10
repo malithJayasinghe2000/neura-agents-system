@@ -49,6 +49,7 @@ tenant would be an access grant nobody could withdraw.
 from __future__ import annotations
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     DateTime,
     Index,
@@ -60,6 +61,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CITEXT
 
 from neura_core.db import metadata
+from neura_core.identity.roles import Role
 
 USERS = "users"
 MEMBERSHIPS = "memberships"
@@ -91,11 +93,12 @@ users = Table(
 #: tenant's data**, and therefore the table that actually carries the
 #: authorisation decision.
 #:
-#: ``role`` exists with exactly one value, ``owner`` (ADR-0026 §5). A permission
-#: model is not invented before a merchant has asked for one — the column is
-#: here so that adding a second role later is a migration rather than a
-#: redesign, and `AGENTS.md` rule 3 means whatever roles arrive will be enforced
-#: in code and never in a prompt or a claim the browser makes.
+#: ``role`` is one of three since ADR-0058 (``owner``, ``support``,
+#: ``developer``; ADR-0026 §5 had one). What each may do is code
+#: (``neura_core.identity.roles``), checked on every request; the database only
+#: refuses a value the code does not know (``ck_memberships_role``), so a typo in
+#: a script cannot make a role that quietly holds nothing. A membership made
+#: without a role is an Owner, as every one made before roles existed is.
 #:
 #: ``revoked_at`` rather than a delete: who *used* to have access to a merchant's
 #: conversations is exactly the question an incident asks, and a deleted row
@@ -109,6 +112,7 @@ memberships = Table(
     Column("role", String(32), nullable=False, server_default="owner"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(f"role IN ({', '.join(repr(r.value) for r in Role)})", name="role"),
     # One membership per person per tenant. Two would make "is this person
     # revoked?" a question with two answers, and the wrong one is the one that
     # grants access.

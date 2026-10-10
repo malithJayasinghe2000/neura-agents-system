@@ -74,7 +74,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,10 +86,11 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.review import no_draft_reason
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import decode_cursor, encode_cursor, envelope, page
 from neura_commerce.sync.schema import synced_entities
 from neura_core import NotFoundError, ValidationError, get_logger
+from neura_core.identity.roles import CONVERSATIONS_READ
 
 log = get_logger(__name__)
 
@@ -112,14 +113,13 @@ MAX_MESSAGES = 200
 @router.get("/conversations", summary="This shop's conversations, newest first")
 async def list_conversations(
     request: Request,
-    tenant_id: str,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONVERSATIONS_READ))],
     state: Annotated[str | None, Query()] = None,
     agent: Annotated[str | None, Query(max_length=64)] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
     # One set of filters for the page, its count and its *Newer* cursor, so the
     # three can never describe different rows.
     matching: dict[str, Any] = {
@@ -181,10 +181,10 @@ async def list_conversations(
 
 @router.get("/conversations/{conversation_id}", summary="One transcript")
 async def read_conversation(
-    request: Request, tenant_id: str, conversation_id: str
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONVERSATIONS_READ))],
+    conversation_id: str,
 ) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
     db = request.app.state.database
     async with db.tenant_session(actor.tenant_id) as session:
         repository = ConversationRepository(session)

@@ -1027,8 +1027,9 @@ class TestTheOwnersPreview:
     """The console's preview endpoint (2026-09-28): the basket's own answer,
     asked of the shop when the owner opens a product — and never a model run.
 
-    The console session check is replaced at `console._owner` (its own
-    integration tests cover it); the shop, cache and choices at the same seams
+    The console's session and role check is replaced with FastAPI's own
+    override of SELL's permission, and the shop lookup at `console._store`
+    (their own tests cover both); the shop, cache and choices at the same seams
     the storefront tests use, so this is the real route and the real
     `suggest()`.
     """
@@ -1041,10 +1042,11 @@ class TestTheOwnersPreview:
 
         from neura_agent_sell import console as sell_console
         from neura_agent_sell import routes as sell_routes
+        from neura_api.dependencies import Permitted
         from neura_api.main import create_app
 
-        async def _owner(request: Any, tenant_id: str, agent_key: str) -> Any:
-            return SimpleNamespace(tenant_id=TENANT, user_id="usr_owner"), "st_pairing"
+        async def _store(actor: Any, agent_key: str) -> str:
+            return "st_pairing"
 
         async def _computed(tenant_id: str, store_id: str, product_id: str) -> Any:
             return self.tried
@@ -1055,7 +1057,7 @@ class TestTheOwnersPreview:
         self.tried: Any = None
         self.adapter: Any = store()
         cache, choices = FakeCache(), FakeChoices()
-        monkeypatch.setattr(sell_console, "_owner", _owner)
+        monkeypatch.setattr(sell_console, "_store", _store)
         monkeypatch.setattr(sell_console, "_computed", _computed)
         monkeypatch.setattr(sell_console, "_rows", _rows)
         monkeypatch.setattr(sell_routes, "_pairing_cache", lambda tenant_id, store_id: cache)
@@ -1069,7 +1071,11 @@ class TestTheOwnersPreview:
                     adapter=test.adapter, capabilities=ALL, store_id="st_pairing"
                 )
 
-        with TestClient(create_app()) as client:
+        app = create_app()
+        app.dependency_overrides[Permitted(sell_console.SUGGESTIONS)] = lambda: SimpleNamespace(
+            tenant_id=TENANT, user_id="usr_owner", role="owner"
+        )
+        with TestClient(app) as client:
             client.app.state.stores = Directory()
             client.pairing_cache = cache
             client.owner_choices = choices

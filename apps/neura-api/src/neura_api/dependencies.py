@@ -17,7 +17,9 @@ fail with different words:
   (tenancy-and-packaging.md §3).
 * :func:`acting_for` — the console's equivalent, and the only one that
   authenticates a **person**: cookie → user → membership → tenant
-  ([ADR-0026](../../../../docs/architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) §3).
+  ([ADR-0026](../../../../docs/architecture/adr/0026-the-merchant-console-and-the-first-human-in-the-system.md) §3),
+  then → role → permission (ADR-0058), declared on each route with
+  :class:`Permitted`.
 
 None of them is the security boundary. The policy engine authorises every tool
 call again, in code, at the point of use. These exist so a caller gets a clean
@@ -46,7 +48,7 @@ from neura_core import (
 # Aliased on import: `verify` in this repository otherwise reads as the
 # groundedness check the agent graph runs, which is an entirely different
 # thing to find in an authentication path.
-from neura_core.identity import COOKIE_NAME, memberships_for
+from neura_core.identity import COOKIE_NAME, is_permission, memberships_for, role_may
 from neura_core.identity import verify as verify_session
 from neura_core.tenancy import (
     CUSTOMER_SECRET_PREFIX,
@@ -76,6 +78,11 @@ SHOP_TOKEN_IN_PAGE = "SHOP_TOKEN_IN_PAGE"  # noqa: S105
 #: The refusal of the customer sign-in secret sent from a web page (ADR-0057 §3),
 #: for the same reason: it signs customer passes on the shop's server.
 CUSTOMER_SECRET_IN_PAGE = "CUSTOMER_SECRET_IN_PAGE"  # noqa: S105
+
+#: The refusal of a shop's member whose role does not include what a route
+#: needs (ADR-0058 §1). Its own code, so the dashboard can say *"You can't open
+#: this page"* rather than a general error, and a test can name it.
+ROLE_NOT_ALLOWED = "ROLE_NOT_ALLOWED"
 
 
 def bearer_token(authorization: str | None) -> str:
@@ -332,14 +339,15 @@ async def agent_context_for_socket(
 
 @dataclass(frozen=True, slots=True)
 class ConsoleActor:
-    """A signed-in human, and the one merchant this request is about.
+    """A signed-in human, the one merchant this request is about, and their role there.
 
-    Both halves are derived on the request. Neither is anything the browser
-    said about itself.
+    All three are derived on the request. None is anything the browser said
+    about itself.
     """
 
     user_id: str
     tenant_id: str
+    role: str
 
 
 def console_user(request: Request) -> str:
@@ -356,19 +364,29 @@ def console_user(request: Request) -> str:
     return signed_in.user_id
 
 
-async def acting_for(request: Request, tenant_id: str) -> ConsoleActor:
-    """Session → person → membership → tenant. `AGENTS.md` rule 3, in code.
+async def acting_for(request: Request, tenant_id: str, *, permission: str) -> ConsoleActor:
+    """Session → person → membership → tenant → role → permission. `AGENTS.md` rule 3, in code.
 
     ``tenant_id`` arrives in the URL, and a URL is something the browser writes.
-    That makes it a **suggestion**; :func:`~neura_core.identity.may_act_for` is
-    what turns it into a decision, and it reads ``memberships`` fresh — the lock
-    that already existed, with the doorman in front of it (ADR-0026).
+    That makes it a **suggestion**; the membership, read fresh from
+    ``memberships``, is what turns it into a decision — the lock that already
+    existed, with the doorman in front of it (ADR-0026).
 
     **404, not 403, for a tenant this person cannot act for.** The two are the
     same answer on purpose: a 403 would confirm that a tenant id exists, which
     turns this route into a way of asking whether a given merchant is a customer.
     The shadow grading endpoint already collapses the same pair for the same
     reason.
+
+    **403 for a member whose role does not include ``permission``** (ADR-0058
+    §1): they already know the shop exists, and a plain refusal naming their
+    role is easier to understand than a pretence that it does not. The role is
+    read with the membership, on this request, so a changed role bites on the
+    person's next click.
+
+    ``permission`` has no default, so no caller can forget it. Routes state it
+    with :class:`Permitted` rather than calling this, so it is checked before
+    the body is read (G89) and a test can find it on the route.
     """
     user_id = console_user(request)
 
@@ -376,11 +394,57 @@ async def acting_for(request: Request, tenant_id: str) -> ConsoleActor:
     async with db.identity_session(user_id) as session:
         held = await memberships_for(session, user_id)
 
-    if not any(membership.tenant_id == tenant_id for membership in held):
+    membership = next((m for m in held if m.tenant_id == tenant_id), None)
+    if membership is None:
         log.info("console_tenant_refused", user_id=user_id)
         raise NotFoundError("No such shop.", details={"tenant_id": tenant_id})
 
-    return ConsoleActor(user_id=user_id, tenant_id=tenant_id)
+    if not role_may(membership.role, permission):
+        log.info(
+            "console_permission_refused",
+            user_id=user_id,
+            tenant_id=tenant_id,
+            role=membership.role,
+            permission=permission,
+        )
+        raise ForbiddenError(
+            "Your role in this shop doesn't include this. If you need it, ask the shop's owner.",
+            code=ROLE_NOT_ALLOWED,
+            details={"role": membership.role, "permission": permission},
+        )
+
+    return ConsoleActor(user_id=user_id, tenant_id=tenant_id, role=membership.role)
+
+
+@dataclass(frozen=True, slots=True)
+class Permitted:
+    """A dependency: a member of the shop in the URL whose role holds ``permission``.
+
+        @router.get("/conversations")
+        async def conversations(
+            actor: Annotated[ConsoleActor, Depends(Permitted(CONVERSATIONS_READ))],
+        ) -> ...
+
+    Stated **on the route**, for the reason :func:`require` gives for key
+    scopes: a central table of paths is a table that drifts from the routes it
+    describes. ``tests/unit/test_console_roles.py`` walks every dashboard route
+    and fails for one without it, so a forgotten permission is a failed test
+    rather than a screen open to every member.
+
+    A dependency runs before FastAPI reads the body and the query, so a stranger
+    gets 404 and a member without the permission 403 whatever they sent (G89).
+    """
+
+    permission: str
+
+    def __post_init__(self) -> None:
+        # At import, when the route is declared: a misspelt permission would
+        # otherwise refuse every request at run time, Owner included.
+        if not is_permission(self.permission):
+            raise ValueError(f"not a permission: {self.permission!r}")
+
+    async def __call__(self, request: Request, tenant_id: str) -> ConsoleActor:
+        return await acting_for(request, tenant_id, permission=self.permission)
 
 
 def database() -> Database:
@@ -391,10 +455,12 @@ DatabaseDep = Annotated[Database, Depends(database)]
 
 
 __all__ = [
+    "ROLE_NOT_ALLOWED",
     "AgentContext",
     "CallerDep",
     "ConsoleActor",
     "DatabaseDep",
+    "Permitted",
     "acting_for",
     "agent_context",
     "authenticate_request",

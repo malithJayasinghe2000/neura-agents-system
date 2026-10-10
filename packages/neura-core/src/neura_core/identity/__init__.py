@@ -18,6 +18,7 @@ from neura_core.identity.login import (
     redeem,
     request_sign_in_link,
 )
+from neura_core.identity.roles import Role, is_permission, role_may
 from neura_core.identity.schema import (
     LOGIN_TOKENS,
     MEMBERSHIPS,
@@ -42,8 +43,10 @@ __all__ = [
     "TOKEN_TTL",
     "USERS",
     "Membership",
+    "Role",
     "Session",
     "SignInRequest",
+    "is_permission",
     "issue",
     "login_tokens",
     "may_act_for",
@@ -51,6 +54,7 @@ __all__ = [
     "memberships_for",
     "redeem",
     "request_sign_in_link",
+    "role_may",
     "users",
     "verify",
 ]

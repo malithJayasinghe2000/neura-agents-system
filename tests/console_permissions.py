@@ -1,0 +1,113 @@
+"""Who may open each dashboard route: ADR-0058 §2 and console.md §3.8, as data.
+
+**Written from the documents, not from the code's map.** The tests that use this
+check the code against it, so it must not be generated from the code: a table
+copied out of ``neura_core.identity.roles`` would pass whatever the map said.
+
+Two halves, kept apart because they answer different questions:
+
+* :data:`WHO`: which roles each permission opens (the ADR's table, with the
+  names fixed in the build, G88);
+* :data:`ROUTES`: which permission each dashboard route needs.
+
+A route added to the API and not to :data:`ROUTES` fails
+``tests/unit/test_console_roles.py``, so whoever adds it must say who may open it.
+"""
+
+from __future__ import annotations
+
+OWNER = "owner"
+SUPPORT = "support"
+DEVELOPER = "developer"
+
+ROLES = (OWNER, SUPPORT, DEVELOPER)
+
+CONVERSATIONS = "shop:conversations:read"
+REVIEW = "shop:review:write"
+SUGGESTIONS = "sell:suggestions:write"
+SOLD_OUT = "shop:sold_out:read"
+CONNECTION = "shop:connection:write"
+CONNECT = "shop:connect:write"
+CONTACT = "shop:contact:write"
+MODE = "shop:mode:write"
+USAGE = "usage:cost:read"
+PEOPLE = "people:members:write"
+
+#: ADR-0058 §2, *The first permissions*, and R10's B (the Developer has all of
+#: Shop connection, Connect and the contact details included).
+WHO: dict[str, frozenset[str]] = {
+    CONVERSATIONS: frozenset({OWNER, SUPPORT}),
+    REVIEW: frozenset({OWNER, SUPPORT}),
+    SUGGESTIONS: frozenset({OWNER}),
+    SOLD_OUT: frozenset({OWNER}),
+    CONNECTION: frozenset({OWNER, DEVELOPER}),
+    CONNECT: frozenset({OWNER, DEVELOPER}),
+    CONTACT: frozenset({OWNER, DEVELOPER}),
+    MODE: frozenset({OWNER}),
+    USAGE: frozenset({OWNER}),
+    PEOPLE: frozenset({OWNER}),
+}
+
+#: A person's own routes. They come before a shop is chosen, so they name no
+#: shop and need no permission: signing in, signing out, and *which shops am I in*.
+PERSON_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("POST", "/v1/console/auth/request-link"),
+        ("POST", "/v1/console/auth/verify"),
+        ("POST", "/v1/console/auth/sign-out"),
+        ("GET", "/v1/console/me"),
+    }
+)
+
+_SHOP = "/v1/console/shops/{tenant_id}"
+_SELL = "/v1/sell/console/shops/{tenant_id}"
+
+#: Every dashboard route that names a shop, and the permission it needs.
+ROUTES: dict[tuple[str, str], str] = {
+    # Review: read and grade (one permission, as the ADR's table has it).
+    ("GET", f"{_SHOP}/review/scorecard"): REVIEW,
+    ("GET", f"{_SHOP}/review"): REVIEW,
+    ("GET", f"{_SHOP}/review/counts"): REVIEW,
+    ("GET", f"{_SHOP}/review/{{shadow_id}}"): REVIEW,
+    ("POST", f"{_SHOP}/review/{{shadow_id}}/grade"): REVIEW,
+    # Conversations.
+    ("GET", f"{_SHOP}/conversations"): CONVERSATIONS,
+    ("GET", f"{_SHOP}/conversations/{{conversation_id}}"): CONVERSATIONS,
+    # Shop connection: read, Check, Sync now, the tokens and the sign-in secret.
+    ("GET", f"{_SHOP}/store"): CONNECTION,
+    ("POST", f"{_SHOP}/store/{{store_id}}/sync"): CONNECTION,
+    ("GET", f"{_SHOP}/store/{{store_id}}/health"): CONNECTION,
+    ("POST", f"{_SHOP}/token"): CONNECTION,
+    ("POST", f"{_SHOP}/checks"): CONNECTION,
+    ("GET", f"{_SHOP}/checks/{{check_id}}"): CONNECTION,
+    ("POST", f"{_SHOP}/store/{{store_id}}/token"): CONNECTION,
+    ("GET", f"{_SHOP}/customer-secret"): CONNECTION,
+    ("POST", f"{_SHOP}/customer-secret"): CONNECTION,
+    # Shop connection: Connect, and the contact details.
+    ("POST", f"{_SHOP}/connect"): CONNECT,
+    ("GET", f"{_SHOP}/contact"): CONTACT,
+    ("PUT", f"{_SHOP}/contact"): CONTACT,
+    # Go live and back to practice.
+    ("PUT", f"{_SHOP}/mode"): MODE,
+    # Usage and cost.
+    ("GET", f"{_SHOP}/usage"): USAGE,
+    # Sold out (served by the console, so it names no agent).
+    ("GET", f"{_SHOP}/sold-out"): SOLD_OUT,
+    # Suggestions (served by SELL, so it is SELL's own permission).
+    ("GET", f"{_SELL}/suggestions"): SUGGESTIONS,
+    ("GET", f"{_SELL}/suggestions/catalogue"): SUGGESTIONS,
+    ("GET", f"{_SELL}/suggestions/{{product_id}}/preview"): SUGGESTIONS,
+    ("PUT", f"{_SELL}/suggestions/{{product_id}}"): SUGGESTIONS,
+    ("DELETE", f"{_SELL}/suggestions/{{product_id}}"): SUGGESTIONS,
+}
+
+
+__all__ = [
+    "DEVELOPER",
+    "OWNER",
+    "PERSON_ROUTES",
+    "ROLES",
+    "ROUTES",
+    "SUPPORT",
+    "WHO",
+]

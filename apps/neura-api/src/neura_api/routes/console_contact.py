@@ -18,15 +18,16 @@ save that changes nothing records nothing.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_core import get_logger
+from neura_core.identity.roles import CONTACT_WRITE
 from neura_core.tenancy import TenantConfig, TenantRepository, handover_message
 
 log = get_logger(__name__)
@@ -87,17 +88,20 @@ def _answer(config: TenantConfig) -> dict[str, str | None]:
 
 
 @router.get("/contact", summary="The shop's contact details, named in every handover")
-async def read_contact(request: Request, tenant_id: str) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
+async def read_contact(
+    request: Request, actor: Annotated[ConsoleActor, Depends(Permitted(CONTACT_WRITE))]
+) -> dict[str, Any]:
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         tenant = await TenantRepository(session).require(actor.tenant_id)
     return envelope(_answer(tenant.config), request_id=getattr(request.state, "request_id", None))
 
 
 @router.put("/contact", summary="Save the shop's contact details")
-async def save_contact(request: Request, tenant_id: str, body: ContactRequest) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
+async def save_contact(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONTACT_WRITE))],
+    body: ContactRequest,
+) -> dict[str, Any]:
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         tenants = TenantRepository(session)
         before = _shown((await tenants.require(actor.tenant_id)).config)

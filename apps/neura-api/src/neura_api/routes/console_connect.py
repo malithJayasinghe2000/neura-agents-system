@@ -24,18 +24,19 @@ never the token (§8).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_api.addresses import check_shop_address
-from neura_api.dependencies import ConsoleActor, acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.jobs import enqueue_check, enqueue_sync, live_check_id
 from neura_api.jobs.shop_check import STANDARD_BRIDGE
 from neura_core import ConflictError, NotFoundError, ValidationError, get_logger, get_settings
+from neura_core.identity.roles import CONNECT_WRITE, CONNECTION_WRITE
 from neura_core.tenancy import (
     ShopCheckRepository,
     ShopTokenRepository,
@@ -64,9 +65,10 @@ class ConnectRequest(BaseModel):
 
 
 @router.post("/token", summary="Make the shop token, before the shop is connected")
-async def make_token(request: Request, tenant_id: str) -> dict[str, Any]:
+async def make_token(
+    request: Request, actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))]
+) -> dict[str, Any]:
     """Step 1. Returned **once**; making another replaces it (ADR-0052 §1)."""
-    actor = await acting_for(request, tenant_id)
     if await request.app.state.stores.rows_for(actor.tenant_id):
         raise ConflictError(
             "This shop is already connected. Make a new token from its connection instead.",
@@ -87,13 +89,16 @@ async def make_token(request: Request, tenant_id: str) -> dict[str, Any]:
 
 
 @router.post("/checks", summary="Run the full check against the shop's bridge", status_code=202)
-async def start_check(request: Request, tenant_id: str, body: CheckRequest) -> dict[str, Any]:
+async def start_check(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))],
+    body: CheckRequest,
+) -> dict[str, Any]:
     """Queue the check and return at once; the worker asks the shop (ADR-0052 §4).
 
     **One at a time per shop:** while a check is queued or running, pressing
     again returns that one rather than asking the shop a second time.
     """
-    actor = await acting_for(request, tenant_id)
     production = get_settings().is_production
 
     store_id = body.store_id
@@ -132,8 +137,11 @@ async def start_check(request: Request, tenant_id: str, body: CheckRequest) -> d
 
 
 @router.get("/checks/{check_id}", summary="One check and, once it has run, its result")
-async def read_check(request: Request, tenant_id: str, check_id: str) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
+async def read_check(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))],
+    check_id: str,
+) -> dict[str, Any]:
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         check = await ShopCheckRepository(session).get(actor.tenant_id, check_id)
     if check is None:
@@ -142,10 +150,13 @@ async def read_check(request: Request, tenant_id: str, check_id: str) -> dict[st
 
 
 @router.post("/connect", summary="Connect the shop and copy its catalogue")
-async def connect(request: Request, tenant_id: str, body: ConnectRequest) -> dict[str, Any]:
+async def connect(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONNECT_WRITE))],
+    body: ConnectRequest,
+) -> dict[str, Any]:
     """Step 3. Only after a clean check of **this** address, made with **this**
     token (ADR-0052 §5). Saves the connection and queues the full copy."""
-    actor = await acting_for(request, tenant_id)
     address = await check_shop_address(body.address, production=get_settings().is_production)
     directory = request.app.state.stores
     if await directory.rows_for(actor.tenant_id):
@@ -184,14 +195,17 @@ async def connect(request: Request, tenant_id: str, body: ConnectRequest) -> dic
 
 
 @router.post("/store/{store_id}/token", summary="Make a new token for a connected shop")
-async def replace_token(request: Request, tenant_id: str, store_id: str) -> dict[str, Any]:
+async def replace_token(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))],
+    store_id: str,
+) -> dict[str, Any]:
     """*Make a new token* (ADR-0052 §2). Returned **once**.
 
     NEURA stops sending the old token at once. The shop's bridge still accepts it
     until the developer puts the new one in, because the bridge checks it (G49);
     the screen says so.
     """
-    actor = await acting_for(request, tenant_id)
     directory = request.app.state.stores
     if not any(row["id"] == store_id for row in await directory.rows_for(actor.tenant_id)):
         raise NotFoundError("No such store connection.", details={"store_id": store_id})
