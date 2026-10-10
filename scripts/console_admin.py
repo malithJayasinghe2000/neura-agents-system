@@ -5,6 +5,7 @@
     make user-show EMAIL=owner@shop.com
     make user-revoke EMAIL=owner@shop.com TENANT=tn_...
     make user-link EMAIL=owner@shop.com
+    make invite-link EMAIL=person@shop.com TENANT=tn_...
 
 **There is no sign-up page, and that is a decision rather than a gap.** Anyone
 who could reach the console's sign-in form would otherwise be able to create an
@@ -20,6 +21,11 @@ would be a working login credential committed to version control.
 SMTP is not configured yet, or mail is not arriving and you need to know whether
 the problem is delivery or the login flow itself. It is a **credential printed
 to a terminal**, so it says so.
+
+``invite-link`` does the same for an invite an Owner sent from People
+(ADR-0058 §4): it makes a **new** link for the waiting invite, exactly as *Send
+again* does (the old link stops, 7 more days), records it in the shop's audit log
+as done by ``console_admin``, and prints it instead of mailing it.
 """
 
 from __future__ import annotations
@@ -31,9 +37,14 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 
+from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_core import Database, get_settings, ids, load_env
 from neura_core.identity import request_sign_in_link
+from neura_core.identity.people import PeopleRepository
 from neura_core.identity.schema import memberships, users
+
+#: Who an audit entry names when this script, not a person in the dashboard, acted.
+OPERATOR = "console_admin"
 
 
 async def create(email: str, name: str, tenant_id: str) -> int:
@@ -186,6 +197,43 @@ async def link(email: str) -> int:
         await db.dispose()
 
 
+async def invite_link(email: str, tenant_id: str) -> int:
+    db = Database.from_settings()
+    try:
+        async with db.tenant_session(tenant_id) as session:
+            people = PeopleRepository(session)
+            waiting = next(
+                (i for i in await people.invites(tenant_id) if i.email.lower() == email.lower()),
+                None,
+            )
+            if waiting is None:
+                print(f"  no waiting invite for {email} in {tenant_id}: nothing made")
+                return 1
+            sent = await people.send_again(
+                tenant_id,
+                waiting.id,
+                by=waiting.invited_by,
+                console_base_url=get_settings().console_base_url,
+            )
+            await PostgresAuditLog(session).record(
+                AuditEntry(
+                    tenant_id=tenant_id,
+                    event_type=AuditEvent.PEOPLE_CHANGE,
+                    actor=OPERATOR,
+                    outcome="invite.sent_again",
+                    payload={"invite_id": sent.invite.id},
+                )
+            )
+
+        print("\n  This link adds that person to the shop and signs them in.")
+        print("  Treat it as a password. Any earlier link for this invite has stopped.\n")
+        print(f"  {sent.url}\n")
+        print(f"  Works once, until {sent.invite.expires_at:%Y-%m-%d %H:%M} UTC.\n")
+        return 0
+    finally:
+        await db.dispose()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -205,6 +253,10 @@ def main() -> None:
     printed = sub.add_parser("link", help="Print a sign-in link instead of mailing it")
     printed.add_argument("--email", required=True)
 
+    invited = sub.add_parser("invite-link", help="A new link for a waiting invite, printed")
+    invited.add_argument("--email", required=True)
+    invited.add_argument("--tenant", required=True)
+
     args = parser.parse_args()
     load_env()
 
@@ -217,6 +269,8 @@ def main() -> None:
             sys.exit(asyncio.run(revoke(args.email, args.tenant)))
         case "link":
             sys.exit(asyncio.run(link(args.email)))
+        case "invite-link":
+            sys.exit(asyncio.run(invite_link(args.email, args.tenant)))
 
 
 if __name__ == "__main__":

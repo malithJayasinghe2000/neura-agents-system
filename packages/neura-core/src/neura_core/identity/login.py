@@ -56,7 +56,7 @@ TOKEN_TTL = timedelta(minutes=15)
 _ENTROPY_BYTES = 32
 
 
-def _fingerprint(token: str) -> str:
+def fingerprint(token: str) -> str:
     """SHA-256, exactly as ``tenancy.keys.fingerprint`` does for API keys.
 
     Not a slow password hash, and deliberately not: the input is 256 bits of
@@ -126,7 +126,7 @@ async def request_sign_in_link(
         login_tokens.insert().values(
             id=ids.new_id(ids.LOGIN_TOKEN),
             user_id=user_id,
-            token_hash=_fingerprint(token),
+            token_hash=fingerprint(token),
             expires_at=moment + TOKEN_TTL,
             requested_ip=requested_ip,
             created_at=moment,
@@ -170,7 +170,7 @@ async def redeem(
     consumed = await session.execute(
         update(login_tokens)
         .where(
-            login_tokens.c.token_hash == _fingerprint(token),
+            login_tokens.c.token_hash == fingerprint(token),
             login_tokens.c.consumed_at.is_(None),
             login_tokens.c.expires_at > moment,
         )
@@ -229,6 +229,7 @@ __all__ = [
     "TOKEN_TTL",
     "Membership",
     "SignInRequest",
+    "fingerprint",
     "may_act_for",
     "memberships_for",
     "redeem",

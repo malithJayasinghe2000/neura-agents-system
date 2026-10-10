@@ -35,6 +35,7 @@ from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.jobs import enqueue_check, enqueue_sync, live_check_id
 from neura_api.jobs.shop_check import STANDARD_BRIDGE
+from neura_api.routes.console_people import who_made
 from neura_core import ConflictError, NotFoundError, ValidationError, get_logger, get_settings
 from neura_core.identity.roles import CONNECT_WRITE, CONNECTION_WRITE
 from neura_core.tenancy import (
@@ -79,11 +80,12 @@ async def make_token(
         tokens = ShopTokenRepository(session)
         token = await tokens.make(actor.tenant_id, made_by=actor.user_id)
         made_at = await tokens.made_at(actor.tenant_id)
+        made_by = await who_made(session, actor.tenant_id, actor.user_id)
         await _audit(session, actor, "shop_token.made")
 
     log.info("console_shop_token_made", tenant_id=actor.tenant_id, user_id=actor.user_id)
     return envelope(
-        {"token": token, "made_at": _iso(made_at)},
+        {"token": token, "made_at": _iso(made_at), "made_by": made_by},
         request_id=getattr(request.state, "request_id", None),
     )
 
@@ -179,7 +181,13 @@ async def connect(
             )
 
         store_id = await StoreConnectionRepository(session).connect(
-            actor.tenant_id, platform=STANDARD_BRIDGE, base_url=address, credentials=credentials
+            actor.tenant_id,
+            platform=STANDARD_BRIDGE,
+            base_url=address,
+            credentials=credentials,
+            # Who made the token, not who pressed Connect: the token is what
+            # Shop connection says *Made … by …* about (ADR-0058 §6).
+            set_by=await tokens.made_by(actor.tenant_id),
         )
         await tokens.discard(actor.tenant_id)
         # The clean check that allowed this becomes the connection's first one.
@@ -213,15 +221,18 @@ async def replace_token(
     token = new_shop_token()
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         stores = StoreConnectionRepository(session)
-        await stores.replace_credentials(actor.tenant_id, store_id, {"token": token})
+        await stores.replace_credentials(
+            actor.tenant_id, store_id, {"token": token}, set_by=actor.user_id
+        )
         set_at = await stores.credentials_set_at(actor.tenant_id, store_id)
+        made_by = await who_made(session, actor.tenant_id, actor.user_id)
         await _audit(session, actor, "shop_token.replaced", store_id=store_id)
 
     # The capability set negotiated with the old token must not outlive it.
     directory.forget(store_id)
     log.info("console_shop_token_replaced", tenant_id=actor.tenant_id, store_id=store_id)
     return envelope(
-        {"token": token, "made_at": _iso(set_at)},
+        {"token": token, "made_at": _iso(set_at), "made_by": made_by},
         request_id=getattr(request.state, "request_id", None),
     )
 

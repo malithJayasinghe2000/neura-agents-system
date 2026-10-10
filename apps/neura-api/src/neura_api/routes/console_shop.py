@@ -73,6 +73,7 @@ from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.jobs import SYNC_STORE, enqueue_sync
 from neura_api.jobs.sync import dedupe_key_for
+from neura_api.routes.console_people import who_made
 from neura_commerce.identity import EntityType
 from neura_commerce.sync.postgres import PostgresEntityStore, PostgresSyncStateStore
 from neura_commerce.sync.schema import synced_entities
@@ -145,7 +146,11 @@ async def shop_store(
         chat_box = await _chat_box(session, actor.tenant_id, now)
         # ADR-0052: whether a token is waiting (when, never what), and each
         # connection's last check and when its token was set.
-        token_made_at = await ShopTokenRepository(session).made_at(actor.tenant_id)
+        waiting_token = ShopTokenRepository(session)
+        token_made_at = await waiting_token.made_at(actor.tenant_id)
+        token_made_by = await who_made(
+            session, actor.tenant_id, await waiting_token.made_by(actor.tenant_id)
+        )
         check_repo = ShopCheckRepository(session)
         last_checks = {
             row["id"]: await check_repo.latest(actor.tenant_id, store_id=row["id"]) for row in rows
@@ -154,6 +159,14 @@ async def shop_store(
         connections = StoreConnectionRepository(session)
         token_set = {
             row["id"]: await connections.credentials_set_at(actor.tenant_id, row["id"])
+            for row in rows
+        }
+        token_set_by = {
+            row["id"]: await who_made(
+                session,
+                actor.tenant_id,
+                await connections.credentials_set_by(actor.tenant_id, row["id"]),
+            )
             for row in rows
         }
 
@@ -183,6 +196,8 @@ async def shop_store(
                     ),
                     "last_check": last_checks[row["id"]],
                     "token_set_at": _iso(token_set[row["id"]]),
+                    # Who made it, for *Made [date] by [name]* (ADR-0058 §6).
+                    "token_made_by": token_set_by[row["id"]],
                 }
                 for row in rows
             ],
@@ -190,7 +205,11 @@ async def shop_store(
             # never what) and the last check of the typed address (ADR-0052).
             "connect": None
             if rows
-            else {"token_made_at": _iso(token_made_at), "last_check": connect_check},
+            else {
+                "token_made_at": _iso(token_made_at),
+                "token_made_by": token_made_by,
+                "last_check": connect_check,
+            },
             # Said plainly rather than left for the screen to infer from an
             # empty list. "No shop connected" and "we could not read your
             # shops" are different sentences and only one of them is true here.

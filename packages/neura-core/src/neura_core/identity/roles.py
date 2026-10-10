@@ -60,15 +60,24 @@ MODE_WRITE = "shop:mode:write"
 USAGE_READ = "usage:cost:read"
 #: People: invite, change a role, remove.
 PEOPLE_WRITE = "people:members:write"
+#: Home: what every member's Home reads beyond their own screens (R12): the
+#: mode, and for whoever reads chats, how many were handed to a person.
+HOME_READ = "shop:home:read"
+
+#: The refusal of a member whose role does not include what was asked for. Its
+#: own code, so the dashboard can say *"You can't open this page"* rather than a
+#: general error, and a test can name it. Here, beside the map, because the
+#: people rules refuse with it too.
+ROLE_NOT_ALLOWED = "ROLE_NOT_ALLOWED"
 
 #: What each role other than the Owner holds. The Owner holds everything.
 ROLE_PERMISSIONS: Mapping[Role, frozenset[str]] = {
     # The help desk: chats and grading. Never keys, the connection, Go live,
     # people or money.
-    Role.SUPPORT: frozenset({CONVERSATIONS_READ, REVIEW_WRITE}),
+    Role.SUPPORT: frozenset({HOME_READ, CONVERSATIONS_READ, REVIEW_WRITE}),
     # Whoever builds the bridge: all of Shop connection, the same page as the
     # Owner's (R10, settled at the mockup: B). Never a shopper's chat.
-    Role.DEVELOPER: frozenset({CONNECTION_WRITE, CONNECT_WRITE, CONTACT_WRITE}),
+    Role.DEVELOPER: frozenset({HOME_READ, CONNECTION_WRITE, CONNECT_WRITE, CONTACT_WRITE}),
 }
 
 _PERMISSION = re.compile(r"^[a-z][a-z_]*:[a-z][a-z_]*:(read|write)$")
@@ -101,9 +110,11 @@ __all__ = [
     "CONNECT_WRITE",
     "CONTACT_WRITE",
     "CONVERSATIONS_READ",
+    "HOME_READ",
     "MODE_WRITE",
     "PEOPLE_WRITE",
     "REVIEW_WRITE",
+    "ROLE_NOT_ALLOWED",
     "ROLE_PERMISSIONS",
     "SOLD_OUT_READ",
     "USAGE_READ",

@@ -57,6 +57,7 @@ from sqlalchemy import (
     Table,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import CITEXT
 
@@ -66,6 +67,10 @@ from neura_core.identity.roles import Role
 USERS = "users"
 MEMBERSHIPS = "memberships"
 LOGIN_TOKENS = "login_tokens"
+MEMBERSHIP_INVITES = "membership_invites"
+
+#: The roles a membership or an invite may name, for the database's own check.
+_ROLES = ", ".join(repr(role.value) for role in Role)
 
 
 #: One human. Not one merchant, and not one login — a person who owns two shops
@@ -112,7 +117,7 @@ memberships = Table(
     Column("role", String(32), nullable=False, server_default="owner"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
-    CheckConstraint(f"role IN ({', '.join(repr(r.value) for r in Role)})", name="role"),
+    CheckConstraint(f"role IN ({_ROLES})", name="role"),
     # One membership per person per tenant. Two would make "is this person
     # revoked?" a question with two answers, and the wrong one is the one that
     # grants access.
@@ -151,11 +156,56 @@ login_tokens = Table(
 )
 
 
+#: An Owner's invitation to one person, for one shop, with one role (ADR-0058 §4).
+#:
+#: **Tenant-scoped and forced, like ``memberships``**, because it is a grant of
+#: access waiting to happen: only the shop's own Owner may make one, so Shop A's
+#: Owner can never invite anyone into Shop B (§5). The link names its shop, so
+#: accepting it opens that shop's session and looks the hash up there; a link
+#: with another shop in it finds nothing.
+#:
+#: **The token is never stored**, only its SHA-256, as ``login_tokens`` does.
+#: *Send again* writes a new hash over the old one, so the old link stops at once.
+#: ``accepted_at`` and ``cancelled_at`` are set in the same statement that checks
+#: they are empty, so a forwarded link cannot be used twice.
+#:
+#: **One open invite per email per shop** (the partial unique index): a second
+#: invite to the same address replaces the waiting one rather than racing it.
+membership_invites = Table(
+    MEMBERSHIP_INVITES,
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("tenant_id", String(64), nullable=False),
+    Column("email", CITEXT, nullable=False),
+    Column("role", String(32), nullable=False),
+    Column("token_hash", String(64), nullable=False),
+    #: The Owner who sent it, or last sent it again.
+    Column("invited_by", String(64), nullable=False),
+    Column("sent_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("accepted_at", DateTime(timezone=True), nullable=True),
+    Column("accepted_by", String(64), nullable=True),
+    Column("cancelled_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint(f"role IN ({_ROLES})", name="role"),
+    UniqueConstraint("token_hash", name="uq_membership_invites_token_hash"),
+    Index(
+        "uq_membership_invites_open_email",
+        "tenant_id",
+        "email",
+        unique=True,
+        postgresql_where=text("accepted_at IS NULL AND cancelled_at IS NULL"),
+    ),
+)
+
+
 __all__ = [
     "LOGIN_TOKENS",
     "MEMBERSHIPS",
+    "MEMBERSHIP_INVITES",
     "USERS",
     "login_tokens",
+    "membership_invites",
     "memberships",
     "users",
 ]

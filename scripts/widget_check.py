@@ -849,7 +849,7 @@ def tenant_tables() -> list[Any]:
     from neura_agent_sell.pairing.schema import sell_pairing_choices, sell_pairings
     from neura_commerce.sync.schema import sync_checkpoints, synced_entities
     from neura_core.idempotency import idempotency_keys
-    from neura_core.identity.schema import memberships
+    from neura_core.identity.schema import membership_invites, memberships
     from neura_core.jobs.schema import job_queue
     from neura_core.observation.schema import observed_events
     from neura_core.tenancy.schema import (
@@ -883,6 +883,8 @@ def tenant_tables() -> list[Any]:
         job_queue,
         webhook_deliveries,
         webhook_endpoints,
+        # Invites waiting for the shop, with an email in each (ADR-0058 §4).
+        membership_invites,
         memberships,
         idempotency_keys,
         tenant_usage,

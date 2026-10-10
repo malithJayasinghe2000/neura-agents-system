@@ -32,10 +32,13 @@ CONTACT = "shop:contact:write"
 MODE = "shop:mode:write"
 USAGE = "usage:cost:read"
 PEOPLE = "people:members:write"
+HOME = "shop:home:read"
 
-#: ADR-0058 §2, *The first permissions*, and R10's B (the Developer has all of
-#: Shop connection, Connect and the contact details included).
+#: ADR-0058 §2, *The first permissions*, R10's B (the Developer has all of
+#: Shop connection, Connect and the contact details included), and R12 (Home is
+#: every member's, each seeing only their own work there).
 WHO: dict[str, frozenset[str]] = {
+    HOME: frozenset({OWNER, SUPPORT, DEVELOPER}),
     CONVERSATIONS: frozenset({OWNER, SUPPORT}),
     REVIEW: frozenset({OWNER, SUPPORT}),
     SUGGESTIONS: frozenset({OWNER}),
@@ -56,6 +59,9 @@ PERSON_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/v1/console/auth/verify"),
         ("POST", "/v1/console/auth/sign-out"),
         ("GET", "/v1/console/me"),
+        # The invite link: whoever holds it proves the inbox it was sent to,
+        # and the shop it names is checked against the link, never trusted.
+        ("POST", "/v1/console/auth/accept-invite"),
     }
 )
 
@@ -64,6 +70,15 @@ _SELL = "/v1/sell/console/shops/{tenant_id}"
 
 #: Every dashboard route that names a shop, and the permission it needs.
 ROUTES: dict[tuple[str, str], str] = {
+    # Home: what every member's Home reads beyond their own screens (R12).
+    ("GET", f"{_SHOP}/home"): HOME,
+    # People: the Owner's alone (ADR-0058 §4).
+    ("GET", f"{_SHOP}/people"): PEOPLE,
+    ("PUT", f"{_SHOP}/people/{{user_id}}"): PEOPLE,
+    ("DELETE", f"{_SHOP}/people/{{user_id}}"): PEOPLE,
+    ("POST", f"{_SHOP}/invites"): PEOPLE,
+    ("POST", f"{_SHOP}/invites/{{invite_id}}/send-again"): PEOPLE,
+    ("DELETE", f"{_SHOP}/invites/{{invite_id}}"): PEOPLE,
     # Review: read and grade (one permission, as the ADR's table has it).
     ("GET", f"{_SHOP}/review/scorecard"): REVIEW,
     ("GET", f"{_SHOP}/review"): REVIEW,
@@ -104,7 +119,9 @@ ROUTES: dict[tuple[str, str], str] = {
 
 __all__ = [
     "DEVELOPER",
+    "HOME",
     "OWNER",
+    "PEOPLE",
     "PERSON_ROUTES",
     "ROLES",
     "ROUTES",

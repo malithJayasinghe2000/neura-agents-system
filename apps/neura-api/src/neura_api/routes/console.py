@@ -1,6 +1,6 @@
 """Signing a human into the merchant console. ADR-0026.
 
-The console's entire authentication surface is these five endpoints, and they
+The console's entire authentication surface is these six endpoints, and they
 are the only ones in this API that authenticate a **person** rather than a
 program. Every other route resolves a bearer token to a tenant; these resolve a
 cookie to a human, then a human to the merchants they may act for.
@@ -36,6 +36,7 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_api.dependencies import DatabaseDep
 from neura_api.envelopes import envelope
 from neura_core import Database, get_logger, get_settings
@@ -47,8 +48,10 @@ from neura_core.identity import (
     memberships_for,
     redeem,
     request_sign_in_link,
+    role_may,
     verify,
 )
+from neura_core.identity.people import PeopleRepository
 from neura_core.tenancy import TenantRepository
 
 log = get_logger(__name__)
@@ -61,6 +64,12 @@ router = APIRouter(prefix="/console", tags=["console"])
 SENT_MESSAGE = "If that address has an account, a sign-in link is on its way."
 
 SIGN_IN_SUBJECT = "Your FiveNeurals sign-in link"
+
+#: What a refused invite link says, whatever was wrong with it: unknown, used,
+#: cancelled, sent again, run out, or naming another shop (ADR-0058 §4).
+INVITE_NO_LONGER_VALID = (
+    "That invite link is no longer valid. Ask the shop's owner to send it again."
+)
 
 
 def _sign_in_body(url: str, minutes: int) -> str:
@@ -92,6 +101,15 @@ class RequestLink(BaseModel):
 class VerifyLink(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    token: str = Field(min_length=1, max_length=512)
+
+
+class AcceptInvite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: The shop the link names. A suggestion, like every id a browser sends: the
+    #: token is looked up in that shop's own session, so a wrong shop finds nothing.
+    shop: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
     token: str = Field(min_length=1, max_length=512)
 
 
@@ -148,8 +166,42 @@ async def verify_link(
     return envelope({"signed_in": True})
 
 
+@router.post("/auth/accept-invite", summary="Use an invite link: join the shop and sign in")
+async def accept_invite(
+    body: AcceptInvite, response: Response, request: Request, db: DatabaseDep
+) -> dict[str, object]:
+    """ADR-0058 §4: the link adds the person to **that shop only**, with the
+    invite's role, making their account when the email has none, and signs them
+    in. Used once; the audit entry is written in the same transaction."""
+    async with db.tenant_session(body.shop) as session:
+        joined = await PeopleRepository(session).accept(body.shop, token=body.token)
+        if joined is not None:
+            await PostgresAuditLog(session).record(
+                AuditEntry(
+                    tenant_id=body.shop,
+                    event_type=AuditEvent.PEOPLE_CHANGE,
+                    actor=joined.user_id,
+                    outcome="invite.accepted",
+                    payload={
+                        "invite_id": joined.invite_id,
+                        "role": joined.role,
+                        "new_account": joined.made_account,
+                    },
+                )
+            )
+
+    if joined is None:
+        log.info("console_invite_failed", ip=_peer(request))
+        return envelope({"signed_in": False, "message": INVITE_NO_LONGER_VALID})
+
+    _set_session_cookie(response, issue(joined.user_id, get_settings().secret_key))
+    log.info("console_invite_accepted", user_id=joined.user_id, tenant_id=body.shop)
+    return envelope({"signed_in": True, "tenant_id": body.shop, "user_id": joined.user_id})
+
+
 @router.get("/me", summary="Who is signed in, and which merchants they may act for")
 async def me(
+    request: Request,
     db: DatabaseDep,
     session_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> dict[str, object]:
@@ -163,11 +215,21 @@ async def me(
     async with db.identity_session(signed_in.user_id) as session:
         held = await memberships_for(session, signed_in.user_id)
 
+    # Every permission some route declares, gathered at startup. What each role
+    # holds of them is the map's answer, so the dashboard shows each person only
+    # what they may open, and never keeps a copy of the map (ADR-0058 §1).
+    known: frozenset[str] = getattr(request.app.state, "permissions", frozenset())
     memberships = []
     for m in held:
         name, assistants = await _shop(db, m.tenant_id)
         memberships.append(
-            {"tenant_id": m.tenant_id, "role": m.role, "name": name, "assistants": assistants}
+            {
+                "tenant_id": m.tenant_id,
+                "role": m.role,
+                "name": name,
+                "assistants": assistants,
+                "permissions": sorted(p for p in known if role_may(m.role, p)),
+            }
         )
     return envelope({"signed_in": True, "user_id": signed_in.user_id, "memberships": memberships})
 

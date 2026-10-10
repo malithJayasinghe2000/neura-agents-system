@@ -195,6 +195,8 @@ class TestTheShopScreenReportsWhatWasRecorded:
             # the token was set (never the token).
             "last_check",
             "token_set_at",
+            # ADR-0058 §6: who made the token (a person), never the token.
+            "token_made_by",
         }
 
     def test_the_last_sync_is_reported_per_entity_type(self, client: TestClient, shop) -> None:

@@ -21,9 +21,11 @@ from neura_core.identity.login import (
 from neura_core.identity.roles import Role, is_permission, role_may
 from neura_core.identity.schema import (
     LOGIN_TOKENS,
+    MEMBERSHIP_INVITES,
     MEMBERSHIPS,
     USERS,
     login_tokens,
+    membership_invites,
     memberships,
     users,
 )
@@ -39,6 +41,7 @@ __all__ = [
     "COOKIE_NAME",
     "LOGIN_TOKENS",
     "MEMBERSHIPS",
+    "MEMBERSHIP_INVITES",
     "SESSION_TTL",
     "TOKEN_TTL",
     "USERS",
@@ -50,6 +53,7 @@ __all__ = [
     "issue",
     "login_tokens",
     "may_act_for",
+    "membership_invites",
     "memberships",
     "memberships_for",
     "redeem",

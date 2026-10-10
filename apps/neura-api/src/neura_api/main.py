@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from neura_api import developer_mcp
+from neura_api.dependencies import declared_permissions
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
 from neura_api.jobs import (
@@ -49,7 +50,9 @@ from neura_api.routes import (
     console_contact,
     console_conversations,
     console_customer_secret,
+    console_home,
     console_mode,
+    console_people,
     console_review,
     console_shop,
     console_sold_out,
@@ -138,6 +141,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # a startup activity and a route table built from an empty registry would
     # silently serve 404s for every agent.
     _mount_agents(app)
+    # After every route, an agent's too, is mounted: what `/me` reports each
+    # role may open is drawn from what the routes declare (ADR-0058 §1).
+    app.state.permissions = declared_permissions(app.routes)
     app.state.jobs.start()
 
     log.info(
@@ -301,6 +307,8 @@ def create_app() -> FastAPI:
     app.include_router(console_contact.router, prefix="/v1")
     app.include_router(console_customer_secret.router, prefix="/v1")
     app.include_router(console_sold_out.router, prefix="/v1")
+    app.include_router(console_home.router, prefix="/v1")
+    app.include_router(console_people.router, prefix="/v1")
     # Mounted once, and it names no agent — that is the whole point
     # ([ADR-0031]). It sits beside the per-agent routes rather than
     # replacing them: `/v1/care/chat` is still CARE's own declared prefix.

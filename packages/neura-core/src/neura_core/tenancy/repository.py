@@ -357,8 +357,13 @@ class StoreConnectionRepository:
         platform: str,
         base_url: str,
         credentials: dict[str, str],
+        set_by: str | None = None,
     ) -> str:
-        """Store (or replace) one store connection. Returns its id."""
+        """Store (or replace) one store connection. Returns its id.
+
+        ``set_by``: the console user who made the token in ``credentials``, when a
+        person did (ADR-0058 §6).
+        """
         dek = generate_key()
         kek = self._require_kek()
         ciphertext = encrypt(json.dumps(credentials, sort_keys=True), dek, aad=tenant_id.encode())
@@ -370,6 +375,7 @@ class StoreConnectionRepository:
             base_url=base_url,
             credentials=ciphertext,
             wrapped_dek=wrap_dek(dek, kek, tenant_id=tenant_id),
+            credentials_set_by=set_by,
         )
         result = await self._session.execute(
             statement.on_conflict_do_update(
@@ -381,6 +387,7 @@ class StoreConnectionRepository:
                 set_={
                     "credentials": statement.excluded.credentials,
                     "wrapped_dek": statement.excluded.wrapped_dek,
+                    "credentials_set_by": statement.excluded.credentials_set_by,
                     "status": "active",
                     "updated_at": func.now(),
                 },
@@ -431,7 +438,12 @@ class StoreConnectionRepository:
         ]
 
     async def replace_credentials(
-        self, tenant_id: str, store_id: str, credentials: dict[str, str]
+        self,
+        tenant_id: str,
+        store_id: str,
+        credentials: dict[str, str],
+        *,
+        set_by: str | None = None,
     ) -> bool:
         """Seal new credentials over an existing connection. ``False`` if no such row.
 
@@ -449,6 +461,7 @@ class StoreConnectionRepository:
                     json.dumps(credentials, sort_keys=True), dek, aad=tenant_id.encode()
                 ),
                 wrapped_dek=wrap_dek(dek, kek, tenant_id=tenant_id),
+                credentials_set_by=set_by,
                 updated_at=func.now(),
             )
         )
@@ -462,6 +475,17 @@ class StoreConnectionRepository:
         value = (
             await self._session.execute(
                 select(tenant_stores.c.updated_at).where(
+                    tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id
+                )
+            )
+        ).scalar_one_or_none()
+        return value
+
+    async def credentials_set_by(self, tenant_id: str, store_id: str) -> str | None:
+        """Who made this connection's token, when a person did. Never the token."""
+        value: str | None = (
+            await self._session.execute(
+                select(tenant_stores.c.credentials_set_by).where(
                     tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id
                 )
             )

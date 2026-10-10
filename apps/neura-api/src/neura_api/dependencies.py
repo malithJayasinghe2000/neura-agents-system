@@ -29,10 +29,13 @@ act on.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import Depends, Request
+from fastapi.routing import APIRoute, iter_route_contexts
+from starlette.routing import BaseRoute
 from starlette.websockets import WebSocket
 
 from neura_core import (
@@ -50,6 +53,7 @@ from neura_core import (
 # thing to find in an authentication path.
 from neura_core.identity import COOKIE_NAME, is_permission, memberships_for, role_may
 from neura_core.identity import verify as verify_session
+from neura_core.identity.roles import ROLE_NOT_ALLOWED
 from neura_core.tenancy import (
     CUSTOMER_SECRET_PREFIX,
     SHOP_TOKEN_PREFIX,
@@ -78,11 +82,6 @@ SHOP_TOKEN_IN_PAGE = "SHOP_TOKEN_IN_PAGE"  # noqa: S105
 #: The refusal of the customer sign-in secret sent from a web page (ADR-0057 §3),
 #: for the same reason: it signs customer passes on the shop's server.
 CUSTOMER_SECRET_IN_PAGE = "CUSTOMER_SECRET_IN_PAGE"  # noqa: S105
-
-#: The refusal of a shop's member whose role does not include what a route
-#: needs (ADR-0058 §1). Its own code, so the dashboard can say *"You can't open
-#: this page"* rather than a general error, and a test can name it.
-ROLE_NOT_ALLOWED = "ROLE_NOT_ALLOWED"
 
 
 def bearer_token(authorization: str | None) -> str:
@@ -447,6 +446,27 @@ class Permitted:
         return await acting_for(request, tenant_id, permission=self.permission)
 
 
+def declared_permissions(routes: Sequence[BaseRoute]) -> frozenset[str]:
+    """Every permission a route declares with :class:`Permitted`, an agent's included.
+
+    Gathered once, after the agents are mounted, so ``/me`` can tell the
+    dashboard which of them a person's role holds without the dashboard keeping
+    its own copy of the map, and without this package naming any agent.
+    """
+    found: set[str] = set()
+    for context in iter_route_contexts(routes):
+        route = context.original_route
+        if not isinstance(route, APIRoute):
+            continue
+        stack = list(route.dependant.dependencies)
+        while stack:
+            dependency = stack.pop()
+            if isinstance(dependency.call, Permitted):
+                found.add(dependency.call.permission)
+            stack.extend(dependency.dependencies)
+    return frozenset(found)
+
+
 def database() -> Database:
     return get_database()
 
@@ -469,6 +489,7 @@ __all__ = [
     "client_address",
     "console_user",
     "database",
+    "declared_permissions",
     "require",
     "resolve_agent",
 ]

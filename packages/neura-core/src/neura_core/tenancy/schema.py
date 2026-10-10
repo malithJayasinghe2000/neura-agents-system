@@ -127,6 +127,10 @@ tenant_stores = Table(
     Column("status", String(32), nullable=False, server_default="active"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    #: The console user who made the token in ``credentials`` (ADR-0058 §6, *Made
+    #: [date] by [name]*). Empty for a connection made by a command or the API,
+    #: and for every one made before it was recorded: the screen then names nobody.
+    Column("credentials_set_by", String(64), nullable=True),
     # One connection per store, not per platform: sync/state.py already assumes
     # a tenant may run two shops, and two shops on the same software is the
     # ordinary case rather than the exotic one.

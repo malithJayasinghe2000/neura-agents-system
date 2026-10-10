@@ -48,6 +48,10 @@ class AuditEvent(StrEnum):
     ESCALATION = "escalation"
     GUARD_BLOCK = "guard.block"
     CONFIG_CHANGE = "config.change"
+    #: Who can open a shop's dashboard changed: an invite sent, sent again,
+    #: cancelled or accepted, a role changed, a person removed (ADR-0058 §4).
+    #: The payload names ids and roles, never an email.
+    PEOPLE_CHANGE = "people.change"
 
 
 @dataclass(frozen=True, slots=True)

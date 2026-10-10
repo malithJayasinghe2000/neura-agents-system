@@ -58,6 +58,7 @@ console:  ## How to run the merchant console (prints the two commands)
 	@echo "    make tenant-new NAME=\"My Shop\" AGENTS=care        (prints tn_...)"
 	@echo "    make user-new EMAIL=you@shop.com TENANT=tn_...     (once)"
 	@echo "    make user-link EMAIL=you@shop.com                  (a sign-in URL)"
+	@echo "    make invite-link EMAIL=them@shop.com TENANT=tn_... (an invite URL)"
 	@echo ""
 	@echo "  To prove it works: make console-check EMAIL=you@shop.com"
 	@echo ""
@@ -427,6 +428,11 @@ user-revoke:  ## Withdraw access: make user-revoke EMAIL=... TENANT=tn_...
 # know whether the fault is delivery or the login flow.
 user-link:  ## Print a sign-in link instead of mailing it: make user-link EMAIL=...
 	uv run python scripts/console_admin.py link --email "$(EMAIL)"
+
+# A new link for an invite an Owner sent from People (ADR-0058 §4), printed
+# instead of mailed: the old link stops, as Send again does.
+invite-link:  ## Print a new link for a waiting invite: make invite-link EMAIL=... TENANT=tn_...
+	uv run python scripts/console_admin.py invite-link --email "$(EMAIL)" --tenant "$(TENANT)"
 
 tenant-new:  ## Create a tenant: make tenant-new NAME="Acme Store" AGENTS=care
 	uv run python scripts/tenant_admin.py create-tenant --name "$(NAME)" --agents "$(AGENTS)"

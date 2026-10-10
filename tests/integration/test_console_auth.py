@@ -185,8 +185,13 @@ class TestVerifyAndSession:
                     "role": "owner",
                     "name": "Corner Bookshop",
                     "assistants": ["care", "sell"],
+                    # ADR-0058: what the role may open, from the API's own map.
+                    "permissions": response.json()["data"]["memberships"][0]["permissions"],
                 }
             ]
+            assert (
+                "people:members:write" in response.json()["data"]["memberships"][0]["permissions"]
+            )
             assert "Somebody Else" not in response.text
             assert stranger not in response.text
         finally:
