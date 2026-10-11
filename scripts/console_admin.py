@@ -7,15 +7,12 @@
     make user-link EMAIL=owner@shop.com
     make invite-link EMAIL=person@shop.com TENANT=tn_...
 
-**There is no sign-up page, and that is a decision rather than a gap.** Anyone
-who could reach the console's sign-in form would otherwise be able to create an
-account for any address they liked. Accounts exist because somebody with
-database access put them there; self-serve onboarding, when it arrives, needs
-its own design — an invitation flow, not an open form.
-
-That also means this script is the only way a *first* account comes into being,
-which is why it is a script and not a seeded migration: a row in a migration
-would be a working login credential committed to version control.
+**A shop owner may now sign up themselves** (ADR-0058 §7, ADR-0060): the
+dashboard's *Create an account* makes the account only when the emailed link is
+clicked, and the shop waits for FiveNeurals (`make tenant-approve`). This script
+still makes an account directly, for a shop FiveNeurals sets up itself, which is
+why it is a script and not a seeded migration: a row in a migration would be a
+working login credential committed to version control.
 
 ``user-link`` prints a sign-in link instead of mailing one — for the case where
 SMTP is not configured yet, or mail is not arriving and you need to know whether

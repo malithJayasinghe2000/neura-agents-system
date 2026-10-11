@@ -11,7 +11,8 @@
  * role there, from their own memberships on `/me` (a shop they do not hold has
  * no name to show, so the id stands in and the page underneath says *no
  * access*), what the role may open, for the menu (ADR-0058), and how many
- * replies wait in Review, for the menu's badge. Grading calls
+ * replies wait in Review, for the menu's badge. A shop waiting for approval
+ * gets its waiting screen instead of the menu (ADR-0058 §7). Grading calls
  * `router.refresh()`, which re-reads both, so the badge does not go stale on the
  * screen where it changes. Nothing is granted or refused by what this finds.
  */
@@ -19,7 +20,8 @@ import { fromApi } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
 import { PERMISSION, may, roleName } from "@/lib/roles";
 import { ShopSidebar } from "@/components/shop/shop-sidebar";
-import { assistantsOf, hasSell, type Me } from "@/lib/shop-assistants";
+import { WaitingForApproval } from "@/components/waiting-for-approval";
+import { assistantsOf, hasSell, isWaiting, type Me } from "@/lib/shop-assistants";
 
 export default async function ShopLayout({
   children,
@@ -34,6 +36,19 @@ export default async function ShopLayout({
     ? me.data.memberships?.find((held) => held.tenant_id === tenantId)
     : undefined;
   const name = membership?.name;
+
+  // A shop waiting for approval has one screen and no menu (ADR-0058 §7): the
+  // API refuses its every route, so nothing below could open anyway.
+  if (isWaiting(membership)) {
+    return (
+      <WaitingForApproval
+        shop={name ?? tenantId}
+        email={me.ok ? (me.data.email ?? null) : null}
+        otherShops={(me.ok ? (me.data.memberships?.length ?? 0) : 0) > 1}
+      />
+    );
+  }
+
   // The menu shows each role only what it may open (ADR-0058). The Review count
   // is read only for a role that may open Review: for any other it is a 403.
   const reviews = may(membership, PERMISSION.review);

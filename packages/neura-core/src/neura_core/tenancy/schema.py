@@ -66,6 +66,10 @@ tenants = Table(
     #: because it is **enforced** (ADR-0013): an ``observe:write`` key cannot be
     #: issued without it, and the event route refuses without it.
     Column("dpa_signed_at", DateTime(timezone=True), nullable=True),
+    #: The shop's web address, as typed at sign up (ADR-0058 §7). Read by
+    #: FiveNeurals before approving (`make tenant-waiting`); empty for a shop
+    #: made with a command.
+    Column("website", String(255), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )

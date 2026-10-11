@@ -95,7 +95,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | **Help** | *Connecting your shop*, step by step, and what to send your developer: the guide for developers, the address for an AI coding tool, and the chat box line. | ✅ Built |
 | Settings and keys (the owner makes the chat box key) | — | ⬜ Not designed (needs an ADR) |
 | **People and roles** (Owner, Support, Developer; invite by email) | The owner adds people to the shop's dashboard by email, each seeing only what their role allows, checked on every click; a developer never sees shoppers' chats. The owner changes a role or removes a person at any time, and a shop always keeps one Owner. Every change is kept in the shop's record, with who did it. | ✅ Built (ADR-0058, ADR-0059) |
-| **Create an account** (sign up, then FiveNeurals approves) | A new shop owner signs up with their email, shop name and website, and waits for approval; nothing runs until then. | ⬜ Decided, not built (ADR-0058) |
+| **Create an account** (sign up, then FiveNeurals approves) | A new shop owner signs up with their email, shop name and website, and confirms by an emailed link. The shop then waits for approval: nothing runs and nothing costs anything until FiveNeurals approves it and emails the owner. Someone who already has an account can sign up a second shop the same way. | ✅ Built (ADR-0058, ADR-0060) |
 
 ---
 

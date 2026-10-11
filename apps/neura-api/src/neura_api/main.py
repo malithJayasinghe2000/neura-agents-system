@@ -55,6 +55,7 @@ from neura_api.routes import (
     console_people,
     console_review,
     console_shop,
+    console_sign_up,
     console_sold_out,
     console_usage,
     dispatch,
@@ -309,6 +310,7 @@ def create_app() -> FastAPI:
     app.include_router(console_sold_out.router, prefix="/v1")
     app.include_router(console_home.router, prefix="/v1")
     app.include_router(console_people.router, prefix="/v1")
+    app.include_router(console_sign_up.router, prefix="/v1")
     # Mounted once, and it names no agent — that is the whole point
     # ([ADR-0031]). It sits beside the per-agent routes rather than
     # replacing them: `/v1/care/chat` is still CARE's own declared prefix.

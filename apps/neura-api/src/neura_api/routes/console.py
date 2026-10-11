@@ -1,8 +1,8 @@
 """Signing a human into the merchant console. ADR-0026.
 
-The console's entire authentication surface is these six endpoints, and they
-are the only ones in this API that authenticate a **person** rather than a
-program. Every other route resolves a bearer token to a tenant; these resolve a
+The console's authentication surface is these six endpoints and the two of
+sign up (``console_sign_up``), and they are the only ones in this API that
+authenticate a **person** rather than a program. Every other route resolves a bearer token to a tenant; these resolve a
 cookie to a human, then a human to the merchants they may act for.
 
 ## The rule the rest of the console rests on
@@ -35,6 +35,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from sqlalchemy import select
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_api.dependencies import DatabaseDep, client_address
@@ -53,7 +54,8 @@ from neura_core.identity import (
     verify,
 )
 from neura_core.identity.people import PeopleRepository
-from neura_core.tenancy import TenantRepository
+from neura_core.identity.schema import users
+from neura_core.tenancy import TenantRepository, TenantStatus
 
 log = get_logger(__name__)
 
@@ -125,7 +127,7 @@ class AcceptInvite(BaseModel):
 @router.post("/auth/request-link", summary="Email a one-time sign-in link")
 async def request_link(body: RequestLink, request: Request, db: DatabaseDep) -> dict[str, object]:
     settings = get_settings()
-    await _limit_sign_in(request, str(body.email))
+    await limit_links(request, str(body.email))
 
     # No `app.tenant_id` and no user id: the person has proved nothing yet, and
     # this call is what begins to change that. The transaction can see `users`
@@ -135,7 +137,7 @@ async def request_link(body: RequestLink, request: Request, db: DatabaseDep) -> 
             session,
             email=str(body.email),
             console_base_url=settings.console_base_url,
-            requested_ip=_peer(request),
+            requested_ip=peer(request),
         )
 
     if minted.minted:
@@ -168,10 +170,10 @@ async def verify_link(
         # One message for unknown, expired, already-used and malformed. Telling
         # the holder of a stolen link *which* it was tells them whether it ever
         # worked.
-        log.info("console_sign_in_failed", ip=_peer(request))
+        log.info("console_sign_in_failed", ip=peer(request))
         return envelope({"signed_in": False, "message": "That link is no longer valid."})
 
-    _set_session_cookie(response, issue(user_id, get_settings().secret_key))
+    set_session_cookie(response, issue(user_id, get_settings().secret_key))
     log.info("console_signed_in", user_id=user_id)
     return envelope({"signed_in": True})
 
@@ -217,14 +219,14 @@ async def accept_invite(
             )
 
     if joined is None:
-        log.info("console_invite_failed", ip=_peer(request))
+        log.info("console_invite_failed", ip=peer(request))
         return envelope({"signed_in": False, "message": INVITE_NO_LONGER_VALID})
 
     log.info("console_invite_accepted", user_id=joined.user_id, tenant_id=body.shop)
     secret = get_settings().secret_key
     already = verify(session_cookie or "", secret)
     if joined.made_account:
-        _set_session_cookie(response, issue(joined.user_id, secret))
+        set_session_cookie(response, issue(joined.user_id, secret))
     elif already is None or already.user_id != joined.user_id:
         return envelope(
             {
@@ -252,6 +254,7 @@ async def me(
     # working on this request, not when the cookie expires.
     async with db.identity_session(signed_in.user_id) as session:
         held = await memberships_for(session, signed_in.user_id)
+        email = await session.scalar(select(users.c.email).where(users.c.id == signed_in.user_id))
 
     # Every permission some route declares, gathered at startup. What each role
     # holds of them is the map's answer, so the dashboard shows each person only
@@ -259,25 +262,41 @@ async def me(
     known: frozenset[str] = getattr(request.app.state, "permissions", frozenset())
     memberships = []
     for m in held:
-        name, assistants = await _shop(db, m.tenant_id)
+        name, assistants, status = await _shop(db, m.tenant_id)
+        # A shop waiting for approval opens nothing (ADR-0058 §7): the API
+        # refuses its every route, and the dashboard shows the waiting screen.
+        opens = [] if status == TenantStatus.WAITING.value else known
         memberships.append(
             {
                 "tenant_id": m.tenant_id,
                 "role": m.role,
                 "name": name,
+                "status": status,
                 "assistants": assistants,
-                "permissions": sorted(p for p in known if role_may(m.role, p)),
+                "permissions": sorted(p for p in opens if role_may(m.role, p)),
             }
         )
-    return envelope({"signed_in": True, "user_id": signed_in.user_id, "memberships": memberships})
+    return envelope(
+        {
+            "signed_in": True,
+            "user_id": signed_in.user_id,
+            # Their own address, for the waiting screen's *"We'll email [email]"*.
+            "email": str(email) if email else None,
+            "memberships": memberships,
+        }
+    )
 
 
-async def _shop(db: Database, tenant_id: str) -> tuple[str | None, list[str]]:
-    """The shop's own name, and the assistants it has.
+async def _shop(db: Database, tenant_id: str) -> tuple[str | None, list[str], str | None]:
+    """The shop's own name, the assistants it has, and its status.
 
     **The name**, so a merchant never has to recognise ``tn_01M…``. ``None`` when
     there is no name to show; the screen falls back to the id rather than
     inventing one.
+
+    **The status**, so the dashboard shows a shop waiting for approval its
+    waiting screen and nothing else (ADR-0058 §7). Display only, like the rest:
+    every shop route refuses a waiting shop itself (``acting_for``).
 
     **The assistants** are ``enabled_agents``, sorted, passed through as data:
     the console hides a screen that belongs to an assistant the shop does not
@@ -293,8 +312,8 @@ async def _shop(db: Database, tenant_id: str) -> tuple[str | None, list[str]]:
     async with db.tenant_session(tenant_id) as session:
         tenant = await TenantRepository(session).get(tenant_id)
     if tenant is None:
-        return None, []
-    return (tenant.name or None), sorted(tenant.enabled_agents)
+        return None, [], None
+    return (tenant.name or None), sorted(tenant.enabled_agents), tenant.status.value
 
 
 @router.post("/auth/sign-out", summary="End the session")
@@ -310,8 +329,12 @@ async def sign_out(response: Response) -> dict[str, object]:
     return envelope({"signed_out": True})
 
 
-async def _limit_sign_in(request: Request, email: str) -> None:
+async def limit_links(request: Request, email: str, *, refusal: str = SIGN_IN_LIMITED) -> None:
     """At most so many links an hour per network address and per email (G97).
+
+    **Sign-in and sign-up links count together** (ADR-0058 §7): the limit is on
+    the emails NEURA sends one inbox, and on the requests one address makes,
+    whichever form asked. Only the words of the refusal differ (``refusal``).
 
     Checked **before** anything is looked up, so the answer cannot depend on
     whether the email has an account. Both are counted as keyed hashes that
@@ -335,10 +358,10 @@ async def _limit_sign_in(request: Request, email: str) -> None:
     )
     if not verdict.allowed:
         log.info("sign_in_rate_limited", subject=verdict.subject)
-        raise RateLimitError(SIGN_IN_LIMITED, details={"retry_after": verdict.retry_after})
+        raise RateLimitError(refusal, details={"retry_after": verdict.retry_after})
 
 
-def _set_session_cookie(response: Response, value: str) -> None:
+def set_session_cookie(response: Response, value: str) -> None:
     """Every flag here is doing a job.
 
     ``httponly`` keeps the cookie out of reach of any script that gets onto the
@@ -360,7 +383,7 @@ def _set_session_cookie(response: Response, value: str) -> None:
     )
 
 
-def _peer(request: Request) -> str:
+def peer(request: Request) -> str:
     """The network peer, for abuse investigation only.
 
     Never `X-Forwarded-For` unless a proxy hop count is configured — trusting a

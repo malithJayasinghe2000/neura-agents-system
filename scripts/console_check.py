@@ -237,6 +237,9 @@ async def main() -> int:
                 else:
                     print(f"  {DIM}no shop with SELL — the Sold out checks are skipped{OFF}")
 
+            print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
+            await _check_sign_up(console, failures)
+
             if without_sell:
                 print(f"\n  {BOLD}a shop without NEURA-SELL — its screens are not shown{OFF}")
                 await _check_without_sell(browser, console, without_sell[0], failures)
@@ -2561,6 +2564,193 @@ async def _check_people_and_roles(
                 )
             )
         async with db.identity_session() as session:
+            await session.execute(delete(login_tokens).where(login_tokens.c.user_id.in_(gone)))
+            await session.execute(delete(users).where(users.c.id.in_(gone)))
+        await db.dispose()
+
+
+async def _check_sign_up(console: str, failures: list[str]) -> None:
+    """Create an account, the waiting screen and approval (ADR-0058 §7, boards 42 to 45).
+
+    In its own browser, signed out, as a new shop owner. The form is sent once
+    with a website that is not one, which the API refuses before anything is
+    stored or mailed; the request itself is then made **in the database**
+    (`request_sign_up`), so this check never sends an email, whatever mail
+    server the API has. The link is opened as the new owner would, the waiting
+    screen read on desktop and phone, the shop approved in the database (no
+    email), and Home must then open. Afterwards the shop is removed as
+    `make tenant-refuse` removes one, and the account by its email.
+    """
+    from widget_check import deprovision
+
+    from neura_core.identity.schema import login_tokens, sign_up_requests, users
+    from neura_core.identity.sign_up import approve_shop, request_sign_up
+
+    email = f"sign-up-check-{ids.new_id(ids.USER).lower()}@example.com"
+    shop = "Sign Up Check Shop"
+    db = Database.from_settings()
+    tenant = ""
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def opened(page: Chrome, url: str, wait: float = 3) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def type_into(page: Chrome, selector: str, value: str) -> None:
+        await page.evaluate(
+            f"""(() => {{
+              const el = document.querySelector('{selector}');
+              const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              set.call(el, {value!r});
+              el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              return true;
+            }})()"""
+        )
+
+    async def menu(page: Chrome) -> int:
+        return int(
+            await page.evaluate("document.querySelectorAll('nav[aria-label=Screens] a').length")
+        )
+
+    try:
+        async with Chrome(find_chrome()) as page:
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/")
+                _check(
+                    f"Sign in offers New to NEURA? Create an account ({size})",
+                    "New to NEURA?" in shown and "Create an account" in shown,
+                    failures,
+                )
+                await page.evaluate("document.querySelector('[data-create-account]').click(), true")
+                await asyncio.sleep(2.5)
+                shown = str(await page.evaluate("document.body.innerText"))
+                _check(
+                    f"Create an account opens from Sign in ({size})",
+                    await page.evaluate("location.pathname") == "/sign-up"
+                    and "Tell us about your shop" in shown,
+                    failures,
+                )
+                _check(
+                    f"it asks for the email, the shop's name and its website ({size})",
+                    all(
+                        words in shown
+                        for words in (
+                            "Your email address",
+                            "Your shop's name",
+                            "Your shop's website",
+                            "Create my account",
+                            "FiveNeurals looks at every new shop before its assistant starts.",
+                            "Already have an account?",
+                        )
+                    ),
+                    failures,
+                )
+                _check(f"Create an account fits the screen ({size})", await fits(page), failures)
+
+            await phone(page, False)
+            await opened(page, f"{console}/sign-up")
+            await type_into(page, "#email", email)
+            await type_into(page, "#shop-name", shop)
+            await type_into(page, "#website", "not a site")
+            await page.evaluate("document.querySelector('form button[type=submit]').click(), true")
+            await asyncio.sleep(2.5)
+            shown = str(await page.evaluate("document.body.innerText"))
+            _check(
+                "a website that is not one is refused in plain words, nothing sent",
+                "Enter your shop's website, like yourshop.com." in shown
+                and "Check your email" not in shown,
+                failures,
+            )
+
+            async with db.identity_session() as session:
+                link = await request_sign_up(
+                    session,
+                    email=email,
+                    name=shop,
+                    website="sign-up-check.example.com",
+                    console_base_url=console,
+                )
+            await opened(page, link.url, wait=5)
+            path = str(await page.evaluate("location.pathname"))
+            tenant = path.split("/")[2] if path.startswith("/console/tn_") else ""
+            _check("the link signs the new owner in and opens their shop", bool(tenant), failures)
+            if not tenant:
+                return
+
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/console/{tenant}")
+                _check(
+                    f"the waiting screen: the shop waits, we'll email them ({size})",
+                    f"{shop} is waiting for approval" in shown
+                    and email in shown
+                    and "Until then nothing runs and nothing costs anything." in shown,
+                    failures,
+                )
+                _check(
+                    f"it offers the owner guide and Sign out, no menu, no Your shops ({size})",
+                    "While you wait: the guide for shop owners" in shown
+                    and "Sign out" in shown
+                    and "Your shops" not in shown
+                    and await menu(page) == 0,
+                    failures,
+                )
+                _check(f"the waiting screen fits the screen ({size})", await fits(page), failures)
+
+            await phone(page, False)
+            shown = await opened(page, f"{console}/console/{tenant}/conversations")
+            _check(
+                "a typed address to another screen still shows the waiting screen",
+                "is waiting for approval" in shown and await menu(page) == 0,
+                failures,
+            )
+            shown = await opened(page, f"{console}/console")
+            _check(
+                "Your shops says Waiting for approval", "Waiting for approval" in shown, failures
+            )
+
+            async with db.tenant_session(tenant) as session:
+                await approve_shop(session, tenant, agents=["care"])
+            shown = await opened(page, f"{console}/console/{tenant}")
+            _check(
+                "once approved, Home opens with the Owner's menu",
+                "is waiting for approval" not in shown
+                and "You're the Owner" in shown
+                and await menu(page) > 0,
+                failures,
+            )
+
+            shown = await opened(page, link.url, wait=4)
+            _check(
+                "a used sign-up link says so, with Sign in and Create an account",
+                "work once" in shown and "Sign in" in shown and "Create an account" in shown,
+                failures,
+            )
+    finally:
+        if tenant:
+            await deprovision(tenant)
+        async with db.identity_session() as session:
+            gone = list(
+                (await session.execute(select(users.c.id).where(users.c.email == email))).scalars()
+            )
+            await session.execute(delete(sign_up_requests).where(sign_up_requests.c.email == email))
             await session.execute(delete(login_tokens).where(login_tokens.c.user_id.in_(gone)))
             await session.execute(delete(users).where(users.c.id.in_(gone)))
         await db.dispose()

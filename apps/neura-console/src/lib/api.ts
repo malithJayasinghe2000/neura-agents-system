@@ -82,6 +82,28 @@ export function verifySignInToken(
   return call("/auth/verify", { method: "POST", body: JSON.stringify({ token }) });
 }
 
+/**
+ * Ask for a sign-up link (ADR-0058 §7). Resolves the same for every email, and
+ * every email gets a link (R15), so the screen says the same words to everyone.
+ */
+export function requestSignUp(
+  email: string,
+  shopName: string,
+  website: string,
+): Promise<{ message: string }> {
+  return call("/auth/sign-up", {
+    method: "POST",
+    body: JSON.stringify({ email, shop_name: shopName, website }),
+  });
+}
+
+/** Use a sign-up link. The response's cookie signs them in; the shop waits. */
+export function confirmSignUp(
+  token: string,
+): Promise<{ signed_in: boolean; tenant_id?: string; message?: string }> {
+  return call("/auth/confirm-sign-up", { method: "POST", body: JSON.stringify({ token }) });
+}
+
 /** Who is signed in, and which merchants they may act for — asked fresh. */
 export function fetchMe(): Promise<Me> {
   return call("/me");

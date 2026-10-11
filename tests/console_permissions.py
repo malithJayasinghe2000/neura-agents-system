@@ -62,6 +62,10 @@ PERSON_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # The invite link: whoever holds it proves the inbox it was sent to,
         # and the shop it names is checked against the link, never trusted.
         ("POST", "/v1/console/auth/accept-invite"),
+        # Signing up (ADR-0058 §7): before there is a person or a shop. The
+        # link proves the inbox; the shop it makes waits for FiveNeurals.
+        ("POST", "/v1/console/auth/sign-up"),
+        ("POST", "/v1/console/auth/confirm-sign-up"),
     }
 )
 

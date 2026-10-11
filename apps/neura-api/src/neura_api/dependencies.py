@@ -54,11 +54,14 @@ from neura_core import (
 from neura_core.identity import COOKIE_NAME, is_permission, memberships_for, role_may
 from neura_core.identity import verify as verify_session
 from neura_core.identity.roles import ROLE_NOT_ALLOWED
+from neura_core.identity.sign_up import SHOP_WAITING, WAITING_MESSAGE
 from neura_core.tenancy import (
     CUSTOMER_SECRET_PREFIX,
     SHOP_TOKEN_PREFIX,
     ApiKeyKind,
     AuthenticatedCaller,
+    TenantRepository,
+    TenantStatus,
     authenticate,
     require_agent,
     require_scopes,
@@ -383,6 +386,11 @@ async def acting_for(request: Request, tenant_id: str, *, permission: str) -> Co
     read with the membership, on this request, so a changed role bites on the
     person's next click.
 
+    **403 ``SHOP_WAITING`` for a shop waiting for approval** (ADR-0058 §7),
+    whatever the role: a waiting shop opens nothing but the waiting screen,
+    which reads only ``/me``. Read on every request, so approval opens the shop
+    on the Owner's next click. A stranger still gets 404 first.
+
     ``permission`` has no default, so no caller can forget it. Routes state it
     with :class:`Permitted` rather than calling this, so it is checked before
     the body is read (G89) and a test can find it on the route.
@@ -397,6 +405,12 @@ async def acting_for(request: Request, tenant_id: str, *, permission: str) -> Co
     if membership is None:
         log.info("console_tenant_refused", user_id=user_id)
         raise NotFoundError("No such shop.", details={"tenant_id": tenant_id})
+
+    async with db.tenant_session(tenant_id) as session:
+        shop = await TenantRepository(session).get(tenant_id)
+    if shop is not None and shop.status is TenantStatus.WAITING:
+        log.info("console_shop_waiting", user_id=user_id, tenant_id=tenant_id)
+        raise ForbiddenError(WAITING_MESSAGE, code=SHOP_WAITING)
 
     if not role_may(membership.role, permission):
         log.info(

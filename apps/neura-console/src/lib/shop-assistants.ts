@@ -18,8 +18,16 @@ export type Membership = {
   role?: string;
   /** What the role may open, worked out by the API from its own map. */
   permissions?: string[];
+  /** `active`, or `waiting` for a shop FiveNeurals has not approved yet (ADR-0058 §7). */
+  status?: string | null;
 };
-export type Me = { memberships?: Membership[] };
+/** `email` is the signed-in person's own, for the waiting screen. */
+export type Me = { email?: string | null; memberships?: Membership[] };
+
+/** A shop that signed up and waits for FiveNeurals: it opens nothing else. */
+export function isWaiting(membership: Membership | null | undefined): boolean {
+  return membership?.status === "waiting";
+}
 
 /** NEURA-SELL's key in `enabled_agents`. Its screens: Suggestions and Sold out. */
 export const SELL = "sell";

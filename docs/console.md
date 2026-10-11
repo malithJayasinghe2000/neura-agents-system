@@ -585,7 +585,7 @@ product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), 
 `reason`: `unreachable` · `not_supported`) — `null` unless `?stock=now`, the only value it takes (400 otherwise).
 `ObservedEventRepository.any_views_since` answers *receiving* with an `EXISTS`, never a count.
 
-### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (People and roles built 2026-10-10; Create an account not built)
+### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (People and roles built 2026-10-10; Create an account built 2026-10-11)
 
 [ADR-0058](architecture/adr/0058-a-shops-dashboard-has-people-with-roles-and-a-shop-signs-up.md), accepted 2026-10-10; mockups approved the same day (canvas rows 12 and 13, boards 38 to 45, version 31). **Build from this section and the ADR; do not redesign.**
 
@@ -669,9 +669,31 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
 
 **FiveNeurals approves** with a command for now (`make tenant-approve`, and a refusal), the admin dashboard later (the log's *Admin needs*, AD1 to AD6).
 
+**As built in piece 3 (2026-10-11; what the build decided is [ADR-0060](architecture/adr/0060-sign-up-what-the-build-decided.md), R14 to R17):**
+
+- **Create an account** is `/sign-up`, open to anyone, signed in or not (an existing account may add a second
+  shop, R15). The website may be typed with or without `https://`; a wrong one: *"Enter your shop's website, like
+  yourshop.com."* *Check your email* says the same words for every email, because every email gets a link.
+- **The link** (`/auth/sign-up?token=…`) makes the account when the email has none, the shop waiting for approval
+  and its Owner, signs them in and opens the shop, which shows the waiting screen. A used or old link: *"That link
+  didn't work"*, *"Sign-up links expire after 15 minutes and work once. If you already confirmed, sign in. If not,
+  create your account again."*, **Sign in** and **Create an account**.
+- **The waiting screen** replaces the menu and every screen of a waiting shop (`components/waiting-for-approval.tsx`,
+  from the shop's frame); a typed address to another screen shows it too. It also shows **Your shops** when the
+  person has another shop (R17 a). *Your shops* lists a waiting shop as *Waiting for approval*.
+- **The API is the lock:** every shop route answers a waiting shop **403 `SHOP_WAITING`** (a stranger still 404);
+  `/me` gives each membership its `status` and no permissions for a waiting shop; no key can be issued for it.
+- **FiveNeurals:** `make tenant-waiting`, `make tenant-approve TENANT=… [AGENTS=care,sell]` (CARE when none named,
+  R14; the approval email), `make tenant-refuse TENANT=…` (removed, then the refusal email; the person keeps their
+  account). The three emails' words are in ADR-0060 §5.
+- **Checked:** `make console-check` signs up a new owner in its own browser (the request made in the database, so
+  no email is sent), reads Create an account and the waiting screen on desktop and phone, approves the shop in the
+  database, and Home must then open; `tests/integration/test_console_sign_up.py` holds the API, the commands and
+  the emails.
+
 ## 4. Identity — the part that is genuinely new
 
-### 4.1 Three tables
+### 4.1 The tables
 
 ```
 users                       (NOT tenant-scoped — see ADR-0026 §4)
@@ -682,6 +704,9 @@ memberships                 (tenant-scoped, forced RLS)
 
 login_tokens                (NOT tenant-scoped)
   id, user_id, token_hash, expires_at, consumed_at, requested_ip
+
+sign_up_requests            (NOT tenant-scoped: there is no shop yet; ADR-0058 §7)
+  id, email (one per email), shop_name, website, token_hash, expires_at, requested_ip
 ```
 
 `sessions` are signed cookies rather than a table, so a logout is a cookie clear and there is no session store to grow unbounded. **Revocation is checked against `memberships` on every request**, not baked into the cookie — otherwise removing someone's access does nothing until their cookie expires.
@@ -705,7 +730,7 @@ The last two steps are the ones that already exist and are already trusted. **Th
 3. **Login tokens are single-use, hashed at rest, and consumed in the same transaction that creates the session.**
 4. **Sign-in reveals nothing about who has an account.**
 5. **Asking for a sign-in link is limited**, per network address and per email, over an hour (G97, 2026-10-10;
-   `RATE_LIMIT_SIGN_IN_*`, guesses until real use). Checked before anything is looked up, so the limit, too, says
+   `RATE_LIMIT_SIGN_IN_*`, guesses until real use). **Sign-up links count in the same limit** (ADR-0060). Checked before anything is looked up, so the limit, too, says
    nothing about who has an account; neither the address nor the email is stored, only keyed hashes that expire.
 
 ---

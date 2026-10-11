@@ -191,6 +191,8 @@ class TestVerifyAndSession:
                     "tenant_id": owner["tenant"],
                     "role": "owner",
                     "name": "Corner Bookshop",
+                    # ADR-0058 §7: a waiting shop shows its waiting screen.
+                    "status": "active",
                     "assistants": ["care", "sell"],
                     # ADR-0058: what the role may open, from the API's own map.
                     "permissions": response.json()["data"]["memberships"][0]["permissions"],

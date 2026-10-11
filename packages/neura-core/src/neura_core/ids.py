@@ -31,6 +31,9 @@ LOGIN_TOKEN: Final = "lgt"  # noqa: S105
 #: An Owner's invitation to one person, for one shop (ADR-0058 §4). The id names
 #: the invite on the People screen; the link's token is another thing, hashed.
 INVITE: Final = "inv"
+#: A sign-up waiting for its email link (ADR-0058 §7). The token is another
+#: thing, hashed.
+SIGN_UP: Final = "sgn"
 API_KEY: Final = "key"
 CONVERSATION: Final = "cnv"
 MESSAGE: Final = "msg"

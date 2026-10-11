@@ -49,6 +49,7 @@ class TenantRepository:
         enabled_agents: Sequence[str] = (),
         config: TenantConfig | None = None,
         status: TenantStatus = TenantStatus.ACTIVE,
+        website: str | None = None,
     ) -> Tenant:
         """Create a tenant.
 
@@ -67,6 +68,7 @@ class TenantRepository:
                 status=status.value,
                 enabled_agents=sorted(set(enabled_agents)),
                 config=_config_to_jsonb(settings),
+                website=website,
             )
         )
         created = await self.get(new_tenant_id)
@@ -207,6 +209,18 @@ class ApiKeyRepository:
                     f"anyone can read it in the page; not {', '.join(refused)}. Use a "
                     "secret key on a server for these.",
                 )
+
+        status = await self._session.scalar(
+            select(tenants.c.status).where(tenants.c.tenant_id == tenant_id)
+        )
+        if status == TenantStatus.WAITING.value:
+            # ADR-0058 §7: a shop waiting for approval holds no key, so nothing
+            # can reach its AI before FiveNeurals has looked at it. Keys are
+            # refused at use too (`is_servable`); this stops one being made.
+            raise ConfigurationError(
+                "this shop is waiting for approval, so it may hold no key. "
+                "Approve it first: make tenant-approve TENANT=...",
+            )
 
         if OBSERVE_WRITE in scopes:
             await self._check_observer(tenant_id, kind)
@@ -532,6 +546,7 @@ def _tenant_from_row(row: Any) -> Tenant:
         enabled_agents=frozenset(row.enabled_agents or ()),
         config=TenantConfig.model_validate(row.config or {}),
         dpa_signed_at=row.dpa_signed_at,
+        website=row.website,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

@@ -1,4 +1,4 @@
-"""The three tables a *person* is made of. ADR-0026.
+"""The tables a *person* is made of. ADR-0026, ADR-0058.
 
 Every other table in this system describes a machine or a merchant. These
 describe a human being, and they are the first ones to do so — which is why the
@@ -68,6 +68,7 @@ USERS = "users"
 MEMBERSHIPS = "memberships"
 LOGIN_TOKENS = "login_tokens"
 MEMBERSHIP_INVITES = "membership_invites"
+SIGN_UP_REQUESTS = "sign_up_requests"
 
 #: The roles a membership or an invite may name, for the database's own check.
 _ROLES = ", ".join(repr(role.value) for role in Role)
@@ -199,13 +200,42 @@ membership_invites = Table(
 )
 
 
+#: A sign-up waiting for its email link to be clicked (ADR-0058 §7).
+#:
+#: **No ``tenant_id``, like ``login_tokens``**, and for the same reason: there is
+#: no shop yet. Nothing is made until the link is used: no account, no shop. The
+#: link proves the inbox, then one transaction deletes this row (so the link
+#: works once) and makes the account, the waiting shop and its Owner.
+#:
+#: **The token is never stored**, only its SHA-256. **One request per email**: a
+#: second replaces the first, so its link stops. Rows live 15 minutes; expired
+#: ones are deleted by the next sign-up, so the table holds only links in flight.
+#: ``requested_ip`` is for abuse investigation, as on ``login_tokens``.
+sign_up_requests = Table(
+    SIGN_UP_REQUESTS,
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("email", CITEXT, nullable=False),
+    Column("shop_name", String(100), nullable=False),
+    Column("website", String(255), nullable=False),
+    Column("token_hash", String(64), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("requested_ip", String(64), nullable=False, server_default=""),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("email", name="uq_sign_up_requests_email"),
+    UniqueConstraint("token_hash", name="uq_sign_up_requests_token_hash"),
+)
+
+
 __all__ = [
     "LOGIN_TOKENS",
     "MEMBERSHIPS",
     "MEMBERSHIP_INVITES",
+    "SIGN_UP_REQUESTS",
     "USERS",
     "login_tokens",
     "membership_invites",
     "memberships",
+    "sign_up_requests",
     "users",
 ]

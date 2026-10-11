@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        tenant-dpa retention-sweep \
+        tenant-dpa retention-sweep tenant-waiting tenant-approve tenant-refuse \
         api-check verify-probe router-probe console console-check web-check
 
 help:  ## Show this help
@@ -471,6 +471,18 @@ tenant-dpa:  ## Record a data-processing agreement: make tenant-dpa TENANT=tn_..
 # for RETENTION_CONVERSATIONS_DAYS, then books the next pass if anything is left.
 retention-sweep:  ## Delete what has expired, now: make retention-sweep TENANT=tn_...
 	uv run python scripts/tenant_admin.py sweep --tenant-id $(TENANT)
+
+# ADR-0058 §7: a shop that signed up waits for FiveNeurals (AD1, until the admin
+# dashboard exists). Approval gives it the assistants named, CARE when none, and
+# emails its Owner; refusal removes it, as tenant-drop does, and emails its Owner.
+tenant-waiting:  ## Shops waiting for approval: make tenant-waiting
+	uv run python scripts/tenant_admin.py waiting
+
+tenant-approve:  ## Approve a shop that signed up: make tenant-approve TENANT=tn_... [AGENTS=care,sell]
+	uv run python scripts/tenant_admin.py approve --tenant-id $(TENANT) --agents "$(AGENTS)"
+
+tenant-refuse:  ## Refuse and remove a shop that signed up: make tenant-refuse TENANT=tn_...
+	uv run python scripts/tenant_admin.py refuse --tenant-id $(TENANT)
 
 revision:  ## New migration: make revision M="add tenants"
 	uv run alembic revision --autogenerate -m "$(M)"

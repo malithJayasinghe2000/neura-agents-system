@@ -24,8 +24,11 @@ import type { ShopView } from "@/lib/shop";
 import type { Usage } from "@/lib/usage";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** `name` is `null` when the shop has none on record; the id stands in for it. */
-type Membership = { tenant_id: string; role: string; name: string | null };
+/**
+ * `name` is `null` when the shop has none on record; the id stands in for it.
+ * `status` is `waiting` for a shop FiveNeurals has not approved yet (ADR-0058 §7).
+ */
+type Membership = { tenant_id: string; role: string; name: string | null; status?: string | null };
 type Me = { signed_in: boolean; memberships?: Membership[] };
 
 export default async function ConsolePage() {
@@ -38,7 +41,10 @@ export default async function ConsolePage() {
   if (!me.ok || !me.data.signed_in) redirect("/");
 
   const memberships: Membership[] = me.data.memberships ?? [];
-  const statuses = await Promise.all(memberships.map((m) => statusOf(m.tenant_id)));
+  // A waiting shop is not read: every one of its routes refuses until approval.
+  const statuses = await Promise.all(
+    memberships.map((m) => (m.status === "waiting" ? WAITING : statusOf(m.tenant_id))),
+  );
 
   return (
     <>
@@ -97,11 +103,15 @@ export default async function ConsolePage() {
 }
 
 type Status = {
+  /** Signed up, and waiting for FiveNeurals to approve it (ADR-0058 §7). */
+  approval?: true;
   /** `null` when it could not be read — then nothing is said about it. */
   connected: boolean | null;
   practice: boolean | null;
   waiting: number | null;
 };
+
+const WAITING: Status = { approval: true, connected: null, practice: null, waiting: null };
 
 /** Three reads per shop, in parallel, each one already membership-checked. */
 async function statusOf(tenantId: string): Promise<Status> {
@@ -119,6 +129,9 @@ async function statusOf(tenantId: string): Promise<Status> {
 }
 
 function StatusLine({ status }: { status: Status }) {
+  if (status.approval) {
+    return <span className="block text-sm text-muted-foreground">Waiting for approval</span>;
+  }
   if (status.connected === false) {
     return (
       <span className="block text-sm text-muted-foreground">
