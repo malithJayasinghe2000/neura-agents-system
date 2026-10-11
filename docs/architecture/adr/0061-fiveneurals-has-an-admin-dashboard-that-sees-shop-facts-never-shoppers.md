@@ -50,8 +50,10 @@ command is harder to press by mistake. They stay on the *Admin needs* list for a
 
 ### 3. Where: `/admin` in the same dashboard (R21, the owner: A)
 
-The admin area is part of the dashboard, at `/admin`, with its own simple header (*Shops*, *AI use and cost*, *Your
-shops*, *Sign out*). An admin finds it from a link on *Your shops*; nobody else is shown the link. **The address is
+The admin area is part of the dashboard, at `/admin`, with **its own side menu** (settled at the mockup, the owner,
+2026-10-11, R24: *the admin side will get a lot of things*, so a side menu from the start rather than a top bar
+changed later): the black *Admin* badge by the name, a card *FiveNeurals admin*, *You're an admin · Your shops*
+where a shop's menu has its switcher, then *Shops* and *AI use and cost*, and *Sign out*. An admin finds it from a link on *Your shops*; nobody else is shown the link. **The address is
 not the lock**: the API checks every admin request (§4), and the dashboard only hides what the API refuses, as for
 shop roles.
 
