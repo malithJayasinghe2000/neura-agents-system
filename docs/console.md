@@ -12,7 +12,7 @@ The screen a shop owner logs into. It shows them what their AI assistant said, l
 
 ### 1.1 What it is not
 
-It is **not** an admin panel for us, it is **not** a replacement for the shop's own back office, and in v1 it does **not** approve anything — because nothing in the system can yet change a merchant's store ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)).
+~~It is **not** an admin panel for us~~ (superseded 2026-10-11 by [ADR-0061](architecture/adr/0061-fiveneurals-has-an-admin-dashboard-that-sees-shop-facts-never-shoppers.md): FiveNeurals gets `/admin`, which shows shop facts and never a shopper), it is **not** a replacement for the shop's own back office, and in v1 it does **not** approve anything — because nothing in the system can yet change a merchant's store ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)).
 
 ---
 
