@@ -1198,8 +1198,8 @@ async def _check_contact(
         )
         _check(
             "the screen shows the sentence a handed-over shopper reads, with them",
-            sentence == "I can't help with this here. Please contact our store: "
-            "hello@yourshop.example, +94 11 234 5678.",
+            sentence == "I can't answer this here. Leave your email so our store can answer you.\n"
+            "Or contact our store: hello@yourshop.example, +94 11 234 5678.",
             failures,
         )
 

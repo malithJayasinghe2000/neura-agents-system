@@ -3,9 +3,11 @@
     GET /v1/console/shops/{tenant_id}/contact    {"email": …, "phone": …}
     PUT /v1/console/shops/{tenant_id}/contact    {"email": "…", "phone": "…"}
 
-Typed once by the owner on Shop connection. A handed-over shopper reads *"I can't
-help with this here. Please contact our store:"* and these (`neura_core.tenancy.
-handover_message`, put on by the turn service).
+Typed once by the owner on Shop connection. A handed-over shopper reads them at the
+end of the handover's words (`neura_core.tenancy.handover`, put on by the turn
+service): since ADR-0062 the first handover in a chat says *"I can't answer this
+here. Leave your email so our store can answer you."* then *"Or contact our store:"*
+and these.
 
 Behind the console session, the shop taken from the membership (`acting_for`).
 **Only the two keys change** in the shop's settings, merged like the mode
@@ -28,7 +30,7 @@ from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_core import get_logger
 from neura_core.identity.roles import CONTACT_WRITE
-from neura_core.tenancy import TenantConfig, TenantRepository, handover_message
+from neura_core.tenancy import TenantConfig, TenantRepository, handover_ask_message
 
 log = get_logger(__name__)
 
@@ -82,9 +84,13 @@ def _shown(config: TenantConfig) -> dict[str, str | None]:
 
 
 def _answer(config: TenantConfig) -> dict[str, str | None]:
-    """The details, and the sentence a handed-over shopper reads with them, made
-    here so the dashboard shows the server's words and never a copy of them."""
-    return {**_shown(config), "handover": handover_message(config)}
+    """The details, and the words a handed-over shopper reads with them, made
+    here so the dashboard shows the server's words and never a copy of them.
+
+    The first handover's words, to a shopper who is not signed in, since
+    ADR-0062: the commonest case, and the one the owner's details end (G104).
+    The email box sits between the two lines in the chat box."""
+    return {**_shown(config), "handover": handover_ask_message(config)}
 
 
 @router.get("/contact", summary="The shop's contact details, named in every handover")

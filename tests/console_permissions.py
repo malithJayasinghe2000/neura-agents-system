@@ -33,6 +33,7 @@ MODE = "shop:mode:write"
 USAGE = "usage:cost:read"
 PEOPLE = "people:members:write"
 HOME = "shop:home:read"
+HANDOVERS = "shop:handovers:write"
 
 #: ADR-0058 §2, *The first permissions*, R10's B (the Developer has all of
 #: Shop connection, Connect and the contact details included), and R12 (Home is
@@ -49,6 +50,9 @@ WHO: dict[str, frozenset[str]] = {
     MODE: frozenset({OWNER}),
     USAGE: frozenset({OWNER}),
     PEOPLE: frozenset({OWNER}),
+    # ADR-0062 §8: answer a handed-over shopper (see their email, Answer by
+    # email, Mark as answered). The help desk's work; never the Developer's.
+    HANDOVERS: frozenset({OWNER, SUPPORT}),
 }
 
 #: A person's own routes. They come before a shop is chosen, so they name no

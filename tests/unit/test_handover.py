@@ -70,3 +70,71 @@ def test_a_shop_without_details_loads_as_before() -> None:
     config = TenantConfig.model_validate({"mode": "live"})
     assert config.contact_email is None
     assert config.contact_phone is None
+
+
+# ── ADR-0062: a handed-over shopper may leave an email (R31's words) ─────────
+
+from neura_core.tenancy import (  # noqa: E402 - kept beside the tests that use them
+    HANDOVER_ASK,
+    HANDOVER_WITH_STORE,
+    WRONG_EMAIL,
+    email_thanks,
+    handover_ask_message,
+    handover_with_store_message,
+)
+
+#: ADR-0062 §5: *can*, not *will*: NEURA cannot promise that the shop answers.
+PROMISES_AN_ANSWER = (" will ", "we'll", "someone will", "get back to you")
+
+
+class TestTheWordsAShopperReadsAtAHandover:
+    """The owner's words, approved 2026-10-11 (R31). Fixed text, never the AI's."""
+
+    CONTACT = TenantConfig(contact_email="hello@yourshop.example", contact_phone="+94 11 234 5678")
+
+    def test_the_ask_with_the_shops_details(self) -> None:
+        assert handover_ask_message(self.CONTACT) == (
+            "I can't answer this here. Leave your email so our store can answer you.\n"
+            "Or contact our store: hello@yourshop.example, +94 11 234 5678."
+        )
+
+    def test_the_ask_with_one_detail(self) -> None:
+        config = TenantConfig(contact_phone="+94 11 234 5678")
+        assert handover_ask_message(config) == (
+            "I can't answer this here. Leave your email so our store can answer you.\n"
+            "Or contact our store: +94 11 234 5678."
+        )
+
+    def test_the_ask_with_no_details_has_no_contact_line(self) -> None:
+        """ADR-0055 §3's rule: the line is left out when nothing is set."""
+        assert handover_ask_message(TenantConfig()) == HANDOVER_ASK
+        assert (
+            HANDOVER_ASK
+            == "I can't answer this here. Leave your email so our store can answer you."
+        )
+
+    def test_a_signed_in_shopper_is_told_the_question_is_with_the_store(self) -> None:
+        assert handover_with_store_message(self.CONTACT) == (
+            "I can't answer this here. Your question is with our store, and they can answer you "
+            "by email.\nOr contact our store: hello@yourshop.example, +94 11 234 5678."
+        )
+        assert handover_with_store_message(TenantConfig()) == HANDOVER_WITH_STORE
+
+    def test_after_send_the_shopper_reads_their_own_address(self) -> None:
+        assert email_thanks("saman@example.com") == (
+            "Thanks. Your question is with our store, and they can answer you at saman@example.com."
+        )
+
+    def test_a_wrong_address(self) -> None:
+        assert WRONG_EMAIL == "Please check your email address."
+
+    def test_no_sentence_promises_an_answer_or_a_person(self) -> None:
+        sentences = [
+            handover_ask_message(self.CONTACT),
+            handover_with_store_message(self.CONTACT),
+            email_thanks("saman@example.com"),
+        ]
+        for sentence in sentences:
+            lowered = f" {sentence.lower()} "
+            assert not any(promise in lowered for promise in PROMISES_AN_ANSWER), sentence
+            assert not any(promise in lowered for promise in PROMISES), sentence

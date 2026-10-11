@@ -140,8 +140,9 @@ class TestContactDetails:
         assert read.json()["data"] == {
             "email": None,
             "phone": None,
-            # The sentence a handed-over shopper reads now, made by the server.
-            "handover": "I can't help with this here. Please contact our store.",
+            # The words a handed-over shopper reads now, made by the server: the
+            # first handover's, to a shopper who is not signed in (ADR-0062, G104).
+            "handover": "I can't answer this here. Leave your email so our store can answer you.",
         }
 
     async def test_saved_then_read_back(self, client, owner) -> None:
@@ -154,8 +155,8 @@ class TestContactDetails:
         assert saved.json()["data"] == {
             "email": "hello@yourshop.example",
             "phone": "+94 11 234 5678",
-            "handover": "I can't help with this here. Please contact our store: "
-            "hello@yourshop.example, +94 11 234 5678.",
+            "handover": "I can't answer this here. Leave your email so our store can answer you.\n"
+            "Or contact our store: hello@yourshop.example, +94 11 234 5678.",
         }
         read = client.get(contact_of(owner), cookies=as_owner(owner))
         assert read.json()["data"] == saved.json()["data"]

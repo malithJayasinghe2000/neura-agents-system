@@ -151,6 +151,13 @@ class Settings(BaseSettings):
     retention_observed_events_days: int = Field(
         default=7, ge=1, alias="RETENTION_OBSERVED_EVENTS_DAYS"
     )
+    #: How long a handed-over shopper's typed email waits for the shop's answer
+    #: (ADR-0062 §4, the owner's R30). *Mark as answered* deletes it at once;
+    #: unanswered, it goes after this many days and the chat leaves the waiting
+    #: list. Thirty is a guess (CLAUDE.md §4).
+    retention_handover_emails_days: int = Field(
+        default=30, ge=1, alias="RETENTION_HANDOVER_EMAILS_DAYS"
+    )
     # RETENTION_AUDIT_LOG_DAYS and RETENTION_TRACES_DAYS are deliberately NOT
     # fields. Neither is enforced (ADR-0048 §5), and a field nothing acts on is
     # the failure ADR-0042 §3 warned about — a setting that appears to work.

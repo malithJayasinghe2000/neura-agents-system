@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
+from neura_agent_core.waiting import waiting_answers
 from neura_core import metadata, new_id
 from neura_core.ids import MESSAGE
 
@@ -597,6 +598,8 @@ class ConversationRepository:
         transcript and left the working state would have deleted nothing a
         forensic reader could not reassemble.
 
+        The waiting row a handover left (``waiting_answers``, ADR-0062) goes too.
+
         **Deliberately left behind:** ``shadow_turns``, the graded review queue
         (``by_ids`` renders a deleted question as *"no longer in the
         transcript"* for exactly this case), and ``audit_log``, which the app
@@ -619,6 +622,13 @@ class ConversationRepository:
                 .where(table.c.tenant_id == tenant_id)
                 .where(table.c.thread_id.in_(expired))
             )
+        # A handed-over shopper's row (ADR-0062): an address not yet answered, or
+        # who answered. Neither outlives the chat it belongs to.
+        await self._session.execute(
+            delete(waiting_answers)
+            .where(waiting_answers.c.tenant_id == tenant_id)
+            .where(waiting_answers.c.conversation_id.in_(expired))
+        )
         result = await self._session.execute(
             delete(conversations)
             .where(conversations.c.tenant_id == tenant_id)

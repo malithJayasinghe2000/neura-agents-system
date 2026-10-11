@@ -1,4 +1,4 @@
-"""What a handed-over shopper reads. ADR-0055, the log's G44.
+"""What a handed-over shopper reads. ADR-0055, ADR-0062, the log's G44.
 
 Every handover used to say *"I'm passing you to a colleague. They'll have
 everything we've talked about"*, and nobody came: the dashboard cannot reply to a
@@ -31,6 +31,58 @@ def handover_message(config: TenantConfig) -> str:
     return f"{HANDOVER_WITHOUT_DETAILS[:-1]}: {', '.join(details)}."
 
 
+# ── ADR-0062: a handed-over shopper may leave an email (R31, the owner's words) ──
+#
+# The shop answers from its own email app; NEURA sends nothing. So every sentence
+# says the store **can** answer, never that it **will**: NEURA cannot promise it.
+# The contact line goes on a line of its own, because the chat box draws its
+# email box between the first line and the rest (ADR-0062 §5, the approved
+# mockup), and a client without the box still shows the whole text.
+
+#: The first handover in a chat, to a shopper NEURA cannot reach: the chat box
+#: shows its email box under this line (the reply's ``ask_email`` mark).
+HANDOVER_ASK = "I can't answer this here. Leave your email so our store can answer you."
+
+#: A shopper the shop can already reach: signed in (the shop holds their email),
+#: or one who left an address earlier in the same chat.
+HANDOVER_WITH_STORE = (
+    "I can't answer this here. Your question is with our store, and they can answer you by email."
+)
+
+#: Under the email box when the address does not look like one.
+WRONG_EMAIL = "Please check your email address."
+
+
+def contact_line(config: TenantConfig) -> str | None:
+    """*"Or contact our store: [email], [phone]."*, or nothing when the owner set no
+    details (ADR-0055 §3's rule: the sentence is true with nothing set)."""
+    details = [value for value in (config.contact_email, config.contact_phone) if value]
+    if not details:
+        return None
+    return f"Or contact our store: {', '.join(details)}."
+
+
+def handover_ask_message(config: TenantConfig) -> str:
+    """The first handover in a chat, with the email box under its first line."""
+    return _with_contact(HANDOVER_ASK, config)
+
+
+def handover_with_store_message(config: TenantConfig) -> str:
+    """A handover whose shopper the shop can already answer by email."""
+    return _with_contact(HANDOVER_WITH_STORE, config)
+
+
+def email_thanks(email: str) -> str:
+    """What the chat box shows after *Send*: the address the shopper typed, so a
+    mistyped one is seen at once."""
+    return f"Thanks. Your question is with our store, and they can answer you at {email}."
+
+
+def _with_contact(sentence: str, config: TenantConfig) -> str:
+    line = contact_line(config)
+    return sentence if line is None else f"{sentence}\n{line}"
+
+
 #: What a shopper who is not signed in reads about an order (ADR-0057 §7, the
 #: owner's words, accepted 2026-10-08). Not a handover: a person could not answer
 #: it either without knowing who is asking.
@@ -54,9 +106,16 @@ def sign_in_message(config: TenantConfig) -> str:
 
 
 __all__ = [
+    "HANDOVER_ASK",
     "HANDOVER_WITHOUT_DETAILS",
+    "HANDOVER_WITH_STORE",
     "PASS_EXPIRED_MESSAGE",
     "SIGN_IN_WITHOUT_DETAILS",
+    "WRONG_EMAIL",
+    "contact_line",
+    "email_thanks",
+    "handover_ask_message",
     "handover_message",
+    "handover_with_store_message",
     "sign_in_message",
 ]

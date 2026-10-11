@@ -127,7 +127,9 @@ export function ShopContact({
               <p className="text-xs font-medium text-muted-foreground">
                 What a shopper reads when your assistant can&apos;t help
               </p>
-              <p className="text-sm leading-relaxed" data-handover>
+              {/* Two lines, as the chat box shows them: the email box sits
+                  between them there (ADR-0062 §5). */}
+              <p className="text-sm leading-relaxed whitespace-pre-line" data-handover>
                 {shown.handover}
               </p>
             </div>

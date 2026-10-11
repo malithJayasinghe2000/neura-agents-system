@@ -845,6 +845,7 @@ def tenant_tables() -> list[Any]:
     from neura_agent_core.rag.schema import document_chunks
     from neura_agent_core.shadow import shadow_turns
     from neura_agent_core.shadow_evidence import shadow_evidence
+    from neura_agent_core.waiting import waiting_answers
     from neura_agent_sell.feed.schema import sell_feeds
     from neura_agent_sell.pairing.schema import sell_pairing_choices, sell_pairings
     from neura_commerce.sync.schema import sync_checkpoints, synced_entities
@@ -867,6 +868,8 @@ def tenant_tables() -> list[Any]:
         # A shopper's events first: a dropped tenant must not leave the one
         # table that holds observed personal data behind (ADR-0044 §7).
         observed_events,
+        # A handed-over shopper's typed email (ADR-0062): personal data too.
+        waiting_answers,
         # Before the turns it points at: the one foreign key among these tables.
         shadow_evidence,
         shadow_turns,

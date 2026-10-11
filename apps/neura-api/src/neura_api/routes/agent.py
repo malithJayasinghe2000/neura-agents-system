@@ -150,6 +150,11 @@ class ChatData(BaseModel):
     #: Show the shop's *Sign in* link under this reply (ADR-0057 §7). Set by
     #: the server, so the chat box never guesses from the words.
     sign_in: bool = False
+    #: Show the chat box's email box under this reply (ADR-0062 §5): the first
+    #: line of ``reply`` above it, the rest below. Set by the server, so the chat
+    #: box never guesses from the words. The address goes to
+    #: ``POST /v1/conversations/{id}/email``, never into a chat message.
+    ask_email: bool = False
 
 
 def build_router(agent_key: str) -> APIRouter:
@@ -513,6 +518,7 @@ def _chat_payload(request: Request | WebSocket, result: TurnResult) -> dict[str,
             customer_pass=result.customer_pass.value if result.customer_pass else None,
             customer_pass_reason=result.customer_pass_reason,
             sign_in=result.sign_in,
+            ask_email=result.ask_email,
         ).model_dump(mode="json"),
         request_id=str(getattr(getattr(request, "state", None), "request_id", "") or ""),
     )

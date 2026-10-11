@@ -43,6 +43,7 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.graph.schema import audit_log
 from neura_agent_core.shadow import ShadowRepository, shadow_turns
+from neura_agent_core.waiting import WaitingAnswerRepository, WaitingReach, waiting_answers
 from neura_api.jobs import WEBHOOK_DRAIN
 from neura_commerce import registry
 from neura_core import Database, get_database, get_settings
@@ -95,6 +96,7 @@ ALL_TENANT_TABLES = (
     webhook_deliveries,
     shadow_turns,
     job_queue,
+    waiting_answers,
 )
 
 
@@ -1243,11 +1245,18 @@ class NeedsPersonLLM(StubLLM):
 
 
 class TestHandover:
-    """ADR-0055, G44. A handed-over shopper is told how to reach the shop, in the
-    shop's own words, and never that a person is coming."""
+    """ADR-0055 and ADR-0062. A handed-over shopper is told how to reach the shop,
+    in the shop's own words, never that a person is coming; and, the first time in
+    a chat, may leave an email so the shop can answer (R26, R31)."""
 
     CONTACT = TenantConfig(contact_email="hello@yourshop.example", contact_phone="+94 11 234 5678")
-    WITH_CONTACT = (
+    CONTACT_LINE = "Or contact our store: hello@yourshop.example, +94 11 234 5678."
+    ASK = "I can't answer this here. Leave your email so our store can answer you."
+    WITH_STORE = (
+        "I can't answer this here. Your question is with our store, and they can answer you "
+        "by email."
+    )
+    ADR_0055 = (
         "I can't help with this here. Please contact our store: "
         "hello@yourshop.example, +94 11 234 5678."
     )
@@ -1259,7 +1268,7 @@ class TestHandover:
         app = client.app
         app.state.turns = TurnService(app.state.database, NeedsPersonLLM(), app.state.stores)  # type: ignore[attr-defined]
 
-    async def test_a_handover_names_the_shops_contact_details(
+    async def test_the_first_handover_asks_for_an_email(
         self, client: TestClient, db: Database
     ) -> None:
         token = await _provision(db, TENANT_A, config=self.CONTACT)
@@ -1270,15 +1279,20 @@ class TestHandover:
         ).json()["data"]
 
         assert body["state"] == ConversationState.ESCALATED.value
-        assert body["reply"] == self.WITH_CONTACT
+        assert body["reply"] == f"{self.ASK}\n{self.CONTACT_LINE}"
+        # The chat box draws its email box from the mark, never from the words.
+        assert body["ask_email"] is True
         async with db.tenant_session(TENANT_A) as session:
             messages = await ConversationRepository(session).messages(
                 TENANT_A, body["conversation_id"]
             )
-        # The transcript holds what the shopper read, not the old promise.
-        assert messages[-1].content == self.WITH_CONTACT
+            waiting = await WaitingAnswerRepository(session).get(TENANT_A, body["conversation_id"])
+        # The transcript holds what the shopper read.
+        assert messages[-1].content == f"{self.ASK}\n{self.CONTACT_LINE}"
+        # Nothing waits until the shopper leaves an address.
+        assert waiting is None
 
-    async def test_with_no_details_it_promises_nothing(
+    async def test_with_no_details_there_is_no_contact_line(
         self, client: TestClient, db: Database
     ) -> None:
         token = await _provision(db, TENANT_A)
@@ -1288,8 +1302,8 @@ class TestHandover:
             "/v1/care/chat", json={"message": "what is your returns policy?"}, headers=_auth(token)
         ).json()["data"]
 
-        assert body["state"] == ConversationState.ESCALATED.value
-        assert body["reply"] == "I can't help with this here. Please contact our store."
+        assert body["reply"] == self.ASK
+        assert body["ask_email"] is True
 
     async def test_the_live_connection_says_the_same(
         self, client: TestClient, db: Database
@@ -1302,9 +1316,305 @@ class TestHandover:
             frames = _drain(socket)
 
         assert frames[-1]["state"] == ConversationState.ESCALATED.value
-        assert frames[-1]["reply"] == self.WITH_CONTACT
+        assert frames[-1]["reply"] == f"{self.ASK}\n{self.CONTACT_LINE}"
+        assert frames[-1]["ask_email"] is True
         # A handover is fixed text, sent whole: no `token` frame carries the old words.
         assert not [f for f in frames if f["type"] == "token"]
+
+    async def test_a_chat_asks_once(self, client: TestClient, db: Database) -> None:
+        """R32 (2): after *No thanks* (or no answer at all), a later handover in the
+        same chat says ADR-0055's sentence and shows no box."""
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+
+        first = client.post(
+            "/v1/care/chat", json={"message": "please cancel my order"}, headers=_auth(token)
+        ).json()["data"]
+        second = client.post(
+            "/v1/care/chat",
+            json={"message": "and refund it", "conversation_id": first["conversation_id"]},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert second["conversation_id"] == first["conversation_id"]
+        assert second["reply"] == self.ADR_0055
+        assert second["ask_email"] is False
+
+    async def test_after_an_email_a_later_handover_says_the_question_is_with_the_store(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+        first = client.post(
+            "/v1/care/chat", json={"message": "please cancel my order"}, headers=_auth(token)
+        ).json()["data"]
+        left = client.post(
+            f"/v1/conversations/{first['conversation_id']}/email",
+            json={"email": "saman@example.com"},
+            headers=_auth(token),
+        )
+        assert left.status_code == 200, left.text
+
+        second = client.post(
+            "/v1/care/chat",
+            json={"message": "and refund it", "conversation_id": first["conversation_id"]},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert second["reply"] == f"{self.WITH_STORE}\n{self.CONTACT_LINE}"
+        assert second["ask_email"] is False
+
+    async def test_practice_mode_asks_nothing(self, client: TestClient, db: Database) -> None:
+        """ADR-0062 §9: a held handover reached nobody, so nothing waits."""
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+        self._handing_over(client)
+
+        body = client.post(
+            "/v1/care/chat", json={"message": "please cancel my order"}, headers=_auth(token)
+        ).json()["data"]
+
+        assert body["reply"] == ""
+        assert body["ask_email"] is False
+        async with db.tenant_session(TENANT_A) as session:
+            assert (
+                await WaitingAnswerRepository(session).get(TENANT_A, body["conversation_id"])
+                is None
+            )
+
+    async def test_a_signed_in_shopper_is_never_asked(
+        self, client: TestClient, db: Database, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R26: the shop already holds their email, so the chat waits with no
+        address of ours, and the shopper is told their question is with the store."""
+        monkeypatch.setattr(
+            _Health, "capabilities", _Health.capabilities | {Capability.CUSTOMER_READ}
+        )
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "change my delivery address", "customer": {"external_id": "385"}},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert body["reply"] == f"{self.WITH_STORE}\n{self.CONTACT_LINE}"
+        assert body["ask_email"] is False
+        async with db.tenant_session(TENANT_A) as session:
+            waiting = await WaitingAnswerRepository(session).get(TENANT_A, body["conversation_id"])
+        assert waiting is not None
+        assert waiting.reach is WaitingReach.CUSTOMER
+        # Never a copy of the shop's own record (ADR-0062 §2).
+        assert waiting.email is None
+
+    async def test_a_signed_in_shopper_on_a_shop_that_cannot_give_customers_is_asked(
+        self, client: TestClient, db: Database
+    ) -> None:
+        """No `customer.read` in the bridge: NEURA could not find the email, so it asks."""
+        token = await _provision(db, TENANT_A, config=self.CONTACT)
+        self._handing_over(client)
+
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "change my delivery address", "customer": {"external_id": "385"}},
+            headers=_auth(token),
+        ).json()["data"]
+
+        assert body["reply"] == f"{self.ASK}\n{self.CONTACT_LINE}"
+        assert body["ask_email"] is True
+
+
+class TestHandoverEmail:
+    """ADR-0062 §10: ``POST /v1/conversations/{id}/email``, what the chat box sends
+    when a handed-over shopper presses *Send*. Never a chat message: the address
+    never reaches the AI, the transcript, a log line or an error answer."""
+
+    CHAT_BOX: ClassVar[dict[str, str]] = {"Origin": "https://shop.example"}
+
+    async def _handed_over(
+        self, client: TestClient, db: Database, tenant_id: str = TENANT_A
+    ) -> tuple[str, str]:
+        """A chat box key, and a chat it handed over."""
+        token = await _provision(db, tenant_id, kind=ApiKeyKind.PUBLIC)
+        TestHandover._handing_over(client)
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "please cancel my order"},
+            headers={**_auth(token), **self.CHAT_BOX},
+        ).json()["data"]
+        assert body["ask_email"] is True
+        return token, body["conversation_id"]
+
+    def _leave(
+        self, client: TestClient, token: str, conversation_id: str, email: Any, *, page: bool = True
+    ) -> Any:
+        """From the chat box (a public key and its page's Origin), or, with
+        ``page=False``, from the shop's own server (a secret key never comes from
+        a page: G57)."""
+        return client.post(
+            f"/v1/conversations/{conversation_id}/email",
+            json={"email": email},
+            headers={**_auth(token), **(self.CHAT_BOX if page else {})},
+        )
+
+    async def test_a_handed_over_shopper_leaves_an_email(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token, conversation_id = await self._handed_over(client, db)
+
+        response = self._leave(client, token, conversation_id, "  saman@example.com ")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["reply"] == (
+            "Thanks. Your question is with our store, and they can answer you at saman@example.com."
+        )
+        async with db.tenant_session(TENANT_A) as session:
+            waiting = await WaitingAnswerRepository(session).get(TENANT_A, conversation_id)
+            stored = (
+                (
+                    await session.execute(
+                        select(conversation_messages.c.content).where(
+                            conversation_messages.c.conversation_id == conversation_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            sweeps = (
+                (
+                    await session.execute(
+                        select(job_queue.c.kind).where(job_queue.c.tenant_id == TENANT_A)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert waiting is not None
+        assert waiting.reach is WaitingReach.EMAIL
+        assert waiting.email == "saman@example.com"
+        assert waiting.answered_at is None
+        # Not a chat message: the AI reads the transcript, and the address is not in it.
+        assert not [text for text in stored if "saman@example.com" in text]
+        # Something to expire books the sweep that will (ADR-0042 §3).
+        assert "retention.sweep" in sweeps
+
+    async def test_a_wrong_address_is_refused_without_repeating_it(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token, conversation_id = await self._handed_over(client, db)
+
+        response = self._leave(client, token, conversation_id, "saman.perera@")
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "INVALID_EMAIL"
+        assert response.json()["error"]["message"] == "Please check your email address."
+        assert "saman.perera" not in response.text
+        async with db.tenant_session(TENANT_A) as session:
+            assert await WaitingAnswerRepository(session).get(TENANT_A, conversation_id) is None
+
+    async def test_a_chat_that_was_never_handed_over_is_refused(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+        answered = client.post(
+            "/v1/care/chat",
+            json={"message": "what is your returns policy?"},
+            headers={**_auth(token), **self.CHAT_BOX},
+        ).json()["data"]
+        assert answered["escalated"] is False
+
+        response = self._leave(client, token, answered["conversation_id"], "saman@example.com")
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "NOT_HANDED_OVER"
+
+    async def test_a_chat_takes_one_email(self, client: TestClient, db: Database) -> None:
+        token, conversation_id = await self._handed_over(client, db)
+        assert self._leave(client, token, conversation_id, "saman@example.com").status_code == 200
+
+        again = self._leave(client, token, conversation_id, "someone.else@example.com")
+
+        assert again.status_code == 409
+        assert again.json()["error"]["code"] == "ALREADY_WAITING"
+        assert "someone.else" not in again.text
+        async with db.tenant_session(TENANT_A) as session:
+            waiting = await WaitingAnswerRepository(session).get(TENANT_A, conversation_id)
+        assert waiting is not None and waiting.email == "saman@example.com"
+
+    async def test_another_shops_chat_is_no_such_chat(
+        self, client: TestClient, db: Database
+    ) -> None:
+        _, conversation_id = await self._handed_over(client, db, TENANT_A)
+        other = await _provision(db, TENANT_B, kind=ApiKeyKind.PUBLIC)
+
+        response = self._leave(client, other, conversation_id, "saman@example.com")
+
+        assert response.status_code == 404
+        async with db.tenant_session(TENANT_A) as session:
+            assert await WaitingAnswerRepository(session).get(TENANT_A, conversation_id) is None
+
+    async def test_an_unknown_chat_is_no_such_chat(self, client: TestClient, db: Database) -> None:
+        token = await _provision(db, TENANT_A, kind=ApiKeyKind.PUBLIC)
+
+        response = self._leave(client, token, "cnv_does_not_exist", "saman@example.com")
+
+        assert response.status_code == 404
+
+    async def test_a_key_that_cannot_chat_is_refused(
+        self, client: TestClient, db: Database
+    ) -> None:
+        _, conversation_id = await self._handed_over(client, db)
+        async with db.tenant_session(TENANT_A) as session:
+            _, reader = await ApiKeyRepository(session).issue(
+                TENANT_A, kind=ApiKeyKind.SECRET, scopes=["care:conversations:read"]
+            )
+
+        response = client.post(
+            f"/v1/conversations/{conversation_id}/email",
+            json={"email": "saman@example.com"},
+            headers=_auth(reader.token),
+        )
+
+        assert response.status_code == 403
+
+    async def test_a_signed_in_chat_takes_no_typed_email(
+        self, client: TestClient, db: Database, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It already waits, on the shop's own record of the customer."""
+        monkeypatch.setattr(
+            _Health, "capabilities", _Health.capabilities | {Capability.CUSTOMER_READ}
+        )
+        token = await _provision(db, TENANT_A)
+        TestHandover._handing_over(client)
+        body = client.post(
+            "/v1/care/chat",
+            json={"message": "change my address", "customer": {"external_id": "385"}},
+            headers=_auth(token),
+        ).json()["data"]
+
+        response = self._leave(
+            client, token, body["conversation_id"], "saman@example.com", page=False
+        )
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "ALREADY_WAITING"
+
+    async def test_a_chat_held_in_practice_mode_takes_no_email(
+        self, client: TestClient, db: Database
+    ) -> None:
+        token = await _provision(db, TENANT_A, config=TenantConfig(mode="shadow"))
+        TestHandover._handing_over(client)
+        body = client.post(
+            "/v1/care/chat", json={"message": "please cancel my order"}, headers=_auth(token)
+        ).json()["data"]
+
+        response = self._leave(
+            client, token, body["conversation_id"], "saman@example.com", page=False
+        )
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "NOT_HANDED_OVER"
 
 
 class TestShadowMode:

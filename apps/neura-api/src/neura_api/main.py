@@ -59,6 +59,7 @@ from neura_api.routes import (
     console_sold_out,
     console_usage,
     dispatch,
+    handover_email,
     health,
     observe,
     stores,
@@ -318,6 +319,9 @@ def create_app() -> FastAPI:
     # ([ADR-0031]). It sits beside the per-agent routes rather than
     # replacing them: `/v1/care/chat` is still CARE's own declared prefix.
     app.include_router(dispatch.router, prefix="/v1")
+    # A handed-over shopper's address (ADR-0062). Mounted once, naming no agent,
+    # like the dispatched chat: the agent comes from the conversation.
+    app.include_router(handover_email.router, prefix="/v1")
     app.include_router(health.router, prefix="/v1")
     app.include_router(widget.router, prefix="/v1")
     app.include_router(stores.router, prefix="/v1")
