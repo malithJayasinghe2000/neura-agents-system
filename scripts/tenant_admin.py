@@ -63,6 +63,7 @@ from neura_core.tenancy import (
     TurnMode,
     UsageMeter,
 )
+from neura_core.tenancy.removal import remove_tenant
 
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -344,12 +345,10 @@ async def approve(db: Database, tenant_id: str, agents: list[str]) -> int:
 async def refuse(db: Database, tenant_id: str) -> int:
     """Remove a waiting shop, then tell its Owners (R16, R17).
 
-    Removed first, as ``make tenant-drop`` does, so the email states what is
-    already true. The person keeps their account: they may be in another shop.
+    Removed first, from every table that holds its rows (``remove_tenant``, as
+    the admin dashboard does), so the email states what is already true. The person keeps their account: they may be in another shop.
     The shop's audit entries stay, as for every removed shop (S10).
     """
-    from widget_check import deprovision
-
     from neura_api.routes.console_sign_up import refused_email
 
     async with db.tenant_session(tenant_id) as session:
@@ -366,8 +365,10 @@ async def refuse(db: Database, tenant_id: str) -> int:
                 payload={},
             )
         )
+        # The same removal the admin dashboard uses (ADR-0061 §6): every table
+        # holding the shop's rows, read from the database, the audit log kept.
+        await remove_tenant(session, tenant_id)
 
-    await deprovision(tenant_id)
     print(f"\n  {BOLD}{shop.name}{OFF} refused and removed  {DIM}{tenant_id}{OFF}")
     subject, body = refused_email(shop=shop.name)
     _mail(get_settings(), shop.owners, subject, body)

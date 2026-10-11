@@ -104,6 +104,31 @@ export function confirmSignUp(
   return call("/auth/confirm-sign-up", { method: "POST", body: JSON.stringify({ token }) });
 }
 
+/** Approve a waiting shop with these assistants (ADR-0061 §7). */
+export function approveShop(
+  tenantId: string,
+  agents: string[],
+): Promise<{
+  approved: boolean;
+  name: string;
+  assistants: string[];
+  owners: string[];
+  emailed: boolean;
+}> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/approve`,
+    { method: "POST", body: JSON.stringify({ agents }) },
+    "/v1/admin",
+  );
+}
+
+/** Refuse a waiting shop: it is removed, and its Owners are emailed (ADR-0061 §7). */
+export function refuseShop(
+  tenantId: string,
+): Promise<{ refused: boolean; name: string; owners: string[]; emailed: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/refuse`, { method: "POST" }, "/v1/admin");
+}
+
 /** Who is signed in, and which merchants they may act for — asked fresh. */
 export function fetchMe(): Promise<Me> {
   return call("/me");

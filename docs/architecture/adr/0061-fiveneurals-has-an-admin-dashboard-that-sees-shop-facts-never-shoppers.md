@@ -1,9 +1,8 @@
 # ADR-0061 · FiveNeurals Has An Admin Dashboard That Sees Shop Facts, Never Shoppers
 
 **Status:** **Accepted** · owner decisions 2026-10-11, a design session, R19 to R23
-([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *Admin*) · **not built**; the three
-screens are drawn for the owner's approval first (the console work cycle) · Everything marked *(Claude)* was Claude's
-proposal, accepted by the owner with R23 · **Date:** 2026-10-11 · **Supersedes:** [console.md](../../console.md) §1.1's
+([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *Admin*) · mockups approved 2026-10-11 (canvas row 14; the side menu is R24) · **built 2026-10-11** · Everything marked *(Claude)* was Claude's
+proposal, accepted by the owner with R23 · **Built:** the API requires at least one assistant at approval (it may not name an agent, so the dashboard ticks CARE, R14) · **Date:** 2026-10-11 · **Supersedes:** [console.md](../../console.md) §1.1's
 *"It is not an admin panel for us"*, and nothing else · **Related:**
 [ADR-0058](0058-a-shops-dashboard-has-people-with-roles-and-a-shop-signs-up.md) (shop roles; the admin is not one),
 [ADR-0060](0060-sign-up-what-the-build-decided.md) (sign up and approval by command),

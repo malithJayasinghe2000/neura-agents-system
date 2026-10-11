@@ -18,6 +18,7 @@ import { redirect } from "next/navigation";
 import { ChevronRight, Store } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { SignOutButton } from "@/components/sign-out-button";
+import { AdminBadge } from "@/components/admin/admin-sidebar";
 import { fromApi, hasSession } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
 import type { ShopView } from "@/lib/shop";
@@ -29,7 +30,8 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
  * `status` is `waiting` for a shop FiveNeurals has not approved yet (ADR-0058 §7).
  */
 type Membership = { tenant_id: string; role: string; name: string | null; status?: string | null };
-type Me = { signed_in: boolean; memberships?: Membership[] };
+/** `is_admin`: FiveNeurals staff, shown the Admin link (ADR-0061). Display only. */
+type Me = { signed_in: boolean; is_admin?: boolean; memberships?: Membership[] };
 
 export default async function ConsolePage() {
   if (!(await hasSession())) redirect("/");
@@ -51,7 +53,19 @@ export default async function ConsolePage() {
       <header className="border-b">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 sm:px-6">
           <Brand />
-          <SignOutButton />
+          <div className="flex items-center gap-2">
+            {me.data.is_admin ? (
+              <Link
+                href="/admin"
+                className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium hover:bg-muted"
+                data-admin-link
+              >
+                <AdminBadge />
+                Admin
+              </Link>
+            ) : null}
+            <SignOutButton />
+          </div>
         </div>
       </header>
 

@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        tenant-dpa retention-sweep tenant-waiting tenant-approve tenant-refuse \
+        tenant-dpa retention-sweep tenant-waiting tenant-approve tenant-refuse admin-add admin-remove admin-list \
         api-check verify-probe router-probe console console-check web-check
 
 help:  ## Show this help
@@ -433,6 +433,16 @@ user-link:  ## Print a sign-in link instead of mailing it: make user-link EMAIL=
 # instead of mailed: the old link stops, as Send again does.
 invite-link:  ## Print a new link for a waiting invite: make invite-link EMAIL=... TENANT=tn_...
 	uv run python scripts/console_admin.py invite-link --email "$(EMAIL)" --tenant "$(TENANT)"
+
+# ADR-0061: the only way the FiveNeurals admin list changes. No route writes it.
+admin-add:  ## Make a person a FiveNeurals admin: make admin-add EMAIL=...
+	uv run python scripts/console_admin.py admin-add --email "$(EMAIL)"
+
+admin-remove:  ## Stop a person being a FiveNeurals admin: make admin-remove EMAIL=...
+	uv run python scripts/console_admin.py admin-remove --email "$(EMAIL)"
+
+admin-list:  ## The FiveNeurals admins: make admin-list
+	uv run python scripts/console_admin.py admin-list
 
 tenant-new:  ## Create a tenant: make tenant-new NAME="Acme Store" AGENTS=care
 	uv run python scripts/tenant_admin.py create-tenant --name "$(NAME)" --agents "$(AGENTS)"

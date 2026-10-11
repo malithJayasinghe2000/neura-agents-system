@@ -6,6 +6,9 @@
     make user-revoke EMAIL=owner@shop.com TENANT=tn_...
     make user-link EMAIL=owner@shop.com
     make invite-link EMAIL=person@shop.com TENANT=tn_...
+    make admin-add EMAIL=you@fiveneurals.com
+    make admin-remove EMAIL=you@fiveneurals.com
+    make admin-list
 
 **A shop owner may now sign up themselves** (ADR-0058 §7, ADR-0060): the
 dashboard's *Create an account* makes the account only when the emailed link is
@@ -23,6 +26,12 @@ to a terminal**, so it says so.
 (ADR-0058 §4): it makes a **new** link for the waiting invite, exactly as *Send
 again* does (the old link stops, 7 more days), records it in the shop's audit log
 as done by ``console_admin``, and prints it instead of mailing it.
+
+``admin-add``, ``admin-remove`` and ``admin-list`` are **the only way** the
+FiveNeurals admin list changes (ADR-0061 §4): no route writes it, so no admin
+can make another from the dashboard. ``admin-add`` makes the account when the
+email has none, so the new admin can sign in; ``admin-remove`` marks them
+removed (never a delete) and bites on their next click.
 """
 
 from __future__ import annotations
@@ -37,6 +46,7 @@ from sqlalchemy import select, update
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_core import Database, get_settings, ids, load_env
 from neura_core.identity import request_sign_in_link
+from neura_core.identity.admins import add_admin, list_admins, remove_admin
 from neura_core.identity.people import PeopleRepository
 from neura_core.identity.schema import memberships, users
 
@@ -231,6 +241,55 @@ async def invite_link(email: str, tenant_id: str) -> int:
         await db.dispose()
 
 
+async def admin_add(email: str) -> int:
+    db = Database.from_settings()
+    try:
+        async with db.identity_session() as session:
+            added = await add_admin(session, email=email)
+        if added.already:
+            print(f"  {email} is already an admin: nothing changed")
+            return 0
+        if added.made_account:
+            print(f"  account made   {added.user_id}  {email}")
+        print(f"  admin added    {email}")
+        print(
+            f"\n  They sign in at {get_settings().console_base_url} and open Admin from Your shops."
+        )
+        print("  Admin pages need a sign-in from the last 12 hours.\n")
+        return 0
+    finally:
+        await db.dispose()
+
+
+async def admin_remove(email: str) -> int:
+    db = Database.from_settings()
+    try:
+        async with db.identity_session() as session:
+            removed = await remove_admin(session, email=email)
+        if not removed:
+            print(f"  {email} is not an admin: nothing changed")
+            return 1
+        print(f"  admin removed  {email}  (from their next click; their shops are unchanged)")
+        return 0
+    finally:
+        await db.dispose()
+
+
+async def admin_list() -> int:
+    db = Database.from_settings()
+    try:
+        async with db.identity_session() as session:
+            admins = await list_admins(session)
+        if not admins:
+            print("  no admins: add one with make admin-add EMAIL=...")
+            return 0
+        for admin in admins:
+            print(f"  {admin.email}  added {admin.added_at:%Y-%m-%d}")
+        return 0
+    finally:
+        await db.dispose()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -254,6 +313,13 @@ def main() -> None:
     invited.add_argument("--email", required=True)
     invited.add_argument("--tenant", required=True)
 
+    for name, text in (
+        ("admin-add", "Make a person a FiveNeurals admin (ADR-0061)"),
+        ("admin-remove", "Stop a person being a FiveNeurals admin"),
+    ):
+        sub.add_parser(name, help=text).add_argument("--email", required=True)
+    sub.add_parser("admin-list", help="The FiveNeurals admins")
+
     args = parser.parse_args()
     load_env()
 
@@ -268,6 +334,12 @@ def main() -> None:
             sys.exit(asyncio.run(link(args.email)))
         case "invite-link":
             sys.exit(asyncio.run(invite_link(args.email, args.tenant)))
+        case "admin-add":
+            sys.exit(asyncio.run(admin_add(args.email)))
+        case "admin-remove":
+            sys.exit(asyncio.run(admin_remove(args.email)))
+        case "admin-list":
+            sys.exit(asyncio.run(admin_list()))
 
 
 if __name__ == "__main__":

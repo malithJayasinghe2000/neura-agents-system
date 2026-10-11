@@ -691,7 +691,7 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
   database, and Home must then open; `tests/integration/test_console_sign_up.py` holds the API, the commands and
   the emails.
 
-### 3.9 FiveNeurals admin: from the owner's approved design, 2026-10-11 (not built)
+### 3.9 FiveNeurals admin: from the owner's approved design, 2026-10-11 (built 2026-10-11)
 
 [ADR-0061](architecture/adr/0061-fiveneurals-has-an-admin-dashboard-that-sees-shop-facts-never-shoppers.md), accepted 2026-10-11 (R19 to R23); mockups approved the same day (canvas row 14, boards 46 to 49, version 34; the side menu is R24). **Build from this section and the ADR; do not redesign.** Only for people on FiveNeurals' admin list (`make admin-add`); anyone else gets *No such page*. **Shop facts only, never a shopper's chat or details.**
 
@@ -710,6 +710,33 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
 **AI use and cost** (board 48; `/admin/usage`): heading, *"Across every shop. The same counts each shop sees on its own Usage screen."*, the period **Today / 7 days / 30 days**; six tiles: **chats**, **questions**, **handed to a person**, **AI calls**, **tokens**, **cost** (*Not priced*, dashed, when nothing was priced); **By shop** (only shops with use; *"[n] shops had no AI use in these [period]."*) and **By assistant** (*NEURA-CARE*, *NEURA-SELL*), each with Chats, Questions, Handed to a person, AI calls, Tokens, Cost; *"The rows add up to the totals above."*; the box *"**Why "Not priced".** The AI model in use has no price set in NEURA, so no cost is recorded, and a free local model records none either. NEURA never shows that as $0.00. The real amount is on the AI provider's own bill."*
 
 **On a phone** (board 49): each shop is a card (name, state badge, one line of facts); the waiting shop first with a full-width button; buttons 44px.
+
+**As built (2026-10-11):**
+
+- **Routes** (`neura_api/routes/admin.py`): `GET /v1/admin/shops`, `GET /v1/admin/shops/{id}`, `POST …/approve`
+  (`{"agents": [...]}`, at least one: the API names no agent, so CARE being ticked is the dashboard's default),
+  `POST …/refuse`, `GET /v1/admin/usage?period=today|7d|30d`. Each states `AdminOnly` on the route (a test fails for
+  one that forgets): signed out 401; not a live admin **404 *No such page.***; an admin signed in more than 12 hours
+  ago **401 `ADMIN_SIGN_IN_AGAIN`**. `/me` gives `is_admin` for the *Admin* link.
+- **The database keeps §1 true:** `neura_admin_shops()` and `neura_admin_usage()` (migration `9b4e7a2c5d18`), owned
+  by the `NOLOGIN` role `neura_admin_reader`, which holds column grants on shop facts only and answers only a
+  transaction naming a live admin (`app.user_id`). A test reads the role's grants and fails if it can read anything
+  else.
+- **Refuse removes the shop with `remove_tenant`** (`neura_core/tenancy/removal.py`): every base table with a
+  `tenant_id`, read from the database, the tables that point at others first, the audit log kept (S10). `make
+  tenant-refuse` uses it too.
+- **Admins:** `platform_admins` (no tenant; never deleted, `removed_at`), changed only by `make admin-add`,
+  `make admin-remove`, `make admin-list`.
+- **Screens:** `/admin` (Shops), `/admin/shops/[id]` (a waiting shop: Approve, Refuse; any other shop: its facts
+  and *"This shop is not waiting for approval, so there is nothing to decide here."*), `/admin/usage`. Someone not
+  on the list sees *No such page*, *"There's nothing at this address."*, *Your shops*; an admin signed in over 12
+  hours ago sees *Sign in again*, *"Admin pages need a sign-in from the last 12 hours. Your shops are not
+  affected."*, **Sign in again**. When an email could not be sent, the result says *"The email to [owner] could not
+  be sent."* rather than *"We emailed"*. The result stays until the admin leaves; **Back to Shops** re-reads the
+  list and the menu's count (G100).
+- **Checked:** `tests/unit/test_admin.py`, `tests/integration/test_admin.py`; `make console-check` has an admin
+  section (its own browser; waiting shops made with no owner, so no email can be sent; desktop and phone; the
+  12-hour rule with a cookie made 13 hours old).
 
 ## 4. Identity — the part that is genuinely new
 

@@ -53,6 +53,7 @@ from neura_core import (
 # thing to find in an authentication path.
 from neura_core.identity import COOKIE_NAME, is_permission, memberships_for, role_may
 from neura_core.identity import verify as verify_session
+from neura_core.identity.admins import fresh_enough, is_admin
 from neura_core.identity.roles import ROLE_NOT_ALLOWED
 from neura_core.identity.sign_up import SHOP_WAITING, WAITING_MESSAGE
 from neura_core.tenancy import (
@@ -460,6 +461,54 @@ class Permitted:
         return await acting_for(request, tenant_id, permission=self.permission)
 
 
+#: The refusal of an admin whose sign-in is older than ``ADMIN_FRESH`` (R22).
+ADMIN_SIGN_IN_AGAIN = "ADMIN_SIGN_IN_AGAIN"
+
+
+@dataclass(frozen=True, slots=True)
+class AdminActor:
+    """A FiveNeurals admin, proved on this request. Names no shop (ADR-0061 §5)."""
+
+    user_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdminOnly:
+    """A dependency: a live FiveNeurals admin, signed in within 12 hours (ADR-0061 §4).
+
+        @router.get("/shops")
+        async def shops(actor: Annotated[AdminActor, Depends(AdminOnly())]) -> ...
+
+    Stated **on every admin route**, checked before the body is read, and a test
+    fails for an admin route without it (``tests/unit/test_admin.py``). In order:
+
+    * nobody signed in: **401**, as for every console route;
+    * signed in, not a live admin: **404 *No such page.***, whatever was sent:
+      an admin route tells a stranger nothing, and an old sign-in does not
+      change that answer;
+    * an admin signed in more than 12 hours ago: **401 ``ADMIN_SIGN_IN_AGAIN``**.
+
+    The list is read on every request, so a removed admin stops on the next
+    click. Being an admin opens no shop: ``acting_for`` never reads this.
+    """
+
+    async def __call__(self, request: Request) -> AdminActor:
+        signed_in = verify_session(request.cookies.get(COOKIE_NAME, ""), get_settings().secret_key)
+        if signed_in is None:
+            raise AuthenticationError("Sign in to continue.")
+        async with get_database().identity_session(signed_in.user_id) as session:
+            admin = await is_admin(session, signed_in.user_id)
+        if not admin:
+            log.info("admin_refused", user_id=signed_in.user_id)
+            raise NotFoundError("No such page.")
+        if not fresh_enough(signed_in.issued_at):
+            raise AuthenticationError(
+                "Admin pages need a sign-in from the last 12 hours. Sign in again.",
+                code=ADMIN_SIGN_IN_AGAIN,
+            )
+        return AdminActor(user_id=signed_in.user_id)
+
+
 def declared_permissions(routes: Sequence[BaseRoute]) -> frozenset[str]:
     """Every permission a route declares with :class:`Permitted`, an agent's included.
 
@@ -489,7 +538,10 @@ DatabaseDep = Annotated[Database, Depends(database)]
 
 
 __all__ = [
+    "ADMIN_SIGN_IN_AGAIN",
     "ROLE_NOT_ALLOWED",
+    "AdminActor",
+    "AdminOnly",
     "AgentContext",
     "CallerDep",
     "ConsoleActor",

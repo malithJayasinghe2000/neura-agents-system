@@ -41,7 +41,7 @@ import asyncio
 import os
 import re
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import httpx
 from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import create_async_engine
 from widget_check import Chrome, find_chrome
 
 from neura_agent_core.conversations import (
@@ -239,6 +240,9 @@ async def main() -> int:
 
             print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
             await _check_sign_up(console, failures)
+
+            print(f"\n  {BOLD}FiveNeurals admin — shops, approve, refuse, AI use{OFF}")
+            await _check_admin(console, email, failures)
 
             if without_sell:
                 print(f"\n  {BOLD}a shop without NEURA-SELL — its screens are not shown{OFF}")
@@ -2753,6 +2757,228 @@ async def _check_sign_up(console: str, failures: list[str]) -> None:
             await session.execute(delete(sign_up_requests).where(sign_up_requests.c.email == email))
             await session.execute(delete(login_tokens).where(login_tokens.c.user_id.in_(gone)))
             await session.execute(delete(users).where(users.c.id.in_(gone)))
+        await db.dispose()
+
+
+async def _check_admin(console: str, email: str, failures: list[str]) -> None:
+    """The FiveNeurals admin dashboard (ADR-0061, boards 46 to 49), in its own browser.
+
+    The check's own person is not an admin at first: Your shops shows no *Admin*
+    link and `/admin` says *No such page*. Then they are made one in the
+    database, and two shops waiting for approval are made **with no owner**, so
+    approving and refusing them on the screen can never send an email, whatever
+    mail server the API has. One is approved and one refused on the screen, on
+    desktop; Shops and AI use and cost are read on desktop and phone; an admin
+    sign-in older than 12 hours is shown *Sign in again*. Afterwards the person
+    is taken off the admin list and every shop this made is removed.
+    """
+    from sqlalchemy import text as sql
+
+    from neura_core.identity import COOKIE_NAME as SESSION
+    from neura_core.identity import issue
+    from neura_core.identity.admins import add_admin
+    from neura_core.tenancy import TenantConfig, TenantRepository, TenantStatus, TurnMode
+    from neura_core.tenancy.removal import remove_tenant
+
+    db = Database.from_settings()
+    suffix = ids.new_id(ids.USER).lower()[-8:]
+    approve_name, refuse_name = f"Admin Check Approve {suffix}", f"Admin Check Refuse {suffix}"
+    made: list[str] = []
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def opened(page: Chrome, url: str, wait: float = 3) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def click(page: Chrome, selector: str, wait: float = 2.5) -> str:
+        await page.evaluate(f"document.querySelector('{selector}').click(), true")
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def waiting_shop(name: str) -> str:
+        tenant_id = ids.new_id(ids.TENANT)
+        async with db.tenant_session(tenant_id) as session:
+            await TenantRepository(session).create(
+                tenant_id=tenant_id,
+                name=name,
+                status=TenantStatus.WAITING,
+                website="admin-check.example.com",
+                config=TenantConfig(mode=TurnMode.SHADOW),
+            )
+        made.append(tenant_id)
+        return tenant_id
+
+    try:
+        async with db.identity_session() as session:
+            minted = await request_sign_in_link(session, email=email, console_base_url=console)
+        user = minted.user_id
+        async with Chrome(find_chrome()) as page:
+            await phone(page, False)
+            await opened(page, minted.url, wait=4)
+            shown = await opened(page, f"{console}/console")
+            _check(
+                "not an admin: Your shops has no Admin link",
+                "Your shops" in shown
+                and not await page.evaluate("!!document.querySelector('[data-admin-link]')"),
+                failures,
+            )
+            shown = await opened(page, f"{console}/admin")
+            _check("not an admin: /admin says No such page", "No such page" in shown, failures)
+
+            async with db.identity_session() as session:
+                await add_admin(session, email=email)
+            approve_id = await waiting_shop(approve_name)
+            refuse_id = await waiting_shop(refuse_name)
+
+            shown = await opened(page, f"{console}/console")
+            _check(
+                "an admin: Your shops has the Admin link",
+                bool(await page.evaluate("!!document.querySelector('[data-admin-link]')")),
+                failures,
+            )
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/admin")
+                _check(
+                    f"Shops: the waiting shops first, then every shop ({size})",
+                    "Waiting for approval ·" in shown
+                    and approve_name in shown
+                    and "Look and decide" in shown
+                    and "All shops ·" in shown
+                    and "no shopper's chat or details" in shown,
+                    failures,
+                )
+                _check(f"Shops fits the screen ({size})", await fits(page), failures)
+            await phone(page, False)
+            shown = str(await page.evaluate("document.body.innerText"))
+            _check(
+                "the side menu: FiveNeurals admin, Shops, AI use and cost",
+                "FiveNeurals admin" in shown
+                and "You're an admin" in shown
+                and "AI use and cost" in shown,
+                failures,
+            )
+
+            shown = await opened(page, f"{console}/admin/shops/{approve_id}")
+            _check(
+                "a waiting shop: its facts, CARE ticked, SELL not",
+                "Look at the website before you decide" in shown
+                and bool(
+                    await page.evaluate("document.querySelector('[data-assistant=care]').checked")
+                )
+                and not await page.evaluate(
+                    "document.querySelector('[data-assistant=sell]').checked"
+                ),
+                failures,
+            )
+            shown = await click(page, "[data-refuse]", wait=1.5)
+            _check(
+                "Refuse asks first, and says it can't be undone",
+                f"Refuse {approve_name}?" in shown and "can't be undone" in shown,
+                failures,
+            )
+            await page.evaluate(
+                "[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Keep waiting').click(), true"
+            )
+            await asyncio.sleep(1)
+            shown = await click(page, "[data-approve]", wait=4)
+            async with db.tenant_session(approve_id) as session:
+                approved = await TenantRepository(session).get(approve_id)
+            _check(
+                "Approve: the shop is approved with NEURA-CARE, in practice mode",
+                f"{approve_name} is approved" in shown
+                and "With NEURA-CARE, in practice mode" in shown
+                and approved is not None
+                and approved.status is TenantStatus.ACTIVE
+                and approved.enabled_agents == frozenset({"care"}),
+                failures,
+            )
+
+            shown = await click(page, "[data-back-to-shops]", wait=4)
+            _check(
+                "Back to Shops: the approved shop no longer waits",
+                await page.evaluate("location.pathname") == "/admin"
+                and not await page.evaluate(
+                    f"!!document.querySelector('[data-waiting-shop=\"{approve_id}\"]')"
+                ),
+                failures,
+            )
+
+            await opened(page, f"{console}/admin/shops/{refuse_id}")
+            await click(page, "[data-refuse]", wait=1.5)
+            shown = await click(page, "[data-confirm-refuse]", wait=4)
+            async with db.tenant_session(refuse_id) as session:
+                refused = await TenantRepository(session).get(refuse_id)
+            _check(
+                "Refuse: the shop is refused and removed",
+                f"{refuse_name} is refused and removed" in shown and refused is None,
+                failures,
+            )
+
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/admin/usage?period=7d")
+                _check(
+                    f"AI use and cost: totals, by shop, why Not priced ({size})",
+                    "AI use and cost" in shown
+                    and "handed to a person" in shown
+                    and "By shop" in shown
+                    and 'Why "Not priced".' in shown,
+                    failures,
+                )
+                _check(f"AI use and cost fits the screen ({size})", await fits(page), failures)
+
+            await phone(page, False)
+            old = issue(
+                user, get_settings().secret_key, now=datetime.now(UTC) - timedelta(hours=13)
+            )
+            await page.call(
+                "Network.setCookie",
+                name=SESSION,
+                value=old,
+                url=console,
+                path="/",
+                secure=True,
+                httpOnly=True,
+            )
+            shown = await opened(page, f"{console}/admin")
+            _check(
+                "an admin signed in 13 hours ago is asked to sign in again",
+                "Sign in again" in shown and "last 12 hours" in shown,
+                failures,
+            )
+    finally:
+        for tenant_id in made:
+            async with db.tenant_session(tenant_id) as session:
+                await remove_tenant(session, tenant_id)
+        engine = create_async_engine(str(get_settings().database_migration_url))
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    sql(
+                        "DELETE FROM platform_admins WHERE user_id IN "
+                        "(SELECT id FROM users WHERE email = :e)"
+                    ),
+                    {"e": email},
+                )
+        finally:
+            await engine.dispose()
         await db.dispose()
 
 

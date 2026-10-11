@@ -69,6 +69,7 @@ MEMBERSHIPS = "memberships"
 LOGIN_TOKENS = "login_tokens"
 MEMBERSHIP_INVITES = "membership_invites"
 SIGN_UP_REQUESTS = "sign_up_requests"
+PLATFORM_ADMINS = "platform_admins"
 
 #: The roles a membership or an invite may name, for the database's own check.
 _ROLES = ", ".join(repr(role.value) for role in Role)
@@ -227,15 +228,35 @@ sign_up_requests = Table(
 )
 
 
+#: FiveNeurals' admins (ADR-0061): who may open ``/admin``.
+#:
+#: **No ``tenant_id``, like ``users``**: an admin belongs to no shop, and being
+#: one opens no shop's own screens. Changed **only by command**
+#: (``make admin-add`` / ``admin-remove``): no route writes it. ``removed_at``
+#: rather than a delete, as for memberships: who *was* an admin is what an
+#: incident asks. Read on every admin request, so a removal bites on the next
+#: click; and read by the admin functions themselves, which answer nothing to a
+#: transaction that names no live admin.
+platform_admins = Table(
+    PLATFORM_ADMINS,
+    metadata,
+    Column("user_id", String(64), primary_key=True),
+    Column("added_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("removed_at", DateTime(timezone=True), nullable=True),
+)
+
+
 __all__ = [
     "LOGIN_TOKENS",
     "MEMBERSHIPS",
     "MEMBERSHIP_INVITES",
+    "PLATFORM_ADMINS",
     "SIGN_UP_REQUESTS",
     "USERS",
     "login_tokens",
     "membership_invites",
     "memberships",
+    "platform_admins",
     "sign_up_requests",
     "users",
 ]

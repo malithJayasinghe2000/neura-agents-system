@@ -132,3 +132,17 @@ __all__ = [
     "SUPPORT",
     "WHO",
 ]
+
+#: The FiveNeurals admin's routes (ADR-0061). Not shop routes: they name no
+#: permission, and each must state the admin check on the route (`AdminOnly`),
+#: which `tests/unit/test_admin.py` holds. A route added under `/v1/admin` and
+#: not here fails that test.
+ADMIN_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/v1/admin/shops"),
+        ("GET", "/v1/admin/shops/{tenant_id}"),
+        ("POST", "/v1/admin/shops/{tenant_id}/approve"),
+        ("POST", "/v1/admin/shops/{tenant_id}/refuse"),
+        ("GET", "/v1/admin/usage"),
+    }
+)

@@ -43,8 +43,8 @@ from neura_api.registry import (
     discover_job_handlers,
     discover_runners,
 )
-from neura_api.routes import agent as agent_routes
 from neura_api.routes import (
+    admin,
     console,
     console_connect,
     console_contact,
@@ -65,6 +65,7 @@ from neura_api.routes import (
     webhooks,
     widget,
 )
+from neura_api.routes import agent as agent_routes
 from neura_api.stores import StoreDirectory
 from neura_api.turns import TurnService
 from neura_api.webhooks import WebhookDrainer
@@ -311,6 +312,8 @@ def create_app() -> FastAPI:
     app.include_router(console_home.router, prefix="/v1")
     app.include_router(console_people.router, prefix="/v1")
     app.include_router(console_sign_up.router, prefix="/v1")
+    # FiveNeurals' own area (ADR-0061): every route behind `AdminOnly`.
+    app.include_router(admin.router, prefix="/v1")
     # Mounted once, and it names no agent — that is the whole point
     # ([ADR-0031]). It sits beside the per-agent routes rather than
     # replacing them: `/v1/care/chat` is still CARE's own declared prefix.

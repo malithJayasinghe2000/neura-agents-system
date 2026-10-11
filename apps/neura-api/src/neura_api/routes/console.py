@@ -53,6 +53,7 @@ from neura_core.identity import (
     role_may,
     verify,
 )
+from neura_core.identity.admins import is_admin
 from neura_core.identity.people import PeopleRepository
 from neura_core.identity.schema import users
 from neura_core.tenancy import TenantRepository, TenantStatus
@@ -255,6 +256,9 @@ async def me(
     async with db.identity_session(signed_in.user_id) as session:
         held = await memberships_for(session, signed_in.user_id)
         email = await session.scalar(select(users.c.email).where(users.c.id == signed_in.user_id))
+        # For the *Admin* link on Your shops (ADR-0061). Display only: every
+        # admin route checks the list itself.
+        admin = await is_admin(session, signed_in.user_id)
 
     # Every permission some route declares, gathered at startup. What each role
     # holds of them is the map's answer, so the dashboard shows each person only
@@ -282,6 +286,7 @@ async def me(
             "user_id": signed_in.user_id,
             # Their own address, for the waiting screen's *"We'll email [email]"*.
             "email": str(email) if email else None,
+            "is_admin": admin,
             "memberships": memberships,
         }
     )
