@@ -691,6 +691,26 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
   database, and Home must then open; `tests/integration/test_console_sign_up.py` holds the API, the commands and
   the emails.
 
+### 3.9 FiveNeurals admin: from the owner's approved design, 2026-10-11 (not built)
+
+[ADR-0061](architecture/adr/0061-fiveneurals-has-an-admin-dashboard-that-sees-shop-facts-never-shoppers.md), accepted 2026-10-11 (R19 to R23); mockups approved the same day (canvas row 14, boards 46 to 49, version 34; the side menu is R24). **Build from this section and the ADR; do not redesign.** Only for people on FiveNeurals' admin list (`make admin-add`); anyone else gets *No such page*. **Shop facts only, never a shopper's chat or details.**
+
+**The frame** (all three screens): a **side menu** like a shop's: *FiveNeurals* with a black **Admin** badge; a card *FiveNeurals admin*, *"You're an admin · Your shops"* (a link to Your shops) where a shop's menu has its switcher; **Shops** (with the number of shops waiting, when there are any) and **AI use and cost**; **Sign out** at the bottom. On a phone the menu folds into a menu button, as a shop's does; the bar says *FiveNeurals admin* and shows the badge. **Your shops** gets an **Admin** link for an admin only.
+
+**Shops** (board 46; `/admin`): heading *Shops*, *"Every shop on NEURA, and its state. Facts about shops only: no shopper's chat or details are shown here."*
+- *Waiting for approval · [n]*: one amber card per waiting shop: its name, *"[website] · signed up [date, time] by [owner email]"*, **Look and decide**. The section is left out when nothing waits.
+- *All shops · [n]*: a table, waiting shops first, then newest first: **Shop** (a waiting shop's name links to its page, with its website under it), **State** (*Waiting for approval* amber, *Practice* grey, *Live* green), **Assistants** (*CARE, SELL*; *None yet* while waiting), **Shop connected** (*Yes* / *Not yet*), **Chats, 7 days**, **AI cost, 7 days** (*Not priced* when there was AI use and no price; *No AI use* when none), **Since** (the date).
+- Under it: *"Chats and AI cost are for the last 7 days. **Not priced**: the AI model in use has no price set, so NEURA records no cost. The full numbers are on AI use and cost."*
+
+**A waiting shop** (board 47; `/admin/shops/[id]`): *← Shops*; the name, the *Waiting for approval* badge; facts: **Website** (a link, *opens in a new tab*), **Owner**, **Signed up**, **Shop id**; *"Look at the website before you decide: is it a real shop that sells things?"*
+- **Approve**: *"Choose its assistants. CARE is the usual start."* Two choices: **NEURA-CARE** (ticked) *"Answers shoppers' questions: orders, delivery, returns, the shop's policies."*; **NEURA-SELL** *"Helps shoppers choose, and suggests what goes together. Uses some AI in the background for each product."*; *"It starts in practice mode, with the daily spending limit every shop has. We email [owner]."*; **Approve** (black) and **Refuse** (red outline).
+- **Refuse** asks: *"Refuse [shop]?"* *"It is removed, and [owner] gets an email. This can't be undone."* **Refuse** (red) / **Keep waiting**.
+- After approving: *"[shop] is approved"*, *"With [assistants], in practice mode. We emailed [owner]. It is in the shop list now, as Practice."* After refusing: *"[shop] is refused and removed"*, *"We emailed [owner]. [They keep] their account, in case [they are] in another shop."* Each with *Back to Shops*.
+
+**AI use and cost** (board 48; `/admin/usage`): heading, *"Across every shop. The same counts each shop sees on its own Usage screen."*, the period **Today / 7 days / 30 days**; six tiles: **chats**, **questions**, **handed to a person**, **AI calls**, **tokens**, **cost** (*Not priced*, dashed, when nothing was priced); **By shop** (only shops with use; *"[n] shops had no AI use in these [period]."*) and **By assistant** (*NEURA-CARE*, *NEURA-SELL*), each with Chats, Questions, Handed to a person, AI calls, Tokens, Cost; *"The rows add up to the totals above."*; the box *"**Why "Not priced".** The AI model in use has no price set in NEURA, so no cost is recorded, and a free local model records none either. NEURA never shows that as $0.00. The real amount is on the AI provider's own bill."*
+
+**On a phone** (board 49): each shop is a card (name, state badge, one line of facts); the waiting shop first with a full-width button; buttons 44px.
+
 ## 4. Identity — the part that is genuinely new
 
 ### 4.1 The tables
