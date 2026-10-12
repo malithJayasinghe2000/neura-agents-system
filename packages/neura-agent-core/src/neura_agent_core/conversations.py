@@ -263,6 +263,7 @@ class ConversationRepository:
         state: ConversationState | None = None,
         agent: str | None = None,
         search: str | None = None,
+        waiting: bool = False,
         before: tuple[datetime, str] | None = None,
         limit: int = 50,
     ) -> list[Conversation]:
@@ -276,9 +277,12 @@ class ConversationRepository:
         ``search`` matches what the **shopper** wrote, never the reply: the
         question a merchant remembers is the customer's, and matching the
         assistant's words would find every thread it ever mentioned returns in.
+
+        ``waiting`` keeps the chats whose shopper waits for the shop's answer
+        (ADR-0062): an address left, or a signed-in customer, not yet answered.
         """
         query = select(conversations).where(
-            *_matching(tenant_id, state=state, agent=agent, search=search)
+            *_matching(tenant_id, state=state, agent=agent, search=search, waiting=waiting)
         )
         if before is not None:
             moment, last_id = before
@@ -302,6 +306,7 @@ class ConversationRepository:
         state: ConversationState | None = None,
         agent: str | None = None,
         search: str | None = None,
+        waiting: bool = False,
         through: tuple[datetime, str] | None = None,
     ) -> int:
         """How many conversations match — or, with ``through``, how many sort at
@@ -315,7 +320,7 @@ class ConversationRepository:
         query = (
             select(func.count())
             .select_from(conversations)
-            .where(*_matching(tenant_id, state=state, agent=agent, search=search))
+            .where(*_matching(tenant_id, state=state, agent=agent, search=search, waiting=waiting))
         )
         if through is not None:
             query = query.where(_at_or_newer(through))
@@ -330,6 +335,7 @@ class ConversationRepository:
         state: ConversationState | None = None,
         agent: str | None = None,
         search: str | None = None,
+        waiting: bool = False,
     ) -> tuple[datetime, str] | None:
         """The position that fetches the page *before* the one after ``page_after``.
 
@@ -342,7 +348,9 @@ class ConversationRepository:
         row = (
             await self._session.execute(
                 select(conversations.c.updated_at, conversations.c.id)
-                .where(*_matching(tenant_id, state=state, agent=agent, search=search))
+                .where(
+                    *_matching(tenant_id, state=state, agent=agent, search=search, waiting=waiting)
+                )
                 .where(_at_or_newer(page_after))
                 .order_by(conversations.c.updated_at.asc(), conversations.c.id.asc())
                 .offset(size)
@@ -659,6 +667,7 @@ def _matching(
     state: ConversationState | None,
     agent: str | None,
     search: str | None,
+    waiting: bool = False,
 ) -> list[ColumnElement[bool]]:
     """The filters a conversation list is narrowed by — one definition, so a
     page, its count and its *Newer* cursor can never disagree about which rows
@@ -675,6 +684,14 @@ def _matching(
                 conversation_messages.c.conversation_id == conversations.c.id,
                 conversation_messages.c.role == Role.SHOPPER.value,
                 conversation_messages.c.content.ilike(f"%{_literal(search)}%", escape="\\"),
+            )
+        )
+    if waiting:
+        clauses.append(
+            exists().where(
+                waiting_answers.c.tenant_id == conversations.c.tenant_id,
+                waiting_answers.c.conversation_id == conversations.c.id,
+                waiting_answers.c.answered_at.is_(None),
             )
         )
     return clauses

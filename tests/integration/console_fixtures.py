@@ -34,6 +34,7 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.rag.schema import document_chunks
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn, shadow_turns
+from neura_agent_core.waiting import waiting_answers
 from neura_commerce.pagination import Cursor
 from neura_commerce.sync.schema import sync_checkpoints
 from neura_core import Database, ids
@@ -153,6 +154,10 @@ async def drop_shop(db: Database, shop: Shop) -> None:
             )
         )
         await session.execute(delete(document_chunks).where(document_chunks.c.id == shop.chunk))
+        # A handed-over shopper's row, if a test left one (ADR-0062).
+        await session.execute(
+            delete(waiting_answers).where(waiting_answers.c.conversation_id.in_(made_conversations))
+        )
         await session.execute(
             delete(conversation_messages).where(
                 conversation_messages.c.conversation_id.in_(made_conversations)

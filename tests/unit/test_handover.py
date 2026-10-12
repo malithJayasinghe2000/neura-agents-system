@@ -138,3 +138,26 @@ class TestTheWordsAShopperReadsAtAHandover:
             lowered = f" {sentence.lower()} "
             assert not any(promise in lowered for promise in PROMISES_AN_ANSWER), sentence
             assert not any(promise in lowered for promise in PROMISES), sentence
+
+
+class TestTheEmailTheTeamSends:
+    """ADR-0062 §7, approved with the mockup (board 53): what *Answer by email*
+    fills the team member's own email app with. Never the AI's draft."""
+
+    def test_the_subject_the_question_and_the_shops_name(self) -> None:
+        from neura_core.tenancy import answer_email
+
+        subject, body = answer_email("Ceylon Harvester", "Can I return an opened pack?")
+        assert subject == "Your question to Ceylon Harvester"
+        assert body == (
+            "Hello,\n\nYou asked us in the chat on our website:\n"
+            "“Can I return an opened pack?”\n\n\n\nCeylon Harvester"
+        )
+
+    def test_a_chat_with_no_question_still_has_the_gap_and_the_name(self) -> None:
+        from neura_core.tenancy import answer_email
+
+        assert answer_email("Ceylon Harvester", None) == (
+            "Your question to Ceylon Harvester",
+            "Hello,\n\n\n\n\nCeylon Harvester",
+        )

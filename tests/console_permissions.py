@@ -96,6 +96,10 @@ ROUTES: dict[tuple[str, str], str] = {
     # Conversations.
     ("GET", f"{_SHOP}/conversations"): CONVERSATIONS,
     ("GET", f"{_SHOP}/conversations/{{conversation_id}}"): CONVERSATIONS,
+    # Answering a handed-over shopper (ADR-0062 §8): their address, and Mark as
+    # answered. Owner and Support only.
+    ("GET", f"{_SHOP}/conversations/{{conversation_id}}/waiting"): HANDOVERS,
+    ("POST", f"{_SHOP}/conversations/{{conversation_id}}/answered"): HANDOVERS,
     # Shop connection: read, Check, Sync now, the tokens and the sign-in secret.
     ("GET", f"{_SHOP}/store"): CONNECTION,
     ("POST", f"{_SHOP}/store/{{store_id}}/sync"): CONNECTION,
@@ -127,6 +131,7 @@ ROUTES: dict[tuple[str, str], str] = {
 
 __all__ = [
     "DEVELOPER",
+    "HANDOVERS",
     "HOME",
     "OWNER",
     "PEOPLE",

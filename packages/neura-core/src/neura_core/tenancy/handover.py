@@ -78,6 +78,21 @@ def email_thanks(email: str) -> str:
     return f"Thanks. Your question is with our store, and they can answer you at {email}."
 
 
+def answer_email(shop: str, question: str | None) -> tuple[str, str]:
+    """The subject and body the team member's own email app is filled with when
+    they press *Answer by email* (ADR-0062 §7, approved with the mockup).
+
+    *You asked us* tells a person whose address someone else typed why they got
+    it (ADR-0046 §4). The gap is where the team member writes the answer; **the
+    AI's unsent draft is never put in**: it was held back because it may be wrong.
+    """
+    subject = f"Your question to {shop}"
+    asked = (
+        f"You asked us in the chat on our website:\n\u201c{question}\u201d\n" if question else ""
+    )
+    return subject, f"Hello,\n\n{asked}\n\n\n{shop}"
+
+
 def _with_contact(sentence: str, config: TenantConfig) -> str:
     line = contact_line(config)
     return sentence if line is None else f"{sentence}\n{line}"
@@ -112,6 +127,7 @@ __all__ = [
     "PASS_EXPIRED_MESSAGE",
     "SIGN_IN_WITHOUT_DETAILS",
     "WRONG_EMAIL",
+    "answer_email",
     "contact_line",
     "email_thanks",
     "handover_ask_message",
