@@ -21,12 +21,18 @@
 import Form from "next/form";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Search } from "lucide-react";
 import { StateBadge } from "@/components/shop/state-badge";
+import { WaitingBadge } from "@/components/conversations/waiting-badge";
 import { TokenNote, hasToken } from "@/components/shop/token-note";
 import { When } from "@/components/when";
 import { ASSISTANT_CHOICES, assistantName } from "@/lib/assistants";
-import { STATE_FILTERS, questions, type ConversationRow } from "@/lib/conversations";
+import {
+  STATE_FILTERS,
+  WAITING_FILTER,
+  questions,
+  type ConversationRow,
+} from "@/lib/conversations";
 import { fromApi, hasSession, type PageMeta } from "@/lib/server-api";
 import { PERMISSION, refusal } from "@/lib/roles";
 import { NotAllowed } from "@/components/not-allowed";
@@ -53,13 +59,22 @@ export default async function ConversationsPage({
   const { state = "", agent = "", q = "", cursor } = await searchParams;
   const filters: Filters = { state, agent, q: q.trim() };
 
-  const query = new URLSearchParams(present(filters));
+  // *Waiting for an answer* is not a conversation state: the API is asked for
+  // `?waiting=1` (ADR-0062 §6). Every other choice is the state itself.
+  const waitingOnly = filters.state === WAITING_FILTER;
+  const query = new URLSearchParams(
+    present({ ...filters, state: waitingOnly ? "" : filters.state }),
+  );
+  if (waitingOnly) query.set("waiting", "1");
   if (cursor) query.set("cursor", cursor);
   const suffix = query.size ? `?${query}` : "";
 
-  const list = await fromApi<ConversationRow[]>(
-    `/shops/${encodeURIComponent(tenantId)}/conversations${suffix}`,
-  );
+  const [list, home] = await Promise.all([
+    fromApi<ConversationRow[]>(`/shops/${encodeURIComponent(tenantId)}/conversations${suffix}`),
+    // How many wait, for the choice's count: `null` for a role that may not answer.
+    fromApi<{ waiting: number | null }>(`/shops/${encodeURIComponent(tenantId)}/home`),
+  ]);
+  const waitingCount = home.ok ? home.data.waiting : null;
   const base = `/console/${encodeURIComponent(tenantId)}/conversations`;
 
   return (
@@ -131,27 +146,52 @@ export default async function ConversationsPage({
           </Form>
 
           <nav className="flex flex-wrap gap-2" aria-label="Show conversations that ended as">
-            {STATE_FILTERS.map((option) => (
+            {STATE_FILTERS.filter(
+              // Only for a role that may answer them; `null` means it may not.
+              (option) => option.key !== WAITING_FILTER || waitingCount !== null,
+            ).map((option) => (
               <Link
                 key={option.key || "all"}
                 href={hrefFor(base, { ...filters, state: option.key })}
                 aria-current={option.key === filters.state ? "page" : undefined}
+                data-waiting-chip={option.key === WAITING_FILTER ? "" : undefined}
                 className={
                   option.key === filters.state
-                    ? "inline-flex h-9 items-center rounded-full border border-foreground bg-foreground px-4 text-sm font-medium text-background"
-                    : "inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    ? "inline-flex h-9 items-center gap-2 rounded-full border border-foreground bg-foreground px-4 text-sm font-medium text-background"
+                    : "inline-flex h-9 items-center gap-2 rounded-full border px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 }
               >
                 {option.label}
+                {option.key === WAITING_FILTER && waitingCount ? (
+                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-amber-400 px-1.5 text-xs font-semibold text-amber-950 tabular-nums">
+                    {waitingCount}
+                  </span>
+                ) : null}
               </Link>
             ))}
           </nav>
 
+          {waitingOnly && list.data.length > 0 ? (
+            <WaitingLine count={list.meta.total ?? list.data.length} />
+          ) : null}
+
           {list.data.length === 0 ? (
-            <EmptyList
-              filtered={Boolean(filters.state || filters.agent || filters.q)}
-              clearHref={base}
-            />
+            waitingOnly ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Nobody is waiting for an answer</CardTitle>
+                  <CardDescription>
+                    When your assistant hands a chat over and the shopper leaves a way to reach
+                    them, it shows up here.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            ) : (
+              <EmptyList
+                filtered={Boolean(filters.state || filters.agent || filters.q)}
+                clearHref={base}
+              />
+            )
           ) : (
             <>
               <ul className="divide-y overflow-hidden rounded-xl border">
@@ -169,9 +209,38 @@ export default async function ConversationsPage({
               <Pager base={base} filters={filters} shown={list.data.length} meta={list.meta} />
             </>
           )}
+
+          {waitingOnly ? (
+            <p className="text-sm text-muted-foreground">
+              A chat where the shopper pressed <em>No thanks</em> is not here: nobody can answer it.
+              It stays under <em>Handed to a person</em>.
+            </p>
+          ) : null}
         </>
       )}
     </>
+  );
+}
+
+/** *2 shoppers are waiting for an answer.* Above the waiting list (ADR-0062 §6). */
+function WaitingLine({ count }: { count: number }) {
+  return (
+    <div
+      data-waiting-line
+      className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3.5 text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+    >
+      <Clock className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <p className="text-sm">
+        <span className="font-semibold">
+          {count === 1
+            ? "1 shopper is waiting for an answer."
+            : `${count} shoppers are waiting for an answer.`}
+        </span>{" "}
+        {count === 1
+          ? "Your assistant handed them over, and they left a way to reach them. Open the chat to answer by email."
+          : "Your assistant handed them over, and each left a way to reach them. Open one to answer by email."}
+      </p>
+    </div>
   );
 }
 
@@ -189,10 +258,18 @@ function ConversationRowLink({ tenantId, row }: { tenantId: string; row: Convers
           <p className="text-muted-foreground italic">No message from the shopper</p>
         )}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <StateBadge state={row.state} />
+          {row.waiting ? <WaitingBadge /> : <StateBadge state={row.state} />}
           <span>{assistantName(row.agent)}</span>
           <span aria-hidden>·</span>
           <span>{questions(row.turns)}</span>
+          {row.waiting ? (
+            <>
+              <span aria-hidden>·</span>
+              <span>
+                {row.waiting.reach === "email" ? "left an email" : "signed in to your shop"}
+              </span>
+            </>
+          ) : null}
           {row.escalations > 0 && row.state !== "escalated" ? (
             <>
               <span aria-hidden>·</span>

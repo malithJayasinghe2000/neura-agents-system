@@ -61,6 +61,7 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.rag.schema import document_chunks
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn, shadow_turns
+from neura_agent_core.waiting import WaitingAnswerRepository, waiting_answers
 from neura_commerce.pagination import Cursor
 from neura_commerce.sync.schema import sync_checkpoints, synced_entities
 from neura_core import Database, get_settings, ids, load_env
@@ -218,6 +219,9 @@ async def main() -> int:
                 print(f"\n  {BOLD}conversations — what it actually said{OFF}")
                 await _check_conversations(browser, console, seeded, failures)
 
+                print(f"\n  {BOLD}a handed-over shopper waits — answer by email{OFF}")
+                await _check_handover(browser, console, db, seeded, failures)
+
                 print(f"\n  {BOLD}shop and usage — connection, and honest numbers{OFF}")
                 await _check_shop_and_usage(browser, console, seeded, failures)
                 await _check_contact(browser, console, seeded, failures)
@@ -289,6 +293,16 @@ async def main() -> int:
     print(f"  {DIM}Evidence about THIS build and THIS browser, and nothing more.{OFF}\n")
     return 0
 
+
+#: ADR-0062: two handed-over shoppers waiting for the shop's answer.
+SEEDED_WAITING_QUESTION = "Can I return an opened pack of console-check tea?"
+SEEDED_SIGNED_IN_QUESTION = "Can you change the delivery address on my console-check parcel?"
+SEEDED_SHOPPER_EMAIL = "console-check-shopper@example.com"
+SEEDED_CUSTOMER = "console-check-385"
+SEEDED_ASK = "I can't answer this here. Leave your email so our store can answer you."
+SEEDED_WITH_STORE = (
+    "I can't answer this here. Your question is with our store, and they can answer you by email."
+)
 
 #: What the seeded shopper asks. Distinctive enough that finding it on the page
 #: cannot be a coincidence, and about a policy so that the cited evidence is a
@@ -730,6 +744,163 @@ async def _check_conversations(
         )
     finally:
         await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _check_handover(
+    browser: Chrome, console: str, db: Database, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """ADR-0062 §6 and §7, console.md §3.10, against rendered pages: who waits,
+    the box at the top of a waiting chat, *Answer by email* (a `mailto:` link,
+    since NEURA sends nothing), *Mark as answered* asking first, and Home."""
+    tenant = seeded["tenant"]
+    base = f"{console}/console/{tenant}"
+
+    await browser.goto(f"{base}/conversations")
+    await asyncio.sleep(3)
+    chip = await browser.evaluate(
+        "(document.querySelector('[data-waiting-chip]') || {}).innerText || ''"
+    )
+    menu = await browser.evaluate(
+        "(document.querySelector('[data-waiting-count]') || {}).innerText || ''"
+    )
+    _check(
+        "Conversations offers Waiting for an answer, with how many",
+        "Waiting for an answer" in chip and "2" in chip,
+        failures,
+    )
+    _check("the menu shows the same count beside Conversations", menu.strip() == "2", failures)
+
+    await browser.goto(f"{base}/conversations?state=waiting")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    _check(
+        "the waiting list says how many wait, and why they can be reached",
+        "2 shoppers are waiting for an answer." in page,
+        failures,
+    )
+    _check(
+        "it holds both waiting chats and nothing else",
+        SEEDED_WAITING_QUESTION in page
+        and SEEDED_SIGNED_IN_QUESTION in page
+        and SEEDED_QUESTION not in page,
+        failures,
+    )
+    _check(
+        "each row says how to reach the shopper",
+        "left an email" in page and "signed in to your shop" in page,
+        failures,
+    )
+    _check("no address is on the list", SEEDED_SHOPPER_EMAIL not in page, failures)
+
+    await browser.goto(f"{base}/conversations/{seeded['waiting_conversation']}")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    mailto = await browser.evaluate(
+        "(document.querySelector('[data-answer-by-email]') || {}).href || ''"
+    )
+    _check(
+        "a waiting chat opens with the box at the top",
+        "This shopper is waiting for an answer" in page and SEEDED_SHOPPER_EMAIL in page,
+        failures,
+    )
+    _check(
+        "Answer by email opens the team member's own email app, filled in",
+        mailto.startswith(f"mailto:{SEEDED_SHOPPER_EMAIL}?subject=Your%20question%20to%20")
+        and "You%20asked%20us%20in%20the%20chat%20on%20our%20website" in mailto
+        and "console-check%20tea" in mailto,
+        failures,
+    )
+    _check(
+        "the chat says where the shopper left their email, without it",
+        "The shopper left their email for an answer" in page,
+        failures,
+    )
+
+    await browser.goto(f"{base}/conversations/{seeded['signed_in_conversation']}")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    _check(
+        "a signed-in shopper the shop cannot give is named, to find in the shop's admin",
+        f"Find customer {SEEDED_CUSTOMER} in your shop's admin" in page
+        and not await browser.evaluate("!!document.querySelector('[data-answer-by-email]')"),
+        failures,
+    )
+
+    await browser.goto(base)
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    links = await browser.evaluate(
+        "[...document.querySelectorAll('a')].filter((a) => a.textContent.trim() === 'Answer them')"
+        ".map((a) => a.getAttribute('href'))"
+    )
+    _check(
+        "Home says first who is waiting, and opens them",
+        "shoppers are waiting for an answer" in page
+        and f"/console/{tenant}/conversations?state=waiting" in (links or []),
+        failures,
+    )
+
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
+    )
+    try:
+        await browser.goto(f"{base}/conversations/{seeded['waiting_conversation']}")
+        await asyncio.sleep(3)
+        _check(
+            "on a phone a waiting chat does not scroll sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+        heights = await browser.evaluate(
+            "[...document.querySelectorAll('[data-waiting-box] a, [data-waiting-box] button')]"
+            ".map((b) => b.getBoundingClientRect().height)"
+        )
+        _check(
+            "and its buttons are 44px high",
+            bool(heights) and all(height >= 44 for height in heights),
+            failures,
+        )
+        dot = await browser.evaluate("!!document.querySelector('[data-waiting-dot]')")
+        _check("the phone's menu button carries a dot while someone waits", dot, failures)
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
+    # Last, because it changes what waits: Mark as answered asks first.
+    await browser.goto(f"{base}/conversations/{seeded['waiting_conversation']}")
+    await asyncio.sleep(3)
+    await browser.evaluate(
+        "(document.querySelector('[data-mark-answered]') || { click() {} }).click() || true"
+    )
+    await asyncio.sleep(1)
+    asked = await browser.evaluate("document.body.innerText")
+    _check(
+        "Mark as answered asks first, and says the email goes",
+        "Mark as answered?" in asked and "We delete the shopper's email" in asked,
+        failures,
+    )
+    await browser.evaluate(
+        "(document.querySelector('[data-confirm-answered]') || { click() {} }).click() || true"
+    )
+    await asyncio.sleep(3)
+    done = await browser.evaluate("document.body.innerText")
+    async with db.tenant_session(tenant) as session:
+        row = await WaitingAnswerRepository(session).get(tenant, seeded["waiting_conversation"])
+    _check(
+        "then it says who answered, and the address is gone from the database",
+        "The shopper's email is deleted." in done
+        and row is not None
+        and row.email is None
+        and row.answered_at is not None,
+        failures,
+    )
+    menu = await browser.evaluate(
+        "(document.querySelector('[data-waiting-count]') || {}).innerText || ''"
+    )
+    _check("and the menu's count drops by one", menu.strip() == "1", failures)
 
 
 async def _check_shop_and_usage(
@@ -2217,6 +2388,38 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
                 latency_ms=1180,
             )
         )
+        # ADR-0062: two handed-over shoppers waiting for an answer, one who left
+        # an email in the chat box and one who was signed in. The shop's store
+        # is a placeholder, so the signed-in one shows the customer's id.
+        made["waiting_conversation"] = ids.new_id(ids.CONVERSATION)
+        made["signed_in_conversation"] = ids.new_id(ids.CONVERSATION)
+        await conversations.start(
+            tenant_id, conversation_id=made["waiting_conversation"], agent_key="care"
+        )
+        await conversations.append_turn(
+            tenant_id,
+            made["waiting_conversation"],
+            shopper=SEEDED_WAITING_QUESTION,
+            reply=SEEDED_ASK,
+            state=ConversationState.ESCALATED,
+        )
+        await conversations.start(
+            tenant_id,
+            conversation_id=made["signed_in_conversation"],
+            agent_key="care",
+            customer_external_id=SEEDED_CUSTOMER,
+        )
+        await conversations.append_turn(
+            tenant_id,
+            made["signed_in_conversation"],
+            shopper=SEEDED_SIGNED_IN_QUESTION,
+            reply=SEEDED_WITH_STORE,
+            state=ConversationState.ESCALATED,
+        )
+        waiting = WaitingAnswerRepository(session)
+        await waiting.leave_email(tenant_id, made["waiting_conversation"], SEEDED_SHOPPER_EMAIL)
+        await waiting.wait_for_customer(tenant_id, made["signed_in_conversation"])
+
         made["declined"] = await shadow.record(
             ShadowTurn(
                 tenant_id=tenant_id,
@@ -2284,7 +2487,15 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
         await session.execute(
             delete(document_chunks).where(document_chunks.c.id == seeded["chunk"])
         )
-        threads = [seeded["conversation"], seeded["answered_conversation"]]
+        threads = [
+            seeded["conversation"],
+            seeded["answered_conversation"],
+            seeded["waiting_conversation"],
+            seeded["signed_in_conversation"],
+        ]
+        await session.execute(
+            delete(waiting_answers).where(waiting_answers.c.conversation_id.in_(threads))
+        )
         await session.execute(
             delete(conversation_messages).where(
                 conversation_messages.c.conversation_id.in_(threads)

@@ -22,6 +22,8 @@ export const PERMISSION = {
   mode: "shop:mode:write",
   usage: "usage:cost:read",
   people: "people:members:write",
+  /** Answer a handed-over shopper: their email, Mark as answered (ADR-0062 §8). */
+  handovers: "shop:handovers:write",
 } as const;
 
 export type Permission = (typeof PERMISSION)[keyof typeof PERMISSION];

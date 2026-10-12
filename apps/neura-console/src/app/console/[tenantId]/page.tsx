@@ -53,13 +53,15 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
   // A shop without NEURA-SELL is not shown its two screens, so Home does not
   // ask for them either (lib/assistants.ts).
   const sell = hasSell(await shopAssistants(tenantId));
-  const [usage, card, store, soldOut, suggestions] = await Promise.all([
+  const [usage, card, store, soldOut, suggestions, home] = await Promise.all([
     fromApi<Usage>(`/shops/${shop}/usage?period=7d`),
     fromApi<Scorecard>(`/shops/${shop}/review/scorecard`),
     fromApi<ShopView>(`/shops/${shop}/store`),
     sell ? fromApi<SoldOut>(`/shops/${shop}/sold-out`) : null,
     // SELL's own route: the API that mounts it never learns an agent's name.
     sell ? fromApi<SuggestionsPage>(`/shops/${shop}/suggestions`, "/v1/sell/console") : null,
+    // Shoppers waiting for an answer (ADR-0062), first in Needs you.
+    fromApi<TeamView>(`/shops/${shop}/home`),
   ]);
 
   return (
@@ -108,6 +110,7 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
             base={base}
             waiting={card.ok ? card.data.ungraded : null}
             handed={usage.data.totals.escalations}
+            answering={home.ok ? home.data.waiting : null}
             connected={store.ok ? store.data.connected : null}
           />
 
@@ -140,7 +143,13 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
 
 /** What `/home` gives every member (R12): the mode, and the handed-over count
  * for a role that reads chats (`null` for any other). */
-type TeamView = { mode: string; practice: boolean; handed: number | null };
+type TeamView = {
+  mode: string;
+  practice: boolean;
+  handed: number | null;
+  /** Shoppers waiting for an answer (ADR-0062); `null` for a role that may not answer. */
+  waiting: number | null;
+};
 
 /**
  * Home for Support and the Developer: only the parts about their own work (R12).
@@ -180,6 +189,7 @@ async function TeamHome({ tenantId, membership }: { tenantId: string; membership
             base={base}
             waiting={card?.ok ? card.data.ungraded : null}
             handed={home.data.handed}
+            answering={home.data.waiting}
             connected={store?.ok ? store.data.connected : null}
             withDeveloper={false}
             empty={
@@ -214,6 +224,7 @@ function NeedsYou({
   base,
   waiting,
   handed,
+  answering = null,
   connected,
   withDeveloper = true,
   empty = "Nothing needs you right now. Replies waiting for review and conversations handed to a person will show up here.",
@@ -222,12 +233,30 @@ function NeedsYou({
   waiting: number | null;
   /** `null`: this role does not read chats, so the count is not theirs to see. */
   handed: number | null;
+  /** Shoppers waiting for an answer (ADR-0062). `null`: not this role's to answer. */
+  answering?: number | null;
   connected: boolean | null;
   /** Whether *in three steps with your developer* is said: not to the developer. */
   withDeveloper?: boolean;
   empty?: string;
 }) {
   const items: Need[] = [];
+
+  // First: a person is waiting (ADR-0062 §6, the approved mockup, board 55).
+  if (answering) {
+    items.push({
+      figure: answering,
+      title:
+        answering === 1 ? "shopper is waiting for an answer" : "shoppers are waiting for an answer",
+      detail:
+        answering === 1
+          ? "Your assistant handed them over, and they left a way to reach them. Answer them by email."
+          : "Your assistant handed them over, and each left a way to reach them. Answer them by email.",
+      action: "Answer them",
+      href: `${base}/conversations?state=waiting`,
+      primary: true,
+    });
+  }
 
   if (connected === false) {
     items.push({

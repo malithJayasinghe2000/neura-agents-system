@@ -355,6 +355,32 @@ export function connectShop(
   });
 }
 
+/** Home's own facts; here for the menu's count of shoppers waiting (ADR-0062). */
+export function readHome(tenantId: string): Promise<{ waiting: number | null }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/home`);
+}
+
+/**
+ * Said on `window` after *Mark as answered*, so the menu reads its count again
+ * at once. `router.refresh()` alone left the menu's number as it was until the
+ * next page (found by `make console-check`, 2026-10-12).
+ */
+export const WAITING_CHANGED = "neura:waiting-changed";
+
+/** *Mark as answered*: the shopper's email is deleted at once (ADR-0062 §7). */
+export function markAnswered(
+  tenantId: string,
+  conversationId: string,
+): Promise<{
+  answered_at: string | null;
+  answered_by: { name: string; role: string | null } | null;
+}> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/conversations/${encodeURIComponent(conversationId)}/answered`,
+    { method: "POST" },
+  );
+}
+
 export function readScorecard(tenantId: string): Promise<Scorecard> {
   return call(`/shops/${encodeURIComponent(tenantId)}/review/scorecard`);
 }

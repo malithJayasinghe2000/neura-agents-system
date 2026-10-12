@@ -738,7 +738,7 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
   section (its own browser; waiting shops made with no owner, so no email can be sent; desktop and phone; the
   12-hour rule with a cookie made 13 hours old).
 
-### 3.10 The handover answered by email: from the owner's approved design, 2026-10-11 (not built)
+### 3.10 The handover answered by email: from the owner's approved design, 2026-10-11 (built 2026-10-12)
 
 [ADR-0062](architecture/adr/0062-a-handed-over-shopper-may-leave-an-email-and-the-shop-answers-from-its-own.md), accepted 2026-10-11 (R25 to R32); mockups approved the same day (canvas row 15, boards 50 to 56, version 36). **Build from this section and the ADR; do not redesign.** For **Owner and Support** (`shop:handovers:write`); the Developer sees none of it. **NEURA sends no email**: *Answer by email* opens the team member's own email app. No new screen: Conversations, Home and the menu gain parts.
 
@@ -753,6 +753,12 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
 **A signed-in shopper's chat** (board 54): *"They were signed in to your shop when your assistant handed them over, [date] at [time]."*; the address with *"from your shop's customer record"*, read from the shop when the chat opens, never stored. When the shop cannot give it: *"Your shop didn't give us this customer's email. Find customer [id] in your shop's admin, and write to them from there."* (no Copy, no Answer by email; Mark as answered stays).
 
 **Home** (board 55): first in *Needs you*, for Owner and Support: **[n]** *"shoppers are waiting for an answer"* / *"shopper is waiting for an answer"*, *"Your assistant handed them over, and each left a way to reach them. Answer them by email."*, **Answer them** (black), opening the waiting list. Left out when nobody waits.
+
+**As built (2026-10-12):**
+
+- **Routes:** `POST /v1/conversations/{id}/email` (the chat box, its own key; names no agent); `GET /v1/console/shops/{tenant}/conversations?waiting=1`; each list row and transcript carries `waiting` (`reach`, `since`, and on a transcript `answered_at`, `answered_by`), never the address; `GET …/conversations/{id}/waiting` (the address, or `customer_id` when the shop cannot give it, plus `subject` and `body`) and `POST …/conversations/{id}/answered`, both `shop:handovers:write`; `/home` gives `waiting` to a role that may answer, `null` to any other.
+- **Small things the build decided:** the amber counts have a dark number (`amber-400` with `amber-950`): white on the mockup's amber is under 3:1 and unreadable at 12px. The *No thanks* note under the list drops *as today* (a shop owner has no *before*). *Waiting for an answer* is offered only to a role that may answer. An empty waiting list says *"Nobody is waiting for an answer"* / *"When your assistant hands a chat over and the shopper leaves a way to reach them, it shows up here."* For a signed-in customer the help line is *"… Send it from your shop's email, then press Mark as answered."* and the question *"This chat leaves Waiting for an answer. This can't be undone."* (nothing of theirs is stored to delete). Reopened later, an answered chat shows *Answered*, *"[name] marked it, [when]. The shopper's email is deleted."* After *Mark as answered* the box tells the menu to read its count again (`neura:waiting-changed`): `router.refresh()` alone left the old number until the next page.
+- **Checked:** `make console-check` has a handover section (17 checks: the choice and its count, the menu count, the waiting list and its rows, no address on the list, the box, the `mailto:` link filled in, the left-email line, a signed-in shopper the shop cannot give, Home, a phone with no sideways scroll, 44px buttons and the menu dot, *Mark as answered* asking first, the address gone from the database, the menu count dropping). Desktop and 390px seen.
 
 ## 4. Identity — the part that is genuinely new
 
