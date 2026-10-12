@@ -44,6 +44,20 @@
   var PLACEHOLDER = "Ask a question…";
 
   /**
+   * The email box under a handover that asks for one. [ADR-0062] §5, the
+   * owner's words (R31). The sentences around it come from the server; these
+   * four are the box's own.
+   */
+  var EMAIL_LABEL = "Your email";
+  var EMAIL_SEND = "Send";
+  var EMAIL_SKIP = "No thanks";
+  var WRONG_EMAIL_MESSAGE = "Please check your email address.";
+  /** A first check, before anything is sent; the server checks again. */
+  var EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  /** The longest address email allows, as the server keeps it. */
+  var MAX_EMAIL_CHARS = 254;
+
+  /**
    * Ids accepted from one page. The server truncates too; this is here so a
    * page holding a long list does not spend the bytes.
    */
@@ -336,6 +350,47 @@
   }
 
   /**
+   * The handover's two parts around the email box, or null for no box.
+   * [ADR-0062] §5
+   *
+   * The server says when (`ask_email`), so the widget never guesses from the
+   * words. The reply's first line goes above the box; the rest (the shop's own
+   * contact line, when the owner set one) goes below it.
+   */
+  function emailAskFor(payload) {
+    if (!payload || payload.ask_email !== true || !payload.reply) {
+      return null;
+    }
+    var text = withoutEmphasis(payload.reply);
+    var at = text.indexOf("\n");
+    if (at < 0) {
+      return { before: text, after: "" };
+    }
+    return { before: text.slice(0, at), after: text.slice(at + 1).trim() };
+  }
+
+  function looksLikeEmail(text) {
+    if (typeof text !== "string") {
+      return false;
+    }
+    var trimmed = text.trim();
+    return trimmed.length <= MAX_EMAIL_CHARS && EMAIL_SHAPE.test(trimmed);
+  }
+
+  /**
+   * Where a handed-over shopper's address goes: its own route, never a chat
+   * message, so it never reaches the AI or the transcript. [ADR-0062] §10
+   */
+  function emailEndpointFor(base, conversationId) {
+    return base + "/v1/conversations/" + encodeURIComponent(conversationId) + "/email";
+  }
+
+  /** The address and nothing else: no pass, no message. */
+  function emailBody(text) {
+    return JSON.stringify({ email: String(text || "").trim() });
+  }
+
+  /**
    * The developer's warning for a refused pass, or "". [ADR-0057] §5
    *
    * Only for `invalid`: an expired pass is a page left open, not a mistake.
@@ -537,6 +592,24 @@
     "color:#fff;font-size:13px;font-weight:600;text-decoration:none;}",
     ".signin:hover{background:#2c3850;}",
     ".signin:focus-visible{outline:2px solid #7aa2ff;outline-offset:1px;}",
+    // The email box under a handover that asks ([ADR-0062] §5): between the
+    // reply's first line and the shop's contact line.
+    ".ask{display:flex;flex-direction:column;gap:8px;margin-top:4px;padding:10px;",
+    "border:1px solid #e6e9f0;border-radius:10px;background:#fff;}",
+    ".ask label{font-size:12px;color:#4a5468;}",
+    ".ask input{padding:9px 11px;border:1px solid #d3d8e3;border-radius:9px;font-size:14px;",
+    "font-family:inherit;color:inherit;background:#fff;}",
+    ".ask input[aria-invalid='true']{border-color:#d64545;}",
+    ".ask input:focus-visible{outline:2px solid #7aa2ff;outline-offset:0;}",
+    ".ask-error{font-size:12px;color:#8c2b2b;}",
+    ".ask-actions{display:flex;gap:8px;}",
+    ".ask-actions button{padding:9px 14px;border-radius:9px;font-size:13px;cursor:pointer;",
+    "font-family:inherit;}",
+    ".ask-send{border:0;background:#1b2333;color:#fff;font-weight:600;}",
+    ".ask-skip{border:1px solid #d3d8e3;background:#fff;color:#1b2333;}",
+    ".ask-actions button[disabled]{opacity:.5;cursor:default;}",
+    ".ask-actions button:focus-visible{outline:2px solid #7aa2ff;outline-offset:1px;}",
+    ".contact{font-size:13px;line-height:1.45;margin-top:4px;padding:0 2px;}",
     // Product cards ([ADR-0030]). A stacked list of wide rows rather than a
     // strip of tall tiles: a chat panel is ~340px, most merchants publish no
     // image at all (the test shop publishes none for any product), and a tile
@@ -968,9 +1041,16 @@
         this.disclosure.textContent = payload.ai_disclosure;
       }
       var rows = messagesForTurn(payload);
+      var ask = emailAskFor(payload);
+      if (ask) {
+        rows = [{ role: "assistant", text: ask.before, disclosure: payload.ai_disclosure || "" }];
+      }
       var last = null;
       for (var i = 0; i < rows.length; i += 1) {
         last = this.render(rows[i]);
+      }
+      if (ask && last) {
+        this.askForEmail(last, ask.after, payload.ai_disclosure || "");
       }
       var signIn = signInLinkFor(payload, this.config);
       if (signIn && last) {
@@ -985,6 +1065,125 @@
       }
       this.renderProducts(productsForTurn(payload));
       this.setBusy(false);
+    };
+
+    /**
+     * The email box under a handover that asks for one. [ADR-0062] §5, §10
+     *
+     * Drawn inside the reply's row: the first line, this box, then the shop's
+     * contact line, then the AI disclosure. Not a `<form>`: the chat's own
+     * message box is the form, and one form per panel keeps Enter in each box
+     * doing that box's thing. The address goes to its own route with the chat
+     * box's key, never as a chat message, so it never reaches the AI.
+     */
+    NeuraChat.prototype.askForEmail = function (row, after, disclosure) {
+      var self = this;
+      var note = row.querySelector(".note");
+      var box = element("div", "ask");
+      box.setAttribute("role", "group");
+      box.setAttribute("aria-label", EMAIL_LABEL);
+
+      var id = "neura-ask-email-" + String(Date.now());
+      var label = element("label", "", EMAIL_LABEL);
+      label.setAttribute("for", id);
+      var input = document.createElement("input");
+      input.type = "email";
+      input.id = id;
+      input.autocomplete = "email";
+      input.maxLength = MAX_EMAIL_CHARS;
+      var error = element("div", "ask-error", "");
+      error.setAttribute("aria-live", "polite");
+      var actions = element("div", "ask-actions");
+      var send = element("button", "ask-send", EMAIL_SEND);
+      send.type = "button";
+      var skip = element("button", "ask-skip", EMAIL_SKIP);
+      skip.type = "button";
+
+      function busy(on) {
+        send.disabled = on;
+        skip.disabled = on;
+        input.disabled = on;
+      }
+
+      function wrong(text) {
+        input.setAttribute("aria-invalid", "true");
+        error.textContent = text;
+        busy(false);
+        input.focus();
+      }
+
+      function leave() {
+        if (!looksLikeEmail(input.value)) {
+          wrong(WRONG_EMAIL_MESSAGE);
+          return;
+        }
+        busy(true);
+        fetch(emailEndpointFor(self.config.base, self.conversationId), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + self.config.key,
+          },
+          body: emailBody(input.value),
+        })
+          .then(function (response) {
+            return response.json().then(
+              function (json) {
+                return { ok: response.ok, json: json };
+              },
+              function () {
+                return { ok: false, json: null };
+              }
+            );
+          })
+          .then(
+            function (result) {
+              var data = result.json && result.json.data;
+              if (result.ok && data && data.reply) {
+                box.remove();
+                self.render({ role: "assistant", text: data.reply, disclosure: disclosure });
+                return;
+              }
+              var code = result.json && result.json.error && result.json.error.code;
+              if (code === "ALREADY_WAITING" || code === "NOT_HANDED_OVER") {
+                // Nothing to do here any more: the box goes, the words stay.
+                box.remove();
+                return;
+              }
+              wrong(code === "INVALID_EMAIL" ? WRONG_EMAIL_MESSAGE : TRANSPORT_ERROR_MESSAGE);
+            },
+            function () {
+              wrong(TRANSPORT_ERROR_MESSAGE);
+            }
+          );
+      }
+
+      send.addEventListener("click", leave);
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          leave();
+        }
+      });
+      input.addEventListener("input", function () {
+        input.removeAttribute("aria-invalid");
+        error.textContent = "";
+      });
+      skip.addEventListener("click", function () {
+        box.remove();
+      });
+
+      actions.appendChild(send);
+      actions.appendChild(skip);
+      box.appendChild(label);
+      box.appendChild(input);
+      box.appendChild(error);
+      box.appendChild(actions);
+      row.insertBefore(box, note);
+      if (after) {
+        row.insertBefore(element("div", "contact", after), note);
+      }
+      this.log.scrollTop = this.log.scrollHeight;
     };
 
     /**
@@ -1129,13 +1328,21 @@
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
+      EMAIL_LABEL: EMAIL_LABEL,
+      EMAIL_SEND: EMAIL_SEND,
+      EMAIL_SKIP: EMAIL_SKIP,
       EMPTY_TURN_MESSAGE: EMPTY_TURN_MESSAGE,
       STEP_FALLBACK: STEP_FALLBACK,
       TRANSPORT_ERROR_MESSAGE: TRANSPORT_ERROR_MESSAGE,
+      WRONG_EMAIL_MESSAGE: WRONG_EMAIL_MESSAGE,
       configFrom: configFrom,
+      emailAskFor: emailAskFor,
+      emailBody: emailBody,
+      emailEndpointFor: emailEndpointFor,
       endpointFor: endpointFor,
       errorTextFor: errorTextFor,
       labelForStep: labelForStep,
+      looksLikeEmail: looksLikeEmail,
       messageBody: messageBody,
       messagesForTurn: messagesForTurn,
       pairsFor: pairsFor,

@@ -462,3 +462,66 @@ test("a good pass, an expired one, or none warns nobody", () => {
     assert.strictEqual(widget.passWarningFor({ customer_pass: state }), "", String(state));
   }
 });
+
+// ── ADR-0062: a handed-over shopper may leave an email ──────────────────────
+
+const ASK = "I can't answer this here. Leave your email so our store can answer you.";
+const CONTACT = "Or contact our store: hello@yourshop.example, +94 11 234 5678.";
+
+test("a handover that asks puts the email box between its two lines", () => {
+  assert.deepStrictEqual(widget.emailAskFor({ ask_email: true, reply: ASK + "\n" + CONTACT }), {
+    before: ASK,
+    after: CONTACT,
+  });
+});
+
+test("with no contact details set there is nothing under the box", () => {
+  assert.deepStrictEqual(widget.emailAskFor({ ask_email: true, reply: ASK }), {
+    before: ASK,
+    after: "",
+  });
+});
+
+test("the box shows only when the server asks, never from the words", () => {
+  for (const payload of [
+    { ask_email: false, reply: ASK + "\n" + CONTACT },
+    { reply: ASK },
+    { ask_email: "true", reply: ASK },
+    { ask_email: true, reply: "" },
+    null,
+    undefined,
+  ]) {
+    assert.strictEqual(widget.emailAskFor(payload), null);
+  }
+});
+
+test("an address is checked before it is sent", () => {
+  for (const good of ["saman@example.com", "  saman.perera@example.com ", "a+b@shop.co.uk"]) {
+    assert.ok(widget.looksLikeEmail(good), good);
+  }
+  for (const bad of ["", "   ", "saman.perera@", "saman", "@example.com", "saman@example", "a b@c.com", "a@@c.com", null]) {
+    assert.ok(!widget.looksLikeEmail(bad), String(bad));
+  }
+});
+
+test("the address goes to its own route, never into a chat message", () => {
+  assert.strictEqual(
+    widget.emailEndpointFor("https://api.example", "cnv_01M4"),
+    "https://api.example/v1/conversations/cnv_01M4/email"
+  );
+  assert.strictEqual(
+    widget.emailEndpointFor("https://api.example", "a/b?c"),
+    "https://api.example/v1/conversations/a%2Fb%3Fc/email"
+  );
+  // The body is the address and nothing else: no pass, no message.
+  assert.deepStrictEqual(JSON.parse(widget.emailBody(" saman@example.com ")), {
+    email: "saman@example.com",
+  });
+});
+
+test("the box's own words, as the owner approved them (R31)", () => {
+  assert.strictEqual(widget.EMAIL_LABEL, "Your email");
+  assert.strictEqual(widget.EMAIL_SEND, "Send");
+  assert.strictEqual(widget.EMAIL_SKIP, "No thanks");
+  assert.strictEqual(widget.WRONG_EMAIL_MESSAGE, "Please check your email address.");
+});
