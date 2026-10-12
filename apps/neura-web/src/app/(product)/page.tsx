@@ -189,8 +189,11 @@ export default function CarePage() {
             <Stage>
               <Card className="flex flex-col gap-3 p-5">
                 <Asked>Can you change the address on my order?</Asked>
+                {/* CARE's own words for a signed-in shopper (ADR-0062 §5, R31), not
+                    a sentence it never says (G105). */}
                 <Answered>
-                  That&apos;s one for a person. I&apos;ve passed it to the team, with your question.
+                  I can&apos;t answer this here. Your question is with our store, and they can
+                  answer you by email.
                 </Answered>
                 <span className="flex h-7 items-center self-start rounded-full bg-accent px-3 text-xs font-semibold text-white">
                   Handed to your team
