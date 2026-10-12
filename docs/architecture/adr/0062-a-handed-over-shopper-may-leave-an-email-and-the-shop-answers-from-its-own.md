@@ -1,8 +1,8 @@
 # ADR-0062 · A Handed-Over Shopper May Leave An Email, And The Shop Answers From Its Own
 
 **Status:** **Accepted** · owner decisions 2026-10-11, a design session, R25 to R32
-([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *Handover*) · **not built, mockups
-first** · Everything marked *(Claude)* was Claude's proposal, accepted by the owner with R32 · **Date:** 2026-10-11 ·
+([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *Handover*) · mockups approved 2026-10-11 (canvas row 15) · **built 2026-10-11/12**; what the build decided, and the
+Gemini check, is [ADR-0063](0063-the-handover-answered-by-email-what-the-build-decided.md) · Everything marked *(Claude)* was Claude's proposal, accepted by the owner with R32 · **Date:** 2026-10-11 ·
 **Amends:** [ADR-0042](0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md) §1 (a third
 kind of data, *volunteered*, for this one purpose) and §2 (no data agreement checked for it, R29);
 [ADR-0055](0055-a-handover-tells-the-shopper-how-to-contact-the-shop.md) §2 (what a handed-over shopper reads) ·
