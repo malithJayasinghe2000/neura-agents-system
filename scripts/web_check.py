@@ -60,6 +60,9 @@ SEEDER = Path.home() / "Developer" / "bagisto" / "database" / "seeders" / "Neura
 #: keys, the shop token and the customer sign-in secret, whose bodies may hold - and _.
 SECRET = re.compile(r"fn_(?:sk|pk|st|cs)_(?:live_|test_)?[A-Za-z0-9_-]{8,}")
 EXTERNAL = re.compile(r"""<(?:script|link|img|iframe)\b[^>]*\b(?:src|href)=["']https?://""", re.I)
+#: An offer the assistants no longer make (G74, R35; G108): nobody called a
+#: colleague exists, and a "yes" leads to the handover, never to a person.
+UNTRUE_OFFER = re.compile(r"colleague|pass\s+you\s+(?:to|over)")
 PLACEHOLDER = re.compile(r"\[[A-Z][A-Z ]{3,}\]")
 
 
@@ -113,6 +116,13 @@ def _static_checks(failures: list[str]) -> None:
         _check(f"{page}: no platform named", not any(p in text for p in PLATFORMS), failures)
         _check(f"{page}: no secret key", not SECRET.search(html), failures)
         _check(f"{page}: no request to another site", not EXTERNAL.search(html), failures)
+        offer = UNTRUE_OFFER.search(text)
+        _check(
+            f"{page}: no offer the assistants do not make",
+            not offer,
+            failures,
+            offer.group(0) if offer else "",
+        )
     spec = (OUT / "spec" / "openapi.json").read_text().lower()
     _check(
         "the OpenAPI file is published, and names no platform",

@@ -40,8 +40,8 @@ function OrderChat() {
           <Asked>Hi — where&apos;s my order? It hasn&apos;t arrived yet.</Asked>
           <div className="flex flex-col gap-2 self-start">
             <span className="max-w-[330px] rounded-[16px_16px_16px_4px] bg-hush px-3.5 py-[11px] text-[15px] leading-[1.5]">
-              It was shipped on Monday and is on its way with the carrier. I can pass you to the
-              team if you&apos;d like a hand with it.
+              It was shipped on Monday and is on its way with the carrier. Someone at our store
+              can answer you if you&apos;d like a hand with it.
             </span>
             <span className="flex items-center gap-1.5 text-xs font-medium text-body">
               <Check className="size-[13px] text-accent" strokeWidth={2.2} aria-hidden />
@@ -218,8 +218,8 @@ export default function CarePage() {
                   Held — not sent
                 </span>
                 <span className="text-[15px] leading-[1.55]">
-                  &ldquo;Unworn items can be returned with their tags on. Would you like me to pass
-                  you to the team to start one?&rdquo;
+                  &ldquo;Unworn items can be returned with their tags on. Someone at our store can
+                  help you start one, if you&apos;d like.&rdquo;
                 </span>
                 <div className="grid grid-cols-3 gap-2">
                   <span className="flex h-10 items-center justify-center rounded-[10px] bg-ink text-sm font-medium text-white">
