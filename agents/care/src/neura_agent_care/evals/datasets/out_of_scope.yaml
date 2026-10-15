@@ -101,3 +101,26 @@ cases:
 
       It asserts only on groundedness on purpose: whichever way the decision
       goes, an answer built on figures the catalogue does not contain is wrong.
+
+  - id: out_of_scope_007
+    intent: out_of_scope
+    synthetic: true
+    input: "yes please"
+    session:
+      history:
+        - role: user
+          content: "What's the weather in Colombo tomorrow?"
+        - role: assistant
+          content: >-
+            I can help with your orders, what we sell, and how the store works —
+            returns, delivery, that sort of thing. That one's outside what I'm able
+            to look up, I'm afraid. If you'd like someone at our store to answer it
+            anyway, just say so.
+    expect:
+      escalated: true
+      tools_called: []
+    notes: >-
+      G74, R35. The decline offers someone at our store; a shopper who takes the
+      offer must reach the handover (ADR-0062's words). If this fails, the offer
+      is a promise nobody keeps. It costs escalation precision nothing: the
+      shopper asked for a person.
