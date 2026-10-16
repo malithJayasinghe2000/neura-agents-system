@@ -51,8 +51,26 @@ def without_ids(reply: str, known: Iterable[str]) -> str:
     id is removed — ``(4)``, ``(Product 4)``, ``[p_boot_1]`` — never a bare one,
     because "4 cups" and "size 4" are the shopper's own words. Run on the reply
     after every check, so nothing it removes was ever evidence.
+
+    The model also writes it the other way round, *"Product 4 (Ceylon Black Tea
+    BOPF 400g)"* (G106): there the word *product* and a known id come before a
+    bracketed name, and the name is kept without its brackets; or *"Product 4, the
+    Enamel Camp Mug"*, where the id and its comma go. Without the word *product*
+    nothing changes, so *"size 4 (UK)"* stays.
     """
     for product_id in sorted({i for i in known if i}, key=len, reverse=True):
+        reply = re.sub(
+            rf"\bproduct\s+(?:id\s+)?{re.escape(product_id)}\s*\(\s*([^()]+?)\s*\)",
+            r"\1",
+            reply,
+            flags=re.IGNORECASE,
+        )
+        reply = re.sub(
+            rf"\bproduct\s+(?:id\s+)?{re.escape(product_id)},\s+",
+            "",
+            reply,
+            flags=re.IGNORECASE,
+        )
         reply = re.sub(
             rf"\s*[(\[]\s*(?:product\s+(?:id\s+)?)?{re.escape(product_id)}\s*[)\]]",
             "",
