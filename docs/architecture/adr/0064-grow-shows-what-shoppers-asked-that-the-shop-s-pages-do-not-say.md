@@ -1,8 +1,8 @@
 # ADR-0064 · GROW Shows What Shoppers Asked That The Shop's Pages Do Not Say
 
-**Status:** **Proposed** · owner decisions 2026-10-20, a design session, R36 to R41
+**Status:** **Accepted** · owner decision 2026-10-20 (R42: *"A"*, with Claude's additions) · owner decisions 2026-10-20, a design session, R36 to R41
 ([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*) · not built,
-mockup first · Everything marked *(Claude)* is Claude's proposal, for the owner to accept with this ADR ·
+mockup first · Everything marked *(Claude)* was Claude's proposal, accepted by the owner with R42 ·
 **Date:** 2026-10-20 · **Design:** [docs/agents/grow.md](../../agents/grow.md) · **Related:**
 [ADR-0010](0010-read-only-mvp-tools.md), [ADR-0015](0015-usage-rollups-and-budget-degradation.md),
 [ADR-0022](0022-scheduling-under-rls.md), [ADR-0045](0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md),

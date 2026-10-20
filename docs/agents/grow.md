@@ -1,10 +1,10 @@
 # NEURA-GROW — Design
 
-**Status:** **Proposed**, 2026-10-20 · for the owner's decision with
+**Status:** **Accepted**, 2026-10-20 (R42) · with
 [ADR-0064](../architecture/adr/0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md) ·
 nothing built · the owner's decisions are R36 to R41 in
 [CONNECTING_A_NEW_SHOP_LOG.md](../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*. Everything marked
-*(Claude)* is Claude's proposal and is the owner's to accept or change.
+*(Claude)* was Claude's proposal, accepted by the owner with R42.
 
 > **In one sentence:** GROW's first surface is one dashboard page, *Missing from your pages*: the facts
 > shoppers asked for in the last 30 days that the shop's own data could not give, grouped so the owner
