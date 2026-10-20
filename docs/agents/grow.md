@@ -23,9 +23,10 @@ any AI tool that reads the page.
 
 **What the owner reads, as an example:**
 
-> **Ceylon Green Tea 100g** · asked by 12 shoppers · last on Oct 18
-> *Add to your page:* **Organic:** ____
-> See the chats · I added it
+> Shoppers asked: **"Is it organic?"**
+> Your page doesn't say. Add the answer to its description in your shop.
+> **Green Tea Loose Leaf 100g** · Open the page ↗
+> Asked by 5 shoppers · last on Oct 18 · See the chats · I added it
 
 ## 1. Product scope
 
@@ -44,8 +45,13 @@ product the shop does not sell, or a question about another shop is **not** a pa
 
 - **A topic shows only when at least 2 different shoppers asked it** (R40), counted by conversation,
   in the last **30 days** *(Claude)*.
-- **GROW never writes a fact.** It shows a blank to fill: *Organic: ____* (R39). Only the owner knows
-  whether the tea is organic.
+- **GROW never writes a fact** (R39). It shows the shoppers' question and where the answer belongs:
+  *Shoppers asked: "Is it organic?" Your page doesn't say. Add the answer to its description in your
+  shop.* (R43, which replaced R39's blank *Organic: ____*, found confusing on the mockup.) Only the
+  owner knows whether the tea is organic.
+- **Open the page ↗** (R44): the shop's own product page, from the synced product's address; http or
+  https only, a new tab; no address, no link. The shop's admin page is not known (each shop system
+  differs).
 - **Grouped by product**, with one group *About your shop* for facts that belong to no product
   (*cash on delivery*, *delivery to Jaffna*) *(Claude)*.
 - **Most asked first**, then the most recent *(Claude)*.
@@ -83,7 +89,8 @@ nightly, per shop with GROW
      read: the shopper's message, the reply, whether it was handed over,
            and the ids of the products that turn looked up
      → one model call: is a fact missing that the shop's pages could state?
-           { gap: bool, product_id: one of the turn's ids or null, fact: a short label }
+           { gap: bool, product_id: one of the turn's ids or null,
+             fact: a short label (for grouping), question: the shoppers' question (for the page) }
      → checked in code (§3), then one row, or nothing
 ```
 
@@ -105,7 +112,8 @@ code before it is stored** *(Claude)*, because the model reads shopper text:
 |:--|:--|
 | `product_id` must be one the turn looked up, or null | The model cannot point a gap at a product the shopper never saw |
 | `fact` is 1 to 4 words, letters, digits, spaces and `'-` only, at most 40 characters | No sentence, no link, no phone number, no instruction reaches the owner's page |
-| `fact` passes the injection guard's rules and has no email address or 7+ digit number | A shopper cannot plant text for the owner, or their own contact details |
+| `question` is at most 60 characters, the same characters plus `?`, and ends with `?` | The page shows a question, never an instruction or a sentence of the model's |
+| `fact` and `question` pass the injection guard's rules and have no email address or 7+ digit number | A shopper cannot plant text for the owner, or their own contact details |
 | A topic needs 2 different conversations | One crafted chat cannot put a line on the owner's page |
 
 **The owner's page shows the label as plain text, never as a link or markup.**
@@ -118,7 +126,8 @@ conversation, the reply, the escalation flag and the products each turn looked u
 ## 5. Data requirements
 
 - **A new table** *(Claude)*, `page_gaps`: tenant, conversation, turn, kind (`handed_over` or
-  `half_answered`), product id (or null), fact label, asked at, the prompt revision. Row-level
+  `half_answered`), product id (or null), fact label, question, asked at, the prompt revision. The
+  page shows the most recent question of each group. Row-level
   security as every shop table.
 - **It goes with its conversation**: deleted by the conversation fan-out (90 days,
   `RETENTION_CONVERSATIONS_DAYS`) and by `make tenant-drop` (G76). The page shows the last 30 days.
