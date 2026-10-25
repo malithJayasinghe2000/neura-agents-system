@@ -54,6 +54,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from neura_agent_core.gaps import page_gaps
 from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
 from neura_agent_core.waiting import waiting_answers
 from neura_core import metadata, new_id
@@ -606,7 +607,8 @@ class ConversationRepository:
         transcript and left the working state would have deleted nothing a
         forensic reader could not reassemble.
 
-        The waiting row a handover left (``waiting_answers``, ADR-0062) goes too.
+        The waiting row a handover left (``waiting_answers``, ADR-0062) goes too,
+        and so does every gap GROW found in the chat (``page_gaps``, ADR-0064).
 
         **Deliberately left behind:** ``shadow_turns``, the graded review queue
         (``by_ids`` renders a deleted question as *"no longer in the
@@ -636,6 +638,13 @@ class ConversationRepository:
             delete(waiting_answers)
             .where(waiting_answers.c.tenant_id == tenant_id)
             .where(waiting_answers.c.conversation_id.in_(expired))
+        )
+        # A gap GROW found (ADR-0064) is derived from the shopper's words, so it
+        # goes with the chat it came from.
+        await self._session.execute(
+            delete(page_gaps)
+            .where(page_gaps.c.tenant_id == tenant_id)
+            .where(page_gaps.c.conversation_id.in_(expired))
         )
         result = await self._session.execute(
             delete(conversations)

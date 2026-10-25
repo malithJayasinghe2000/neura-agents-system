@@ -1038,6 +1038,7 @@ def tenant_tables() -> list[Any]:
     after it, and their rows outlived every dropped tenant (G76).
     """
     from neura_agent_core.conversations import conversation_messages, conversations
+    from neura_agent_core.gaps import page_gap_fixes, page_gap_scans, page_gaps
     from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
     from neura_agent_core.rag.schema import document_chunks
     from neura_agent_core.shadow import shadow_turns
@@ -1067,6 +1068,11 @@ def tenant_tables() -> list[Any]:
         observed_events,
         # A handed-over shopper's typed email (ADR-0062): personal data too.
         waiting_answers,
+        # What shoppers asked that the shop's pages do not say (ADR-0064):
+        # derived from shoppers' words, and the team's *I added it*.
+        page_gaps,
+        page_gap_fixes,
+        page_gap_scans,
         # Before the turns it points at: the one foreign key among these tables.
         shadow_evidence,
         shadow_turns,
