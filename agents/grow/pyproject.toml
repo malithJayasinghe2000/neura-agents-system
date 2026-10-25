@@ -8,6 +8,8 @@ dependencies = [
     "neura-domain",
     "neura-core",
     "neura-llm",
+    "neura-commerce",
+    "neura-evals",
 ]
 
 # Discovered like every agent, so FiveNeurals can tick GROW for a shop (R46) and
@@ -16,6 +18,14 @@ dependencies = [
 # chat routes for it (docs/agents/grow.md §2).
 [project.entry-points."neura.agents"]
 grow = "neura_agent_grow:MANIFEST"
+
+# How `make eval` measures the night check (Rule 4).
+[project.entry-points."neura.eval_targets"]
+grow = "neura_agent_grow.evals:build_target"
+
+# The night check (ADR-0064 §6), on ADR-0022's queue. Keyed by job kind.
+[project.entry-points."neura.job_handlers"]
+grow = "neura_agent_grow.jobs:build_handlers"
 
 [build-system]
 requires = ["hatchling"]

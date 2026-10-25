@@ -46,6 +46,7 @@ from neura_agent_core.shadow_evidence import ShadowEvidenceRepository
 from neura_agent_core.tools import SessionIdentity
 from neura_agent_core.waiting import WaitingAnswerRepository
 from neura_api.audit import TenantAuditLog
+from neura_api.jobs.daily import book_daily_jobs
 from neura_api.jobs.retention import enqueue_sweep
 from neura_api.jobs.webhooks import enqueue_drain
 from neura_api.metering import MeteredLLM
@@ -248,6 +249,9 @@ class TurnService:
                 # A new transcript is something to expire, so it books the
                 # sweep that will — in this transaction, or not at all.
                 await enqueue_sweep(session, tenant_id)
+                # And something an agent's daily job may read (GROW's night
+                # check, ADR-0064), for the agents this shop has.
+                await book_daily_jobs(session, tenant_id)
             history = (
                 []
                 if started

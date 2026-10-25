@@ -945,16 +945,20 @@ version = "0.1.0"
 source = { editable = "agents/grow" }
 dependencies = [
     { name = "neura-agent-core" },
+    { name = "neura-commerce" },
     { name = "neura-core" },
     { name = "neura-domain" },
+    { name = "neura-evals" },
     { name = "neura-llm" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "neura-agent-core", editable = "packages/neura-agent-core" },
+    { name = "neura-commerce", editable = "packages/neura-commerce" },
     { name = "neura-core", editable = "packages/neura-core" },
     { name = "neura-domain", editable = "packages/neura-domain" },
+    { name = "neura-evals", editable = "evals" },
     { name = "neura-llm", editable = "packages/neura-llm" },
 ]
 

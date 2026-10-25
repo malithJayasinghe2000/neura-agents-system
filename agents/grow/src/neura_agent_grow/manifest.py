@@ -31,6 +31,10 @@ class AgentManifest(BaseModel):
     #: Whether shoppers talk to this agent. False: no chat routes are mounted
     #: and the dispatcher never chooses it. An agent with a chat leaves this out.
     chat: bool = True
+    #: A job kind the API books once a day for a shop with this agent, from the
+    #: shop's first chat (``neura_api.jobs.daily``). An agent without one leaves
+    #: this out.
+    daily_job: str | None = None
 
 
 MANIFEST = AgentManifest(
@@ -48,6 +52,8 @@ MANIFEST = AgentManifest(
     requires_capabilities=frozenset(),
     route_prefix="/v1/grow",
     chat=False,
+    # The night check (neura_agent_grow.jobs): it reads the shop's chats.
+    daily_job="grow.gaps.scan",
 )
 
 __all__ = ["MANIFEST", "AgentManifest"]
