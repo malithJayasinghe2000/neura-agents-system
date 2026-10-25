@@ -245,8 +245,12 @@ def _mount_agents(app: FastAPI) -> None:
     own_routes = discover_agent_routes()
 
     for key, discovered in sorted(app.state.agents.items()):
-        app.include_router(agent_routes.build_router(key), prefix=discovered.route_prefix)
-        log.info("agent_mounted", agent=key, prefix=discovered.route_prefix)
+        # An agent no shopper talks to (GROW, ADR-0064) gets no chat, no
+        # conversations and no shadow queue: they could only ever answer
+        # AGENT_NOT_RUNNABLE. Its own surface, if any, is still mounted below.
+        if getattr(discovered.manifest, "chat", True) is not False:
+            app.include_router(agent_routes.build_router(key), prefix=discovered.route_prefix)
+            log.info("agent_mounted", agent=key, prefix=discovered.route_prefix)
 
         # An agent's own surface, if it has one, under the same prefix. Mounted
         # after the generic routes so a path an agent invents can never shadow

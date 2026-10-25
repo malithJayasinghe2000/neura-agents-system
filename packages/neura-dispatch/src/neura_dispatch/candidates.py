@@ -45,6 +45,12 @@ def installed_candidates() -> tuple[Candidate, ...]:
             log.error("dispatch_candidate_failed_to_load", agent=entry.name, error=str(exc))
             continue
 
+        # An agent no shopper talks to (GROW, ADR-0064) is left out on purpose,
+        # and quietly: it declares nothing because it answers nothing, which is
+        # not the broken manifest the warning below is for.
+        if getattr(manifest, "chat", True) is False:
+            continue
+
         handles = (getattr(manifest, "handles", "") or "").strip()
         if not handles:
             log.warning("dispatch_candidate_declares_nothing", agent=entry.name)
