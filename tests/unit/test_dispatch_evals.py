@@ -239,7 +239,8 @@ class TestTheExpensiveDirectionIsGated:
         cases = load_dataset(path).cases
         tagged = [c for c in cases if EXPENSIVE_MISS in c.tags]
 
-        assert len(tagged) == 10
+        # Ten, plus two product-fact questions (G111, R54).
+        assert len(tagged) == 12
         # Every tagged case is one SELL answers by fetching a person. Asserted
         # here, in the dataset's own package's test, and deliberately NOT in
         # `metrics.py` — that module must not learn the word "care".

@@ -106,13 +106,16 @@ MANIFEST = AgentManifest(
     handles=(
         "Questions about an order the shopper has already placed, and about how "
         "the store operates — returns, refunds, delivery, payment. Also general "
-        "questions about what the store sells."
+        "questions about what the store sells. Also questions about one product's "
+        "details: what it is made of, its size or weight, where it comes from, "
+        "whether it is organic."
     ),
     handles_examples=(
         "Where is my order NRA0001?",
         "How long do I have to return something?",
         "How much is delivery to Ireland?",
-        "Has my refund come through yet?",
+        # R54 (G111): a question about one product's details is CARE's.
+        "What is this jacket made of?",
         "Do you sell waterproof boots?",
     ),
 )

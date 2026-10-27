@@ -27,7 +27,7 @@ description: >-
   that loses `care → sell` is broken. A run that loses `sell → care` is worse
   than it should be and still answers the shopper.
 
-  THE GATE IS ON THE DETERMINED HALF ONLY — ADR-0033 §3. The ten `care` cases
+  THE GATE IS ON THE DETERMINED HALF ONLY — ADR-0033 §3. The twelve `care` cases
   carry `expensive_miss`, and `expensive_misroute_rate` must be 0.00. That tag
   is how the harness learns which misses are expensive WITHOUT learning that
   `care` and `sell` exist: the severity is declared here by the person who knows
@@ -48,6 +48,27 @@ description: >-
 
 cases:
   # ── CARE: determined. SELL sends every one of these to a person. ────────────
+  # G111 (2026-10-27, the first real test on a shop): a question about ONE named
+  # product's facts went to SELL, which answered it once and handed it over
+  # twice with no lookup. CARE answers what the shop has (R54). The first input
+  # is the owner's own message from that test: a test shop, not a shopper, so
+  # still synthetic.
+  - id: dispatch_product_fact_organic
+    intent: dispatch
+    input: Is the Green Tea Loose Leaf 100g organic?
+    expect:
+      agent: care
+    synthetic: true
+    tags: [care, product_fact, expensive_miss]
+
+  - id: dispatch_product_fact_origin
+    intent: dispatch
+    input: Where does your black pepper come from?
+    expect:
+      agent: care
+    synthetic: true
+    tags: [care, product_fact, expensive_miss]
+
   - id: dispatch_order_status
     intent: dispatch
     input: Where is my order NRA0001?
