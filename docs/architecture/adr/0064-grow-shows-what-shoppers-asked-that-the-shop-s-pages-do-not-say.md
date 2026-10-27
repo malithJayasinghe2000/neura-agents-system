@@ -1,8 +1,7 @@
 # ADR-0064 · GROW Shows What Shoppers Asked That The Shop's Pages Do Not Say
 
 **Status:** **Accepted** · owner decision 2026-10-20 (R42: *"A"*, with Claude's additions) · owner decisions 2026-10-20, a design session, R36 to R41
-([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*) · not built,
-mockup first · **§2's blank amended by the owner, 2026-10-20 (R43, R44):** the page shows the shoppers' question, where to add the answer and a link to the product page; GROW still never writes a fact; recorded again in the build's ADR · Everything marked *(Claude)* was Claude's proposal, accepted by the owner with R42 ·
+([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*) · **built 2026-10-25 to 2026-10-27; what the build decided is [ADR-0066](0066-missing-from-your-pages-what-the-build-decided.md)** · **§2's blank amended by the owner, 2026-10-20 (R43, R44):** the page shows the shoppers' question, where to add the answer and a link to the product page; GROW still never writes a fact; recorded again in the build's ADR · Everything marked *(Claude)* was Claude's proposal, accepted by the owner with R42 ·
 **Date:** 2026-10-20 · **Design:** [docs/agents/grow.md](../../agents/grow.md) · **Related:**
 [ADR-0010](0010-read-only-mvp-tools.md), [ADR-0015](0015-usage-rollups-and-budget-degradation.md),
 [ADR-0022](0022-scheduling-under-rls.md), [ADR-0045](0045-a-pairing-may-be-computed-by-a-model-but-never-while-a-shopper-waits.md),
