@@ -35,6 +35,10 @@ class AgentManifest(BaseModel):
     #: shop's first chat (``neura_api.jobs.daily``). An agent without one leaves
     #: this out.
     daily_job: str | None = None
+    #: Features FiveNeurals may switch off for one shop (ADR-0065): a key, which
+    #: starts with this agent's key, to the words the admin reads, a name and
+    #: what it does. An agent without one leaves this out.
+    switches: dict[str, tuple[str, str]] = {}
 
 
 MANIFEST = AgentManifest(
@@ -54,6 +58,14 @@ MANIFEST = AgentManifest(
     chat=False,
     # The night check (neura_agent_grow.jobs): it reads the shop's chats.
     daily_job="grow.gaps.scan",
+    # The night check is the one GROW feature that spends money (R51).
+    switches={
+        "grow.gaps": (
+            "Missing from your pages",
+            "The night AI check: once a night, AI reads the shop's new chats to find "
+            "questions its pages don't answer.",
+        )
+    },
 )
 
 __all__ = ["MANIFEST", "AgentManifest"]

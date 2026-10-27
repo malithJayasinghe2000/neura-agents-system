@@ -25,6 +25,22 @@ export type AdminShop = {
   chats_7d: number;
   ai_calls_7d: number;
   cost_7d: Money;
+  /** One shop's page only: the features FiveNeurals may switch off (ADR-0065). */
+  switches?: AdminSwitch[];
+};
+
+/** One feature of one shop that FiveNeurals may switch off (ADR-0065). */
+export type AdminSwitch = {
+  key: string;
+  /** The assistant's key, e.g. `grow`. */
+  assistant: string;
+  /** The words the agent's manifest gives: a name and what it does. */
+  name: string;
+  text: string;
+  on: boolean;
+  /** `null`: never changed, so on. */
+  changed_at: string | null;
+  changed_by_you: boolean;
 };
 
 export type AdminShops = { shops: AdminShop[]; waiting: number };

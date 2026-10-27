@@ -26,6 +26,7 @@
  */
 const BASE = "/api";
 
+import type { AdminSwitch } from "@/lib/admin";
 import type { ReviewTurn, Scorecard, Verdict } from "@/lib/review";
 import type { ShopCheck, ShopView, SyncAsked } from "@/lib/shop";
 
@@ -118,6 +119,19 @@ export function approveShop(
   return call(
     `/shops/${encodeURIComponent(tenantId)}/approve`,
     { method: "POST", body: JSON.stringify({ agents }) },
+    "/v1/admin",
+  );
+}
+
+/** Switch one feature of a shop on or off (ADR-0065). `changed` is false for a no-op. */
+export function setSwitch(
+  tenantId: string,
+  key: string,
+  on: boolean,
+): Promise<{ changed: boolean; switch: AdminSwitch }> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/switches/${encodeURIComponent(key)}`,
+    { method: "PUT", body: JSON.stringify({ on }) },
     "/v1/admin",
   );
 }

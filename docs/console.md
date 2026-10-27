@@ -738,6 +738,12 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
   section (its own browser; waiting shops made with no owner, so no email can be sent; desktop and phone; the
   12-hour rule with a cookie made 13 hours old).
 
+**A switch per feature** (ADR-0065, accepted 2026-10-27; canvas row 17, boards 61 and 63, version 50, approved by the owner 2026-10-27, R53; **built 2026-10-27**): on `/admin/shops/[id]` for a shop that is **not waiting**, under its facts, a section **Switch a feature off**, *"Stop one feature for this shop, for example if its AI costs too much. The rest of the assistant keeps working. Only FiveNeurals can switch these."*, with one card per switch of an assistant the shop has (today only GROW's): **[ASSISTANT] · [name]** with an **On** (green) or **Off** (grey) badge, the text from the agent's manifest (*"The night AI check: once a night, AI reads the shop's new chats to find questions its pages don't answer."*), and **Turn off** (outline) or **Turn on** (black).
+- **Turn off asks first:** *"Turn off the night check for [shop]?"* *"While it is off, no chat is read and no AI is used. Chats from that time are never read later. What was already found stays on the shop's page, marked Paused. The shop can't turn it back on."* **Turn off** (red) / **Keep it on**. **Turn on does not ask.**
+- Afterwards: *"Off since [date, time], by you."* (or *by another admin*), and after turning on again *"On again since [date, time], by you. It reads chats from now on, not the ones from while it was off."*
+- On a phone, one column and full-width buttons. A shop without the assistant, or still waiting, shows no section.
+- **As built:** `PUT /v1/admin/shops/{id}/switches/{key}` (`{"on": bool}`), `AdminOnly`; an unknown key **400 `UNKNOWN_SWITCH`**, a key of an assistant the shop lacks **400 `NOT_THIS_SHOPS_ASSISTANT`**; a change is in the shop's record (`config.change`, `switch.off` / `switch.on`, the admin as actor), a no-op answers `changed: false` and records nothing. `GET /v1/admin/shops/{id}` adds `switches`. The table is `tenant_switches` (`neura_core/tenancy/switches.py`, migration `2c8e6a4f9d31`), no row meaning on. Checked by `tests/integration/test_admin.py` (`TestSwitches`), `tests/integration/test_grow_scan_postgres.py` and `make console-check` (desktop and phone).
+
 ### 3.10 The handover answered by email: from the owner's approved design, 2026-10-11 (built 2026-10-12)
 
 [ADR-0062](architecture/adr/0062-a-handed-over-shopper-may-leave-an-email-and-the-shop-answers-from-its-own.md), accepted 2026-10-11 (R25 to R32); mockups approved the same day (canvas row 15, boards 50 to 56, version 36). **Build from this section and the ADR; do not redesign.** For **Owner and Support** (`shop:handovers:write`); the Developer sees none of it. **NEURA sends no email**: *Answer by email* opens the team member's own email app. No new screen: Conversations, Home and the menu gain parts.
@@ -773,6 +779,8 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
 **Home** (board 58): in *Needs you*, after the shoppers waiting for an answer: **[n]** *"things shoppers asked that your pages don't say"*, *"In the last 30 days. Add each one to your shop once, and your assistant can answer the next shopper."*, **See them** (outlined). Only for a role that may open the page, and only when [n] is at least 1.
 
 **Phone** (board 60): one column; the product title above *Open the page*; the two buttons under each question, wrapping.
+
+**Paused** (ADR-0065, board 62, approved 2026-10-27, R53): when FiveNeurals has switched the night check off for the shop, a grey note above the count line, with a pause icon: **Paused since [date]**, *"FiveNeurals has paused the check that finds these questions, so nothing new appears here. What you see was found before it was paused. To turn it back on, ask FiveNeurals."* The rows found before stay (and still leave after 30 days); *I added it* still works; Home's line keeps its count; no email is sent. The route returns when it was paused; built with the page (piece 3).
 
 ## 4. Identity — the part that is genuinely new
 

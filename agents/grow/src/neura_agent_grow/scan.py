@@ -182,13 +182,19 @@ async def scan_shop(
     prompt: str,
     prompt_revision: str,
     now: datetime,
+    not_before: datetime | None = None,
 ) -> ScanResult:
-    """One pass for one shop. Returns what it did; raises nothing for an outage."""
+    """One pass for one shop. Returns what it did; raises nothing for an outage.
+
+    ``not_before``: when the check was last switched on (ADR-0065). Nothing from
+    before it is read, so the chats from while it was off never are (R52).
+    """
     result = ScanResult()
     window = now - timedelta(days=GAP_DAYS)
     async with db.tenant_session(tenant_id) as session:
         since = await PageGapRepository(session).scanned_until(tenant_id) or window
-        replies = await _replies(session, tenant_id, since=max(since, window), until=now)
+        since = max(since, window, not_before or window)
+        replies = await _replies(session, tenant_id, since=since, until=now)
 
     for reply in replies:
         result.read += 1

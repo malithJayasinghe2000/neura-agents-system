@@ -11,6 +11,8 @@ Rule 4); everything else is real: the chats, the synced catalogue, the queue.
 * **The booking**: a shop's first chat books the night check for a shop with
   GROW, and only for one; the job books itself again daily, and stops when the
   shop no longer has GROW.
+* **The switch** (ADR-0065): off, the job reads no chat and asks no model, and
+  books tomorrow; on again, it reads only what came after (R52).
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from neura_core.jobs import JobQueue, JobStatus
 from neura_core.jobs.schema import job_queue
 from neura_core.tenancy import TenantRepository
 from neura_core.tenancy.schema import tenant_usage, tenants
+from neura_core.tenancy.switches import SwitchRepository, tenant_switches
 
 pytestmark = pytest.mark.integration
 
@@ -68,6 +71,7 @@ async def _purge(database: Database) -> None:
                 page_gaps,
                 page_gap_fixes,
                 page_gap_scans,
+                tenant_switches,
                 conversation_messages,
                 conversations,
                 synced_entities,
@@ -300,3 +304,41 @@ async def test_an_outage_makes_the_queue_retry(db: Database) -> None:
     job = await _job(db, GROWING)
     with pytest.raises(GapScanProviderError):
         await GapScanHandler(_Model(fail_on=1))(_Context(db, GROWING, job))
+
+
+async def test_switched_off_the_job_reads_nothing_and_books_tomorrow(db: Database) -> None:
+    await _shop(db, GROWING, ("care", "grow"))
+    await _chat(db, GROWING, "cnv_1", "organic?", "I can't confirm that.")
+    async with db.tenant_session(GROWING) as session:
+        await SwitchRepository(session).set(GROWING, "grow.gaps", on=False, by="usr_admin")
+    job = await _job(db, GROWING)
+    model = _Model()
+
+    summary = await GapScanHandler(model)(_Context(db, GROWING, job))
+
+    assert model.seen == [], "no model is asked while it is off"
+    assert "switched off" in summary
+    async with db.tenant_session(GROWING) as session:
+        assert await PageGapRepository(session).scanned_until(GROWING) is None, "no chat read"
+        again = await JobQueue(session).get(job.id)
+    assert again is not None and again.status is JobStatus.PENDING
+    assert again.run_after > datetime.now(UTC) + timedelta(hours=23)
+
+
+async def test_switched_on_again_it_reads_only_what_came_after(db: Database) -> None:
+    """R52: the chats from while it was off are never read, then or later."""
+    await _shop(db, GROWING, ("care", "grow"))
+    await _chat(db, GROWING, "cnv_1", "organic, while it was off?", "I can't confirm that.")
+    async with db.tenant_session(GROWING) as session:
+        switches = SwitchRepository(session)
+        await switches.set(GROWING, "grow.gaps", on=False, by="usr_admin")
+    async with db.tenant_session(GROWING) as session:
+        await SwitchRepository(session).set(GROWING, "grow.gaps", on=True, by="usr_admin")
+    await _chat(db, GROWING, "cnv_2", "organic, after?", "I can't confirm that.")
+    job = await _job(db, GROWING)
+    model = _Model()
+
+    await GapScanHandler(model)(_Context(db, GROWING, job))
+
+    assert len(model.seen) == 1
+    assert "after?" in model.seen[0]

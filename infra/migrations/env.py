@@ -43,6 +43,7 @@ import neura_core.identity.schema
 import neura_core.jobs.schema
 import neura_core.observation.schema
 import neura_core.tenancy.schema
+import neura_core.tenancy.switches
 import neura_core.webhooks.schema  # noqa: F401
 from neura_core import get_settings, load_env, metadata
 

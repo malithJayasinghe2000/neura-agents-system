@@ -9,12 +9,16 @@ signed in within 12 hours; anyone else gets *No such page*):
   with the assistants chosen (R14); its Owners get the approval email;
 * ``POST /shops/{tenant_id}/refuse``: a waiting shop is removed; its Owners get
   the refusal email and keep their accounts;
-* ``GET /usage``: AI use across every shop, per shop and per assistant.
+* ``GET /usage``: AI use across every shop, per shop and per assistant;
+* ``PUT /shops/{tenant_id}/switches/{key}``: one feature of one shop on or off
+  (ADR-0065). The switches are read from the discovered agents' manifests, so a
+  key is data here, like an assistant's.
 
 **Shop facts only, never a shopper** (§1): every read across shops comes from
 ``neura_core.identity.admins``, whose two database functions can return nothing
-else, and only to an admin's own transaction. Approve and refuse write one shop
-in that shop's own session, as the commands do, with the admin in its record.
+else, and only to an admin's own transaction. Approve, refuse and a switch write
+one shop in that shop's own session, as the commands do, with the admin in its
+record; a shop's switches are read the same way, after the admin check.
 
 **No agent is named here** (AGENTS.md): the assistants are data, checked against
 the agents this API discovered; CARE being the usual start is the dashboard's
@@ -41,6 +45,7 @@ from neura_core.identity.admins import ShopFacts, UsageFacts, admin_shops, admin
 from neura_core.identity.sign_up import approve_shop, waiting_shop
 from neura_core.tenancy import TenantConfig, TenantRepository, TurnMode
 from neura_core.tenancy.removal import remove_tenant
+from neura_core.tenancy.switches import Switch, SwitchRepository
 from neura_core.tenancy.usage import today
 
 log = get_logger(__name__)
@@ -63,6 +68,12 @@ class Approve(BaseModel):
     agents: list[str] = Field(default_factory=list, max_length=20)
 
 
+class SetSwitch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    on: bool
+
+
 @router.get("/shops", summary="Every shop's facts, waiting shops first")
 async def shops(actor: AdminDep, db: DatabaseDep) -> dict[str, object]:
     day = today()
@@ -78,14 +89,68 @@ async def shops(actor: AdminDep, db: DatabaseDep) -> dict[str, object]:
 
 
 @router.get("/shops/{tenant_id}", summary="One shop's facts")
-async def shop(tenant_id: str, actor: AdminDep, db: DatabaseDep) -> dict[str, object]:
+async def shop(
+    tenant_id: str, actor: AdminDep, request: Request, db: DatabaseDep
+) -> dict[str, object]:
     day = today()
     async with db.identity_session(actor.user_id) as session:
         found = next((s for s in await admin_shops(session) if s.tenant_id == tenant_id), None)
         if found is None:
             raise NotFoundError("No such shop.", details={"tenant_id": tenant_id})
         week = _by_shop(await admin_usage(session, since=day - timedelta(days=6), until=day))
-    return envelope({"shop": _shop(found, week.get(tenant_id))})
+    async with db.tenant_session(tenant_id) as session:
+        records = await SwitchRepository(session).all(tenant_id)
+    declared = _declared(request)
+    switches = [
+        _switch(key, declared[key], records.get(key), actor)
+        for key in sorted(declared)
+        if declared[key][0] in found.assistants
+    ]
+    return envelope({"shop": {**_shop(found, week.get(tenant_id)), "switches": switches}})
+
+
+@router.put("/shops/{tenant_id}/switches/{key}", summary="Switch one feature of a shop on or off")
+async def set_switch(
+    tenant_id: str,
+    key: str,
+    body: SetSwitch,
+    actor: AdminDep,
+    request: Request,
+    db: DatabaseDep,
+) -> dict[str, object]:
+    declared = _declared(request)
+    if key not in declared:
+        raise ValidationError("No such switch.", code="UNKNOWN_SWITCH", details={"key": key})
+    agent = declared[key][0]
+    async with db.tenant_session(tenant_id) as session:
+        tenant = await TenantRepository(session).get(tenant_id)
+        if tenant is None:
+            raise NotFoundError("No such shop.", details={"tenant_id": tenant_id})
+        if agent not in tenant.enabled_agents:
+            raise ValidationError(
+                "This shop does not have that assistant.",
+                code="NOT_THIS_SHOPS_ASSISTANT",
+                details={"key": key},
+            )
+        switches = SwitchRepository(session)
+        changed = await switches.set(tenant_id, key, on=body.on, by=actor.user_id)
+        if changed is not None:
+            await PostgresAuditLog(session).record(
+                AuditEntry(
+                    tenant_id=tenant_id,
+                    event_type=AuditEvent.CONFIG_CHANGE,
+                    actor=actor.user_id,
+                    outcome="switch.on" if body.on else "switch.off",
+                    payload={"key": key},
+                )
+            )
+        current = changed or await switches.get(tenant_id, key)
+    log.info(
+        "admin_switch_set", tenant_id=tenant_id, key=key, on=body.on, changed=changed is not None
+    )
+    return envelope(
+        {"changed": changed is not None, "switch": _switch(key, declared[key], current, actor)}
+    )
 
 
 @router.post("/shops/{tenant_id}/approve", summary="Approve a waiting shop")
@@ -248,6 +313,36 @@ def _shop(shop: ShopFacts, week: list[UsageFacts] | None) -> dict[str, object]:
         "chats_7d": sum(row.conversations for row in rows),
         "ai_calls_7d": sum(row.llm_calls for row in rows),
         "cost_7d": _money(sum((row.cost_usd for row in rows), Decimal("0"))),
+    }
+
+
+def _declared(request: Request) -> dict[str, tuple[str, str, str]]:
+    """Every switch the discovered agents declare: key to (agent, name, text).
+
+    A key must start with its own agent's key, so one agent cannot declare a
+    switch that reads as another's.
+    """
+    declared: dict[str, tuple[str, str, str]] = {}
+    for agent_key, discovered in (getattr(request.app.state, "agents", {}) or {}).items():
+        for key, (name, text) in (getattr(discovered.manifest, "switches", None) or {}).items():
+            if key.startswith(f"{agent_key}."):
+                declared[key] = (agent_key, name, text)
+    return declared
+
+
+def _switch(
+    key: str, declared: tuple[str, str, str], record: Switch | None, actor: AdminActor
+) -> dict[str, object]:
+    agent, name, text = declared
+    return {
+        "key": key,
+        "assistant": agent,
+        "name": name,
+        "text": text,
+        # No record: never changed, so on (ADR-0065 §1).
+        "on": record is None or record.on,
+        "changed_at": record.changed_at.isoformat() if record else None,
+        "changed_by_you": bool(record and record.changed_by == actor.user_id),
     }
 
 

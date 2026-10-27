@@ -1,8 +1,9 @@
 # ADR-0065 · FiveNeurals May Switch Off One Feature For One Shop
 
-**Status:** **Proposed** · owner decisions 2026-10-25, R49 to R52
-([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *R49's switch*) · not built,
-mockup first · Everything marked *(Claude)* is Claude's proposal, for the owner's yes ·
+**Status:** **Accepted** · owner decisions 2026-10-25, R49 to R52; the mockup (canvas row 17, boards 61 to 63) and
+this ADR approved by the owner 2026-10-27 (R53: *"approved"*), with Claude's *(Claude)* parts
+([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *R49's switch*) · **the admin side
+built 2026-10-27**; the shop page's *Paused* note is built with GROW's page (ADR-0064's piece 3) ·
 **Date:** 2026-10-25 · **Amends:** [ADR-0061](0061-fiveneurals-has-an-admin-dashboard-that-sees-shop-facts-never-shoppers.md) §2
 (the admin dashboard gains a fourth job) · **Related:**
 [ADR-0015](0015-usage-rollups-and-budget-degradation.md), [ADR-0022](0022-scheduling-under-rls.md),
@@ -66,9 +67,9 @@ with one line in its manifest and one check in its own code.
 - **The change is written in the shop's own session after the admin check**, exactly as Approve is (ADR-0061
   §6), and recorded in **the shop's record** (`config.change`, `switch.off` / `switch.on`, the admin as the
   actor).
-- **ADR-0061 §1 holds:** a switch is a shop fact, not a shopper's. The admin's cross-shop function may return
-  a shop's switches; it gains no grant on any table holding a chat, a shopper or a catalogue, and the grant test
-  keeps checking that.
+- **ADR-0061 §1 holds:** a switch is a shop fact, not a shopper's. **As built**, a shop's switches are read in
+  that shop's own session after the admin check, as Approve writes it, so the cross-shop functions and their
+  role are unchanged and gain no grant at all; the grant test keeps checking that.
 - A route: **`PUT /v1/admin/shops/{tenant_id}/switches/{key}`** with `{ "on": true | false }`. An unknown key,
   or a key of an assistant the shop does not have, is refused with a plain sentence and changes nothing. Setting
   a switch to the state it already has changes nothing and records nothing.

@@ -245,7 +245,7 @@ async def main() -> int:
             print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
             await _check_sign_up(console, failures)
 
-            print(f"\n  {BOLD}FiveNeurals admin — shops, approve, refuse, AI use{OFF}")
+            print(f"\n  {BOLD}FiveNeurals admin — shops, approve, refuse, switches, AI use{OFF}")
             await _check_admin(console, email, failures)
 
             if without_sell:
@@ -2979,8 +2979,10 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
     database, and two shops waiting for approval are made **with no owner**, so
     approving and refusing them on the screen can never send an email, whatever
     mail server the API has. One is approved and one refused on the screen, on
-    desktop; Shops and AI use and cost are read on desktop and phone; an admin
-    sign-in older than 12 hours is shown *Sign in again*. Afterwards the person
+    desktop; Shops and AI use and cost are read on desktop and phone; a live shop
+    with GROW has its night check turned off and on again on the screen (ADR-0065,
+    boards 61 and 63), on desktop and phone; an admin sign-in older than 12 hours
+    is shown *Sign in again*. Afterwards the person
     is taken off the admin list and every shop this made is removed.
     """
     from sqlalchemy import text as sql
@@ -2990,10 +2992,12 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
     from neura_core.identity.admins import add_admin
     from neura_core.tenancy import TenantConfig, TenantRepository, TenantStatus, TurnMode
     from neura_core.tenancy.removal import remove_tenant
+    from neura_core.tenancy.switches import SwitchRepository
 
     db = Database.from_settings()
     suffix = ids.new_id(ids.USER).lower()[-8:]
     approve_name, refuse_name = f"Admin Check Approve {suffix}", f"Admin Check Refuse {suffix}"
+    switch_name = f"Admin Check Switch {suffix}"
     made: list[str] = []
 
     async def phone(page: Chrome, on: bool) -> None:
@@ -3154,6 +3158,57 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                     failures,
                 )
                 _check(f"AI use and cost fits the screen ({size})", await fits(page), failures)
+
+            # ADR-0065: a live shop with GROW, and no owner, so nothing is emailed.
+            switch_id = ids.new_id(ids.TENANT)
+            async with db.tenant_session(switch_id) as session:
+                await TenantRepository(session).create(
+                    tenant_id=switch_id, name=switch_name, enabled_agents=["care", "grow"]
+                )
+            made.append(switch_id)
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/admin/shops/{switch_id}")
+                _check(
+                    f"a shop with GROW: its night check, On ({size})",
+                    "Switch a feature off" in shown
+                    and "Missing from your pages" in shown
+                    and "The night AI check" in shown
+                    and bool(await page.evaluate("!!document.querySelector('[data-switch-off]')")),
+                    failures,
+                )
+                shown = await click(page, "[data-switch-off]", wait=1.5)
+                _check(
+                    f"Turn off asks first, and says those chats are never read ({size})",
+                    f"Turn off the night check for {switch_name}?" in shown
+                    and "never read later" in shown
+                    and "can't turn it back on" in shown,
+                    failures,
+                )
+                _check(f"the shop page fits the screen ({size})", await fits(page), failures)
+                shown = await click(page, "[data-confirm-switch-off]", wait=3)
+                async with db.tenant_session(switch_id) as session:
+                    off = not await SwitchRepository(session).is_on(switch_id, "grow.gaps")
+                _check(
+                    f"Turn off: it is off, by you, and stored ({size})",
+                    "Off since" in shown and "by you" in shown and off,
+                    failures,
+                )
+                shown = await click(page, "[data-switch-on]", wait=3)
+                async with db.tenant_session(switch_id) as session:
+                    back = await SwitchRepository(session).is_on(switch_id, "grow.gaps")
+                _check(
+                    f"Turn on: on again, from now on ({size})",
+                    "On again since" in shown and "from now on" in shown and back,
+                    failures,
+                )
+            shown = await opened(page, f"{console}/admin/shops/{approve_id}")
+            _check(
+                "a shop without GROW has no switch",
+                "Switch a feature off" not in shown,
+                failures,
+            )
 
             await phone(page, False)
             old = issue(

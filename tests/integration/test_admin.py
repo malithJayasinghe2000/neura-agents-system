@@ -16,6 +16,9 @@ What these tests hold the build to:
 * **AI use and cost**: today, 7 days, 30 days; the rows add up to the totals;
 * **removing a shop** reaches every table that holds a shop's rows, without
   naming an agent, the audit log excepted (S10);
+* **a switch per feature** (ADR-0065): a shop's switches come from its
+  assistants' manifests; only an admin changes one, for an assistant the shop
+  has; a change is in the shop's record with the admin, a no-op records nothing;
 * ``/me`` says who is an admin; ``make admin-add`` and ``admin-remove`` change
   the list and nothing else.
 """
@@ -45,6 +48,7 @@ from neura_core.identity.sign_up import confirm_sign_up, request_sign_up
 from neura_core.tenancy import TenantRepository, TenantStatus, TurnMode
 from neura_core.tenancy.removal import remove_tenant
 from neura_core.tenancy.schema import tenants
+from neura_core.tenancy.switches import SwitchRepository
 from tests.console_permissions import ADMIN_ROUTES, ROUTES
 from tests.integration.console_fixtures import QUESTION, REPLY, Shop, drop_shop, make_shop
 
@@ -182,7 +186,7 @@ def cookie(user: str, *, age: timedelta = timedelta(0)) -> dict[str, str]:
 
 def call(client: TestClient, method: str, template: str, tenant: str, cookies: dict[str, str]):
     path = re.sub(r"\{[a-z_]+\}", MADE_UP, template.replace("{tenant_id}", tenant))
-    body = {} if method == "POST" else None
+    body = {"on": True} if method == "PUT" else {} if method == "POST" else None
     return client.request(method, path, json=body, cookies=cookies)
 
 
@@ -518,6 +522,95 @@ class TestRemovingAShop:
                     {"t": populated.tenant},
                 )
                 assert left == 0, table
+
+
+GAPS = "grow.gaps"
+
+
+async def _growing_shop(
+    db: Database, made: Made, agents: tuple[str, ...] = ("care", "grow")
+) -> str:
+    tenant_id = ids.new_id(ids.TENANT)
+    async with db.tenant_session(tenant_id) as session:
+        await TenantRepository(session).create(
+            tenant_id=tenant_id, name="Switch Test Shop", enabled_agents=list(agents)
+        )
+    made.shops.append(tenant_id)
+    return tenant_id
+
+
+class TestSwitches:
+    async def test_a_shop_lists_the_switches_of_its_assistants(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made)
+        growing = await _growing_shop(db, made)
+        caring = await _growing_shop(db, made, ("care",))
+        shop = client.get(f"/v1/admin/shops/{growing}", cookies=cookie(admin)).json()["data"][
+            "shop"
+        ]
+        [switch] = shop["switches"]
+        assert switch["key"] == GAPS
+        assert switch["assistant"] == "grow"
+        assert switch["on"] is True
+        assert switch["name"] and switch["text"]
+        assert switch["changed_at"] is None
+        other = client.get(f"/v1/admin/shops/{caring}", cookies=cookie(admin)).json()["data"][
+            "shop"
+        ]
+        assert other["switches"] == []
+
+    async def test_turning_off_and_on_says_who_and_a_no_op_records_nothing(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made)
+        tenant = await _growing_shop(db, made)
+        path = f"/v1/admin/shops/{tenant}/switches/{GAPS}"
+
+        off = client.put(path, json={"on": False}, cookies=cookie(admin))
+        assert off.status_code == 200, off.text
+        switch = off.json()["data"]["switch"]
+        assert (switch["on"], switch["changed_by_you"]) == (False, True)
+        assert switch["changed_at"]
+        async with db.tenant_session(tenant) as session:
+            assert not await SwitchRepository(session).is_on(tenant, GAPS)
+
+        again = client.put(path, json={"on": False}, cookies=cookie(admin))
+        assert again.status_code == 200
+        assert again.json()["data"]["changed"] is False
+
+        assert client.put(path, json={"on": True}, cookies=cookie(admin)).status_code == 200
+        async with db.tenant_session(tenant) as session:
+            assert await SwitchRepository(session).is_on(tenant, GAPS)
+
+        assert [a for a in await _audit(tenant) if a[2].startswith("switch.")] == [
+            ("config.change", admin, "switch.off"),
+            ("config.change", admin, "switch.on"),
+        ]
+
+    async def test_an_unknown_key_or_an_assistant_the_shop_lacks_is_refused(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made)
+        caring = await _growing_shop(db, made, ("care",))
+        unknown = client.put(
+            f"/v1/admin/shops/{caring}/switches/care.nothing",
+            json={"on": False},
+            cookies=cookie(admin),
+        )
+        assert unknown.status_code == 400
+        assert unknown.json()["error"]["code"] == "UNKNOWN_SWITCH"
+        lacking = client.put(
+            f"/v1/admin/shops/{caring}/switches/{GAPS}", json={"on": False}, cookies=cookie(admin)
+        )
+        assert lacking.status_code == 400
+        assert lacking.json()["error"]["code"] == "NOT_THIS_SHOPS_ASSISTANT"
+        missing = client.put(
+            f"/v1/admin/shops/{MADE_UP}/switches/{GAPS}", json={"on": False}, cookies=cookie(admin)
+        )
+        assert missing.status_code == 404
+        async with db.tenant_session(caring) as session:
+            assert await SwitchRepository(session).all(caring) == {}
 
 
 class TestWhoIsAnAdmin:

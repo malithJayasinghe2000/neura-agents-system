@@ -153,5 +153,6 @@ ADMIN_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/v1/admin/shops/{tenant_id}/approve"),
         ("POST", "/v1/admin/shops/{tenant_id}/refuse"),
         ("GET", "/v1/admin/usage"),
+        ("PUT", "/v1/admin/shops/{tenant_id}/switches/{key}"),
     }
 )

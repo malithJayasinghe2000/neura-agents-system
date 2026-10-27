@@ -1060,6 +1060,7 @@ def tenant_tables() -> list[Any]:
         tenant_usage,
         tenants,
     )
+    from neura_core.tenancy.switches import tenant_switches
     from neura_core.webhooks.schema import webhook_deliveries, webhook_endpoints
 
     return [
@@ -1094,6 +1095,8 @@ def tenant_tables() -> list[Any]:
         memberships,
         idempotency_keys,
         tenant_usage,
+        # FiveNeurals' switches for this shop (ADR-0065).
+        tenant_switches,
         shop_checks,
         # The shop token, sealed: no shop should leave one behind.
         shop_tokens,

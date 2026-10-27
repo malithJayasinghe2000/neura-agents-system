@@ -2,13 +2,14 @@
  * One shop, as an admin sees it (ADR-0061, board 47): its facts, and for a shop
  * waiting for approval, **Approve** with its assistants or **Refuse**.
  *
- * A shop that is not waiting shows its facts only: the first version decides
- * waiting shops and nothing else (R20).
+ * A shop that is not waiting shows its facts, and the features FiveNeurals may
+ * switch off for it (ADR-0065, board 61): only those of assistants it has.
  */
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { AdminStateBadge } from "@/components/admin/admin-parts";
 import { DecideShop } from "@/components/admin/decide-shop";
+import { FeatureSwitches } from "@/components/admin/feature-switches";
 import { assistantsShort, day, type AdminShop } from "@/lib/admin";
 import { fromApi } from "@/lib/server-api";
 
@@ -86,9 +87,14 @@ function Shop({ shop }: { shop: AdminShop }) {
           <DecideShop tenantId={shop.tenant_id} name={shop.name} owners={shop.owners} />
         </>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          This shop is not waiting for approval, so there is nothing to decide here.
-        </p>
+        <>
+          <p className="text-sm text-muted-foreground">
+            This shop is not waiting for approval, so there is nothing to decide here.
+          </p>
+          {shop.switches?.length ? (
+            <FeatureSwitches tenantId={shop.tenant_id} name={shop.name} switches={shop.switches} />
+          ) : null}
+        </>
       )}
     </>
   );

@@ -4,10 +4,14 @@
 booked first by the shop's first chat (``neura_api.jobs.daily``) and then by
 itself. **The only place GROW calls a model**, and never while a shopper waits.
 
-Before anything is spent, two checks, both read in their own short transaction:
+Before anything is spent, three checks, all read in one short transaction:
 
 1. **The shop still has GROW.** If not, the job finishes and books nothing more.
-2. **The shop's daily AI budget** (ADR-0015). Over the ceiling, nothing is asked
+2. **FiveNeurals has not switched the check off** (ADR-0065). Off, no chat is
+   read and no model asked; the job books tomorrow, so switching on needs no
+   booking. Switched on again, the scan starts from that moment (R52): the chats
+   from while it was off are never read.
+3. **The shop's daily AI budget** (ADR-0015). Over the ceiling, nothing is asked
    today and the job books tomorrow: the replies wait and are read then.
 
 **Every call is metered** to the shop as ``llm_calls`` with no turn, exactly as
@@ -29,10 +33,13 @@ from neura_agent_grow.scan import scan_shop
 from neura_core import get_logger
 from neura_core.jobs import JobQueue
 from neura_core.tenancy import Admission, BudgetLimits, TenantRepository, UsageDelta, UsageMeter
+from neura_core.tenancy.switches import SwitchRepository
 
 log = get_logger(__name__)
 
 GAPS_SCAN = "grow.gaps.scan"
+#: The switch FiveNeurals may turn off for one shop (the manifest's ``switches``).
+GAPS_SWITCH = "grow.gaps"
 PROMPT_NAME = "find_gap"
 INTERVAL = timedelta(days=1)
 
@@ -54,6 +61,11 @@ class GapScanHandler:
             if tenant is None or not tenant.may_use(MANIFEST.key):
                 await JobQueue(session).complete(context.job.id)
                 return "the shop no longer has NEURA-GROW; not booked again"
+            switch = await SwitchRepository(session).get(context.tenant_id, GAPS_SWITCH)
+            if switch is not None and not switch.on:
+                await JobQueue(session).reschedule(context.job.id, run_after=now + INTERVAL)
+                log.info("grow_scan_switched_off", tenant_id=context.tenant_id)
+                return "skipped: switched off by FiveNeurals; booked for tomorrow"
             spend = await UsageMeter(session).spend_today(context.tenant_id)
             limits = BudgetLimits.resolve(tenant)
             if limits.admit(spend) is Admission.ESCALATE_ONLY:
@@ -70,6 +82,7 @@ class GapScanHandler:
                 prompt=load_prompts()[PROMPT_NAME],
                 prompt_revision=REVISION,
                 now=now,
+                not_before=switch.changed_at if switch is not None else None,
             )
         finally:
             await _meter(context, metered)
@@ -112,4 +125,11 @@ def build_handlers(*, llm: Any, **_: Any) -> dict[str, Any]:
     return {GAPS_SCAN: GapScanHandler(llm)}
 
 
-__all__ = ["GAPS_SCAN", "INTERVAL", "GapScanHandler", "GapScanProviderError", "build_handlers"]
+__all__ = [
+    "GAPS_SCAN",
+    "GAPS_SWITCH",
+    "INTERVAL",
+    "GapScanHandler",
+    "GapScanProviderError",
+    "build_handlers",
+]
