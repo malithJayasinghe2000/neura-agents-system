@@ -12,7 +12,7 @@ The screen a shop owner logs into. It shows them what their AI assistant said, l
 
 ### 1.1 What it is not
 
-It is **not** an admin panel for us, it is **not** a replacement for the shop's own back office, and in v1 it does **not** approve anything — because nothing in the system can yet change a merchant's store ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)).
+~~It is **not** an admin panel for us~~ (superseded 2026-10-11 by [ADR-0061](architecture/adr/0061-fiveneurals-has-an-admin-dashboard-that-sees-shop-facts-never-shoppers.md): FiveNeurals gets `/admin`, which shows shop facts and never a shopper), it is **not** a replacement for the shop's own back office, and in v1 it does **not** approve anything — because nothing in the system can yet change a merchant's store ([ADR-0010](architecture/adr/0010-read-only-mvp-tools.md)).
 
 ---
 
@@ -585,19 +585,223 @@ product's `categories`, `price` and `in_stock_now` (`true` / `false` / `null`), 
 `reason`: `unreachable` · `not_supported`) — `null` unless `?stock=now`, the only value it takes (400 otherwise).
 `ObservedEventRepository.any_views_since` answers *receiving* with an `EXISTS`, never a count.
 
+### 3.8 People and roles, and Create an account: from the owner's approved design, 2026-10-10 (People and roles built 2026-10-10; Create an account built 2026-10-11)
+
+[ADR-0058](architecture/adr/0058-a-shops-dashboard-has-people-with-roles-and-a-shop-signs-up.md), accepted 2026-10-10; mockups approved the same day (canvas rows 12 and 13, boards 38 to 45, version 31). **Build from this section and the ADR; do not redesign.**
+
+**Roles (checked in code, per shop, on every request; the dashboard only hides what the API refuses):**
+
+| Role | Menu | Can | Cannot |
+|:--|:--|:--|:--|
+| **Owner** | everything, plus **People** under Setup | everything | |
+| **Support** | Home, Review, Conversations, Help | read chats (CARE and SELL), grade replies | Suggestions, Sold out, Shop connection, Usage, People, *Go live* |
+| **Developer** | Home, Shop connection, Help | **all of Shop connection, the same page as the Owner's** (setup list, Check, Connect, Sync now, the shop token, the sign-in secret, the contact details: R10, the owner's B) | shoppers' chats, Review, Suggestions, Sold out, Usage, People, *Go live* |
+
+- **The shop switcher** says the role: *"You're the Owner · Switch shop"* (Support, Developer likewise).
+- **A page the role cannot open** (a link, a typed address): *"You can't open this page"*, *"Your role in [shop] is [role], which doesn't include [what]. If you need it, ask the shop's owner."*, and a link to a page the role can open. The API answers 403 for a member without the permission; **404 for a stranger**, as today.
+- **Home** shows *Go live* / back to practice to the Owner only.
+- **Shop connection's secrets** say who made them: *"Made Oct 10 by Nimal Perera (Developer)."*
+
+**The permissions, as built (piece 1, 2026-10-10).** The map is `neura_core/identity/roles.py`; each route states its
+permission on the route (`Depends(Permitted(...))` in `neura_api/dependencies.py`), checked before the request's body
+is read. A stranger gets **404** *No such shop.*; a member without the permission **403** `ROLE_NOT_ALLOWED`, with
+`details.role` and `details.permission`. The Owner holds every permission, also one an agent brings later; a role or a
+permission the code does not know opens nothing; the database refuses any role but these three
+(`ck_memberships_role`). **The names differ from the ADR's draft** (it said *fixed in the build*): a screen the
+console serves names no agent (G88).
+
+| Permission | Opens | Owner | Support | Developer |
+|:--|:--|:--|:--|:--|
+| `shop:home:read` | Home's own facts: the mode, and the handed-over count for a role that reads chats (R12) | ✅ | ✅ | ✅ |
+| `shop:conversations:read` | Conversations (CARE's and SELL's chats) | ✅ | ✅ | ❌ |
+| `shop:review:write` | Review: read and grade | ✅ | ✅ | ❌ |
+| `sell:suggestions:write` | Suggestions (SELL's own permission, on SELL's routes) | ✅ | ❌ | ❌ |
+| `shop:sold_out:read` | Sold out | ✅ | ❌ | ❌ |
+| `shop:connection:write` | Shop connection: read, Check, Sync now, the shop token, the sign-in secret | ✅ | ❌ | ✅ |
+| `shop:connect:write` | Shop connection: Connect | ✅ | ❌ | ✅ |
+| `shop:contact:write` | Shop connection: the contact details | ✅ | ❌ | ✅ |
+| `shop:mode:write` | *Go live* and back to practice | ✅ | ❌ | ❌ |
+| `usage:cost:read` | Usage and cost | ✅ | ❌ | ❌ |
+| `people:members:write` | People (its routes come in piece 2) | ✅ | ❌ | ❌ |
+
+Every dashboard route and its permission is also written, from this table, in `tests/console_permissions.py`; a
+route missing from it, or declaring another permission, fails `tests/unit/test_console_roles.py`, and
+`tests/integration/test_console_roles.py` calls every route as each role and as a stranger.
+
+**As built in piece 2 (2026-10-10; what the build decided is [ADR-0059](architecture/adr/0059-people-and-roles-what-the-build-decided.md)):**
+
+- **The menu per role** comes from `/me`, which gives each membership its `permissions` (the API's own map; the
+  dashboard keeps no copy, `lib/roles.ts`). A screen the role may not open is not listed; opened by a link it shows
+  *You can't open this page* (`components/not-allowed.tsx`) with *Go to* the first screen the role can open.
+  [what] is the screen's name, and *shoppers' chats* for Conversations (board 40).
+- **Home for Support and the Developer (R12, the owner: A):** Support sees the mode as a sentence with no button,
+  replies waiting for review and chats handed to a person; the Developer the same mode sentence, *your shop isn't
+  connected yet* when true, and the Catalogue card. No 7-day numbers, money or *Go live* (`GET /home`).
+- **An invite link signs in only a new account (R13, the owner: A).** Someone who already uses NEURA is added and
+  signs in as usual, so a forwarded invite cannot open their other shops. The invite page: *"You've joined"*,
+  *"You've joined [shop]. Sign in to open it."*, **Sign in**; a link that no longer works: *"That link didn't work"*,
+  *"That invite link has already been used, or it no longer works. If you already joined, sign in. If not, ask the
+  shop's owner to send it again."*, with **Sign in** (G96: a link works once, so this is usually someone who joined)
+- **The Developer's card** says, as R10's B allowed: *"Shop connection and Help: connects your shop, makes its
+  secrets and edits its contact details. Never sees shoppers' chats."*
+- **When the email could not be sent:** *"The invite for [email] is ready, but the email could not be sent. Try Send
+  again in a moment."* Locally, `make invite-link EMAIL=… TENANT=…` prints a new link.
+- **Checked:** `make console-check` signs in as the Owner, invites two people in the database (no email is sent),
+  opens their links in two more browsers, and checks each role's menu, Home and refusals on desktop and phone, then
+  changes a role and removes both on the People screen.
+
+**People** (board 38; Owner only): heading *People*, *"Who can open [shop]'s dashboard, and what each person can do."*, button **Invite a person**. A list: Person (name and email), Role (a choice: Owner, Support, Developer), Status, actions.
+- The Owner's own row: *"[name] (you)"*, role as text; when they are the only Owner: *"The only Owner, so this can't be removed"*, no Remove.
+- A member: the role choice, *"Joined [date]"*, **Remove**, which asks first: *"Remove [name]?"* *"[name] can't open this shop's dashboard from the next click. Everything done before stays in the record. You can invite them again later."* **Remove** / **Keep**.
+- An invite: the email, *"Invite sent [date]"*, *"Waiting · the link works until [date]"*, **Send again**, **Cancel**.
+- **What each role can do**, three cards: **Owner** *"Everything, including inviting and removing people. A shop always keeps at least one Owner."* **Support** *"Reads chats and grades replies in Review. Can't open settings, keys, Usage, Suggestions or Sold out."* **Developer** *"Shop connection and Help: connects your shop and makes its secrets. Never sees shoppers' chats."* (Since R10's B the Developer also edits the contact details; the card's words may say so at the build, plainly.)
+- Under it: *"Every invite, role change and removal is kept in your shop's record, with who did it."*
+
+**Invite a person** (board 39): a box *Invite a person*: *"Their email address"*; *"Their role"* as three choices, each with its card's words; Owner's: *"Everything you can do, including removing you. Choose it only for a partner."*; *"We email them a link. It works once, for 7 days. They see only what their role allows, and you can change it or remove them at any time."*; **Send invite** / **Cancel**. After: *"Invite sent to [email] as [role]. The link works for 7 days."*, and the invite in the list.
+
+**Phone** (board 41): each person is a card; **Invite a person** full width at the top; buttons 44px.
+
+**Sign in** (board 42): today's card, and under it *"New to NEURA? Create an account"*.
+
+**Create an account** (board 43): the sign-in card's look. *Create an account*, *"Tell us about your shop. We'll email you a link to confirm. No password to remember."*; fields *"Your email address"*, *"Your shop's name"*, *"Your shop's website"*; **Create my account**; *"FiveNeurals looks at every new shop before its assistant starts."*; under the card *"Already have an account? Sign in"*. After: *Check your email*, *"A link is on its way to [email]. It works once and expires in 15 minutes."*, **Use a different address**. **The same words whether or not the email already has an account.**
+
+**Waiting for approval** (board 44; the only screen of a waiting shop): *"[shop] is waiting for approval"*, *"Thanks for signing up. FiveNeurals looks at every new shop before its assistant starts. We'll email [email] when it's ready."*, *"Until then nothing runs and nothing costs anything."*, a link *"While you wait: the guide for shop owners"*, **Sign out**. No time is promised.
+
+**FiveNeurals approves** with a command for now (`make tenant-approve`, and a refusal), the admin dashboard later (the log's *Admin needs*, AD1 to AD6).
+
+**As built in piece 3 (2026-10-11; what the build decided is [ADR-0060](architecture/adr/0060-sign-up-what-the-build-decided.md), R14 to R17):**
+
+- **Create an account** is `/sign-up`, open to anyone, signed in or not (an existing account may add a second
+  shop, R15). The website may be typed with or without `https://`; a wrong one: *"Enter your shop's website, like
+  yourshop.com."* *Check your email* says the same words for every email, because every email gets a link.
+- **The link** (`/auth/sign-up?token=…`) makes the account when the email has none, the shop waiting for approval
+  and its Owner, signs them in and opens the shop, which shows the waiting screen. A used or old link: *"That link
+  didn't work"*, *"Sign-up links expire after 15 minutes and work once. If you already confirmed, sign in. If not,
+  create your account again."*, **Sign in** and **Create an account**.
+- **The waiting screen** replaces the menu and every screen of a waiting shop (`components/waiting-for-approval.tsx`,
+  from the shop's frame); a typed address to another screen shows it too. It also shows **Your shops** when the
+  person has another shop (R17 a). *Your shops* lists a waiting shop as *Waiting for approval*.
+- **The API is the lock:** every shop route answers a waiting shop **403 `SHOP_WAITING`** (a stranger still 404);
+  `/me` gives each membership its `status` and no permissions for a waiting shop; no key can be issued for it.
+- **FiveNeurals:** `make tenant-waiting`, `make tenant-approve TENANT=… [AGENTS=care,sell]` (CARE when none named,
+  R14; the approval email), `make tenant-refuse TENANT=…` (removed, then the refusal email; the person keeps their
+  account). The three emails' words are in ADR-0060 §5.
+- **Checked:** `make console-check` signs up a new owner in its own browser (the request made in the database, so
+  no email is sent), reads Create an account and the waiting screen on desktop and phone, approves the shop in the
+  database, and Home must then open; `tests/integration/test_console_sign_up.py` holds the API, the commands and
+  the emails.
+
+### 3.9 FiveNeurals admin: from the owner's approved design, 2026-10-11 (built 2026-10-11)
+
+[ADR-0061](architecture/adr/0061-fiveneurals-has-an-admin-dashboard-that-sees-shop-facts-never-shoppers.md), accepted 2026-10-11 (R19 to R23); mockups approved the same day (canvas row 14, boards 46 to 49, version 34; the side menu is R24). **Build from this section and the ADR; do not redesign.** Only for people on FiveNeurals' admin list (`make admin-add`); anyone else gets *No such page*. **Shop facts only, never a shopper's chat or details.**
+
+**The frame** (all three screens): a **side menu** like a shop's: *FiveNeurals* with a black **Admin** badge; a card *FiveNeurals admin*, *"You're an admin · Your shops"* (a link to Your shops) where a shop's menu has its switcher; **Shops** (with the number of shops waiting, when there are any) and **AI use and cost**; **Sign out** at the bottom. On a phone the menu folds into a menu button, as a shop's does; the bar says *FiveNeurals admin* and shows the badge. **Your shops** gets an **Admin** link for an admin only.
+
+**Shops** (board 46; `/admin`): heading *Shops*, *"Every shop on NEURA, and its state. Facts about shops only: no shopper's chat or details are shown here."*
+- *Waiting for approval · [n]*: one amber card per waiting shop: its name, *"[website] · signed up [date, time] by [owner email]"*, **Look and decide**. The section is left out when nothing waits.
+- *All shops · [n]*: a table, waiting shops first, then newest first: **Shop** (a waiting shop's name links to its page, with its website under it), **State** (*Waiting for approval* amber, *Practice* grey, *Live* green), **Assistants** (*CARE, SELL*; *None yet* while waiting), **Shop connected** (*Yes* / *Not yet*), **Chats, 7 days**, **AI cost, 7 days** (*Not priced* when there was AI use and no price; *No AI use* when none), **Since** (the date).
+- Under it: *"Chats and AI cost are for the last 7 days. **Not priced**: the AI model in use has no price set, so NEURA records no cost. The full numbers are on AI use and cost."*
+
+**A waiting shop** (board 47; `/admin/shops/[id]`): *← Shops*; the name, the *Waiting for approval* badge; facts: **Website** (a link, *opens in a new tab*), **Owner**, **Signed up**, **Shop id**; *"Look at the website before you decide: is it a real shop that sells things?"*
+- **Approve**: *"Choose its assistants. CARE is the usual start."* Two choices: **NEURA-CARE** (ticked) *"Answers shoppers' questions: orders, delivery, returns, the shop's policies."*; **NEURA-SELL** *"Helps shoppers choose, and suggests what goes together. Uses some AI in the background for each product."*; *"It starts in practice mode, with the daily spending limit every shop has. We email [owner]."*; **Approve** (black) and **Refuse** (red outline).
+- **Refuse** asks: *"Refuse [shop]?"* *"It is removed, and [owner] gets an email. This can't be undone."* **Refuse** (red) / **Keep waiting**.
+- After approving: *"[shop] is approved"*, *"With [assistants], in practice mode. We emailed [owner]. It is in the shop list now, as Practice."* After refusing: *"[shop] is refused and removed"*, *"We emailed [owner]. [They keep] their account, in case [they are] in another shop."* Each with *Back to Shops*.
+
+**AI use and cost** (board 48; `/admin/usage`): heading, *"Across every shop. The same counts each shop sees on its own Usage screen."*, the period **Today / 7 days / 30 days**; six tiles: **chats**, **questions**, **handed to a person**, **AI calls**, **tokens**, **cost** (*Not priced*, dashed, when nothing was priced); **By shop** (only shops with use; *"[n] shops had no AI use in these [period]."*) and **By assistant** (*NEURA-CARE*, *NEURA-SELL*), each with Chats, Questions, Handed to a person, AI calls, Tokens, Cost; *"The rows add up to the totals above."*; the box *"**Why "Not priced".** The AI model in use has no price set in NEURA, so no cost is recorded, and a free local model records none either. NEURA never shows that as $0.00. The real amount is on the AI provider's own bill."*
+
+**On a phone** (board 49): each shop is a card (name, state badge, one line of facts); the waiting shop first with a full-width button; buttons 44px.
+
+**As built (2026-10-11):**
+
+- **Routes** (`neura_api/routes/admin.py`): `GET /v1/admin/shops`, `GET /v1/admin/shops/{id}`, `POST …/approve`
+  (`{"agents": [...]}`, at least one: the API names no agent, so CARE being ticked is the dashboard's default),
+  `POST …/refuse`, `GET /v1/admin/usage?period=today|7d|30d`. Each states `AdminOnly` on the route (a test fails for
+  one that forgets): signed out 401; not a live admin **404 *No such page.***; an admin signed in more than 12 hours
+  ago **401 `ADMIN_SIGN_IN_AGAIN`**. `/me` gives `is_admin` for the *Admin* link.
+- **The database keeps §1 true:** `neura_admin_shops()` and `neura_admin_usage()` (migration `9b4e7a2c5d18`), owned
+  by the `NOLOGIN` role `neura_admin_reader`, which holds column grants on shop facts only and answers only a
+  transaction naming a live admin (`app.user_id`). A test reads the role's grants and fails if it can read anything
+  else.
+- **Refuse removes the shop with `remove_tenant`** (`neura_core/tenancy/removal.py`): every base table with a
+  `tenant_id`, read from the database, the tables that point at others first, the audit log kept (S10). `make
+  tenant-refuse` uses it too.
+- **Admins:** `platform_admins` (no tenant; never deleted, `removed_at`), changed only by `make admin-add`,
+  `make admin-remove`, `make admin-list`.
+- **Screens:** `/admin` (Shops), `/admin/shops/[id]` (a waiting shop: Approve, Refuse; any other shop: its facts
+  and *"This shop is not waiting for approval, so there is nothing to decide here."*), `/admin/usage`. Someone not
+  on the list sees *No such page*, *"There's nothing at this address."*, *Your shops*; an admin signed in over 12
+  hours ago sees *Sign in again*, *"Admin pages need a sign-in from the last 12 hours. Your shops are not
+  affected."*, **Sign in again**. When an email could not be sent, the result says *"The email to [owner] could not
+  be sent."* rather than *"We emailed"*. The result stays until the admin leaves; **Back to Shops** re-reads the
+  list and the menu's count (G100).
+- **Checked:** `tests/unit/test_admin.py`, `tests/integration/test_admin.py`; `make console-check` has an admin
+  section (its own browser; waiting shops made with no owner, so no email can be sent; desktop and phone; the
+  12-hour rule with a cookie made 13 hours old).
+
+**A switch per feature** (ADR-0065, accepted 2026-10-27; canvas row 17, boards 61 and 63, version 50, approved by the owner 2026-10-27, R53; **built 2026-10-27**): on `/admin/shops/[id]` for a shop that is **not waiting**, under its facts, a section **Switch a feature off**, *"Stop one feature for this shop, for example if its AI costs too much. The rest of the assistant keeps working. Only FiveNeurals can switch these."*, with one card per switch of an assistant the shop has (today only GROW's): **[ASSISTANT] · [name]** with an **On** (green) or **Off** (grey) badge, the text from the agent's manifest (*"The night AI check: once a night, AI reads the shop's new chats to find questions its pages don't answer."*), and **Turn off** (outline) or **Turn on** (black).
+- **Turn off asks first:** *"Turn off the night check for [shop]?"* *"While it is off, no chat is read and no AI is used. Chats from that time are never read later. What was already found stays on the shop's page, marked Paused. The shop can't turn it back on."* **Turn off** (red) / **Keep it on**. **Turn on does not ask.**
+- Afterwards: *"Off since [date, time], by you."* (or *by another admin*), and after turning on again *"On again since [date, time], by you. It reads chats from now on, not the ones from while it was off."*
+- On a phone, one column and full-width buttons. A shop without the assistant, or still waiting, shows no section.
+- **As built:** `PUT /v1/admin/shops/{id}/switches/{key}` (`{"on": bool}`), `AdminOnly`; an unknown key **400 `UNKNOWN_SWITCH`**, a key of an assistant the shop lacks **400 `NOT_THIS_SHOPS_ASSISTANT`**; a change is in the shop's record (`config.change`, `switch.off` / `switch.on`, the admin as actor), a no-op answers `changed: false` and records nothing. `GET /v1/admin/shops/{id}` adds `switches`. The table is `tenant_switches` (`neura_core/tenancy/switches.py`, migration `2c8e6a4f9d31`), no row meaning on. Checked by `tests/integration/test_admin.py` (`TestSwitches`), `tests/integration/test_grow_scan_postgres.py` and `make console-check` (desktop and phone).
+
+### 3.10 The handover answered by email: from the owner's approved design, 2026-10-11 (built 2026-10-12)
+
+[ADR-0062](architecture/adr/0062-a-handed-over-shopper-may-leave-an-email-and-the-shop-answers-from-its-own.md), accepted 2026-10-11 (R25 to R32); mockups approved the same day (canvas row 15, boards 50 to 56, version 36). **Build from this section and the ADR; do not redesign.** For **Owner and Support** (`shop:handovers:write`); the Developer sees none of it. **NEURA sends no email**: *Answer by email* opens the team member's own email app. No new screen: Conversations, Home and the menu gain parts.
+
+**The chat box, not signed in** (board 50): under the handover reply *"I can't answer this here. Leave your email so our store can answer you."*, a small box: *Your email*, a field, **Send** and **No thanks**; under the box the contact line *"Or contact our store: [email], [phone]."* (left out with no details set). **Send** with a good address: the box goes and a new reply says *"Thanks. Your question is with our store, and they can answer you at [email]."*. A bad address: the field turns red and *"Please check your email address."* under it. **No thanks**: the box goes; the contact line stays. Shown only when the reply carries `ask_email: true` (a real handover, once per chat, never in practice mode).
+
+**The chat box, signed in** (board 51): never asked; the reply says *"I can't answer this here. Your question is with our store, and they can answer you by email."* and the contact line.
+
+**Conversations** (board 52): a new choice **Waiting for an answer** right after *All*, with an amber count; selected, an amber line *"**[n] shoppers are waiting for an answer.** Your assistant handed them over, and each left a way to reach them. Open one to answer by email."*; each row has the amber **Waiting for an answer** badge and *left an email* or *signed in to your shop* in its line. Under the list: *"A chat where the shopper pressed No thanks is not here: nobody can answer it. It stays under Handed to a person, as today."* **The menu** shows the same amber count beside *Conversations* while any shopper waits; on a phone, an amber dot on the menu button.
+
+**A waiting chat** (boards 53 and 56): the amber **Waiting for an answer** badge in the header, then an amber box at the top: **This shopper is waiting for an answer**, *"They left their email after your assistant handed them over, [date] at [time]."*; the address in monospace and **Copy** (*Copied* after); **Answer by email** (black, opens `mailto:` with the address, the subject *"Your question to [shop]"* and the body *"Hello,⏎⏎You asked us in the chat on our website:⏎\"[the first question]\"⏎⏎⏎⏎[shop]"*; never the AI's unsent draft) and **Mark as answered**; under them *"Answer by email opens your email app with their address and question filled in. Send it from your shop's email. When you have answered, press Mark as answered: their email is deleted then, or after 30 days if nobody answers."* **Mark as answered** asks: *"Mark as answered?"* *"We delete the shopper's email, and this chat leaves Waiting for an answer. This can't be undone."* **Mark as answered** / **Cancel**. After: a green box *"Answered"*, *"[name] marked it, just now. The shopper's email is deleted."*, the badge goes back to *Handed to a person*, the menu count drops. In the chat, where the email was left, a centred line *"The shopper left their email for an answer · [time]"* (the address itself is never in the chat). On a phone the three buttons are full width, 44px.
+
+**A signed-in shopper's chat** (board 54): *"They were signed in to your shop when your assistant handed them over, [date] at [time]."*; the address with *"from your shop's customer record"*, read from the shop when the chat opens, never stored. When the shop cannot give it: *"Your shop didn't give us this customer's email. Find customer [id] in your shop's admin, and write to them from there."* (no Copy, no Answer by email; Mark as answered stays).
+
+**Home** (board 55): first in *Needs you*, for Owner and Support: **[n]** *"shoppers are waiting for an answer"* / *"shopper is waiting for an answer"*, *"Your assistant handed them over, and each left a way to reach them. Answer them by email."*, **Answer them** (black), opening the waiting list. Left out when nobody waits.
+
+**As built (2026-10-12):**
+
+- **Routes:** `POST /v1/conversations/{id}/email` (the chat box, its own key; names no agent); `GET /v1/console/shops/{tenant}/conversations?waiting=1`; each list row and transcript carries `waiting` (`reach`, `since`, and on a transcript `answered_at`, `answered_by`), never the address; `GET …/conversations/{id}/waiting` (the address, or `customer_id` when the shop cannot give it, plus `subject` and `body`) and `POST …/conversations/{id}/answered`, both `shop:handovers:write`; `/home` gives `waiting` to a role that may answer, `null` to any other.
+- **Small things the build decided:** the amber counts have a dark number (`amber-400` with `amber-950`): white on the mockup's amber is under 3:1 and unreadable at 12px. The *No thanks* note under the list drops *as today* (a shop owner has no *before*). *Waiting for an answer* is offered only to a role that may answer. An empty waiting list says *"Nobody is waiting for an answer"* / *"When your assistant hands a chat over and the shopper leaves a way to reach them, it shows up here."* For a signed-in customer the help line is *"… Send it from your shop's email, then press Mark as answered."* and the question *"This chat leaves Waiting for an answer. This can't be undone."* (nothing of theirs is stored to delete). Reopened later, an answered chat shows *Answered*, *"[name] marked it, [when]. The shopper's email is deleted."* After *Mark as answered* the box tells the menu to read its count again (`neura:waiting-changed`): `router.refresh()` alone left the old number until the next page.
+- **Checked:** `make console-check` has a handover section (17 checks: the choice and its count, the menu count, the waiting list and its rows, no address on the list, the box, the `mailto:` link filled in, the left-email line, a signed-in shopper the shop cannot give, Home, a phone with no sideways scroll, 44px buttons and the menu dot, *Mark as answered* asking first, the address gone from the database, the menu count dropping). Desktop and 390px seen.
+
+### 3.11 Missing from your pages (NEURA-GROW): from the owner's approved design, 2026-10-20 (built 2026-10-27)
+
+[ADR-0064](architecture/adr/0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md), accepted 2026-10-20 (R36 to R42), amended by R43 and R44; mockup approved the same day (R45; canvas row 16, boards 57 to 60, version 46). Design: [agents/grow.md](agents/grow.md). **Build from this section and the ADR; do not redesign.** For **Owner and Support** (never the Developer), and only in a shop with NEURA-GROW.
+
+**The menu** (board 57): **Missing from your pages** after *Sold out*, before *Setup*, with a file-and-question-mark icon.
+
+**The page** (board 57): heading **Missing from your pages**; *"What shoppers asked in the last 30 days that your shop's pages don't say. Add each one to your shop once, and your assistant can answer the next shopper."*; a count line *"**[n] things** shoppers asked, in [g] groups. Most asked first."*; one card per product (its title, then **Open the page ↗** to the shop's own product page in a new tab, only for an http or https address) and one card **About your shop** (a shop icon, no link). Each row: *Shoppers asked*, the question in quotes (*"Is it organic?"*), then *"Your page doesn't say. Add the answer to its description in your shop."* (in *About your shop*: *"Your shop's pages don't say. Add the answer where you explain payment and delivery."*), then *"Asked by [n] shoppers · last on [date]"*; on the right **See the chats** (Conversations with those chats) and **I added it** (black, with a tick). After **I added it**, the row turns green: *"**Marked as added.** "[question]" leaves this list. If shoppers ask it again after today, it comes back here."* Under the list: *"Counts only, never who asked. A question shows when at least 2 shoppers asked it. Your assistant checks new chats once a night. Only you know the answers, so NEURA never writes them for you."*
+
+**Empty** (board 59): a dashed box, **Nothing missing right now**, *"When 2 or more shoppers ask something your pages don't say, it shows here. Your assistant checks new chats once a night."*
+
+**Home** (board 58): in *Needs you*, after the shoppers waiting for an answer: **[n]** *"things shoppers asked that your pages don't say"*, *"In the last 30 days. Add each one to your shop once, and your assistant can answer the next shopper."*, **See them** (outlined). Only for a role that may open the page, and only when [n] is at least 1.
+
+**Phone** (board 60): one column; the product title above *Open the page*; the two buttons under each question, wrapping.
+
+**Paused** (ADR-0065, board 62, approved 2026-10-27, R53): when FiveNeurals has switched the night check off for the shop, a grey note above the count line, with a pause icon: **Paused since [date]**, *"FiveNeurals has paused the check that finds these questions, so nothing new appears here. What you see was found before it was paused. To turn it back on, ask FiveNeurals."* The rows found before stay (and still leave after 30 days); *I added it* still works; Home's line keeps its count; no email is sent. The route returns when it was paused; built with the page (piece 3).
+
+**As built, piece 2 (the data, 2026-10-27; the page is piece 3):** `GET /v1/console/shops/{id}/gaps` (`console_gaps.py`): `days` 30, `min_shoppers` 2, `paused_since`, `total` (questions), `groups`, `products` (each with `title`, `url` only when http or https, and its `topics`: `fact`, `question`, `shoppers`, `last_asked`), and `shop` (*About your shop*); never a conversation id. `POST …/gaps/added` (`{"product_id": id | null, "fact"}`): *I added it*; a question never asked is **404**. Both need **`shop:gaps:write`** (Owner and Support; the Developer gets 403 `ROLE_NOT_ALLOWED`). *See the chats* is Conversations' **`?gap=<fact>&gap_product=<id>`** (no `gap_product` for the shop): exactly the chats the row counts, after *I added it* only the later ones. Home's payload gains **`gaps`** (the page's count) for a role with `shop:gaps:write`, `null` for any other. *Paused* is read from a switch that an assistant's manifest says pauses this page (`pauses = {"grow.gaps": "page_gaps"}`), so the API names no assistant. Checked by `tests/integration/test_console_gaps.py`.
+
+**As built, piece 3 (the screens, 2026-10-27):** `/console/[id]/gaps` (`app/console/[tenantId]/gaps/page.tsx`, rows in `components/gaps/gap-row.tsx`); the menu item **Missing from your pages** after *Sold out*, only for a shop with NEURA-GROW and a role with `shop:gaps:write`; a shop without GROW that opens the address is told *"It comes with NEURA-GROW, which this shop doesn't have."*; the Developer sees *You can't open this page*. Home's *Needs you* line comes second, after the shoppers waiting for an answer, for Owner and Support. **See the chats** opens Conversations with `?gap=&gap_product=&asked=`, and a line above the list: *"The chats where shoppers asked "[question]". Back to Missing from your pages · Show every conversation"* (Claude's words: the mockup only linked to Conversations). Checked by `make console-check` (its own GROW shop, desktop and phone).
+
 ## 4. Identity — the part that is genuinely new
 
-### 4.1 Three tables
+### 4.1 The tables
 
 ```
 users                       (NOT tenant-scoped — see ADR-0026 §4)
   id, email (citext, unique), name, created_at, last_seen_at
 
 memberships                 (tenant-scoped, forced RLS)
-  id, tenant_id, user_id, role='owner', created_at, revoked_at
+  id, tenant_id, user_id, role='owner' (or 'support', 'developer': ADR-0058), created_at, revoked_at
 
 login_tokens                (NOT tenant-scoped)
   id, user_id, token_hash, expires_at, consumed_at, requested_ip
+
+sign_up_requests            (NOT tenant-scoped: there is no shop yet; ADR-0058 §7)
+  id, email (one per email), shop_name, website, token_hash, expires_at, requested_ip
 ```
 
 `sessions` are signed cookies rather than a table, so a logout is a cookie clear and there is no session store to grow unbounded. **Revocation is checked against `memberships` on every request**, not baked into the cookie — otherwise removing someone's access does nothing until their cookie expires.
@@ -620,6 +824,9 @@ The last two steps are the ones that already exist and are already trusted. **Th
 2. **The tenant comes from the membership, never from the request.** A `?tenant=` parameter the browser can edit is not authorisation, it is a suggestion. `AGENTS.md` rule 3.
 3. **Login tokens are single-use, hashed at rest, and consumed in the same transaction that creates the session.**
 4. **Sign-in reveals nothing about who has an account.**
+5. **Asking for a sign-in link is limited**, per network address and per email, over an hour (G97, 2026-10-10;
+   `RATE_LIMIT_SIGN_IN_*`, guesses until real use). **Sign-up links count in the same limit** (ADR-0060). Checked before anything is looked up, so the limit, too, says
+   nothing about who has an account; neither the address nor the email is stored, only keyed hashes that expire.
 
 ---
 

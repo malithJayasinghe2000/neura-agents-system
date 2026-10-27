@@ -63,20 +63,22 @@ product's own edits, so a sale that lowers stock is invisible to it.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import exists, func, or_, select
 
 from neura_agent_core.rag.schema import document_chunks
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.jobs import SYNC_STORE, enqueue_sync
 from neura_api.jobs.sync import dedupe_key_for
+from neura_api.routes.console_people import who_made
 from neura_commerce.identity import EntityType
 from neura_commerce.sync.postgres import PostgresEntityStore, PostgresSyncStateStore
 from neura_commerce.sync.schema import synced_entities
 from neura_core import NotFoundError, ServiceUnavailableError, get_logger
+from neura_core.identity.roles import CONNECTION_WRITE
 from neura_core.jobs import JobQueue
 from neura_core.observation import ObservedEventRepository
 from neura_core.tenancy import (
@@ -106,9 +108,9 @@ VIEWS_WINDOW_DAYS = 7
 
 
 @router.get("/store", summary="This shop's connection, its last sync and what was synced")
-async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
+async def shop_store(
+    request: Request, actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))]
+) -> dict[str, Any]:
     directory = request.app.state.stores
     # Four columns, no secrets — see this module's docstring. The safety is that
     # the query does not select them, not that something downstream strips them.
@@ -144,7 +146,11 @@ async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
         chat_box = await _chat_box(session, actor.tenant_id, now)
         # ADR-0052: whether a token is waiting (when, never what), and each
         # connection's last check and when its token was set.
-        token_made_at = await ShopTokenRepository(session).made_at(actor.tenant_id)
+        waiting_token = ShopTokenRepository(session)
+        token_made_at = await waiting_token.made_at(actor.tenant_id)
+        token_made_by = await who_made(
+            session, actor.tenant_id, await waiting_token.made_by(actor.tenant_id)
+        )
         check_repo = ShopCheckRepository(session)
         last_checks = {
             row["id"]: await check_repo.latest(actor.tenant_id, store_id=row["id"]) for row in rows
@@ -153,6 +159,14 @@ async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
         connections = StoreConnectionRepository(session)
         token_set = {
             row["id"]: await connections.credentials_set_at(actor.tenant_id, row["id"])
+            for row in rows
+        }
+        token_set_by = {
+            row["id"]: await who_made(
+                session,
+                actor.tenant_id,
+                await connections.credentials_set_by(actor.tenant_id, row["id"]),
+            )
             for row in rows
         }
 
@@ -182,6 +196,8 @@ async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
                     ),
                     "last_check": last_checks[row["id"]],
                     "token_set_at": _iso(token_set[row["id"]]),
+                    # Who made it, for *Made [date] by [name]* (ADR-0058 §6).
+                    "token_made_by": token_set_by[row["id"]],
                 }
                 for row in rows
             ],
@@ -189,7 +205,11 @@ async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
             # never what) and the last check of the typed address (ADR-0052).
             "connect": None
             if rows
-            else {"token_made_at": _iso(token_made_at), "last_check": connect_check},
+            else {
+                "token_made_at": _iso(token_made_at),
+                "token_made_by": token_made_by,
+                "last_check": connect_check,
+            },
             # Said plainly rather than left for the screen to infer from an
             # empty list. "No shop connected" and "we could not read your
             # shops" are different sentences and only one of them is true here.
@@ -215,7 +235,11 @@ async def shop_store(request: Request, tenant_id: str) -> dict[str, Any]:
     summary="Read this shop again into our copy of its catalogue",
     status_code=202,
 )
-async def shop_sync(request: Request, tenant_id: str, store_id: str) -> dict[str, Any]:
+async def shop_sync(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))],
+    store_id: str,
+) -> dict[str, Any]:
     """*Sync now* — owner-approved 2026-09-28 (`console.md §3.4`).
 
     Queues the job that already exists and returns at once: a crawl inside a
@@ -226,7 +250,6 @@ async def shop_sync(request: Request, tenant_id: str, store_id: str) -> dict[str
     **Pressing it twice is one sync**: `enqueue_sync` hands back the job still
     queued or running for this store rather than adding another.
     """
-    actor = await acting_for(request, tenant_id)
 
     rows = await request.app.state.stores.rows_for(actor.tenant_id)
     if not any(row["id"] == store_id for row in rows):
@@ -252,7 +275,11 @@ async def shop_sync(request: Request, tenant_id: str, store_id: str) -> dict[str
 
 
 @router.get("/store/{store_id}/health", summary="Is this shop reachable right now?")
-async def shop_health(request: Request, tenant_id: str, store_id: str) -> dict[str, Any]:
+async def shop_health(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))],
+    store_id: str,
+) -> dict[str, Any]:
     """A live call to the merchant's own server, made only when asked.
 
     Deliberately **not** part of the screen's first render: a page load that
@@ -267,7 +294,6 @@ async def shop_health(request: Request, tenant_id: str, store_id: str) -> dict[s
     error in this API. A 503 here would be indistinguishable from our own
     outage in exactly the moment a merchant is trying to tell the two apart.
     """
-    actor = await acting_for(request, tenant_id)
     directory = request.app.state.stores
 
     rows = await directory.rows_for(actor.tenant_id)

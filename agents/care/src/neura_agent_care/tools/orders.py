@@ -36,7 +36,7 @@ log = get_logger(__name__)
 NOT_FOUND = (
     "No order with that reference is available for this conversation. Do not "
     "speculate about whether it exists — ask the shopper to check the number, or "
-    "offer to pass them to a colleague."
+    "offer to pass their question to someone at our store."
 )
 
 #: What may be repeated back as an order reference: one word of letters,
@@ -198,7 +198,7 @@ async def find_orders_for_customer(ctx: ToolContext) -> str:
         return (
             "This conversation has not established who the shopper is, so their "
             "orders cannot be listed. Ask for the order number, or offer to pass "
-            "them to a colleague."
+            "their question to someone at our store."
         )
 
     orders = await ctx.adapter.find_orders_for_customer(CustomerRef(external_id=customer_id))

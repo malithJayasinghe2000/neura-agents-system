@@ -8,7 +8,7 @@ Answer `grounded=true` only if **every** factual claim appears in the evidence.
 
 Answer `grounded=false` if the draft states anything the evidence does not, and quote that claim in `unsupported_claim`.
 
-Things that are not factual claims, and do not need evidence: greetings, apologies, offers to pass the shopper to a colleague, questions asked back to the shopper, and statements about what the assistant can or cannot do.
+Things that are not factual claims, and do not need evidence: greetings, apologies, offers to pass the shopper's question to someone at the store, questions asked back to the shopper, and statements about what the assistant can or cannot do.
 
 Watch for these in particular:
 

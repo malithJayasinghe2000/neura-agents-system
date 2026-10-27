@@ -213,6 +213,15 @@ class CustomerSecretRepository:
         )
         return secret
 
+    async def made_by(self, tenant_id: str) -> str | None:
+        """The console user who made it, or ``None`` when there is none. Never what was made."""
+        value: str | None = (
+            await self._session.execute(
+                select(customer_secrets.c.made_by).where(customer_secrets.c.tenant_id == tenant_id)
+            )
+        ).scalar_one_or_none()
+        return value
+
     async def made_at(self, tenant_id: str) -> datetime | None:
         """When the secret was made, or ``None``. Never the secret."""
         value: datetime | None = (

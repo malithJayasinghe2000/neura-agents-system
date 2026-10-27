@@ -29,6 +29,12 @@ class TenantStatus(StrEnum):
     longer served — an offboarding tenant's shoppers must not reach an agent
     whose store connection is about to be deleted."""
 
+    WAITING = "waiting"
+    """Signed up, and waiting for FiveNeurals to approve it (ADR-0058 §7). Not
+    served, and its dashboard opens nothing but the waiting screen: no keys, no
+    chat box, no AI, no connection, so nothing in it costs anything. Approval
+    makes it ``ACTIVE``; a refused shop is removed."""
+
 
 class TenantConfig(BaseModel):
     """Per-tenant behaviour a merchant may change without a deploy.
@@ -142,6 +148,10 @@ class Tenant(BaseModel):
     #: When a data-processing agreement was recorded; ``None`` means none
     #: exists (ADR-0042 §2).
     dpa_signed_at: datetime | None = None
+    #: The shop's own web address, as typed when it signed up (ADR-0058 §7), so
+    #: FiveNeurals can look at the shop before approving it. ``None`` for a shop
+    #: FiveNeurals made with a command.
+    website: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -96,8 +96,10 @@ READ_ROWS = """
 SEND_MESSAGE = """
 (() => {
   const sr = document.querySelector("neura-chat").shadowRoot;
-  sr.querySelector("input").value = %s;
-  sr.querySelector("form").dispatchEvent(
+  // By name: since ADR-0062 a handover can put an email box (with its own
+  // input) in the chat above the message box.
+  sr.querySelector("form.compose input").value = %s;
+  sr.querySelector("form.compose").dispatchEvent(
     new Event("submit", { cancelable: true, bubbles: true })
   );
   return "sent";
@@ -191,11 +193,22 @@ def build_stub() -> Any:
         },
     }
     payloads["sign_in_refuse"] = payloads["sign_in"]
+    # ADR-0062: the first handover in a chat asks for an email (R31's words).
+    payloads["handover"] = {
+        "reply": f"{HANDOVER_ASK}\n{HANDOVER_CONTACT}",
+        "state": "escalated",
+        "escalated": True,
+        "fallback_message": "",
+        "ask_email": True,
+    }
 
     #: The customer pass the last message carried, on either transport, so a
     #: scenario can prove the chat box sent it (and in the message, not the
     #: address).
     received: dict[str, str] = {"customer_pass": "", "address": ""}
+    #: What reached the email route, and every chat message's words, so a
+    #: scenario can prove the address went to its own route and nowhere else.
+    left: dict[str, list[Any]] = {"emails": [], "messages": []}
 
     def _done(script: str) -> dict[str, Any]:
         body = payloads.get(script, payloads["answer"])
@@ -262,6 +275,7 @@ def build_stub() -> Any:
             except Exception:
                 return
             received["customer_pass"] = str(frame.get("customer_pass") or "")
+            left["messages"].append(str(frame.get("content") or ""))
             await websocket.send_json({"type": "accepted", "conversation_id": "cnv_stub"})
             for node in ("guard", "route", "retrieve", "compose", "verify"):
                 await websocket.send_json({"type": "step", "name": node})
@@ -283,6 +297,28 @@ def build_stub() -> Any:
                 # now, the shopper's NEXT message must still reach a server.
                 await websocket.close(code=1000, reason="idle")
                 return
+
+    @app.get("/left")
+    async def what_was_left() -> dict[str, list[Any]]:
+        return left
+
+    @app.post("/v1/conversations/{conversation_id}/email")
+    async def leave_email(conversation_id: str, request: Request) -> Any:
+        """ADR-0062 §10, as the real route answers: the thanks, or INVALID_EMAIL."""
+        body = await request.json()
+        left["emails"].append(
+            {
+                "conversation_id": conversation_id,
+                "body": body,
+                "authorization": request.headers.get("authorization", ""),
+            }
+        )
+        email = str(body.get("email", ""))
+        if "@" not in email or "." not in email.rpartition("@")[2]:
+            return JSONResponse(
+                {"error": {"code": "INVALID_EMAIL", "message": WRONG_EMAIL}}, status_code=400
+            )
+        return {"data": {"reply": THANKS.format(email=email)}}
 
     @app.post("/v1/chat")
     @app.post("/v1/care/chat")
@@ -431,6 +467,11 @@ class Chrome:
 TRANSPORT_ERROR = "We could not reach the assistant. Please check your connection and try again."
 #: ADR-0057 §7, the owner's words, as the server sends them.
 SIGN_IN_SENTENCE = "Please sign in to your account so I can help with your orders."
+#: ADR-0062 (R31), the owner's words, as the server sends them.
+HANDOVER_ASK = "I can't answer this here. Leave your email so our store can answer you."
+HANDOVER_CONTACT = "Or contact our store: hello@yourshop.example, +94 11 234 5678."
+WRONG_EMAIL = "Please check your email address."
+THANKS = "Thanks. Your question is with our store, and they can answer you at {email}."
 #: A pass's shape only; the stub checks nothing about it.
 STUB_PASS = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIzODUifQ.c2lnbmF0dXJl"  # noqa: S105 - made up, signed by nothing
 STUB_SIGN_IN_URL = "https://shop.example/account/login"
@@ -686,10 +727,166 @@ async def run_stub(chrome_binary: str) -> list[Result]:
                 async with httpx.AsyncClient() as http:
                     served = (await http.get(f"http://127.0.0.1:{port}/served")).json()
                 results.append(check(scenario, state, served["transport"], served))
+            results.extend(await run_handover_email(chrome, port))
     finally:
         server.should_exit = True
         with contextlib.suppress(Exception):
             await task
+    return results
+
+
+#: The email box under a handover, read out of the Shadow root: its words, and
+#: where it sits among the reply's parts.
+READ_ASK = """
+(() => {
+  const sr = document.querySelector("neura-chat").shadowRoot;
+  const row = [...sr.querySelectorAll(".row")].find((r) => r.querySelector(".ask, .contact"));
+  const ask = sr.querySelector(".ask");
+  const parts = row ? [...row.children].map((child) => child.className) : [];
+  const rows = [...sr.querySelectorAll(".row")].map((r) => ({
+    role: r.dataset.role,
+    text: (r.querySelector(".bubble") || {}).textContent || "",
+  }));
+  return JSON.stringify({
+    ask: !!ask,
+    bubble: row ? (row.querySelector(".bubble") || {}).textContent : "",
+    contact: row ? (row.querySelector(".contact") || {}).textContent || "" : "",
+    parts: parts,
+    label: ask ? (ask.querySelector("label") || {}).textContent : "",
+    buttons: ask ? [...ask.querySelectorAll("button")].map((b) => b.textContent) : [],
+    error: ask ? (ask.querySelector(".ask-error") || {}).textContent || "" : "",
+    invalid: ask ? (ask.querySelector("input") || { getAttribute: () => "" }).getAttribute("aria-invalid") : "",
+    rows: rows,
+  });
+})()
+"""
+
+TYPE_EMAIL = """
+(() => {
+  const sr = document.querySelector("neura-chat").shadowRoot;
+  sr.querySelector(".ask input").value = %s;
+  sr.querySelector(".ask .ask-send").click();
+  return "ok";
+})()
+"""
+
+PRESS_NO_THANKS = """
+(() => { document.querySelector("neura-chat").shadowRoot.querySelector(".ask .ask-skip").click(); return "ok"; })()
+"""
+
+
+async def run_handover_email(chrome: Chrome, port: int) -> list[Result]:
+    """ADR-0062 §5 and §10, in the real file in real Chrome: the box between the
+    reply's two lines, a wrong address caught before anything is sent, *Send*
+    going to its own route and never into the chat, and *No thanks*."""
+    results: list[Result] = []
+    base = f"http://127.0.0.1:{port}"
+
+    async def handed_over() -> dict[str, Any]:
+        await chrome.goto(f"{base}/harness")
+        await chrome.evaluate(
+            "(() => { document.querySelector('neura-chat').config.key = "
+            "'fn_pk_test_harness:handover'; return 'ok'; })()"
+        )
+        await chrome.send_message("can I return an opened pack?")
+        await chrome.wait_until_idle(timeout=30)
+        return dict(json.loads(await chrome.evaluate(READ_ASK)))
+
+    async def left() -> dict[str, list[Any]]:
+        async with httpx.AsyncClient() as http:
+            return dict((await http.get(f"{base}/left")).json())
+
+    name = "a handover that asks draws the email box between its two lines"
+    state = await handed_over()
+    order_ok = state["parts"][:3] == ["bubble", "ask", "contact"] and state["parts"][-1] == "note"
+    if not state["ask"]:
+        results.append(Result(name, False, "no email box under the handover"))
+    elif state["bubble"] != HANDOVER_ASK or state["contact"] != HANDOVER_CONTACT or not order_ok:
+        results.append(
+            Result(
+                name,
+                False,
+                f"drawn as {state['parts']}: {state['bubble']!r} / {state['contact']!r}",
+            )
+        )
+    elif state["label"] != "Your email" or state["buttons"] != ["Send", "No thanks"]:
+        results.append(Result(name, False, f"its words: {state['label']!r}, {state['buttons']}"))
+    else:
+        results.append(
+            Result(name, True, "the reply's first line, the box, then the shop's contact line")
+        )
+
+    if not state["ask"]:
+        # Nothing to type into: the three that need the box fail, and say why.
+        for later in (
+            "a wrong address is caught before anything is sent",
+            "Send takes the address to its own route, never into the chat, and says thanks",
+            "No thanks closes the box and keeps the shop's contact line",
+        ):
+            results.append(Result(later, False, "no email box to use"))
+        return results
+
+    name = "a wrong address is caught before anything is sent"
+    before = len((await left())["emails"])
+    await chrome.evaluate(TYPE_EMAIL % json.dumps("saman.perera@"))
+    await asyncio.sleep(0.5)
+    state = dict(json.loads(await chrome.evaluate(READ_ASK)))
+    sent = len((await left())["emails"]) - before
+    if state["error"] != WRONG_EMAIL or state["invalid"] != "true" or sent:
+        results.append(
+            Result(
+                name, False, f"error {state['error']!r}, invalid {state['invalid']!r}, sent {sent}"
+            )
+        )
+    else:
+        results.append(Result(name, True, f"{WRONG_EMAIL!r}, and nothing sent"))
+
+    name = "Send takes the address to its own route, never into the chat, and says thanks"
+    typed = "saman@example.com"
+    await chrome.evaluate(TYPE_EMAIL % json.dumps(typed))
+    thanks = THANKS.format(email=typed)
+    for _ in range(30):
+        state = dict(json.loads(await chrome.evaluate(READ_ASK)))
+        if not state["ask"]:
+            break
+        await asyncio.sleep(0.2)
+    record = await left()
+    emails = record["emails"]
+    last = state["rows"][-1] if state["rows"] else {}
+    if state["ask"]:
+        results.append(Result(name, False, "the box is still there after Send"))
+    elif (
+        not emails
+        or emails[-1]["body"] != {"email": typed}
+        or emails[-1]["conversation_id"] != "cnv_stub"
+    ):
+        results.append(Result(name, False, f"the route got {emails[-1:]}"))
+    elif not emails[-1]["authorization"].startswith("Bearer fn_pk_"):
+        results.append(Result(name, False, "the route was not sent the chat box's key"))
+    elif any(typed in message for message in record["messages"]):
+        results.append(Result(name, False, "THE ADDRESS WENT INTO A CHAT MESSAGE"))
+    elif last.get("text") != thanks or last.get("role") != "assistant":
+        results.append(Result(name, False, f"the last row is {last}"))
+    elif state["contact"] != HANDOVER_CONTACT:
+        results.append(Result(name, False, "the shop's contact line went with the box"))
+    else:
+        results.append(Result(name, True, thanks[:60]))
+
+    name = "No thanks closes the box and keeps the shop's contact line"
+    state = await handed_over()
+    before = len((await left())["emails"])
+    await chrome.evaluate(PRESS_NO_THANKS)
+    await asyncio.sleep(0.3)
+    state = dict(json.loads(await chrome.evaluate(READ_ASK)))
+    if (
+        state["ask"]
+        or state["contact"] != HANDOVER_CONTACT
+        or len((await left())["emails"]) != before
+    ):
+        results.append(Result(name, False, f"box {state['ask']}, contact {state['contact']!r}"))
+    else:
+        results.append(Result(name, True, "the box is gone; the contact line stays"))
+
     return results
 
 
@@ -841,15 +1038,17 @@ def tenant_tables() -> list[Any]:
     after it, and their rows outlived every dropped tenant (G76).
     """
     from neura_agent_core.conversations import conversation_messages, conversations
+    from neura_agent_core.gaps import page_gap_fixes, page_gap_scans, page_gaps
     from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
     from neura_agent_core.rag.schema import document_chunks
     from neura_agent_core.shadow import shadow_turns
     from neura_agent_core.shadow_evidence import shadow_evidence
+    from neura_agent_core.waiting import waiting_answers
     from neura_agent_sell.feed.schema import sell_feeds
     from neura_agent_sell.pairing.schema import sell_pairing_choices, sell_pairings
     from neura_commerce.sync.schema import sync_checkpoints, synced_entities
     from neura_core.idempotency import idempotency_keys
-    from neura_core.identity.schema import memberships
+    from neura_core.identity.schema import membership_invites, memberships
     from neura_core.jobs.schema import job_queue
     from neura_core.observation.schema import observed_events
     from neura_core.tenancy.schema import (
@@ -861,12 +1060,20 @@ def tenant_tables() -> list[Any]:
         tenant_usage,
         tenants,
     )
+    from neura_core.tenancy.switches import tenant_switches
     from neura_core.webhooks.schema import webhook_deliveries, webhook_endpoints
 
     return [
         # A shopper's events first: a dropped tenant must not leave the one
         # table that holds observed personal data behind (ADR-0044 §7).
         observed_events,
+        # A handed-over shopper's typed email (ADR-0062): personal data too.
+        waiting_answers,
+        # What shoppers asked that the shop's pages do not say (ADR-0064):
+        # derived from shoppers' words, and the team's *I added it*.
+        page_gaps,
+        page_gap_fixes,
+        page_gap_scans,
         # Before the turns it points at: the one foreign key among these tables.
         shadow_evidence,
         shadow_turns,
@@ -883,9 +1090,13 @@ def tenant_tables() -> list[Any]:
         job_queue,
         webhook_deliveries,
         webhook_endpoints,
+        # Invites waiting for the shop, with an email in each (ADR-0058 §4).
+        membership_invites,
         memberships,
         idempotency_keys,
         tenant_usage,
+        # FiveNeurals' switches for this shop (ADR-0065).
+        tenant_switches,
         shop_checks,
         # The shop token, sealed: no shop should leave one behind.
         shop_tokens,

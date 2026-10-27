@@ -13,7 +13,8 @@
  */
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { replaceShopToken } from "@/lib/api";
+import { replaceShopToken, type MadeBy } from "@/lib/api";
+import { MadeByText } from "@/components/shop/made-by";
 import { CopyButton } from "@/components/shop/full-check";
 import { When } from "@/components/when";
 import { Button } from "@/components/ui/button";
@@ -24,18 +25,22 @@ export function ShopToken({
   tenantId,
   storeId,
   setAt,
+  setBy,
   named,
 }: {
   tenantId: string;
   storeId: string;
   /** When the token was last set. Never the token. */
   setAt: string | null;
+  /** Who made it (ADR-0058 §6). */
+  setBy?: MadeBy;
   /** The connection's host, when the shop has more than one. */
   named: string | null;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [token, setToken] = useState<string | null>(null);
   const [madeAt, setMadeAt] = useState<string | null>(setAt);
+  const [madeBy, setMadeBy] = useState<MadeBy | undefined>(setBy);
   const [error, setError] = useState<string | null>(null);
 
   function make() {
@@ -45,6 +50,7 @@ export function ShopToken({
       .then((made) => {
         setToken(made.token);
         setMadeAt(made.made_at);
+        setMadeBy(made.made_by);
         setPhase("made");
       })
       .catch((reason: unknown) => {
@@ -67,7 +73,8 @@ export function ShopToken({
       <p className="leading-relaxed text-muted-foreground">
         {madeAt ? (
           <>
-            Set <When iso={madeAt} inline />.{" "}
+            Set <When iso={madeAt} inline />
+            <MadeByText by={madeBy} />.{" "}
           </>
         ) : null}
         Only your shop and NEURA know it. It is kept locked away and can&apos;t be shown again, not

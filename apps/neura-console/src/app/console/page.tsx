@@ -18,15 +18,20 @@ import { redirect } from "next/navigation";
 import { ChevronRight, Store } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { SignOutButton } from "@/components/sign-out-button";
+import { AdminBadge } from "@/components/admin/admin-sidebar";
 import { fromApi, hasSession } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
 import type { ShopView } from "@/lib/shop";
 import type { Usage } from "@/lib/usage";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** `name` is `null` when the shop has none on record; the id stands in for it. */
-type Membership = { tenant_id: string; role: string; name: string | null };
-type Me = { signed_in: boolean; memberships?: Membership[] };
+/**
+ * `name` is `null` when the shop has none on record; the id stands in for it.
+ * `status` is `waiting` for a shop FiveNeurals has not approved yet (ADR-0058 §7).
+ */
+type Membership = { tenant_id: string; role: string; name: string | null; status?: string | null };
+/** `is_admin`: FiveNeurals staff, shown the Admin link (ADR-0061). Display only. */
+type Me = { signed_in: boolean; is_admin?: boolean; memberships?: Membership[] };
 
 export default async function ConsolePage() {
   if (!(await hasSession())) redirect("/");
@@ -38,14 +43,29 @@ export default async function ConsolePage() {
   if (!me.ok || !me.data.signed_in) redirect("/");
 
   const memberships: Membership[] = me.data.memberships ?? [];
-  const statuses = await Promise.all(memberships.map((m) => statusOf(m.tenant_id)));
+  // A waiting shop is not read: every one of its routes refuses until approval.
+  const statuses = await Promise.all(
+    memberships.map((m) => (m.status === "waiting" ? WAITING : statusOf(m.tenant_id))),
+  );
 
   return (
     <>
       <header className="border-b">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 sm:px-6">
           <Brand />
-          <SignOutButton />
+          <div className="flex items-center gap-2">
+            {me.data.is_admin ? (
+              <Link
+                href="/admin"
+                className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium hover:bg-muted"
+                data-admin-link
+              >
+                <AdminBadge />
+                Admin
+              </Link>
+            ) : null}
+            <SignOutButton />
+          </div>
         </div>
       </header>
 
@@ -97,11 +117,15 @@ export default async function ConsolePage() {
 }
 
 type Status = {
+  /** Signed up, and waiting for FiveNeurals to approve it (ADR-0058 §7). */
+  approval?: true;
   /** `null` when it could not be read — then nothing is said about it. */
   connected: boolean | null;
   practice: boolean | null;
   waiting: number | null;
 };
+
+const WAITING: Status = { approval: true, connected: null, practice: null, waiting: null };
 
 /** Three reads per shop, in parallel, each one already membership-checked. */
 async function statusOf(tenantId: string): Promise<Status> {
@@ -119,6 +143,9 @@ async function statusOf(tenantId: string): Promise<Status> {
 }
 
 function StatusLine({ status }: { status: Status }) {
+  if (status.approval) {
+    return <span className="block text-sm text-muted-foreground">Waiting for approval</span>;
+  }
   if (status.connected === false) {
     return (
       <span className="block text-sm text-muted-foreground">

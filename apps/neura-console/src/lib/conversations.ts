@@ -38,7 +38,43 @@ export type ConversationRow = {
    * in words rather than leaving a blank line.
    */
   first_question?: string | null;
+  /**
+   * Whether a handed-over shopper waits for the shop's answer, and how the shop
+   * can reach them (ADR-0062). On list rows only while they wait; `null` once
+   * answered or for a chat nobody waits on. **Never the address.**
+   */
+  waiting?: { reach: WaitingReach; since: string } | null;
 };
+
+/** How the shop can reach a waiting shopper: an address they typed, or their
+ *  account with the shop (signed in). */
+export type WaitingReach = "email" | "customer";
+
+/** A transcript's waiting state, and who answered once someone did. */
+export type Waiting = {
+  reach: WaitingReach;
+  since: string;
+  answered_at: string | null;
+  answered_by: { name: string; role: string | null } | null;
+};
+
+/**
+ * What *Answer by email* needs (`…/waiting`, behind `shop:handovers:write`): the
+ * address, or the customer to find in the shop's own admin when the shop could
+ * not give it, and the email the team member's own app is filled with.
+ */
+export type WaitingDetails = {
+  reach: WaitingReach;
+  since: string;
+  email: string | null;
+  customer_id: string | null;
+  subject: string;
+  body: string;
+};
+
+/** The list's own choice for *Waiting for an answer* (ADR-0062 §6). Not a
+ *  conversation state: it asks the API for `?waiting=1`. */
+export const WAITING_FILTER = "waiting";
 
 export type TranscriptMessage = {
   id: string;
@@ -96,8 +132,10 @@ export type HeldReply = {
   created_at: string | null;
 };
 
-export type Transcript = ConversationRow & {
+export type Transcript = Omit<ConversationRow, "waiting"> & {
   messages: TranscriptMessage[];
+  /** How a handed-over shopper can be reached, and who answered (ADR-0062). */
+  waiting: Waiting | null;
   /** Oldest first. Empty for a chat that was never held. */
   held: HeldReply[];
   /** The thread hit the server's message bound. Shown, so a cut thread does not
@@ -181,6 +219,8 @@ export function whatTheShopperSaw(
 /** The filters offered above the list. `""` is first, so nothing is hidden by default. */
 export const STATE_FILTERS: { key: string; label: string }[] = [
   { key: "", label: "All" },
+  // Who waits for the shop's answer (ADR-0062 §6): right after All, as approved.
+  { key: WAITING_FILTER, label: "Waiting for an answer" },
   { key: "shadowed", label: STATE_LABELS.shadowed },
   { key: "escalated", label: STATE_LABELS.escalated },
   { key: "blocked", label: STATE_LABELS.blocked },

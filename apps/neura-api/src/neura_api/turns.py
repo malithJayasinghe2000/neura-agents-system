@@ -44,7 +44,9 @@ from neura_agent_core.serving import AgentRunner, ProgressSink, TurnOutcome, Tur
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
 from neura_agent_core.shadow_evidence import ShadowEvidenceRepository
 from neura_agent_core.tools import SessionIdentity
+from neura_agent_core.waiting import WaitingAnswerRepository
 from neura_api.audit import TenantAuditLog
+from neura_api.jobs.daily import book_daily_jobs
 from neura_api.jobs.retention import enqueue_sweep
 from neura_api.jobs.webhooks import enqueue_drain
 from neura_api.metering import MeteredLLM
@@ -58,17 +60,21 @@ from neura_core.tenancy import (
     CustomerSecretRepository,
     PassStatus,
     RuntimePolicy,
+    TenantConfig,
     TenantRepository,
     TurnMode,
     UsageDelta,
     UsageMeter,
     check_customer_pass,
+    handover_ask_message,
     handover_message,
+    handover_with_store_message,
     resolve_runtime_policy,
     resolve_turn_mode,
     sign_in_message,
 )
 from neura_core.webhooks import PendingEvent, WebhookEvent, WebhookRepository
+from neura_domain import Capability
 from neura_llm import RoleNotConfiguredError
 
 log = get_logger(__name__)
@@ -123,6 +129,10 @@ class TurnResult:
     #: §7): an order question from someone not signed in, on a reply the
     #: shopper actually sees. Never for an expired pass (they are signed in).
     sign_in: bool = False
+    #: Whether the chat box shows its email box under the reply (ADR-0062 §5):
+    #: the first live handover in a chat whose shopper the shop cannot reach.
+    #: Set by the server, so the chat box never guesses from the words.
+    ask_email: bool = False
 
     @property
     def is_shadowed(self) -> bool:
@@ -239,6 +249,9 @@ class TurnService:
                 # A new transcript is something to expire, so it books the
                 # sweep that will — in this transaction, or not at all.
                 await enqueue_sweep(session, tenant_id)
+                # And something an agent's daily job may read (GROW's night
+                # check, ADR-0064), for the agents this shop has.
+                await book_daily_jobs(session, tenant_id)
             history = (
                 []
                 if started
@@ -350,12 +363,30 @@ class TurnService:
             # here for both assistants and both transports, after the handover
             # sentence so that it wins.
             show_sign_in = False
-            if outcome.needs_sign_in and customer_external_id is None:
+            sign_in_said = outcome.needs_sign_in and customer_external_id is None
+            if sign_in_said:
                 if pass_status is PassStatus.EXPIRED:
                     outcome = replace(outcome, reply=PASS_EXPIRED_MESSAGE)
                 else:
                     outcome = replace(outcome, reply=sign_in_message(config))
                     show_sign_in = True
+            # A live handover may wait for the shop's answer by email (ADR-0062):
+            # the first one in a chat asks for an address, a signed-in customer is
+            # never asked. Not in practice mode (a held handover reached nobody),
+            # and not when the sign-in sentence won (that is not a handover).
+            # Here, before `append_turn`, so the transcript holds what the shopper
+            # read and `escalations` still counts the handovers before this one.
+            ask_email = False
+            if outcome.escalated and mode is not TurnMode.SHADOW and not sign_in_said:
+                reply, ask_email = await _handover_reach(
+                    session,
+                    tenant_id,
+                    conversation_id,
+                    customer_external_id=customer_external_id,
+                    capabilities=store.capabilities,
+                    config=config,
+                )
+                outcome = replace(outcome, reply=reply)
 
             if mode is TurnMode.SHADOW:
                 # The shopper's words are history; the agent's are not. The
@@ -483,6 +514,7 @@ class TurnService:
             customer_pass=pass_status,
             customer_pass_reason=pass_reason,
             sign_in=show_sign_in and mode is not TurnMode.SHADOW,
+            ask_email=ask_email,
         )
 
     def _retriever(self, tenant_id: str, llm: object) -> Retriever | None:
@@ -599,6 +631,41 @@ def _shadow_turn(
         # change helped, and that question needs the revision that wrote it.
         prompt_revision=outcome.prompt_revision,
     )
+
+
+async def _handover_reach(
+    session: Any,
+    tenant_id: str,
+    conversation_id: str,
+    *,
+    customer_external_id: str | None,
+    capabilities: frozenset[Capability],
+    config: TenantConfig,
+) -> tuple[str, bool]:
+    """What a live handover says, and whether the chat box asks for an email
+    (ADR-0062 §2, §5, §9). In the caller's transaction, before the turn is stored.
+
+    * **Signed in, on a shop that can give its customers** (`customer.read`): the
+      chat waits on the shop's own record of the customer, nothing of theirs is
+      copied, and they are told their question is with the store.
+    * **An address already left in this chat**, still unanswered: the same.
+    * **The first handover in a chat** NEURA cannot reach: the ask, with the box.
+    * **Anything else** (asked before and skipped, or answered): ADR-0055's
+      sentence, unchanged. A chat asks once.
+    """
+    waiting = WaitingAnswerRepository(session)
+    if customer_external_id is not None and Capability.CUSTOMER_READ in capabilities:
+        await waiting.wait_for_customer(tenant_id, conversation_id)
+        return handover_with_store_message(config), False
+    row = await waiting.get(tenant_id, conversation_id)
+    if row is not None:
+        return (
+            handover_with_store_message(config) if row.waiting else handover_message(config)
+        ), False
+    conversation = await ConversationRepository(session).get(tenant_id, conversation_id)
+    if conversation is None or conversation.escalations == 0:
+        return handover_ask_message(config), True
+    return handover_message(config), False
 
 
 async def _emit(

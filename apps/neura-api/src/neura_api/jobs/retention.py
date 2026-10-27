@@ -10,6 +10,10 @@ phase 1 is that feature. One pass deletes, for one tenant:
   removal on resolution: without an agreement there is no reason to hold any.
 * **conversations** untouched for ``RETENTION_CONVERSATIONS_DAYS``, with their
   messages and checkpointed state (``ConversationRepository.delete_older_than``).
+* **a handed-over shopper's typed email** still unanswered after
+  ``RETENTION_HANDOVER_EMAILS_DAYS`` (ADR-0062 §4). It always belongs to a
+  conversation, which is itself something to expire, so the sweep that deletes
+  it is already booked; the email route books one anyway, in its transaction.
 
 **How it keeps running without a cron.** ADR-0022 has no recurring schedule, on
 purpose, and this adds none. It uses the pattern ``webhook.drain`` already
@@ -33,6 +37,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from neura_agent_core.conversations import ConversationRepository
+from neura_agent_core.waiting import WaitingAnswerRepository
 from neura_api.jobs.runner import JobContext
 from neura_core import Settings, get_logger
 from neura_core.jobs import Job, JobQueue
@@ -59,6 +64,8 @@ SWEEP_INTERVAL = timedelta(days=1)
 class SweepResult:
     events_deleted: int
     conversations_deleted: int
+    #: Handed-over shoppers' emails nobody answered in time (ADR-0062).
+    emails_deleted: int
     #: ``True`` when the tenant had no agreement, so every event went.
     no_agreement: bool
     #: Whether anything is left for a later pass — decides whether it re-arms.
@@ -68,7 +75,8 @@ class SweepResult:
         why = " (no agreement: all)" if self.no_agreement and self.events_deleted else ""
         return (
             f"{self.events_deleted} observed event(s){why} · "
-            f"{self.conversations_deleted} conversation(s) deleted"
+            f"{self.conversations_deleted} conversation(s) · "
+            f"{self.emails_deleted} unanswered email(s) deleted"
             + ("" if self.remaining else " · nothing left, not re-armed")
         )
 
@@ -100,6 +108,12 @@ async def sweep(session: Any, tenant_id: str, *, now: datetime, settings: Settin
             tenant_id, now - timedelta(days=settings.retention_observed_events_days)
         )
 
+    # Before the conversations: an expired chat takes its waiting row with it,
+    # and counting it here first keeps the number about emails nobody answered.
+    emails_deleted = await WaitingAnswerRepository(session).delete_expired(
+        tenant_id, now - timedelta(days=settings.retention_handover_emails_days)
+    )
+
     conversations = ConversationRepository(session)
     conversations_deleted = await conversations.delete_older_than(
         tenant_id, now - timedelta(days=settings.retention_conversations_days)
@@ -109,6 +123,7 @@ async def sweep(session: Any, tenant_id: str, *, now: datetime, settings: Settin
     return SweepResult(
         events_deleted=events_deleted,
         conversations_deleted=conversations_deleted,
+        emails_deleted=emails_deleted,
         no_agreement=no_agreement,
         remaining=remaining,
     )
@@ -132,12 +147,13 @@ class RetentionSweepHandler:
                 # completion afterwards is a no-op — as in `webhook.drain`.
                 await queue.complete(context.job.id)
 
-        if result.events_deleted or result.conversations_deleted:
+        if result.events_deleted or result.conversations_deleted or result.emails_deleted:
             log.info(
                 "retention_swept",
                 tenant_id=context.tenant_id,
                 observed_events=result.events_deleted,
                 conversations=result.conversations_deleted,
+                handover_emails=result.emails_deleted,
                 no_agreement=result.no_agreement,
             )
         return result.summary()

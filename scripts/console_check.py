@@ -41,7 +41,7 @@ import asyncio
 import os
 import re
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import httpx
 from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import create_async_engine
 from widget_check import Chrome, find_chrome
 
 from neura_agent_core.conversations import (
@@ -60,6 +61,7 @@ from neura_agent_core.conversations import (
 )
 from neura_agent_core.rag.schema import document_chunks
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn, shadow_turns
+from neura_agent_core.waiting import WaitingAnswerRepository, waiting_answers
 from neura_commerce.pagination import Cursor
 from neura_commerce.sync.schema import sync_checkpoints, synced_entities
 from neura_core import Database, get_settings, ids, load_env
@@ -217,6 +219,9 @@ async def main() -> int:
                 print(f"\n  {BOLD}conversations — what it actually said{OFF}")
                 await _check_conversations(browser, console, seeded, failures)
 
+                print(f"\n  {BOLD}a handed-over shopper waits — answer by email{OFF}")
+                await _check_handover(browser, console, db, seeded, failures)
+
                 print(f"\n  {BOLD}shop and usage — connection, and honest numbers{OFF}")
                 await _check_shop_and_usage(browser, console, seeded, failures)
                 await _check_contact(browser, console, seeded, failures)
@@ -224,6 +229,9 @@ async def main() -> int:
 
                 print(f"\n  {BOLD}help — connecting your shop{OFF}")
                 await _check_help(browser, console, seeded, failures)
+
+                print(f"\n  {BOLD}people — each role sees only its screens{OFF}")
+                await _check_people_and_roles(browser, console, seeded, minted.user_id, failures)
 
                 print(f"\n  {BOLD}a shop not connected yet — Home and a passed check{OFF}")
                 await _check_before_connecting(browser, console, minted.user_id, failures)
@@ -233,6 +241,15 @@ async def main() -> int:
                     await _check_sold_out(browser, console, sell_seeded, failures)
                 else:
                     print(f"  {DIM}no shop with SELL — the Sold out checks are skipped{OFF}")
+
+                print(f"\n  {BOLD}missing from your pages — GROW's page, Home's line{OFF}")
+                await _check_gaps(browser, console, db, minted.user_id, seeded, failures)
+
+            print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
+            await _check_sign_up(console, failures)
+
+            print(f"\n  {BOLD}FiveNeurals admin — shops, approve, refuse, switches, AI use{OFF}")
+            await _check_admin(console, email, failures)
 
             if without_sell:
                 print(f"\n  {BOLD}a shop without NEURA-SELL — its screens are not shown{OFF}")
@@ -279,6 +296,16 @@ async def main() -> int:
     print(f"  {DIM}Evidence about THIS build and THIS browser, and nothing more.{OFF}\n")
     return 0
 
+
+#: ADR-0062: two handed-over shoppers waiting for the shop's answer.
+SEEDED_WAITING_QUESTION = "Can I return an opened pack of console-check tea?"
+SEEDED_SIGNED_IN_QUESTION = "Can you change the delivery address on my console-check parcel?"
+SEEDED_SHOPPER_EMAIL = "console-check-shopper@example.com"
+SEEDED_CUSTOMER = "console-check-385"
+SEEDED_ASK = "I can't answer this here. Leave your email so our store can answer you."
+SEEDED_WITH_STORE = (
+    "I can't answer this here. Your question is with our store, and they can answer you by email."
+)
 
 #: What the seeded shopper asks. Distinctive enough that finding it on the page
 #: cannot be a coincidence, and about a policy so that the cited evidence is a
@@ -720,6 +747,163 @@ async def _check_conversations(
         )
     finally:
         await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _check_handover(
+    browser: Chrome, console: str, db: Database, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """ADR-0062 §6 and §7, console.md §3.10, against rendered pages: who waits,
+    the box at the top of a waiting chat, *Answer by email* (a `mailto:` link,
+    since NEURA sends nothing), *Mark as answered* asking first, and Home."""
+    tenant = seeded["tenant"]
+    base = f"{console}/console/{tenant}"
+
+    await browser.goto(f"{base}/conversations")
+    await asyncio.sleep(3)
+    chip = await browser.evaluate(
+        "(document.querySelector('[data-waiting-chip]') || {}).innerText || ''"
+    )
+    menu = await browser.evaluate(
+        "(document.querySelector('[data-waiting-count]') || {}).innerText || ''"
+    )
+    _check(
+        "Conversations offers Waiting for an answer, with how many",
+        "Waiting for an answer" in chip and "2" in chip,
+        failures,
+    )
+    _check("the menu shows the same count beside Conversations", menu.strip() == "2", failures)
+
+    await browser.goto(f"{base}/conversations?state=waiting")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    _check(
+        "the waiting list says how many wait, and why they can be reached",
+        "2 shoppers are waiting for an answer." in page,
+        failures,
+    )
+    _check(
+        "it holds both waiting chats and nothing else",
+        SEEDED_WAITING_QUESTION in page
+        and SEEDED_SIGNED_IN_QUESTION in page
+        and SEEDED_QUESTION not in page,
+        failures,
+    )
+    _check(
+        "each row says how to reach the shopper",
+        "left an email" in page and "signed in to your shop" in page,
+        failures,
+    )
+    _check("no address is on the list", SEEDED_SHOPPER_EMAIL not in page, failures)
+
+    await browser.goto(f"{base}/conversations/{seeded['waiting_conversation']}")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    mailto = await browser.evaluate(
+        "(document.querySelector('[data-answer-by-email]') || {}).href || ''"
+    )
+    _check(
+        "a waiting chat opens with the box at the top",
+        "This shopper is waiting for an answer" in page and SEEDED_SHOPPER_EMAIL in page,
+        failures,
+    )
+    _check(
+        "Answer by email opens the team member's own email app, filled in",
+        mailto.startswith(f"mailto:{SEEDED_SHOPPER_EMAIL}?subject=Your%20question%20to%20")
+        and "You%20asked%20us%20in%20the%20chat%20on%20our%20website" in mailto
+        and "console-check%20tea" in mailto,
+        failures,
+    )
+    _check(
+        "the chat says where the shopper left their email, without it",
+        "The shopper left their email for an answer" in page,
+        failures,
+    )
+
+    await browser.goto(f"{base}/conversations/{seeded['signed_in_conversation']}")
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    _check(
+        "a signed-in shopper the shop cannot give is named, to find in the shop's admin",
+        f"Find customer {SEEDED_CUSTOMER} in your shop's admin" in page
+        and not await browser.evaluate("!!document.querySelector('[data-answer-by-email]')"),
+        failures,
+    )
+
+    await browser.goto(base)
+    await asyncio.sleep(3)
+    page = await browser.evaluate("document.body.innerText")
+    links = await browser.evaluate(
+        "[...document.querySelectorAll('a')].filter((a) => a.textContent.trim() === 'Answer them')"
+        ".map((a) => a.getAttribute('href'))"
+    )
+    _check(
+        "Home says first who is waiting, and opens them",
+        "shoppers are waiting for an answer" in page
+        and f"/console/{tenant}/conversations?state=waiting" in (links or []),
+        failures,
+    )
+
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
+    )
+    try:
+        await browser.goto(f"{base}/conversations/{seeded['waiting_conversation']}")
+        await asyncio.sleep(3)
+        _check(
+            "on a phone a waiting chat does not scroll sideways",
+            await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+        heights = await browser.evaluate(
+            "[...document.querySelectorAll('[data-waiting-box] a, [data-waiting-box] button')]"
+            ".map((b) => b.getBoundingClientRect().height)"
+        )
+        _check(
+            "and its buttons are 44px high",
+            bool(heights) and all(height >= 44 for height in heights),
+            failures,
+        )
+        dot = await browser.evaluate("!!document.querySelector('[data-waiting-dot]')")
+        _check("the phone's menu button carries a dot while someone waits", dot, failures)
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
+    # Last, because it changes what waits: Mark as answered asks first.
+    await browser.goto(f"{base}/conversations/{seeded['waiting_conversation']}")
+    await asyncio.sleep(3)
+    await browser.evaluate(
+        "(document.querySelector('[data-mark-answered]') || { click() {} }).click() || true"
+    )
+    await asyncio.sleep(1)
+    asked = await browser.evaluate("document.body.innerText")
+    _check(
+        "Mark as answered asks first, and says the email goes",
+        "Mark as answered?" in asked and "We delete the shopper's email" in asked,
+        failures,
+    )
+    await browser.evaluate(
+        "(document.querySelector('[data-confirm-answered]') || { click() {} }).click() || true"
+    )
+    await asyncio.sleep(3)
+    done = await browser.evaluate("document.body.innerText")
+    async with db.tenant_session(tenant) as session:
+        row = await WaitingAnswerRepository(session).get(tenant, seeded["waiting_conversation"])
+    _check(
+        "then it says who answered, and the address is gone from the database",
+        "The shopper's email is deleted." in done
+        and row is not None
+        and row.email is None
+        and row.answered_at is not None,
+        failures,
+    )
+    menu = await browser.evaluate(
+        "(document.querySelector('[data-waiting-count]') || {}).innerText || ''"
+    )
+    _check("and the menu's count drops by one", menu.strip() == "1", failures)
 
 
 async def _check_shop_and_usage(
@@ -1188,8 +1372,8 @@ async def _check_contact(
         )
         _check(
             "the screen shows the sentence a handed-over shopper reads, with them",
-            sentence == "I can't help with this here. Please contact our store: "
-            "hello@yourshop.example, +94 11 234 5678.",
+            sentence == "I can't answer this here. Leave your email so our store can answer you.\n"
+            "Or contact our store: hello@yourshop.example, +94 11 234 5678.",
             failures,
         )
 
@@ -2207,6 +2391,38 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
                 latency_ms=1180,
             )
         )
+        # ADR-0062: two handed-over shoppers waiting for an answer, one who left
+        # an email in the chat box and one who was signed in. The shop's store
+        # is a placeholder, so the signed-in one shows the customer's id.
+        made["waiting_conversation"] = ids.new_id(ids.CONVERSATION)
+        made["signed_in_conversation"] = ids.new_id(ids.CONVERSATION)
+        await conversations.start(
+            tenant_id, conversation_id=made["waiting_conversation"], agent_key="care"
+        )
+        await conversations.append_turn(
+            tenant_id,
+            made["waiting_conversation"],
+            shopper=SEEDED_WAITING_QUESTION,
+            reply=SEEDED_ASK,
+            state=ConversationState.ESCALATED,
+        )
+        await conversations.start(
+            tenant_id,
+            conversation_id=made["signed_in_conversation"],
+            agent_key="care",
+            customer_external_id=SEEDED_CUSTOMER,
+        )
+        await conversations.append_turn(
+            tenant_id,
+            made["signed_in_conversation"],
+            shopper=SEEDED_SIGNED_IN_QUESTION,
+            reply=SEEDED_WITH_STORE,
+            state=ConversationState.ESCALATED,
+        )
+        waiting = WaitingAnswerRepository(session)
+        await waiting.leave_email(tenant_id, made["waiting_conversation"], SEEDED_SHOPPER_EMAIL)
+        await waiting.wait_for_customer(tenant_id, made["signed_in_conversation"])
+
         made["declined"] = await shadow.record(
             ShadowTurn(
                 tenant_id=tenant_id,
@@ -2274,7 +2490,15 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
         await session.execute(
             delete(document_chunks).where(document_chunks.c.id == seeded["chunk"])
         )
-        threads = [seeded["conversation"], seeded["answered_conversation"]]
+        threads = [
+            seeded["conversation"],
+            seeded["answered_conversation"],
+            seeded["waiting_conversation"],
+            seeded["signed_in_conversation"],
+        ]
+        await session.execute(
+            delete(waiting_answers).where(waiting_answers.c.conversation_id.in_(threads))
+        )
         await session.execute(
             delete(conversation_messages).where(
                 conversation_messages.c.conversation_id.in_(threads)
@@ -2324,6 +2548,928 @@ async def _unseed_shop(db: Database, seeded: dict[str, str]) -> None:
             .where(tenant_usage.c.usage_date == today())
             .where(tenant_usage.c.agent_key == SEEDED_AGENT)
         )
+
+
+async def _check_people_and_roles(
+    browser: Chrome, console: str, seeded: dict[str, str], owner: str, failures: list[str]
+) -> None:
+    """People, and what Support and the Developer see (ADR-0058, console.md §3.8).
+
+    Two made-up people are invited **in the database** (`PeopleRepository`), so
+    this check never sends an email, whatever mail server the API has. Their
+    links are opened in two more browsers, each its own person, on desktop and
+    phone. The Owner then changes a role and removes both on the People screen,
+    and every row this made is removed by its email afterwards. The invite
+    *form* is held by `tests/integration/test_console_people.py`, through the API.
+    """
+    from neura_core.identity.people import PeopleRepository
+    from neura_core.identity.schema import login_tokens, membership_invites, memberships, users
+
+    tenant = seeded["tenant"]
+    base = f"{console}/console/{tenant}"
+    suffix = ids.new_id(ids.USER).lower()
+    support_email = f"people-check-support-{suffix}@example.com"
+    developer_email = f"people-check-developer-{suffix}@example.com"
+    db = Database.from_settings()
+
+    async def menu(page: Chrome) -> list[str]:
+        return list(
+            await page.evaluate(
+                "[...document.querySelectorAll('nav[aria-label=Screens] a')]"
+                ".map(a => a.innerText.trim().split('\\n')[0])"
+            )
+        )
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def opened(page: Chrome, url: str, wait: float = 3) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    try:
+        # Desktop first: an earlier section may have left the window at phone
+        # size, where the menu is folded away and the switcher is not read.
+        await phone(browser, False)
+        page = await opened(browser, f"{base}/people")
+        _check("Owner: People is in the menu", "People" in await menu(browser), failures)
+        _check("Owner: the switcher says You're the Owner", "You're the Owner" in page, failures)
+        _check(
+            "Owner: People says who can open the dashboard",
+            "Who can open" in page and "What each role can do" in page,
+            failures,
+        )
+
+        links: dict[str, str] = {}
+        async with db.tenant_session(tenant) as session:
+            people = PeopleRepository(session)
+            for role, email in (("support", support_email), ("developer", developer_email)):
+                sent = await people.invite(
+                    tenant, email=email, role=role, by=owner, console_base_url=console
+                )
+                links[role] = sent.url
+        page = await opened(browser, f"{base}/people")
+        _check(
+            "Owner: two invites wait, each with Send again and Cancel",
+            page.count("Waiting · the link works until") == 2 and page.count("Send again") == 2,
+            failures,
+        )
+
+        async with Chrome(find_chrome()) as support:
+            await phone(support, False)
+            page = await opened(support, links["support"], wait=4)
+            _check(
+                "Support: the link lands in the shop",
+                await support.evaluate("location.pathname") == f"/console/{tenant}",
+                failures,
+            )
+            _check(
+                "Support: the menu is Home, Review, Conversations, Help",
+                await menu(support) == ["Home", "Review", "Conversations", "Help"],
+                failures,
+            )
+            _check(
+                "Support: Home says the mode, with no Go live and no 7 days",
+                ("Practice mode is on" in page or "Your assistant is live" in page)
+                and "Go live" not in page
+                and "Last 7 days" not in page,
+                failures,
+            )
+            page = await opened(support, f"{base}/usage")
+            _check(
+                "Support: Usage says You can't open this page, the role and what it lacks",
+                "You can't open this page" in page
+                and "is Support, which doesn't include Usage and cost" in page,
+                failures,
+            )
+            page = await opened(support, f"{base}/people")
+            _check("Support: People is refused too", "You can't open this page" in page, failures)
+            # The link works once. Opened again by someone who joined, it sends
+            # them to sign in, not back to the owner (G96).
+            page = await opened(support, links["support"], wait=4)
+            _check(
+                "Support: the used link says to sign in, with a Sign in button",
+                "If you already joined, sign in" in page
+                and bool(
+                    await support.evaluate("!!document.querySelector('[data-invite-sign-in]')")
+                ),
+                failures,
+            )
+            await phone(support, True)
+            await opened(support, base)
+            _check(
+                "Support: Home on a phone does not scroll sideways", await fits(support), failures
+            )
+
+        async with Chrome(find_chrome()) as developer:
+            await phone(developer, False)
+            page = await opened(developer, links["developer"], wait=4)
+            _check(
+                "Developer: the menu is Home, Shop connection, Help",
+                await menu(developer) == ["Home", "Shop connection", "Help"],
+                failures,
+            )
+            _check(
+                "Developer: Home has no Go live and no Review count",
+                "Go live" not in page and "waiting for your review" not in page,
+                failures,
+            )
+            page = await opened(developer, f"{base}/conversations")
+            _check(
+                "Developer: shoppers' chats are refused, with a way to Shop connection",
+                "is Developer, which doesn't include shoppers' chats" in page
+                and "Go to Shop connection" in page,
+                failures,
+            )
+            page = await opened(developer, f"{base}/shops", wait=4)
+            _check(
+                "Developer: Shop connection opens, the same page as the Owner's",
+                "You can't open this page" not in page and "Your shop's contact details" in page,
+                failures,
+            )
+            await phone(developer, True)
+            await opened(developer, f"{base}/conversations")
+            _check(
+                "Developer: the refusal on a phone does not scroll sideways",
+                await fits(developer),
+                failures,
+            )
+
+        async with db.identity_session() as session:
+            made = {
+                str(row.email): str(row.id)
+                for row in (
+                    await session.execute(
+                        select(users.c.id, users.c.email).where(
+                            users.c.email.in_([support_email, developer_email])
+                        )
+                    )
+                ).all()
+            }
+        page = await opened(browser, f"{base}/people")
+        _check("Owner: both people joined", page.count("Joined") == 2, failures)
+
+        # A role changed on the screen, then read back from the server.
+        await browser.evaluate(
+            f"""(() => {{
+              const box = document.querySelector('[data-role-of="{made[support_email]}"]');
+              Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
+                .set.call(box, 'developer');
+              box.dispatchEvent(new Event('change', {{ bubbles: true }}));
+              return true;
+            }})()"""
+        )
+        await asyncio.sleep(2.5)
+        async with db.tenant_session(tenant) as session:
+            changed = await session.scalar(
+                select(memberships.c.role).where(
+                    memberships.c.tenant_id == tenant,
+                    memberships.c.user_id == made[support_email],
+                    memberships.c.revoked_at.is_(None),
+                )
+            )
+        _check("Owner: a role changed on the screen is saved", changed == "developer", failures)
+
+        await phone(browser, True)
+        await opened(browser, f"{base}/people")
+        _check("Owner: People on a phone does not scroll sideways", await fits(browser), failures)
+        await phone(browser, False)
+        await opened(browser, f"{base}/people")
+
+        for email in (support_email, developer_email):
+            await browser.evaluate(
+                f"document.querySelector('[data-remove=\"{made[email]}\"]').click(), true"
+            )
+            await asyncio.sleep(0.6)
+            asked = str(await browser.evaluate("document.body.innerText"))
+            _check(
+                "Owner: Remove asks first",
+                "can't open this shop's dashboard from the next click" in asked,
+                failures,
+            )
+            await browser.evaluate("document.querySelector('[data-confirm-remove]').click(), true")
+            await asyncio.sleep(2.5)
+        page = str(await browser.evaluate("document.body.innerText"))
+        _check("Owner: after removing both, nobody else is listed", "Joined" not in page, failures)
+    finally:
+        async with db.identity_session() as session:
+            gone = list(
+                (
+                    await session.execute(
+                        select(users.c.id).where(
+                            users.c.email.in_([support_email, developer_email])
+                        )
+                    )
+                ).scalars()
+            )
+        async with db.tenant_session(tenant) as session:
+            await session.execute(delete(memberships).where(memberships.c.user_id.in_(gone)))
+            await session.execute(
+                delete(membership_invites).where(
+                    membership_invites.c.email.in_([support_email, developer_email])
+                )
+            )
+        async with db.identity_session() as session:
+            await session.execute(delete(login_tokens).where(login_tokens.c.user_id.in_(gone)))
+            await session.execute(delete(users).where(users.c.id.in_(gone)))
+        await db.dispose()
+
+
+async def _check_sign_up(console: str, failures: list[str]) -> None:
+    """Create an account, the waiting screen and approval (ADR-0058 §7, boards 42 to 45).
+
+    In its own browser, signed out, as a new shop owner. The form is sent once
+    with a website that is not one, which the API refuses before anything is
+    stored or mailed; the request itself is then made **in the database**
+    (`request_sign_up`), so this check never sends an email, whatever mail
+    server the API has. The link is opened as the new owner would, the waiting
+    screen read on desktop and phone, the shop approved in the database (no
+    email), and Home must then open. Afterwards the shop is removed as
+    `make tenant-refuse` removes one, and the account by its email.
+    """
+    from widget_check import deprovision
+
+    from neura_core.identity.schema import login_tokens, sign_up_requests, users
+    from neura_core.identity.sign_up import approve_shop, request_sign_up
+
+    email = f"sign-up-check-{ids.new_id(ids.USER).lower()}@example.com"
+    shop = "Sign Up Check Shop"
+    db = Database.from_settings()
+    tenant = ""
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def opened(page: Chrome, url: str, wait: float = 3) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def type_into(page: Chrome, selector: str, value: str) -> None:
+        await page.evaluate(
+            f"""(() => {{
+              const el = document.querySelector('{selector}');
+              const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              set.call(el, {value!r});
+              el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              return true;
+            }})()"""
+        )
+
+    async def menu(page: Chrome) -> int:
+        return int(
+            await page.evaluate("document.querySelectorAll('nav[aria-label=Screens] a').length")
+        )
+
+    try:
+        async with Chrome(find_chrome()) as page:
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/")
+                _check(
+                    f"Sign in offers New to NEURA? Create an account ({size})",
+                    "New to NEURA?" in shown and "Create an account" in shown,
+                    failures,
+                )
+                await page.evaluate("document.querySelector('[data-create-account]').click(), true")
+                await asyncio.sleep(2.5)
+                shown = str(await page.evaluate("document.body.innerText"))
+                _check(
+                    f"Create an account opens from Sign in ({size})",
+                    await page.evaluate("location.pathname") == "/sign-up"
+                    and "Tell us about your shop" in shown,
+                    failures,
+                )
+                _check(
+                    f"it asks for the email, the shop's name and its website ({size})",
+                    all(
+                        words in shown
+                        for words in (
+                            "Your email address",
+                            "Your shop's name",
+                            "Your shop's website",
+                            "Create my account",
+                            "FiveNeurals looks at every new shop before its assistant starts.",
+                            "Already have an account?",
+                        )
+                    ),
+                    failures,
+                )
+                _check(f"Create an account fits the screen ({size})", await fits(page), failures)
+
+            await phone(page, False)
+            await opened(page, f"{console}/sign-up")
+            await type_into(page, "#email", email)
+            await type_into(page, "#shop-name", shop)
+            await type_into(page, "#website", "not a site")
+            await page.evaluate("document.querySelector('form button[type=submit]').click(), true")
+            await asyncio.sleep(2.5)
+            shown = str(await page.evaluate("document.body.innerText"))
+            _check(
+                "a website that is not one is refused in plain words, nothing sent",
+                "Enter your shop's website, like yourshop.com." in shown
+                and "Check your email" not in shown,
+                failures,
+            )
+
+            async with db.identity_session() as session:
+                link = await request_sign_up(
+                    session,
+                    email=email,
+                    name=shop,
+                    website="sign-up-check.example.com",
+                    console_base_url=console,
+                )
+            await opened(page, link.url, wait=5)
+            path = str(await page.evaluate("location.pathname"))
+            tenant = path.split("/")[2] if path.startswith("/console/tn_") else ""
+            _check("the link signs the new owner in and opens their shop", bool(tenant), failures)
+            if not tenant:
+                return
+
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/console/{tenant}")
+                _check(
+                    f"the waiting screen: the shop waits, we'll email them ({size})",
+                    f"{shop} is waiting for approval" in shown
+                    and email in shown
+                    and "Until then nothing runs and nothing costs anything." in shown,
+                    failures,
+                )
+                _check(
+                    f"it offers the owner guide and Sign out, no menu, no Your shops ({size})",
+                    "While you wait: the guide for shop owners" in shown
+                    and "Sign out" in shown
+                    and "Your shops" not in shown
+                    and await menu(page) == 0,
+                    failures,
+                )
+                _check(f"the waiting screen fits the screen ({size})", await fits(page), failures)
+
+            await phone(page, False)
+            shown = await opened(page, f"{console}/console/{tenant}/conversations")
+            _check(
+                "a typed address to another screen still shows the waiting screen",
+                "is waiting for approval" in shown and await menu(page) == 0,
+                failures,
+            )
+            shown = await opened(page, f"{console}/console")
+            _check(
+                "Your shops says Waiting for approval", "Waiting for approval" in shown, failures
+            )
+
+            async with db.tenant_session(tenant) as session:
+                await approve_shop(session, tenant, agents=["care"])
+            shown = await opened(page, f"{console}/console/{tenant}")
+            _check(
+                "once approved, Home opens with the Owner's menu",
+                "is waiting for approval" not in shown
+                and "You're the Owner" in shown
+                and await menu(page) > 0,
+                failures,
+            )
+
+            shown = await opened(page, link.url, wait=4)
+            _check(
+                "a used sign-up link says so, with Sign in and Create an account",
+                "work once" in shown and "Sign in" in shown and "Create an account" in shown,
+                failures,
+            )
+    finally:
+        if tenant:
+            await deprovision(tenant)
+        async with db.identity_session() as session:
+            gone = list(
+                (await session.execute(select(users.c.id).where(users.c.email == email))).scalars()
+            )
+            await session.execute(delete(sign_up_requests).where(sign_up_requests.c.email == email))
+            await session.execute(delete(login_tokens).where(login_tokens.c.user_id.in_(gone)))
+            await session.execute(delete(users).where(users.c.id.in_(gone)))
+        await db.dispose()
+
+
+async def _check_admin(console: str, email: str, failures: list[str]) -> None:
+    """The FiveNeurals admin dashboard (ADR-0061, boards 46 to 49), in its own browser.
+
+    The check's own person is not an admin at first: Your shops shows no *Admin*
+    link and `/admin` says *No such page*. Then they are made one in the
+    database, and two shops waiting for approval are made **with no owner**, so
+    approving and refusing them on the screen can never send an email, whatever
+    mail server the API has. One is approved and one refused on the screen, on
+    desktop; Shops and AI use and cost are read on desktop and phone; a live shop
+    with GROW has its night check turned off and on again on the screen (ADR-0065,
+    boards 61 and 63), on desktop and phone; an admin sign-in older than 12 hours
+    is shown *Sign in again*. Afterwards the person
+    is taken off the admin list and every shop this made is removed.
+    """
+    from sqlalchemy import text as sql
+
+    from neura_core.identity import COOKIE_NAME as SESSION
+    from neura_core.identity import issue
+    from neura_core.identity.admins import add_admin
+    from neura_core.tenancy import TenantConfig, TenantRepository, TenantStatus, TurnMode
+    from neura_core.tenancy.removal import remove_tenant
+    from neura_core.tenancy.switches import SwitchRepository
+
+    db = Database.from_settings()
+    suffix = ids.new_id(ids.USER).lower()[-8:]
+    approve_name, refuse_name = f"Admin Check Approve {suffix}", f"Admin Check Refuse {suffix}"
+    switch_name = f"Admin Check Switch {suffix}"
+    made: list[str] = []
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def opened(page: Chrome, url: str, wait: float = 3) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def click(page: Chrome, selector: str, wait: float = 2.5) -> str:
+        await page.evaluate(f"document.querySelector('{selector}').click(), true")
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def waiting_shop(name: str) -> str:
+        tenant_id = ids.new_id(ids.TENANT)
+        async with db.tenant_session(tenant_id) as session:
+            await TenantRepository(session).create(
+                tenant_id=tenant_id,
+                name=name,
+                status=TenantStatus.WAITING,
+                website="admin-check.example.com",
+                config=TenantConfig(mode=TurnMode.SHADOW),
+            )
+        made.append(tenant_id)
+        return tenant_id
+
+    try:
+        async with db.identity_session() as session:
+            minted = await request_sign_in_link(session, email=email, console_base_url=console)
+        user = minted.user_id
+        async with Chrome(find_chrome()) as page:
+            await phone(page, False)
+            await opened(page, minted.url, wait=4)
+            shown = await opened(page, f"{console}/console")
+            _check(
+                "not an admin: Your shops has no Admin link",
+                "Your shops" in shown
+                and not await page.evaluate("!!document.querySelector('[data-admin-link]')"),
+                failures,
+            )
+            shown = await opened(page, f"{console}/admin")
+            _check("not an admin: /admin says No such page", "No such page" in shown, failures)
+
+            async with db.identity_session() as session:
+                await add_admin(session, email=email)
+            approve_id = await waiting_shop(approve_name)
+            refuse_id = await waiting_shop(refuse_name)
+
+            shown = await opened(page, f"{console}/console")
+            _check(
+                "an admin: Your shops has the Admin link",
+                bool(await page.evaluate("!!document.querySelector('[data-admin-link]')")),
+                failures,
+            )
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/admin")
+                _check(
+                    f"Shops: the waiting shops first, then every shop ({size})",
+                    "Waiting for approval ·" in shown
+                    and approve_name in shown
+                    and "Look and decide" in shown
+                    and "All shops ·" in shown
+                    and "no shopper's chat or details" in shown,
+                    failures,
+                )
+                _check(f"Shops fits the screen ({size})", await fits(page), failures)
+            await phone(page, False)
+            shown = str(await page.evaluate("document.body.innerText"))
+            _check(
+                "the side menu: FiveNeurals admin, Shops, AI use and cost",
+                "FiveNeurals admin" in shown
+                and "You're an admin" in shown
+                and "AI use and cost" in shown,
+                failures,
+            )
+
+            shown = await opened(page, f"{console}/admin/shops/{approve_id}")
+            _check(
+                "a waiting shop: its facts, CARE ticked, SELL not",
+                "Look at the website before you decide" in shown
+                and bool(
+                    await page.evaluate("document.querySelector('[data-assistant=care]').checked")
+                )
+                and not await page.evaluate(
+                    "document.querySelector('[data-assistant=sell]').checked"
+                ),
+                failures,
+            )
+            shown = await click(page, "[data-refuse]", wait=1.5)
+            _check(
+                "Refuse asks first, and says it can't be undone",
+                f"Refuse {approve_name}?" in shown and "can't be undone" in shown,
+                failures,
+            )
+            await page.evaluate(
+                "[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Keep waiting').click(), true"
+            )
+            await asyncio.sleep(1)
+            shown = await click(page, "[data-approve]", wait=4)
+            async with db.tenant_session(approve_id) as session:
+                approved = await TenantRepository(session).get(approve_id)
+            _check(
+                "Approve: the shop is approved with NEURA-CARE, in practice mode",
+                f"{approve_name} is approved" in shown
+                and "With NEURA-CARE, in practice mode" in shown
+                and approved is not None
+                and approved.status is TenantStatus.ACTIVE
+                and approved.enabled_agents == frozenset({"care"}),
+                failures,
+            )
+
+            shown = await click(page, "[data-back-to-shops]", wait=4)
+            _check(
+                "Back to Shops: the approved shop no longer waits",
+                await page.evaluate("location.pathname") == "/admin"
+                and not await page.evaluate(
+                    f"!!document.querySelector('[data-waiting-shop=\"{approve_id}\"]')"
+                ),
+                failures,
+            )
+
+            await opened(page, f"{console}/admin/shops/{refuse_id}")
+            await click(page, "[data-refuse]", wait=1.5)
+            shown = await click(page, "[data-confirm-refuse]", wait=4)
+            async with db.tenant_session(refuse_id) as session:
+                refused = await TenantRepository(session).get(refuse_id)
+            _check(
+                "Refuse: the shop is refused and removed",
+                f"{refuse_name} is refused and removed" in shown and refused is None,
+                failures,
+            )
+
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/admin/usage?period=7d")
+                _check(
+                    f"AI use and cost: totals, by shop, why Not priced ({size})",
+                    "AI use and cost" in shown
+                    and "handed to a person" in shown
+                    and "By shop" in shown
+                    and 'Why "Not priced".' in shown,
+                    failures,
+                )
+                _check(f"AI use and cost fits the screen ({size})", await fits(page), failures)
+
+            # ADR-0065: a live shop with GROW, and no owner, so nothing is emailed.
+            switch_id = ids.new_id(ids.TENANT)
+            async with db.tenant_session(switch_id) as session:
+                await TenantRepository(session).create(
+                    tenant_id=switch_id, name=switch_name, enabled_agents=["care", "grow"]
+                )
+            made.append(switch_id)
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                shown = await opened(page, f"{console}/admin/shops/{switch_id}")
+                _check(
+                    f"a shop with GROW: its night check, On ({size})",
+                    "Switch a feature off" in shown
+                    and "Missing from your pages" in shown
+                    and "The night AI check" in shown
+                    and bool(await page.evaluate("!!document.querySelector('[data-switch-off]')")),
+                    failures,
+                )
+                shown = await click(page, "[data-switch-off]", wait=1.5)
+                _check(
+                    f"Turn off asks first, and says those chats are never read ({size})",
+                    f"Turn off the night check for {switch_name}?" in shown
+                    and "never read later" in shown
+                    and "can't turn it back on" in shown,
+                    failures,
+                )
+                _check(f"the shop page fits the screen ({size})", await fits(page), failures)
+                shown = await click(page, "[data-confirm-switch-off]", wait=3)
+                async with db.tenant_session(switch_id) as session:
+                    off = not await SwitchRepository(session).is_on(switch_id, "grow.gaps")
+                _check(
+                    f"Turn off: it is off, by you, and stored ({size})",
+                    "Off since" in shown and "by you" in shown and off,
+                    failures,
+                )
+                shown = await click(page, "[data-switch-on]", wait=3)
+                async with db.tenant_session(switch_id) as session:
+                    back = await SwitchRepository(session).is_on(switch_id, "grow.gaps")
+                _check(
+                    f"Turn on: on again, from now on ({size})",
+                    "On again since" in shown and "from now on" in shown and back,
+                    failures,
+                )
+            shown = await opened(page, f"{console}/admin/shops/{approve_id}")
+            _check(
+                "a shop without GROW has no switch",
+                "Switch a feature off" not in shown,
+                failures,
+            )
+
+            await phone(page, False)
+            old = issue(
+                user, get_settings().secret_key, now=datetime.now(UTC) - timedelta(hours=13)
+            )
+            await page.call(
+                "Network.setCookie",
+                name=SESSION,
+                value=old,
+                url=console,
+                path="/",
+                secure=True,
+                httpOnly=True,
+            )
+            shown = await opened(page, f"{console}/admin")
+            _check(
+                "an admin signed in 13 hours ago is asked to sign in again",
+                "Sign in again" in shown and "last 12 hours" in shown,
+                failures,
+            )
+    finally:
+        for tenant_id in made:
+            async with db.tenant_session(tenant_id) as session:
+                await remove_tenant(session, tenant_id)
+        engine = create_async_engine(str(get_settings().database_migration_url))
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    sql(
+                        "DELETE FROM platform_admins WHERE user_id IN "
+                        "(SELECT id FROM users WHERE email = :e)"
+                    ),
+                    {"e": email},
+                )
+        finally:
+            await engine.dispose()
+        await db.dispose()
+
+
+async def _check_gaps(
+    browser: Chrome,
+    console: str,
+    db: Database,
+    user_id: str,
+    seeded: dict[str, str],
+    failures: list[str],
+) -> None:
+    """*Missing from your pages* (ADR-0064, console.md §3.11, boards 57 to 62).
+
+    In **a shop of its own** with NEURA-GROW, where this person is the Owner, so
+    nothing real is touched: two products and their questions are seeded (one
+    asked by 3 shoppers, one by 2, one by only 1, which must not show; one about
+    the shop). Checked on desktop and phone: the menu item, the rows, *Open the
+    page*, *See the chats* narrowing Conversations, *I added it*, Home's line and
+    the *Paused* note (ADR-0065). The first shop, which has no GROW, must not
+    list the page. Everything made here is removed at the end.
+    """
+    from neura_agent_core.gaps import GapKind, PageGap, PageGapRepository
+    from neura_core.identity.schema import memberships
+    from neura_core.tenancy import TenantRepository
+    from neura_core.tenancy.removal import remove_tenant
+    from neura_core.tenancy.switches import SwitchRepository
+
+    tenant = ids.new_id(ids.TENANT)
+    base = f"{console}/console/{tenant}"
+    shop_name = f"Gaps Check {tenant[-6:].lower()}"
+
+    async def ask(product: str | None, fact: str, question: str, hours: int) -> None:
+        conversation = ids.new_id(ids.CONVERSATION)
+        async with db.tenant_session(tenant) as session:
+            repository = ConversationRepository(session)
+            await repository.start(tenant, conversation_id=conversation, agent_key="care")
+            await repository.append_turn(
+                tenant,
+                conversation,
+                shopper=question,
+                reply="I can't confirm that.",
+                state=ConversationState.RESOLVED,
+            )
+            await PageGapRepository(session).record(
+                tenant,
+                PageGap(
+                    conversation_id=conversation,
+                    message_id=f"msg_{conversation}",
+                    kind=GapKind.HALF_ANSWERED,
+                    product_id=product,
+                    fact=fact,
+                    question=question,
+                    asked_at=datetime.now(UTC) - timedelta(hours=hours),
+                ),
+            )
+
+    async def phone(on: bool) -> None:
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def shown(url: str, wait: float = 3.5) -> str:
+        await browser.goto(url)
+        await asyncio.sleep(wait)
+        return str(await browser.evaluate("document.body.innerText"))
+
+    try:
+        async with db.tenant_session(tenant) as session:
+            await TenantRepository(session).create(
+                tenant_id=tenant, name=shop_name, enabled_agents=["care", "grow"]
+            )
+            await session.execute(
+                memberships.insert().values(
+                    id=ids.new_id(ids.MEMBERSHIP), tenant_id=tenant, user_id=user_id, role="owner"
+                )
+            )
+            for product, title in (("5", "Gaps Check Green Tea"), ("4", "Gaps Check Black Tea")):
+                await session.execute(
+                    synced_entities.insert().values(
+                        tenant_id=tenant,
+                        platform="generic",
+                        entity_type="product",
+                        external_id=product,
+                        neura_id=f"nr_{product}",
+                        fingerprint="f" * 32,
+                        document={"title": title, "url": f"http://shop.example/product/{product}"},
+                    )
+                )
+        for hours in (2, 3, 4):
+            await ask("5", "organic", "Is it organic?", hours)
+        for hours in (5, 6):
+            await ask("4", "caffeine", "How much caffeine?", hours)
+        await ask("5", "cups per pack", "How many cups per pack?", 1)
+        for hours in (7, 8):
+            await ask(None, "cash on delivery", "Can I pay cash on delivery?", hours)
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(on)
+            page = await shown(f"{base}/gaps")
+            _check(
+                f"the page: heading, count line, products, About your shop ({size})",
+                "Missing from your pages" in page
+                and "3 things" in page
+                and "in 3 groups" in page
+                and "Gaps Check Green Tea" in page
+                and "About your shop" in page
+                and "Is it organic?" in page
+                and "Asked by 3 shoppers" in page,
+                failures,
+            )
+            _check(
+                f"a question only 1 shopper asked is not shown ({size})",
+                "How many cups per pack?" not in page,
+                failures,
+            )
+            _check(
+                f"Open the page goes to the shop's own page, in a new tab ({size})",
+                bool(
+                    await browser.evaluate(
+                        "!![...document.querySelectorAll('a[target=_blank]')]"
+                        ".find(a => a.href === 'http://shop.example/product/5')"
+                    )
+                ),
+                failures,
+            )
+            _check(
+                f"GROW never writes the answer; the page says where to add it ({size})",
+                "Add the answer to its description in your shop." in page
+                and "Only you know the answers" in page,
+                failures,
+            )
+            _check(
+                f"the page fits the screen ({size})",
+                bool(
+                    await browser.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth + 1"
+                    )
+                ),
+                failures,
+            )
+        await phone(False)
+
+        menu = await browser.evaluate(
+            "[...document.querySelectorAll('nav a')].some(a => a.innerText.trim() === "
+            "'Missing from your pages')"
+        )
+        _check("the menu lists Missing from your pages for a shop with GROW", bool(menu), failures)
+
+        home = await shown(base)
+        _check(
+            "Home's Needs you: the page's count, with See them",
+            "things shoppers asked that your pages don't say" in home
+            and bool(
+                await browser.evaluate(
+                    f"!!document.querySelector('a[href=\"/console/{tenant}/gaps\"]')"
+                )
+            ),
+            failures,
+        )
+
+        await shown(f"{base}/gaps")
+        await browser.evaluate(
+            "document.querySelector('[data-gap=\"5|organic\"] [data-see-chats]').click(), true"
+        )
+        await asyncio.sleep(3.5)
+        listed = str(await browser.evaluate("document.body.innerText"))
+        rows = await browser.evaluate(
+            "document.querySelectorAll('ul a[href*=\"/conversations/\"]').length"
+        )
+        _check(
+            "See the chats: Conversations shows exactly the 3 chats behind the row",
+            rows == 3 and "Is it organic?" in listed,
+            failures,
+        )
+
+        await shown(f"{base}/gaps")
+        await browser.evaluate(
+            "document.querySelector('[data-gap=\"5|organic\"] [data-added]').click(), true"
+        )
+        await asyncio.sleep(2.5)
+        after = str(await browser.evaluate("document.body.innerText"))
+        _check(
+            "I added it: the row says it leaves the list",
+            "Marked as added." in after and "comes back here" in after,
+            failures,
+        )
+        again = await shown(f"{base}/gaps")
+        _check(
+            "I added it: after a reload the question is gone",
+            "Is it organic?" not in again and "2 things" in again,
+            failures,
+        )
+
+        async with db.tenant_session(tenant) as session:
+            await SwitchRepository(session).set(tenant, "grow.gaps", on=False, by=user_id)
+        paused = await shown(f"{base}/gaps")
+        _check(
+            "Paused: the note says FiveNeurals paused it, and the rows stay",
+            "Paused since" in paused
+            and "FiveNeurals has paused the check" in paused
+            and "How much caffeine?" in paused,
+            failures,
+        )
+
+        if seeded.get("tenant"):
+            await shown(f"{console}/console/{seeded['tenant']}")
+            _check(
+                "a shop without GROW does not list the page",
+                not await browser.evaluate(
+                    "[...document.querySelectorAll('nav a')].some(a => a.innerText.trim() === "
+                    "'Missing from your pages')"
+                ),
+                failures,
+            )
+    finally:
+        async with db.tenant_session(tenant) as session:
+            await remove_tenant(session, tenant)
 
 
 def _check(what: str, passed: bool, failures: list[str]) -> None:

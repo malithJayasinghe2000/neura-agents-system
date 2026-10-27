@@ -49,6 +49,7 @@ class TenantRepository:
         enabled_agents: Sequence[str] = (),
         config: TenantConfig | None = None,
         status: TenantStatus = TenantStatus.ACTIVE,
+        website: str | None = None,
     ) -> Tenant:
         """Create a tenant.
 
@@ -67,6 +68,7 @@ class TenantRepository:
                 status=status.value,
                 enabled_agents=sorted(set(enabled_agents)),
                 config=_config_to_jsonb(settings),
+                website=website,
             )
         )
         created = await self.get(new_tenant_id)
@@ -207,6 +209,18 @@ class ApiKeyRepository:
                     f"anyone can read it in the page; not {', '.join(refused)}. Use a "
                     "secret key on a server for these.",
                 )
+
+        status = await self._session.scalar(
+            select(tenants.c.status).where(tenants.c.tenant_id == tenant_id)
+        )
+        if status == TenantStatus.WAITING.value:
+            # ADR-0058 §7: a shop waiting for approval holds no key, so nothing
+            # can reach its AI before FiveNeurals has looked at it. Keys are
+            # refused at use too (`is_servable`); this stops one being made.
+            raise ConfigurationError(
+                "this shop is waiting for approval, so it may hold no key. "
+                "Approve it first: make tenant-approve TENANT=...",
+            )
 
         if OBSERVE_WRITE in scopes:
             await self._check_observer(tenant_id, kind)
@@ -357,8 +371,13 @@ class StoreConnectionRepository:
         platform: str,
         base_url: str,
         credentials: dict[str, str],
+        set_by: str | None = None,
     ) -> str:
-        """Store (or replace) one store connection. Returns its id."""
+        """Store (or replace) one store connection. Returns its id.
+
+        ``set_by``: the console user who made the token in ``credentials``, when a
+        person did (ADR-0058 §6).
+        """
         dek = generate_key()
         kek = self._require_kek()
         ciphertext = encrypt(json.dumps(credentials, sort_keys=True), dek, aad=tenant_id.encode())
@@ -370,6 +389,7 @@ class StoreConnectionRepository:
             base_url=base_url,
             credentials=ciphertext,
             wrapped_dek=wrap_dek(dek, kek, tenant_id=tenant_id),
+            credentials_set_by=set_by,
         )
         result = await self._session.execute(
             statement.on_conflict_do_update(
@@ -381,6 +401,7 @@ class StoreConnectionRepository:
                 set_={
                     "credentials": statement.excluded.credentials,
                     "wrapped_dek": statement.excluded.wrapped_dek,
+                    "credentials_set_by": statement.excluded.credentials_set_by,
                     "status": "active",
                     "updated_at": func.now(),
                 },
@@ -431,7 +452,12 @@ class StoreConnectionRepository:
         ]
 
     async def replace_credentials(
-        self, tenant_id: str, store_id: str, credentials: dict[str, str]
+        self,
+        tenant_id: str,
+        store_id: str,
+        credentials: dict[str, str],
+        *,
+        set_by: str | None = None,
     ) -> bool:
         """Seal new credentials over an existing connection. ``False`` if no such row.
 
@@ -449,6 +475,7 @@ class StoreConnectionRepository:
                     json.dumps(credentials, sort_keys=True), dek, aad=tenant_id.encode()
                 ),
                 wrapped_dek=wrap_dek(dek, kek, tenant_id=tenant_id),
+                credentials_set_by=set_by,
                 updated_at=func.now(),
             )
         )
@@ -462,6 +489,17 @@ class StoreConnectionRepository:
         value = (
             await self._session.execute(
                 select(tenant_stores.c.updated_at).where(
+                    tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id
+                )
+            )
+        ).scalar_one_or_none()
+        return value
+
+    async def credentials_set_by(self, tenant_id: str, store_id: str) -> str | None:
+        """Who made this connection's token, when a person did. Never the token."""
+        value: str | None = (
+            await self._session.execute(
+                select(tenant_stores.c.credentials_set_by).where(
                     tenant_stores.c.tenant_id == tenant_id, tenant_stores.c.id == store_id
                 )
             )
@@ -508,6 +546,7 @@ def _tenant_from_row(row: Any) -> Tenant:
         enabled_agents=frozenset(row.enabled_agents or ()),
         config=TenantConfig.model_validate(row.config or {}),
         dpa_signed_at=row.dpa_signed_at,
+        website=row.website,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

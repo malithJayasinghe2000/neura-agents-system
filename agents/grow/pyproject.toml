@@ -1,0 +1,35 @@
+[project]
+name = "neura-agent-grow"
+version = "0.1.0"
+description = "NEURA-GROW — the marketing agent; first surface: Missing from your pages (ADR-0064)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "neura-agent-core",
+    "neura-domain",
+    "neura-core",
+    "neura-llm",
+    "neura-commerce",
+    "neura-evals",
+]
+
+# Discovered like every agent, so FiveNeurals can tick GROW for a shop (R46) and
+# `neura-api` never learns its name. GROW is the first agent with no chat: its
+# manifest says `chat = False`, so it registers no runner and the API mounts no
+# chat routes for it (docs/agents/grow.md §2).
+[project.entry-points."neura.agents"]
+grow = "neura_agent_grow:MANIFEST"
+
+# How `make eval` measures the night check (Rule 4).
+[project.entry-points."neura.eval_targets"]
+grow = "neura_agent_grow.evals:build_target"
+
+# The night check (ADR-0064 §6), on ADR-0022's queue. Keyed by job kind.
+[project.entry-points."neura.job_handlers"]
+grow = "neura_agent_grow.jobs:build_handlers"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neura_agent_grow"]

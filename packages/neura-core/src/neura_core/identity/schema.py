@@ -1,4 +1,4 @@
-"""The three tables a *person* is made of. ADR-0026.
+"""The tables a *person* is made of. ADR-0026, ADR-0058.
 
 Every other table in this system describes a machine or a merchant. These
 describe a human being, and they are the first ones to do so — which is why the
@@ -49,6 +49,7 @@ tenant would be an access grant nobody could withdraw.
 from __future__ import annotations
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     DateTime,
     Index,
@@ -56,14 +57,22 @@ from sqlalchemy import (
     Table,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import CITEXT
 
 from neura_core.db import metadata
+from neura_core.identity.roles import Role
 
 USERS = "users"
 MEMBERSHIPS = "memberships"
 LOGIN_TOKENS = "login_tokens"
+MEMBERSHIP_INVITES = "membership_invites"
+SIGN_UP_REQUESTS = "sign_up_requests"
+PLATFORM_ADMINS = "platform_admins"
+
+#: The roles a membership or an invite may name, for the database's own check.
+_ROLES = ", ".join(repr(role.value) for role in Role)
 
 
 #: One human. Not one merchant, and not one login — a person who owns two shops
@@ -91,11 +100,12 @@ users = Table(
 #: tenant's data**, and therefore the table that actually carries the
 #: authorisation decision.
 #:
-#: ``role`` exists with exactly one value, ``owner`` (ADR-0026 §5). A permission
-#: model is not invented before a merchant has asked for one — the column is
-#: here so that adding a second role later is a migration rather than a
-#: redesign, and `AGENTS.md` rule 3 means whatever roles arrive will be enforced
-#: in code and never in a prompt or a claim the browser makes.
+#: ``role`` is one of three since ADR-0058 (``owner``, ``support``,
+#: ``developer``; ADR-0026 §5 had one). What each may do is code
+#: (``neura_core.identity.roles``), checked on every request; the database only
+#: refuses a value the code does not know (``ck_memberships_role``), so a typo in
+#: a script cannot make a role that quietly holds nothing. A membership made
+#: without a role is an Owner, as every one made before roles existed is.
 #:
 #: ``revoked_at`` rather than a delete: who *used* to have access to a merchant's
 #: conversations is exactly the question an incident asks, and a deleted row
@@ -109,6 +119,7 @@ memberships = Table(
     Column("role", String(32), nullable=False, server_default="owner"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(f"role IN ({_ROLES})", name="role"),
     # One membership per person per tenant. Two would make "is this person
     # revoked?" a question with two answers, and the wrong one is the one that
     # grants access.
@@ -147,11 +158,105 @@ login_tokens = Table(
 )
 
 
+#: An Owner's invitation to one person, for one shop, with one role (ADR-0058 §4).
+#:
+#: **Tenant-scoped and forced, like ``memberships``**, because it is a grant of
+#: access waiting to happen: only the shop's own Owner may make one, so Shop A's
+#: Owner can never invite anyone into Shop B (§5). The link names its shop, so
+#: accepting it opens that shop's session and looks the hash up there; a link
+#: with another shop in it finds nothing.
+#:
+#: **The token is never stored**, only its SHA-256, as ``login_tokens`` does.
+#: *Send again* writes a new hash over the old one, so the old link stops at once.
+#: ``accepted_at`` and ``cancelled_at`` are set in the same statement that checks
+#: they are empty, so a forwarded link cannot be used twice.
+#:
+#: **One open invite per email per shop** (the partial unique index): a second
+#: invite to the same address replaces the waiting one rather than racing it.
+membership_invites = Table(
+    MEMBERSHIP_INVITES,
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("tenant_id", String(64), nullable=False),
+    Column("email", CITEXT, nullable=False),
+    Column("role", String(32), nullable=False),
+    Column("token_hash", String(64), nullable=False),
+    #: The Owner who sent it, or last sent it again.
+    Column("invited_by", String(64), nullable=False),
+    Column("sent_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("accepted_at", DateTime(timezone=True), nullable=True),
+    Column("accepted_by", String(64), nullable=True),
+    Column("cancelled_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint(f"role IN ({_ROLES})", name="role"),
+    UniqueConstraint("token_hash", name="uq_membership_invites_token_hash"),
+    Index(
+        "uq_membership_invites_open_email",
+        "tenant_id",
+        "email",
+        unique=True,
+        postgresql_where=text("accepted_at IS NULL AND cancelled_at IS NULL"),
+    ),
+)
+
+
+#: A sign-up waiting for its email link to be clicked (ADR-0058 §7).
+#:
+#: **No ``tenant_id``, like ``login_tokens``**, and for the same reason: there is
+#: no shop yet. Nothing is made until the link is used: no account, no shop. The
+#: link proves the inbox, then one transaction deletes this row (so the link
+#: works once) and makes the account, the waiting shop and its Owner.
+#:
+#: **The token is never stored**, only its SHA-256. **One request per email**: a
+#: second replaces the first, so its link stops. Rows live 15 minutes; expired
+#: ones are deleted by the next sign-up, so the table holds only links in flight.
+#: ``requested_ip`` is for abuse investigation, as on ``login_tokens``.
+sign_up_requests = Table(
+    SIGN_UP_REQUESTS,
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("email", CITEXT, nullable=False),
+    Column("shop_name", String(100), nullable=False),
+    Column("website", String(255), nullable=False),
+    Column("token_hash", String(64), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("requested_ip", String(64), nullable=False, server_default=""),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("email", name="uq_sign_up_requests_email"),
+    UniqueConstraint("token_hash", name="uq_sign_up_requests_token_hash"),
+)
+
+
+#: FiveNeurals' admins (ADR-0061): who may open ``/admin``.
+#:
+#: **No ``tenant_id``, like ``users``**: an admin belongs to no shop, and being
+#: one opens no shop's own screens. Changed **only by command**
+#: (``make admin-add`` / ``admin-remove``): no route writes it. ``removed_at``
+#: rather than a delete, as for memberships: who *was* an admin is what an
+#: incident asks. Read on every admin request, so a removal bites on the next
+#: click; and read by the admin functions themselves, which answer nothing to a
+#: transaction that names no live admin.
+platform_admins = Table(
+    PLATFORM_ADMINS,
+    metadata,
+    Column("user_id", String(64), primary_key=True),
+    Column("added_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("removed_at", DateTime(timezone=True), nullable=True),
+)
+
+
 __all__ = [
     "LOGIN_TOKENS",
     "MEMBERSHIPS",
+    "MEMBERSHIP_INVITES",
+    "PLATFORM_ADMINS",
+    "SIGN_UP_REQUESTS",
     "USERS",
     "login_tokens",
+    "membership_invites",
     "memberships",
+    "platform_admins",
+    "sign_up_requests",
     "users",
 ]

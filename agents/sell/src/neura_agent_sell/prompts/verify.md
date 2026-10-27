@@ -24,7 +24,7 @@ Watch for these in particular:
 - Any superlative — best, most popular, top choice. Nothing in a shortlist supports one.
 - A discount, delivery time, returns window or policy rule. None of these can appear in a catalogue shortlist, so any of them is unsupported.
 
-Things that are not claims and need no evidence: greetings, offers to narrow the search, offers to pass the shopper to a colleague, questions asked back to the shopper, and statements about what the assistant can or cannot do.
+Things that are not claims and need no evidence: greetings, offers to narrow the search, offers to pass the shopper's question to someone at the store, questions asked back to the shopper, and statements about what the assistant can or cannot do.
 
 If the evidence is empty, or does not mention the products the draft names, that is `grounded=false`.
 

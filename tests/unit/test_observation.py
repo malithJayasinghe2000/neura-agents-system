@@ -189,6 +189,13 @@ class TestRetentionSettings:
         # The longest window anything designed reads: ADR-0046's weekly count
         # and ADR-0044 §6's "third visit in a week".
         assert settings.retention_observed_events_days == 7
+        # ADR-0062 §4 (R30): unanswered after 30 days, the typed email goes.
+        assert settings.retention_handover_emails_days == 30
+
+    def test_zero_days_is_refused_for_a_typed_email(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("RETENTION_HANDOVER_EMAILS_DAYS", "0")
+        with pytest.raises(ValidationError):
+            Settings()
 
     def test_zero_days_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Zero would delete every row on every pass — or, read another way, mean
@@ -214,7 +221,12 @@ class TestRetentionSettings:
         }
         not_enforced = {"RETENTION_AUDIT_LOG_DAYS", "RETENTION_TRACES_DAYS"}
 
-        assert enforced == {"RETENTION_CONVERSATIONS_DAYS", "RETENTION_OBSERVED_EVENTS_DAYS"}
+        assert enforced == {
+            "RETENTION_CONVERSATIONS_DAYS",
+            "RETENTION_OBSERVED_EVENTS_DAYS",
+            # ADR-0062 §4: a handed-over shopper's typed email (R30).
+            "RETENTION_HANDOVER_EMAILS_DAYS",
+        }
         assert declared == enforced | not_enforced
         assert not (enforced & not_enforced)
 
@@ -230,11 +242,20 @@ class TestTheSweepJob:
 
     def test_the_summary_says_when_it_stops(self) -> None:
         done = SweepResult(
-            events_deleted=3, conversations_deleted=1, no_agreement=False, remaining=False
+            events_deleted=3,
+            conversations_deleted=1,
+            emails_deleted=2,
+            no_agreement=False,
+            remaining=False,
         )
         assert "not re-armed" in done.summary()
+        assert "2 unanswered email(s) deleted" in done.summary()
         withdrawn = SweepResult(
-            events_deleted=5, conversations_deleted=0, no_agreement=True, remaining=True
+            events_deleted=5,
+            conversations_deleted=0,
+            emails_deleted=0,
+            no_agreement=True,
+            remaining=True,
         )
         assert "no agreement" in withdrawn.summary()
 

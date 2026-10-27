@@ -10,9 +10,11 @@ learns an agent's name:
     PUT    /console/shops/{tenant}/suggestions/{product}          the owner's choice
     DELETE /console/shops/{tenant}/suggestions/{product}          back to automatic
 
-**Who.** The console's own session and membership check (``acting_for``), then
-the tenant's entitlement to this agent — checked here, inside the agent, which is
-what keeps the agent's name out of the deployable.
+**Who.** The console's own session, membership and role check, stated on each
+route with SELL's own permission, ``sell:suggestions:write`` (ADR-0058 §1: each
+agent brings its own permissions; the Owner holds every one, nobody else holds
+this one yet). Then the tenant's entitlement to this agent — checked here,
+inside the agent, which is what keeps the agent's name out of the deployable.
 
 **Only the preview calls the shop, and only when the owner opens a product**
 (2026-09-28, the owner's approved redesign). Everything else — titles, ids,
@@ -32,7 +34,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
@@ -41,6 +43,7 @@ from neura_agent_sell.pairing import select as pairing_rules
 from neura_agent_sell.pairing.cache import source_hash
 from neura_agent_sell.pairing.choices import DatabaseOwnerChoices
 from neura_agent_sell.pairing.schema import sell_pairings
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_commerce.identity import EntityType
 from neura_commerce.sync.schema import synced_entities
 from neura_core import AgentNotEnabledError, NotFoundError, ValidationError, get_logger
@@ -71,6 +74,10 @@ MODES = ("owner", "automatic", "pending")
 #: Results the product picker returns for one search.
 PICKER_LIMIT = 20
 
+#: SELL's own permission (ADR-0058 §1): choosing what shows with a product, and
+#: the screen that does it. The Owner's alone for now (§2).
+SUGGESTIONS = "sell:suggestions:write"
+
 _ENTITIES = synced_entities.c
 _PAIRINGS = sell_pairings.c
 _PRODUCT = EntityType.PRODUCT.value
@@ -90,11 +97,12 @@ class Choice(BaseModel):
     )
 
 
-async def _owner(request: Request, tenant_id: str, agent_key: str) -> tuple[Any, str]:
-    """A console member of this shop, the shop has this agent, and its store id."""
-    from neura_api.dependencies import acting_for
+async def _store(actor: ConsoleActor, agent_key: str) -> str:
+    """The shop has this agent, and the id of its store.
 
-    actor = await acting_for(request, tenant_id)
+    Who the person is, and whether their role may, was decided on the route
+    before this runs (``Permitted``).
+    """
     db = get_database()
     async with db.tenant_session(actor.tenant_id) as session:
         tenant = await TenantRepository(session).get(actor.tenant_id)
@@ -115,7 +123,7 @@ async def _owner(request: Request, tenant_id: str, agent_key: str) -> tuple[Any,
             "No shop is connected yet, so there is nothing to suggest.",
             code="NO_STORE_CONNECTED",
         )
-    return actor, str(store_id)
+    return str(store_id)
 
 
 def register(router: APIRouter, agent_key: str) -> None:
@@ -123,14 +131,13 @@ def register(router: APIRouter, agent_key: str) -> None:
 
     @router.get("/console/shops/{tenant_id}/suggestions", include_in_schema=False)
     async def list_suggestions(
-        request: Request,
-        tenant_id: str,
+        actor: Annotated[ConsoleActor, Depends(Permitted(SUGGESTIONS))],
         after: Annotated[str | None, Query(max_length=255)] = None,
         q: Annotated[str | None, Query(max_length=100)] = None,
         mode: Annotated[str | None, Query(max_length=16)] = None,
         category: Annotated[str | None, Query(max_length=128)] = None,
     ) -> dict[str, Any]:
-        actor, store_id = await _owner(request, tenant_id, agent_key)
+        store_id = await _store(actor, agent_key)
         wanted = _mode(mode)
         classified, counted_all = await _rows(actor.tenant_id, store_id, q=q)
 
@@ -202,7 +209,7 @@ def register(router: APIRouter, agent_key: str) -> None:
     )
     async def preview(
         request: Request,
-        tenant_id: str,
+        actor: Annotated[ConsoleActor, Depends(Permitted(SUGGESTIONS))],
         product_id: Annotated[str, Path(max_length=128)],
     ) -> dict[str, Any]:
         """What a shopper's basket shows with this product **now** — asked of the shop.
@@ -218,7 +225,7 @@ def register(router: APIRouter, agent_key: str) -> None:
         """
         from neura_agent_sell import routes as sell_routes
 
-        actor, store_id = await _owner(request, tenant_id, agent_key)
+        store_id = await _store(actor, agent_key)
         asked_at = datetime.now(UTC)
         tried = await _computed(actor.tenant_id, store_id, product_id)
         # The product as the list shows it, so the screen can head the preview
@@ -274,11 +281,10 @@ def register(router: APIRouter, agent_key: str) -> None:
 
     @router.get("/console/shops/{tenant_id}/suggestions/catalogue", include_in_schema=False)
     async def find_products(
-        request: Request,
-        tenant_id: str,
+        actor: Annotated[ConsoleActor, Depends(Permitted(SUGGESTIONS))],
         q: Annotated[str, Query(min_length=1, max_length=100)],
     ) -> dict[str, Any]:
-        actor, _ = await _owner(request, tenant_id, agent_key)
+        await _store(actor, agent_key)
         async with get_database().tenant_session(actor.tenant_id) as session:
             rows = (
                 await session.execute(
@@ -303,12 +309,11 @@ def register(router: APIRouter, agent_key: str) -> None:
 
     @router.put("/console/shops/{tenant_id}/suggestions/{product_id}", include_in_schema=False)
     async def choose(
-        request: Request,
-        tenant_id: str,
+        actor: Annotated[ConsoleActor, Depends(Permitted(SUGGESTIONS))],
         product_id: Annotated[str, Path(max_length=128)],
         body: Choice,
     ) -> dict[str, Any]:
-        actor, store_id = await _owner(request, tenant_id, agent_key)
+        store_id = await _store(actor, agent_key)
 
         chosen = list(dict.fromkeys(body.product_ids))
         if product_id in chosen:
@@ -342,11 +347,10 @@ def register(router: APIRouter, agent_key: str) -> None:
 
     @router.delete("/console/shops/{tenant_id}/suggestions/{product_id}", include_in_schema=False)
     async def reset(
-        request: Request,
-        tenant_id: str,
+        actor: Annotated[ConsoleActor, Depends(Permitted(SUGGESTIONS))],
         product_id: Annotated[str, Path(max_length=128)],
     ) -> dict[str, Any]:
-        actor, store_id = await _owner(request, tenant_id, agent_key)
+        store_id = await _store(actor, agent_key)
         removed = await DatabaseOwnerChoices(
             get_database(), tenant_id=actor.tenant_id, store_id=store_id
         ).reset(product_id)

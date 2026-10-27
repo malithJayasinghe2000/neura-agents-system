@@ -14,8 +14,20 @@ export type Membership = {
   tenant_id: string;
   name: string | null;
   assistants?: string[];
+  /** `owner`, `support` or `developer` (ADR-0058). */
+  role?: string;
+  /** What the role may open, worked out by the API from its own map. */
+  permissions?: string[];
+  /** `active`, or `waiting` for a shop FiveNeurals has not approved yet (ADR-0058 §7). */
+  status?: string | null;
 };
-export type Me = { memberships?: Membership[] };
+/** `email` is the signed-in person's own, for the waiting screen. */
+export type Me = { email?: string | null; memberships?: Membership[] };
+
+/** A shop that signed up and waits for FiveNeurals: it opens nothing else. */
+export function isWaiting(membership: Membership | null | undefined): boolean {
+  return membership?.status === "waiting";
+}
 
 /** NEURA-SELL's key in `enabled_agents`. Its screens: Suggestions and Sold out. */
 export const SELL = "sell";
@@ -45,4 +57,12 @@ export const CARE = "care";
 /** Whether to show NEURA-CARE's parts. Unknown shows them, as `hasSell`. */
 export function hasCare(assistants: string[] | null): boolean {
   return assistants === null || assistants.includes(CARE);
+}
+
+/** NEURA-GROW's key in `enabled_agents`. Its screen: Missing from your pages (ADR-0064). */
+export const GROW = "grow";
+
+/** Whether to show NEURA-GROW's screen. Unknown shows it, as `hasSell`. */
+export function hasGrow(assistants: string[] | null): boolean {
+  return assistants === null || assistants.includes(GROW);
 }

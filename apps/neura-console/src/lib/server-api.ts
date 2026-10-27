@@ -32,7 +32,7 @@ const API_BASE = process.env.API_BASE_URL ?? "http://localhost:8010";
 /** The session cookie's name. `__Host-` is enforced by the browser (ADR-0026 §3). */
 export const SESSION_COOKIE = "__Host-fn_session";
 
-type Envelope<T> = { data: T; meta?: PageMeta; error?: { message?: string } };
+type Envelope<T> = { data: T; meta?: PageMeta; error?: { message?: string; code?: string } };
 
 /**
  * The pagination half of the envelope. Carried through rather than dropped:
@@ -53,7 +53,9 @@ export type PageMeta = {
 };
 
 export type ServerResult<T> =
-  { ok: true; data: T; meta: PageMeta } | { ok: false; status: number; message: string };
+  | { ok: true; data: T; meta: PageMeta }
+  /** `code` is the API's own (`ADMIN_SIGN_IN_AGAIN`, …), when it sent one. */
+  | { ok: false; status: number; message: string; code?: string };
 
 /**
  * Fetch one console endpoint as the signed-in person.
@@ -88,6 +90,7 @@ export async function fromApi<T>(path: string, prefix = "/v1/console"): Promise<
       ok: false,
       status: response.status,
       message: body?.error?.message ?? `Request failed (${response.status})`,
+      code: body?.error?.code,
     };
   }
   return { ok: true, data: body.data, meta: body.meta ?? {} };

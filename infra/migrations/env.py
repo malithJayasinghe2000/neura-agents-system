@@ -26,7 +26,8 @@ import neura_agent_core.conversations
 import neura_agent_core.graph.schema
 import neura_agent_core.rag.schema
 import neura_agent_core.shadow
-import neura_agent_core.shadow_evidence  # noqa: F401
+import neura_agent_core.shadow_evidence
+import neura_agent_core.waiting  # noqa: F401
 
 # The one place an agent's name legitimately appears outside its own package.
 # Alembic diffs against `neura_core.metadata`, and a table whose module was never
@@ -42,6 +43,7 @@ import neura_core.identity.schema
 import neura_core.jobs.schema
 import neura_core.observation.schema
 import neura_core.tenancy.schema
+import neura_core.tenancy.switches
 import neura_core.webhooks.schema  # noqa: F401
 from neura_core import get_settings, load_env, metadata
 

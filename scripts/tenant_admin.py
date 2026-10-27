@@ -9,6 +9,9 @@
     make webhook-drain TENANT=tn_01J8...
     make tenant-dpa  TENANT=tn_01J8... [WITHDRAW=1]
     make retention-sweep TENANT=tn_01J8...
+    make tenant-waiting
+    make tenant-approve TENANT=tn_01J8... [AGENTS=care,sell]
+    make tenant-refuse  TENANT=tn_01J8...
 
 The operator tool for milestone 1.13. Until the merchant console exists this is
 how a tenant comes into being, so it is a real command rather than a paragraph
@@ -33,13 +36,22 @@ import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 
+from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_core import (
     ConfigurationError,
+    ConflictError,
     Database,
+    Settings,
     configure_logging,
     get_settings,
     load_env,
     new_id,
+)
+from neura_core.email import Mailer
+from neura_core.identity.sign_up import (
+    approve_shop,
+    waiting_shop,
+    waiting_tenant_ids,
 )
 from neura_core.ids import TENANT
 from neura_core.observation import OBSERVE_WRITE, ObservedEventRepository
@@ -51,6 +63,7 @@ from neura_core.tenancy import (
     TurnMode,
     UsageMeter,
 )
+from neura_core.tenancy.removal import remove_tenant
 
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -259,6 +272,122 @@ async def retention_sweep(db: Database, tenant_id: str) -> int:
     return 0
 
 
+#: Who an audit entry names when FiveNeurals, by this command, acted.
+OPERATOR = "tenant_admin"
+
+#: The assistant an approved shop gets when none is named (R14, the owner: A).
+DEFAULT_AGENTS = ["care"]
+
+
+async def list_waiting(db: Database) -> int:
+    """Every shop waiting for approval, the oldest first (ADR-0058 §7, AD1)."""
+    async with db.identity_session() as session:
+        waiting = await waiting_tenant_ids(session)
+    if not waiting:
+        print(f"\n  {DIM}no shop is waiting for approval{OFF}\n")
+        return 0
+    print()
+    for tenant_id in waiting:
+        async with db.tenant_session(tenant_id) as session:
+            shop = await waiting_shop(session, tenant_id)
+        if shop is None:  # approved or refused a moment ago
+            continue
+        signed_up = f"{shop.signed_up_at:%Y-%m-%d %H:%M} UTC" if shop.signed_up_at else "?"
+        print(f"  {BOLD}{shop.name}{OFF}  {DIM}{tenant_id}{OFF}")
+        print(f"    website    {shop.website or '(none)'}")
+        print(f"    owner      {', '.join(shop.owners) or '(none)'}")
+        print(f"    signed up  {signed_up}\n")
+    print(
+        f"  {DIM}make tenant-approve TENANT=... [AGENTS=care,sell]   or   make tenant-refuse TENANT=...{OFF}\n"
+    )
+    return 0
+
+
+async def approve(db: Database, tenant_id: str, agents: list[str]) -> int:
+    """Make a waiting shop an ordinary one, with the assistants named (R14).
+
+    CARE when none is named. It keeps practice mode and the daily spending
+    limit every shop has. Its Owners get the approval email (R17).
+    """
+    from neura_api.registry import discover_agents
+    from neura_api.routes.console_sign_up import approved_email
+
+    chosen = sorted(set(agents or DEFAULT_AGENTS))
+    unknown = sorted(set(chosen) - set(discover_agents()))
+    if unknown:
+        print(f"{RED}no such assistant: {', '.join(unknown)} (nothing changed){OFF}")
+        return 1
+
+    async with db.tenant_session(tenant_id) as session:
+        try:
+            shop = await approve_shop(session, tenant_id, agents=chosen)
+        except ConflictError:
+            print(f"{RED}{tenant_id} is not waiting for approval: nothing changed{OFF}")
+            return 1
+        await PostgresAuditLog(session).record(
+            AuditEntry(
+                tenant_id=tenant_id,
+                event_type=AuditEvent.CONFIG_CHANGE,
+                actor=OPERATOR,
+                outcome="shop.approved",
+                payload={"agents": chosen},
+            )
+        )
+
+    print(f"\n  {BOLD}{shop.name}{OFF} approved  {DIM}{tenant_id}{OFF}")
+    print(f"  {DIM}assistants: {', '.join(chosen)} · practice mode{OFF}")
+    settings = get_settings()
+    subject, body = approved_email(shop=shop.name, dashboard=settings.console_base_url)
+    _mail(settings, shop.owners, subject, body)
+    return 0
+
+
+async def refuse(db: Database, tenant_id: str) -> int:
+    """Remove a waiting shop, then tell its Owners (R16, R17).
+
+    Removed first, from every table that holds its rows (``remove_tenant``, as
+    the admin dashboard does), so the email states what is already true. The person keeps their account: they may be in another shop.
+    The shop's audit entries stay, as for every removed shop (S10).
+    """
+    from neura_api.routes.console_sign_up import refused_email
+
+    async with db.tenant_session(tenant_id) as session:
+        shop = await waiting_shop(session, tenant_id)
+        if shop is None:
+            print(f"{RED}{tenant_id} is not waiting for approval: nothing removed{OFF}")
+            return 1
+        await PostgresAuditLog(session).record(
+            AuditEntry(
+                tenant_id=tenant_id,
+                event_type=AuditEvent.CONFIG_CHANGE,
+                actor=OPERATOR,
+                outcome="shop.refused",
+                payload={},
+            )
+        )
+        # The same removal the admin dashboard uses (ADR-0061 §6): every table
+        # holding the shop's rows, read from the database, the audit log kept.
+        await remove_tenant(session, tenant_id)
+
+    print(f"\n  {BOLD}{shop.name}{OFF} refused and removed  {DIM}{tenant_id}{OFF}")
+    subject, body = refused_email(shop=shop.name)
+    _mail(get_settings(), shop.owners, subject, body)
+    return 0
+
+
+def _mail(settings: Settings, owners: tuple[str, ...], subject: str, body: str) -> None:
+    """Email each Owner, and say plainly which were not sent."""
+    mailer = Mailer(settings)
+    for owner in owners:
+        result = mailer.send(to=owner, subject=subject, body=body)
+        if result.sent:
+            print(f"  {DIM}emailed {owner}{OFF}")
+        else:
+            reason = "email is off (SMTP_HOST is empty)" if result.skipped else result.error
+            print(f"  {YELLOW}NOT emailed {owner}: {reason}{OFF}")
+    print()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -294,6 +423,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sweep = commands.add_parser("sweep")
     sweep.add_argument("--tenant-id", required=True)
+
+    commands.add_parser("waiting")
+
+    approval = commands.add_parser("approve")
+    approval.add_argument("--tenant-id", required=True)
+    approval.add_argument("--agents", default="", help="comma-separated; care when empty")
+
+    refusal = commands.add_parser("refuse")
+    refusal.add_argument("--tenant-id", required=True)
 
     return parser
 
@@ -339,6 +477,12 @@ async def main() -> int:
                 return await record_dpa(db, args.tenant_id, withdraw=args.withdraw)
             case "sweep":
                 return await retention_sweep(db, args.tenant_id)
+            case "waiting":
+                return await list_waiting(db)
+            case "approve":
+                return await approve(db, args.tenant_id, _split(args.agents))
+            case "refuse":
+                return await refuse(db, args.tenant_id)
             case _:  # pragma: no cover — argparse rejects anything else
                 return 2
     finally:

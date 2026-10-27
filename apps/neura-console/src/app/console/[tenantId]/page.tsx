@@ -22,12 +22,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, Info } from "lucide-react";
+import { ModeLine } from "@/components/home/mode-line";
 import { ModeSwitch } from "@/components/home/mode-switch";
 import { When } from "@/components/when";
 import { fromApi, hasSession } from "@/lib/server-api";
+import { PERMISSION, may, membershipOf } from "@/lib/roles";
 import type { Scorecard } from "@/lib/review";
 import type { ShopView } from "@/lib/shop";
-import { hasSell, shopAssistants } from "@/lib/shop-assistants";
+import { hasSell, shopAssistants, type Membership } from "@/lib/shop-assistants";
 import type { SoldOut } from "@/lib/sold-out";
 import type { SuggestionsMeta, SuggestionsPage } from "@/lib/suggestions";
 import type { Usage } from "@/lib/usage";
@@ -41,16 +43,25 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
   const shop = encodeURIComponent(tenantId);
   const base = `/console/${shop}`;
 
+  // The Owner's Home reads Usage, which is money. Every other role sees only the
+  // parts about their own work (R12, the owner's decision 2026-10-10).
+  const membership = await membershipOf(tenantId);
+  if (membership && !may(membership, PERMISSION.usage)) {
+    return <TeamHome tenantId={tenantId} membership={membership} />;
+  }
+
   // A shop without NEURA-SELL is not shown its two screens, so Home does not
   // ask for them either (lib/assistants.ts).
   const sell = hasSell(await shopAssistants(tenantId));
-  const [usage, card, store, soldOut, suggestions] = await Promise.all([
+  const [usage, card, store, soldOut, suggestions, home] = await Promise.all([
     fromApi<Usage>(`/shops/${shop}/usage?period=7d`),
     fromApi<Scorecard>(`/shops/${shop}/review/scorecard`),
     fromApi<ShopView>(`/shops/${shop}/store`),
     sell ? fromApi<SoldOut>(`/shops/${shop}/sold-out`) : null,
     // SELL's own route: the API that mounts it never learns an agent's name.
     sell ? fromApi<SuggestionsPage>(`/shops/${shop}/suggestions`, "/v1/sell/console") : null,
+    // Shoppers waiting for an answer (ADR-0062), first in Needs you.
+    fromApi<TeamView>(`/shops/${shop}/home`),
   ]);
 
   return (
@@ -73,27 +84,34 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
         </Alert>
       ) : (
         <>
-          <ModeSwitch
-            tenantId={tenantId}
-            practice={usage.data.withheld}
-            reviewHref={`${base}/review`}
-            facts={
-              card.ok
-                ? {
-                    checked: card.data.graded,
-                    good: card.data.verdicts.agree,
-                    notGood: card.data.verdicts.disagree,
-                    harmful: card.data.verdicts.would_have_harmed,
-                    waiting: card.data.ungraded,
-                  }
-                : null
-            }
-          />
+          {!may(membership, PERMISSION.mode) ? (
+            // *Go live* is the Owner's (ADR-0058 §2): a role without it is told the mode.
+            <ModeLine practice={usage.data.withheld} reviewHref={`${base}/review`} />
+          ) : (
+            <ModeSwitch
+              tenantId={tenantId}
+              practice={usage.data.withheld}
+              reviewHref={`${base}/review`}
+              facts={
+                card.ok
+                  ? {
+                      checked: card.data.graded,
+                      good: card.data.verdicts.agree,
+                      notGood: card.data.verdicts.disagree,
+                      harmful: card.data.verdicts.would_have_harmed,
+                      waiting: card.data.ungraded,
+                    }
+                  : null
+              }
+            />
+          )}
 
           <NeedsYou
             base={base}
             waiting={card.ok ? card.data.ungraded : null}
             handed={usage.data.totals.escalations}
+            answering={home.ok ? home.data.waiting : null}
+            gaps={home.ok ? (home.data.gaps ?? null) : null}
             connected={store.ok ? store.data.connected : null}
           />
 
@@ -124,6 +142,83 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
   );
 }
 
+/** What `/home` gives every member (R12): the mode, and the handed-over count
+ * for a role that reads chats (`null` for any other). */
+type TeamView = {
+  mode: string;
+  practice: boolean;
+  handed: number | null;
+  /** Shoppers waiting for an answer (ADR-0062); `null` for a role that may not answer. */
+  waiting: number | null;
+  /** Questions on Missing from your pages (ADR-0064); `null` for a role that may not open it. */
+  gaps?: number | null;
+};
+
+/**
+ * Home for Support and the Developer: only the parts about their own work (R12).
+ * Support: the mode, replies waiting for review, chats handed to a person. The
+ * Developer: the mode, whether the shop is connected, the Catalogue card. No
+ * 7-day numbers, no money, no *Go live*. Each part is read only when the role
+ * may open its screen, so nothing here is a refusal waiting to happen.
+ */
+async function TeamHome({ tenantId, membership }: { tenantId: string; membership: Membership }) {
+  const shop = encodeURIComponent(tenantId);
+  const base = `/console/${shop}`;
+  const reviews = may(membership, PERMISSION.review);
+  const connects = may(membership, PERMISSION.connection);
+  const [home, card, store] = await Promise.all([
+    fromApi<TeamView>(`/shops/${shop}/home`),
+    reviews ? fromApi<Scorecard>(`/shops/${shop}/review/scorecard`) : null,
+    connects ? fromApi<ShopView>(`/shops/${shop}/store`) : null,
+  ]);
+
+  return (
+    <>
+      <div className="space-y-1.5">
+        <h1 className="text-2xl font-semibold tracking-tight">Home</h1>
+        <p className="text-muted-foreground">What needs you, and how your assistant is set up.</p>
+      </div>
+
+      {!home.ok ? (
+        <Alert variant="destructive">
+          <AlertTitle>Could not load</AlertTitle>
+          <AlertDescription>{home.message}</AlertDescription>
+        </Alert>
+      ) : (
+        <>
+          <ModeLine practice={home.data.practice} reviewHref={reviews ? `${base}/review` : null} />
+
+          <NeedsYou
+            base={base}
+            waiting={card?.ok ? card.data.ungraded : null}
+            handed={home.data.handed}
+            answering={home.data.waiting}
+            gaps={home.data.gaps ?? null}
+            connected={store?.ok ? store.data.connected : null}
+            withDeveloper={false}
+            empty={
+              reviews
+                ? undefined
+                : "Nothing needs you right now. If the shop's connection needs you, it will show up here."
+            }
+          />
+
+          {store ? (
+            <section className="space-y-3" aria-labelledby="setup">
+              <h2 id="setup" className="text-lg font-semibold">
+                Your setup
+              </h2>
+              <div className="grid gap-3 md:grid-cols-3">
+                <CatalogueCard store={store.ok ? store.data : null} href={`${base}/shops`} />
+              </div>
+            </section>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
 /**
  * Each item is one counted fact, said as a sentence, with one thing to do about
  * it. An item appears only when it is true — a list that always has rows is a
@@ -133,21 +228,66 @@ function NeedsYou({
   base,
   waiting,
   handed,
+  answering = null,
+  gaps = null,
   connected,
+  withDeveloper = true,
+  empty = "Nothing needs you right now. Replies waiting for review and conversations handed to a person will show up here.",
 }: {
   base: string;
   waiting: number | null;
-  handed: number;
+  /** `null`: this role does not read chats, so the count is not theirs to see. */
+  handed: number | null;
+  /** Shoppers waiting for an answer (ADR-0062). `null`: not this role's to answer. */
+  answering?: number | null;
+  /** Questions on Missing from your pages (ADR-0064). `null`: not this role's page. */
+  gaps?: number | null;
   connected: boolean | null;
+  /** Whether *in three steps with your developer* is said: not to the developer. */
+  withDeveloper?: boolean;
+  empty?: string;
 }) {
   const items: Need[] = [];
+
+  // First: a person is waiting (ADR-0062 §6, the approved mockup, board 55).
+  if (answering) {
+    items.push({
+      figure: answering,
+      title:
+        answering === 1 ? "shopper is waiting for an answer" : "shoppers are waiting for an answer",
+      detail:
+        answering === 1
+          ? "Your assistant handed them over, and they left a way to reach them. Answer them by email."
+          : "Your assistant handed them over, and each left a way to reach them. Answer them by email.",
+      action: "Answer them",
+      href: `${base}/conversations?state=waiting`,
+      primary: true,
+    });
+  }
+
+  // Then what shoppers asked that the shop's pages don't say (ADR-0064, board 58).
+  if (gaps) {
+    items.push({
+      figure: gaps,
+      title:
+        gaps === 1
+          ? "thing shoppers asked that your pages don't say"
+          : "things shoppers asked that your pages don't say",
+      detail:
+        "In the last 30 days. Add each one to your shop once, and your assistant can answer the next shopper.",
+      action: "See them",
+      href: `${base}/gaps`,
+      primary: false,
+    });
+  }
 
   if (connected === false) {
     items.push({
       figure: null,
       title: "Your online shop isn't connected yet",
-      detail:
-        "Until it is, your assistant has no products or orders to read. Connect it on Shop connection, in three steps with your developer.",
+      detail: withDeveloper
+        ? "Until it is, your assistant has no products or orders to read. Connect it on Shop connection, in three steps with your developer."
+        : "Until it is, your assistant has no products or orders to read. Connect it on Shop connection.",
       action: "Shop connection",
       href: `${base}/shops`,
       primary: true,
@@ -164,7 +304,7 @@ function NeedsYou({
       primary: true,
     });
   }
-  if (handed > 0) {
+  if (handed) {
     items.push({
       figure: handed,
       title:
@@ -184,10 +324,7 @@ function NeedsYou({
         Needs you
       </h2>
       {items.length === 0 ? (
-        <p className="rounded-xl border px-4 py-4 text-sm text-muted-foreground sm:px-5">
-          Nothing needs you right now. Replies waiting for review and conversations handed to a
-          person will show up here.
-        </p>
+        <p className="rounded-xl border px-4 py-4 text-sm text-muted-foreground sm:px-5">{empty}</p>
       ) : (
         <ul className="divide-y overflow-hidden rounded-xl border">
           {items.map((item) => (

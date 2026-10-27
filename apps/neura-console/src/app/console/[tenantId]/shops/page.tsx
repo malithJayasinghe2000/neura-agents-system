@@ -46,6 +46,8 @@ import { SyncNow } from "@/components/shop/sync-now";
 import { When } from "@/components/when";
 import type { CustomerSecretView, ShopContactView } from "@/lib/api";
 import { fromApi, hasSession } from "@/lib/server-api";
+import { PERMISSION, refusal } from "@/lib/roles";
+import { NotAllowed } from "@/components/not-allowed";
 import {
   ENTITY_LABELS,
   SHOWN_KINDS,
@@ -62,6 +64,9 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
+  // A role that does not include this screen sees why, not an error (ADR-0058).
+  const refused = await refusal(tenantId, PERMISSION.connection);
+  if (refused) return <NotAllowed refusal={refused} what="Shop connection" />;
   const [view, assistants, contact, secret] = await Promise.all([
     fromApi<ShopView>(`/shops/${encodeURIComponent(tenantId)}/store`),
     shopAssistants(tenantId),
@@ -112,7 +117,11 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
           <GetSetUp tenantId={tenantId} view={view.data} sell={sell} />
           <ShopContact tenantId={tenantId} initial={contact.ok ? contact.data : null} />
           {answersOrders && secret.ok ? (
-            <CustomerSecret tenantId={tenantId} madeAt={secret.data.made_at} />
+            <CustomerSecret
+              tenantId={tenantId}
+              madeAt={secret.data.made_at}
+              madeBy={secret.data.made_by}
+            />
           ) : null}
           {view.data.connected ? (
             <>
@@ -122,6 +131,7 @@ export default async function ShopPage({ params }: { params: Promise<{ tenantId:
                   tenantId={tenantId}
                   storeId={store.id}
                   setAt={store.token_set_at}
+                  setBy={store.token_made_by}
                   named={view.data.stores.length > 1 ? host(store.base_url) : null}
                 />
               ))}

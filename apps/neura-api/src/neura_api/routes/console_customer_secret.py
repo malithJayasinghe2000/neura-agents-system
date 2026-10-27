@@ -18,14 +18,16 @@ never the secret, in the same transaction.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
+from neura_api.routes.console_people import who_made
 from neura_core import get_logger
+from neura_core.identity.roles import CONNECTION_WRITE
 from neura_core.tenancy import CustomerSecretRepository
 
 log = get_logger(__name__)
@@ -34,25 +36,31 @@ router = APIRouter(prefix="/console/shops/{tenant_id}", tags=["console"])
 
 
 @router.get("/customer-secret", summary="When the customer sign-in secret was made")
-async def read_secret(request: Request, tenant_id: str) -> dict[str, Any]:
-    """Only when it was made, or ``null``. Never the secret."""
-    actor = await acting_for(request, tenant_id)
+async def read_secret(
+    request: Request, actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))]
+) -> dict[str, Any]:
+    """When it was made and by whom, or ``null``. Never the secret."""
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
-        made_at = await CustomerSecretRepository(session).made_at(actor.tenant_id)
+        secrets = CustomerSecretRepository(session)
+        made_at = await secrets.made_at(actor.tenant_id)
+        made_by = await who_made(session, actor.tenant_id, await secrets.made_by(actor.tenant_id))
     return envelope(
-        {"made_at": _iso(made_at)}, request_id=getattr(request.state, "request_id", None)
+        {"made_at": _iso(made_at), "made_by": made_by},
+        request_id=getattr(request.state, "request_id", None),
     )
 
 
 @router.post("/customer-secret", summary="Make the customer sign-in secret, or a new one")
-async def make_secret(request: Request, tenant_id: str) -> dict[str, Any]:
+async def make_secret(
+    request: Request, actor: Annotated[ConsoleActor, Depends(Permitted(CONNECTION_WRITE))]
+) -> dict[str, Any]:
     """Returned **once**. Making another replaces it at once (ADR-0057 §3)."""
-    actor = await acting_for(request, tenant_id)
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         secrets = CustomerSecretRepository(session)
         replacing = await secrets.made_at(actor.tenant_id) is not None
         secret = await secrets.make(actor.tenant_id, made_by=actor.user_id)
         made_at = await secrets.made_at(actor.tenant_id)
+        made_by = await who_made(session, actor.tenant_id, actor.user_id)
         await PostgresAuditLog(session).record(
             AuditEntry(
                 tenant_id=actor.tenant_id,
@@ -70,7 +78,7 @@ async def make_secret(request: Request, tenant_id: str) -> dict[str, Any]:
         replaced=replacing,
     )
     return envelope(
-        {"secret": secret, "made_at": _iso(made_at)},
+        {"secret": secret, "made_at": _iso(made_at), "made_by": made_by},
         request_id=getattr(request.state, "request_id", None),
     )
 

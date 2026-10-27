@@ -48,3 +48,26 @@ cases:
       An outdoor shop asked for kitchenware. Note this is `recommend` and not
       `out_of_scope`: the shopper is asking what this store sells, which is
       exactly SELL's question — the answer is simply no.
+
+  - id: no_match_003
+    intent: recommend
+    synthetic: true
+    input: "yes please"
+    session:
+      history:
+        - role: user
+          content: "Do you sell fishing rods?"
+        - role: assistant
+          content: >-
+            I've looked through this store's catalogue and I can't find anything
+            matching that. I'd rather tell you that than point you at something that
+            isn't quite right. If you'd like, describe what you need differently and
+            I'll look again. Or just say so and someone at our store can answer you;
+            they may know more.
+    expect:
+      escalated: true
+      tools_called: []
+    notes: >-
+      G74, R35. The no-match words offer someone at our store; a shopper who takes
+      the offer must reach the handover (ADR-0062's words), not another search and
+      not a decline. If this fails, the offer is a promise nobody keeps.

@@ -2075,3 +2075,37 @@ class TestWithoutIds:
 
     def test_an_unknown_id_in_brackets_stays(self) -> None:
         assert without_ids("A pack (p_other).", ["4"]) == "A pack (p_other)."
+
+    def test_an_id_before_its_name_is_removed(self) -> None:
+        """G106: Gemini wrote it the other way round, and the id stayed."""
+        reply = "Product 4 (Ceylon Black Tea BOPF 400g) is in stock at 1850 LKR."
+        assert without_ids(reply, ["4"]) == "Ceylon Black Tea BOPF 400g is in stock at 1850 LKR."
+
+    def test_every_shape_of_an_id_before_its_name_is_removed(self) -> None:
+        reply = "Try **Product 4 (Ceylon Black Tea)** or product id p_boot_1 (Moor Walking Boot)."
+        assert (
+            without_ids(reply, ["4", "p_boot_1"])
+            == "Try **Ceylon Black Tea** or Moor Walking Boot."
+        )
+
+    def test_a_number_before_brackets_without_the_word_product_stays(self) -> None:
+        reply = "Size 4 (UK) fits, and 4 (four) bags come in a box."
+        assert without_ids(reply, ["4"]) == reply
+
+    def test_an_unknown_id_before_a_name_stays(self) -> None:
+        assert without_ids("Product 9 (Mug) is not ours.", ["4"]) == "Product 9 (Mug) is not ours."
+
+    def test_an_id_and_a_comma_before_its_name_are_removed(self) -> None:
+        """G106, seen again on Gemini: "I recommend Product 4, the Enamel Camp Mug"."""
+        reply = "I recommend Product 4, the Enamel Camp Mug 350ml, which costs 12.00 GBP."
+        assert without_ids(reply, ["4"]) == (
+            "I recommend the Enamel Camp Mug 350ml, which costs 12.00 GBP."
+        )
+
+    def test_compose_says_how_to_write_an_id(self) -> None:
+        """G106: told only to "use those exact ids", the model invented a form each time."""
+        from neura_agent_sell.prompts import load_prompts
+
+        compose = " ".join(load_prompts()["compose"].split())
+        assert "in brackets straight after the product's name" in compose
+        assert 'Never write "Product' in compose

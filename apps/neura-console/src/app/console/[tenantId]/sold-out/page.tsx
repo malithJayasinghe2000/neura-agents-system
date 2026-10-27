@@ -28,6 +28,8 @@ import { CheckAgain } from "@/components/sold-out/check-again";
 import { When } from "@/components/when";
 import { hasSell, shopAssistants } from "@/lib/shop-assistants";
 import { fromApi, hasSession } from "@/lib/server-api";
+import { PERMISSION, refusal } from "@/lib/roles";
+import { NotAllowed } from "@/components/not-allowed";
 import { notCheckedLine, opened, type SoldOut, type SoldOutProduct } from "@/lib/sold-out";
 import { money } from "@/lib/suggestions";
 import { cn } from "@/lib/utils";
@@ -37,6 +39,9 @@ export default async function SoldOutPage({ params }: { params: Promise<{ tenant
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
+  // A role that does not include this screen sees why, not an error (ADR-0058).
+  const refused = await refusal(tenantId, PERMISSION.soldOut);
+  if (refused) return <NotAllowed refusal={refused} what="Sold out" />;
   // Reached by its address only: the menu does not list it for a shop without
   // NEURA-SELL. Said the way Suggestions says it, and nothing is asked of the shop.
   if (!hasSell(await shopAssistants(tenantId))) {

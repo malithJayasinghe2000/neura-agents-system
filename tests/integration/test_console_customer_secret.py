@@ -146,7 +146,7 @@ class TestTheCustomerSignInSecret:
     async def test_nothing_is_made_at_first(self, client, owner) -> None:
         read = client.get(secret_of(owner), cookies=as_owner(owner))
         assert read.status_code == 200
-        assert read.json()["data"] == {"made_at": None}
+        assert read.json()["data"] == {"made_at": None, "made_by": None}
 
     async def test_made_shown_once_then_only_its_date(self, client, owner, db) -> None:
         made = client.post(secret_of(owner), cookies=as_owner(owner))
@@ -156,7 +156,9 @@ class TestTheCustomerSignInSecret:
         assert data["made_at"]
 
         read = client.get(secret_of(owner), cookies=as_owner(owner))
-        assert read.json()["data"] == {"made_at": data["made_at"]}
+        # When, and who (ADR-0058 §6): a person's name, never the secret.
+        assert read.json()["data"] == {"made_at": data["made_at"], "made_by": data["made_by"]}
+        assert data["made_by"]["role"] == "owner"
         assert data["secret"] not in read.text
 
         async with db.tenant_session(owner["tenant"]) as session:

@@ -18,6 +18,8 @@
  *   scopes. The API selects two columns, so it cannot send more.
  */
 
+import type { MadeBy } from "@/lib/api";
+
 export type SyncStatus = {
   entity_type: string;
   /** `null` when a sync of this kind has never finished. Not a date. */
@@ -50,6 +52,8 @@ export type ConnectedStore = {
   last_check: ShopCheck | null;
   /** When its token was last set. Never the token. */
   token_set_at: string | null;
+  /** Who made that token (ADR-0058 §6). `null`: not recorded, so nobody is named. */
+  token_made_by?: MadeBy;
 };
 
 /**
@@ -107,7 +111,11 @@ export type ShopView = {
    * Before the shop is connected (ADR-0052): when a token was made (never the
    * token) and the last check of the typed address. `null` once connected.
    */
-  connect: { token_made_at: string | null; last_check: ShopCheck | null } | null;
+  connect: {
+    token_made_at: string | null;
+    token_made_by?: MadeBy;
+    last_check: ShopCheck | null;
+  } | null;
   /** Facts about the shop rather than one connection — all read from our own tables. */
   setup?: {
     /** `null` when the shop has no live chat box key at all. */

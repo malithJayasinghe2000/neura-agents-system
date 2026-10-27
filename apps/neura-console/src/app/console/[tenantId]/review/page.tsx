@@ -44,6 +44,8 @@ import {
   type Scorecard,
 } from "@/lib/review";
 import { fromApi, hasSession, type PageMeta } from "@/lib/server-api";
+import { PERMISSION, refusal } from "@/lib/roles";
+import { NotAllowed } from "@/components/not-allowed";
 import { readerTimeZone } from "@/lib/time-zone";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
@@ -75,6 +77,9 @@ export default async function ReviewPage({
   if (!(await hasSession())) redirect("/");
 
   const { tenantId } = await params;
+  // A role that does not include this screen sees why, not an error (ADR-0058).
+  const refused = await refusal(tenantId, PERMISSION.review);
+  if (refused) return <NotAllowed refusal={refused} what="Review" />;
   const query = await searchParams;
   const graded = query.show === "graded";
   const shop = encodeURIComponent(tenantId);

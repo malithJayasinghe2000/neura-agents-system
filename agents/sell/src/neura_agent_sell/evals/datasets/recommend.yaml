@@ -22,7 +22,11 @@ cases:
       grounded: true
       escalated: false
       must_contain: ["Waterproof Jacket"]
+      must_not_contain: ["colleague", "someone at our store"]
     notes: >-
+      G74, R35: a recommendation ends by offering only to narrow it down, never a
+      person (nobody called a colleague exists).
+
       The straightforward case. Two jackets match; either or both is a correct
       shortlist. Anonymous is fine — a catalogue is public and SELL reads no
       customer record at all.
@@ -92,7 +96,7 @@ cases:
       grounded: true
       escalated: false
       must_contain: ["Camp Mug"]
-      must_not_contain: ["(Product"]
+      must_not_contain: ["(Product", "Product 4"]
     notes: >-
       Product ids ONE character long ("4", "5"), as a real connected shop numbers
       them (CONNECTING_A_NEW_SHOP_LOG.md G36). "Safe to heat directly on a camp

@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     #: real use (CLAUDE.md §4): an AI tool building a bridge asks a few dozen
     #: questions, not hundreds a minute.
     rate_limit_developer_mcp: int = Field(default=60, alias="RATE_LIMIT_DEVELOPER_MCP")
+    #: Asking for a sign-in link (G97), counted over an hour per network address
+    #: and per email. **Guesses**, to be set from real use (CLAUDE.md §4): a person
+    #: asks for a link or two; an office shares one address. Without them anyone
+    #: could make NEURA send any number of emails to one inbox.
+    rate_limit_sign_in_window_s: int = Field(default=3600, alias="RATE_LIMIT_SIGN_IN_WINDOW_S")
+    rate_limit_sign_in_per_client: int = Field(default=20, alias="RATE_LIMIT_SIGN_IN_PER_CLIENT")
+    rate_limit_sign_in_per_email: int = Field(default=5, alias="RATE_LIMIT_SIGN_IN_PER_EMAIL")
 
     #: How many proxies sit in front of this deployment. **Zero means
     #: ``X-Forwarded-For`` is ignored entirely**, which is the only safe default:
@@ -143,6 +150,13 @@ class Settings(BaseSettings):
     #: than every use for it is, in §7's words, pure liability.
     retention_observed_events_days: int = Field(
         default=7, ge=1, alias="RETENTION_OBSERVED_EVENTS_DAYS"
+    )
+    #: How long a handed-over shopper's typed email waits for the shop's answer
+    #: (ADR-0062 §4, the owner's R30). *Mark as answered* deletes it at once;
+    #: unanswered, it goes after this many days and the chat leaves the waiting
+    #: list. Thirty is a guess (CLAUDE.md §4).
+    retention_handover_emails_days: int = Field(
+        default=30, ge=1, alias="RETENTION_HANDOVER_EMAILS_DAYS"
     )
     # RETENTION_AUDIT_LOG_DAYS and RETENTION_TRACES_DAYS are deliberately NOT
     # fields. Neither is enforced (ADR-0048 §5), and a field nothing acts on is

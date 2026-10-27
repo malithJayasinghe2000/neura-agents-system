@@ -40,8 +40,8 @@ function OrderChat() {
           <Asked>Hi — where&apos;s my order? It hasn&apos;t arrived yet.</Asked>
           <div className="flex flex-col gap-2 self-start">
             <span className="max-w-[330px] rounded-[16px_16px_16px_4px] bg-hush px-3.5 py-[11px] text-[15px] leading-[1.5]">
-              It was shipped on Monday and is on its way with the carrier. I can pass you to the
-              team if you&apos;d like a hand with it.
+              It was shipped on Monday and is on its way with the carrier. Someone at our store
+              can answer you if you&apos;d like a hand with it.
             </span>
             <span className="flex items-center gap-1.5 text-xs font-medium text-body">
               <Check className="size-[13px] text-accent" strokeWidth={2.2} aria-hidden />
@@ -189,8 +189,11 @@ export default function CarePage() {
             <Stage>
               <Card className="flex flex-col gap-3 p-5">
                 <Asked>Can you change the address on my order?</Asked>
+                {/* CARE's own words for a signed-in shopper (ADR-0062 §5, R31), not
+                    a sentence it never says (G105). */}
                 <Answered>
-                  That&apos;s one for a person. I&apos;ve passed it to the team, with your question.
+                  I can&apos;t answer this here. Your question is with our store, and they can
+                  answer you by email.
                 </Answered>
                 <span className="flex h-7 items-center self-start rounded-full bg-accent px-3 text-xs font-semibold text-white">
                   Handed to your team
@@ -215,8 +218,8 @@ export default function CarePage() {
                   Held — not sent
                 </span>
                 <span className="text-[15px] leading-[1.55]">
-                  &ldquo;Unworn items can be returned with their tags on. Would you like me to pass
-                  you to the team to start one?&rdquo;
+                  &ldquo;Unworn items can be returned with their tags on. Someone at our store can
+                  help you start one, if you&apos;d like.&rdquo;
                 </span>
                 <div className="grid grid-cols-3 gap-2">
                   <span className="flex h-10 items-center justify-center rounded-[10px] bg-ink text-sm font-medium text-white">

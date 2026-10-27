@@ -17,15 +17,16 @@ reads the mode when the reply is released (§6, G72, `turns.py`).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_core import get_logger
+from neura_core.identity.roles import MODE_WRITE
 from neura_core.tenancy import TenantRepository, TurnMode
 
 log = get_logger(__name__)
@@ -45,9 +46,11 @@ class ModeRequest(BaseModel):
 
 
 @router.put("/mode", summary="Go live, or back to practice mode")
-async def set_mode(request: Request, tenant_id: str, body: ModeRequest) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
+async def set_mode(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(MODE_WRITE))],
+    body: ModeRequest,
+) -> dict[str, Any]:
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         tenants = TenantRepository(session)
         before = (await tenants.require(actor.tenant_id)).config.mode

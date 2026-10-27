@@ -13,6 +13,7 @@ dependencies = [
     "neura-dispatch",
     "neura-agent-care",
     "neura-agent-sell",
+    "neura-agent-grow",
     "neura-api",
     "neura-evals",
 ]
@@ -36,6 +37,7 @@ neura-agent-core = { workspace = true }
 neura-dispatch = { workspace = true }
 neura-agent-care = { workspace = true }
 neura-agent-sell = { workspace = true }
+neura-agent-grow = { workspace = true }
 neura-api = { workspace = true }
 neura-evals = { workspace = true }
 
@@ -116,7 +118,8 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = [
     "neura_core", "neura_domain", "neura_llm", "neura_commerce",
-    "neura_adapters", "neura_agent_core", "neura_agent_care", "neura_api",
+    "neura_adapters", "neura_agent_core", "neura_agent_care", "neura_agent_grow",
+    "neura_api",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,7 +160,8 @@ markers = [
 [tool.importlinter]
 root_packages = [
     "neura_core", "neura_domain", "neura_llm", "neura_commerce",
-    "neura_adapters", "neura_agent_core", "neura_agent_care", "neura_api",
+    "neura_adapters", "neura_agent_core", "neura_agent_care", "neura_agent_grow",
+    "neura_api",
 ]
 # Required so the domain-purity contract can forbid third-party packages
 # (sqlalchemy, httpx, fastapi, ...) and not only our own.
@@ -209,12 +213,12 @@ forbidden_modules = ["neura_adapters"]
 name = "neura_agent_core must never learn an agent's name"
 type = "forbidden"
 source_modules = ["neura_agent_core"]
-forbidden_modules = ["neura_agent_care"]
+forbidden_modules = ["neura_agent_care", "neura_agent_grow"]
 
 [[tool.importlinter.contracts]]
 name = "Agents are independent — they never import each other"
 type = "independence"
-modules = ["neura_agent_care"]
+modules = ["neura_agent_care", "neura_agent_grow"]
 
 # An agent owns its golden dataset and the target that runs it, so `neura_evals`
 # is a legitimate dependency of `neura_agent_care.evals`. It must not become one

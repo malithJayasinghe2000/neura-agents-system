@@ -66,6 +66,14 @@ Review, where the evidence sits beside the buttons (console.md §3.2).
 product's, category's or policy's own title from the **synced** catalogue, as
 Sold out reads it (never a call to the shop). ``null`` for a lookup, which has
 no title, and for anything the synced catalogue does not hold.
+## Who is waiting for the shop's answer (ADR-0062, 2026-10-11)
+
+``?waiting=1`` narrows the list to chats whose handed-over shopper waits: an
+address left in the chat box, or a signed-in customer, not yet answered. Each row
+and transcript carries ``waiting`` (how the shop can reach them, since when, and
+who answered), **never the address itself**: that needs ``shop:handovers:write``
+and comes from ``console_handover.py``, so Conversations stays readable by
+whoever reads chats without showing anyone's email.
 """
 
 from __future__ import annotations
@@ -74,7 +82,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,12 +92,16 @@ from neura_agent_core.conversations import (
     ConversationState,
     Message,
 )
+from neura_agent_core.gaps import MAX_FACT_CHARS, MAX_PRODUCT_ID_CHARS
 from neura_agent_core.review import no_draft_reason
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
-from neura_api.dependencies import acting_for
+from neura_agent_core.waiting import WaitingAnswer, WaitingAnswerRepository
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import decode_cursor, encode_cursor, envelope, page
+from neura_api.routes.console_people import who_made
 from neura_commerce.sync.schema import synced_entities
 from neura_core import NotFoundError, ValidationError, get_logger
+from neura_core.identity.roles import CONVERSATIONS_READ
 
 log = get_logger(__name__)
 
@@ -112,14 +124,16 @@ MAX_MESSAGES = 200
 @router.get("/conversations", summary="This shop's conversations, newest first")
 async def list_conversations(
     request: Request,
-    tenant_id: str,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONVERSATIONS_READ))],
     state: Annotated[str | None, Query()] = None,
     agent: Annotated[str | None, Query(max_length=64)] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
+    waiting: Annotated[bool, Query()] = False,
+    gap: Annotated[str | None, Query(max_length=MAX_FACT_CHARS)] = None,
+    gap_product: Annotated[str | None, Query(max_length=MAX_PRODUCT_ID_CHARS)] = None,
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
     # One set of filters for the page, its count and its *Newer* cursor, so the
     # three can never describe different rows.
     matching: dict[str, Any] = {
@@ -129,6 +143,11 @@ async def list_conversations(
         # nothing, which is what an honest filter on it would show.
         "agent": (agent or "").strip() or None,
         "search": (q or "").strip() or None,
+        # Only the chats whose shopper waits for the shop's answer (ADR-0062).
+        "waiting": waiting,
+        # *See the chats* on Missing from your pages (ADR-0064): the chats one
+        # row counts. No product means the row is about the shop.
+        "gap": (gap_product or "", gap.strip()) if gap and gap.strip() else None,
     }
     before = _position(decode_cursor(cursor))
 
@@ -141,6 +160,9 @@ async def list_conversations(
         has_more = len(rows) > limit
         rows = rows[:limit]
         questions = await repository.first_questions(actor.tenant_id, [row.id for row in rows])
+        waits = await WaitingAnswerRepository(session).for_conversations(
+            actor.tenant_id, [row.id for row in rows]
+        )
         total = await repository.count_for(actor.tenant_id, **matching)
         offset = (
             await repository.count_for(actor.tenant_id, through=before, **matching)
@@ -164,7 +186,12 @@ async def list_conversations(
 
     return page(
         [
-            {**_conversation_payload(row), "first_question": _preview(questions.get(row.id))}
+            {
+                **_conversation_payload(row),
+                "first_question": _preview(questions.get(row.id)),
+                # Only while it waits: a row's badge, never the address.
+                "waiting": _waiting_row(waits.get(row.id)),
+            }
             for row in rows
         ],
         next_cursor=next_cursor,
@@ -181,10 +208,10 @@ async def list_conversations(
 
 @router.get("/conversations/{conversation_id}", summary="One transcript")
 async def read_conversation(
-    request: Request, tenant_id: str, conversation_id: str
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(CONVERSATIONS_READ))],
+    conversation_id: str,
 ) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
     db = request.app.state.database
     async with db.tenant_session(actor.tenant_id) as session:
         repository = ConversationRepository(session)
@@ -200,6 +227,11 @@ async def read_conversation(
             actor.tenant_id, conversation_id, limit=MAX_MESSAGES
         )
         names = await _names(session, actor.tenant_id, messages)
+        waiting = await _waiting_transcript(
+            session,
+            actor.tenant_id,
+            await WaitingAnswerRepository(session).get(actor.tenant_id, conversation_id),
+        )
 
     return envelope(
         {
@@ -208,6 +240,10 @@ async def read_conversation(
             # What the agent *would* have said, never merged into `messages`
             # (this module's docstring). Oldest first.
             "held": [_held_payload(turn) for turn in held],
+            # How the shop can reach a handed-over shopper, and who answered
+            # (ADR-0062). Never the address: that is `…/waiting`'s, behind
+            # `shop:handovers:write`.
+            "waiting": waiting,
             # Stated rather than left for the client to count. A thread cut at
             # the bound must not look like a thread that ended.
             "truncated": len(messages) >= MAX_MESSAGES,
@@ -249,6 +285,31 @@ async def _names(
         if name:
             names[(str(row.entity_type), str(row.external_id))] = str(name)
     return names
+
+
+def _waiting_row(wait: WaitingAnswer | None) -> dict[str, Any] | None:
+    """A list row's *Waiting for an answer*: how, and since when. ``None`` once
+    answered, or for a chat nobody waits on."""
+    if wait is None or not wait.waiting:
+        return None
+    return {"reach": wait.reach.value, "since": wait.created_at.isoformat()}
+
+
+async def _waiting_transcript(
+    session: AsyncSession, tenant_id: str, wait: WaitingAnswer | None
+) -> dict[str, Any] | None:
+    """A transcript's waiting state: how the shop can reach the shopper, since
+    when, and, once answered, when and by whom. Never the address."""
+    if wait is None:
+        return None
+    return {
+        "reach": wait.reach.value,
+        "since": wait.created_at.isoformat(),
+        "answered_at": wait.answered_at.isoformat() if wait.answered_at else None,
+        "answered_by": await who_made(session, tenant_id, wait.answered_by)
+        if wait.answered_by
+        else None,
+    }
 
 
 def _position(decoded: dict[str, Any] | None) -> tuple[datetime, str] | None:

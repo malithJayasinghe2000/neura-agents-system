@@ -305,6 +305,7 @@ async def run_streamed_turn(
                     "customer_pass": result.customer_pass.value if result.customer_pass else None,
                     "customer_pass_reason": result.customer_pass_reason,
                     "sign_in": result.sign_in,
+                    "ask_email": result.ask_email,
                     "citations": [c.as_dict() for c in outcome.citations],
                     "ai_disclosure": AI_DISCLOSURE,
                     # Which service answered. Constant on a named socket and

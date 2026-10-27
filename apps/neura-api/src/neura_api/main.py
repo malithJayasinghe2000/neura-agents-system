@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from neura_api import developer_mcp
+from neura_api.dependencies import declared_permissions
 from neura_api.errors import register_error_handlers
 from neura_api.idempotency import Idempotency
 from neura_api.jobs import (
@@ -42,25 +43,32 @@ from neura_api.registry import (
     discover_job_handlers,
     discover_runners,
 )
-from neura_api.routes import agent as agent_routes
 from neura_api.routes import (
+    admin,
     console,
     console_connect,
     console_contact,
     console_conversations,
     console_customer_secret,
+    console_gaps,
+    console_handover,
+    console_home,
     console_mode,
+    console_people,
     console_review,
     console_shop,
+    console_sign_up,
     console_sold_out,
     console_usage,
     dispatch,
+    handover_email,
     health,
     observe,
     stores,
     webhooks,
     widget,
 )
+from neura_api.routes import agent as agent_routes
 from neura_api.stores import StoreDirectory
 from neura_api.turns import TurnService
 from neura_api.webhooks import WebhookDrainer
@@ -138,6 +146,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # a startup activity and a route table built from an empty registry would
     # silently serve 404s for every agent.
     _mount_agents(app)
+    # After every route, an agent's too, is mounted: what `/me` reports each
+    # role may open is drawn from what the routes declare (ADR-0058 §1).
+    app.state.permissions = declared_permissions(app.routes)
     app.state.jobs.start()
 
     log.info(
@@ -235,8 +246,12 @@ def _mount_agents(app: FastAPI) -> None:
     own_routes = discover_agent_routes()
 
     for key, discovered in sorted(app.state.agents.items()):
-        app.include_router(agent_routes.build_router(key), prefix=discovered.route_prefix)
-        log.info("agent_mounted", agent=key, prefix=discovered.route_prefix)
+        # An agent no shopper talks to (GROW, ADR-0064) gets no chat, no
+        # conversations and no shadow queue: they could only ever answer
+        # AGENT_NOT_RUNNABLE. Its own surface, if any, is still mounted below.
+        if getattr(discovered.manifest, "chat", True) is not False:
+            app.include_router(agent_routes.build_router(key), prefix=discovered.route_prefix)
+            log.info("agent_mounted", agent=key, prefix=discovered.route_prefix)
 
         # An agent's own surface, if it has one, under the same prefix. Mounted
         # after the generic routes so a path an agent invents can never shadow
@@ -294,6 +309,7 @@ def create_app() -> FastAPI:
     app.include_router(console.router, prefix="/v1")
     app.include_router(console_review.router, prefix="/v1")
     app.include_router(console_conversations.router, prefix="/v1")
+    app.include_router(console_handover.router, prefix="/v1")
     app.include_router(console_shop.router, prefix="/v1")
     app.include_router(console_connect.router, prefix="/v1")
     app.include_router(console_usage.router, prefix="/v1")
@@ -301,10 +317,19 @@ def create_app() -> FastAPI:
     app.include_router(console_contact.router, prefix="/v1")
     app.include_router(console_customer_secret.router, prefix="/v1")
     app.include_router(console_sold_out.router, prefix="/v1")
+    app.include_router(console_gaps.router, prefix="/v1")
+    app.include_router(console_home.router, prefix="/v1")
+    app.include_router(console_people.router, prefix="/v1")
+    app.include_router(console_sign_up.router, prefix="/v1")
+    # FiveNeurals' own area (ADR-0061): every route behind `AdminOnly`.
+    app.include_router(admin.router, prefix="/v1")
     # Mounted once, and it names no agent — that is the whole point
     # ([ADR-0031]). It sits beside the per-agent routes rather than
     # replacing them: `/v1/care/chat` is still CARE's own declared prefix.
     app.include_router(dispatch.router, prefix="/v1")
+    # A handed-over shopper's address (ADR-0062). Mounted once, naming no agent,
+    # like the dispatched chat: the agent comes from the conversation.
+    app.include_router(handover_email.router, prefix="/v1")
     app.include_router(health.router, prefix="/v1")
     app.include_router(widget.router, prefix="/v1")
     app.include_router(stores.router, prefix="/v1")

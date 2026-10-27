@@ -22,7 +22,8 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 import Link from "next/link";
-import { connectShop, makeShopToken } from "@/lib/api";
+import { connectShop, makeShopToken, type MadeBy } from "@/lib/api";
+import { MadeByText } from "@/components/shop/made-by";
 import { CheckWarnings, CopyButton, useShopCheck } from "@/components/shop/full-check";
 import { When } from "@/components/when";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ export function ConnectShop({
   const [refreshing, startTransition] = useTransition();
 
   const [madeAt, setMadeAt] = useState<string | null>(initial.token_made_at);
+  const [madeBy, setMadeBy] = useState<MadeBy | undefined>(initial.token_made_by);
   /** Shown once: only in the visit that made it, never read back. */
   const [token, setToken] = useState<string | null>(null);
   const [making, setMaking] = useState(false);
@@ -72,6 +74,7 @@ export function ConnectShop({
       .then((made) => {
         setToken(made.token);
         setMadeAt(made.made_at);
+        setMadeBy(made.made_by);
       })
       .catch((error: unknown) =>
         setTokenError(error instanceof Error ? error.message : "The token could not be made."),
@@ -147,8 +150,8 @@ export function ConnectShop({
             </div>
           ) : hasToken ? (
             <p className="text-sm text-muted-foreground">
-              Made <When iso={madeAt} inline />. It is kept locked away and can&apos;t be shown
-              again.{" "}
+              Made <When iso={madeAt} inline />
+              <MadeByText by={madeBy} />. It is kept locked away and can&apos;t be shown again.{" "}
               <button
                 type="button"
                 onClick={make}

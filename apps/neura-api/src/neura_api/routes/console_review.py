@@ -44,15 +44,16 @@ from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from neura_agent_core.conversations import ConversationState
 from neura_agent_core.review import ReviewItem, ReviewQueue, evidence_payload, no_draft_reason
 from neura_agent_core.shadow import ShadowRepository, ShadowVerdict
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import decode_cursor, encode_cursor, envelope, page
 from neura_core import NotFoundError, ValidationError, get_logger
+from neura_core.identity.roles import REVIEW_WRITE
 
 log = get_logger(__name__)
 
@@ -81,9 +82,9 @@ class Grade(BaseModel):
 
 
 @router.get("/review/scorecard", summary="What this shop's shadow queue says so far")
-async def scorecard(request: Request, tenant_id: str) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
+async def scorecard(
+    request: Request, actor: Annotated[ConsoleActor, Depends(Permitted(REVIEW_WRITE))]
+) -> dict[str, Any]:
     db = request.app.state.database
     async with db.tenant_session(actor.tenant_id) as session:
         # No `agent_key` filter: the console asks about the shop, and a merchant
@@ -111,7 +112,7 @@ Tz = Annotated[str, Query(max_length=64)]
 @router.get("/review", summary="Turns awaiting a human verdict, with their evidence")
 async def review_queue(
     request: Request,
-    tenant_id: str,
+    actor: Annotated[ConsoleActor, Depends(Permitted(REVIEW_WRITE))],
     graded: Annotated[bool | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
     verdict: Annotated[str | None, Query()] = None,
@@ -122,7 +123,6 @@ async def review_queue(
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
     start, end = _window(since, until, tz)
     filters = {
         "state": _state(state),
@@ -168,7 +168,7 @@ async def review_queue(
 @router.get("/review/counts", summary="How many turns match, by outcome and by verdict")
 async def review_counts(
     request: Request,
-    tenant_id: str,
+    actor: Annotated[ConsoleActor, Depends(Permitted(REVIEW_WRITE))],
     graded: Annotated[bool | None, Query()] = None,
     agent: Agent = None,
     since: Since = None,
@@ -176,7 +176,6 @@ async def review_counts(
     tz: Tz = "UTC",
 ) -> dict[str, Any]:
     """The numbers beside the screen's filter buttons. Counts, never a rate."""
-    actor = await acting_for(request, tenant_id)
     start, end = _window(since, until, tz)
 
     db = request.app.state.database
@@ -196,13 +195,16 @@ async def review_counts(
 
 
 @router.get("/review/{shadow_id}", summary="One turn, with its evidence")
-async def review_item(request: Request, tenant_id: str, shadow_id: str) -> dict[str, Any]:
+async def review_item(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(REVIEW_WRITE))],
+    shadow_id: str,
+) -> dict[str, Any]:
     """One turn by id — so a reply can be opened by a link, graded or not.
 
     404 for another tenant's turn and for one that does not exist, which under
     RLS are the same fact.
     """
-    actor = await acting_for(request, tenant_id)
 
     db = request.app.state.database
     async with db.tenant_session(actor.tenant_id) as session:
@@ -217,9 +219,12 @@ async def review_item(request: Request, tenant_id: str, shadow_id: str) -> dict[
 
 
 @router.post("/review/{shadow_id}/grade", summary="Record this person's verdict on one turn")
-async def grade(request: Request, tenant_id: str, shadow_id: str, body: Grade) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
+async def grade(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(REVIEW_WRITE))],
+    shadow_id: str,
+    body: Grade,
+) -> dict[str, Any]:
     db = request.app.state.database
     async with db.tenant_session(actor.tenant_id) as session:
         repository = ShadowRepository(session)

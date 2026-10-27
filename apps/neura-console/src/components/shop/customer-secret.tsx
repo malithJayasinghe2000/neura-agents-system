@@ -14,7 +14,8 @@
  */
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { makeCustomerSecret } from "@/lib/api";
+import { makeCustomerSecret, type MadeBy } from "@/lib/api";
+import { MadeByText } from "@/components/shop/made-by";
 import { DEVELOPER_GUIDE_URL } from "@/lib/shop";
 import { CopyButton } from "@/components/shop/full-check";
 import { When } from "@/components/when";
@@ -25,14 +26,18 @@ type Phase = "idle" | "asking" | "making" | "made";
 export function CustomerSecret({
   tenantId,
   madeAt: initialMadeAt,
+  madeBy: initialMadeBy,
 }: {
   tenantId: string;
   /** When the secret was made, or `null`. Never the secret. */
   madeAt: string | null;
+  /** Who made it (ADR-0058 §6). */
+  madeBy?: MadeBy;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [secret, setSecret] = useState<string | null>(null);
   const [madeAt, setMadeAt] = useState<string | null>(initialMadeAt);
+  const [madeBy, setMadeBy] = useState<MadeBy | undefined>(initialMadeBy);
   const [replacing, setReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +49,7 @@ export function CustomerSecret({
       .then((made) => {
         setSecret(made.secret);
         setMadeAt(made.made_at);
+        setMadeBy(made.made_by);
         setPhase("made");
       })
       .catch((reason: unknown) => {
@@ -92,8 +98,9 @@ export function CustomerSecret({
 
       {madeAt !== null && phase !== "made" ? (
         <p className="leading-relaxed text-muted-foreground" data-secret-state="made">
-          Made <When iso={madeAt} inline />. Only your shop and NEURA know it. It is kept locked
-          away and can&apos;t be shown again, not even to you.
+          Made <When iso={madeAt} inline />
+          <MadeByText by={madeBy} />. Only your shop and NEURA know it. It is kept locked away and
+          can&apos;t be shown again, not even to you.
         </p>
       ) : null}
 
@@ -119,8 +126,8 @@ export function CustomerSecret({
           <p className="text-sm leading-relaxed">
             The old secret stops working at once.{" "}
             <strong className="font-semibold">
-              Signed-in shoppers can&apos;t get answers about their orders until your developer
-              puts the new one in
+              Signed-in shoppers can&apos;t get answers about their orders until your developer puts
+              the new one in
             </strong>
             , so tell them straight away.
           </p>

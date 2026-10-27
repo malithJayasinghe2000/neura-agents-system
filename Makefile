@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        tenant-dpa retention-sweep \
+        tenant-dpa retention-sweep tenant-waiting tenant-approve tenant-refuse admin-add admin-remove admin-list \
         api-check verify-probe router-probe console console-check web-check
 
 help:  ## Show this help
@@ -58,6 +58,7 @@ console:  ## How to run the merchant console (prints the two commands)
 	@echo "    make tenant-new NAME=\"My Shop\" AGENTS=care        (prints tn_...)"
 	@echo "    make user-new EMAIL=you@shop.com TENANT=tn_...     (once)"
 	@echo "    make user-link EMAIL=you@shop.com                  (a sign-in URL)"
+	@echo "    make invite-link EMAIL=them@shop.com TENANT=tn_... (an invite URL)"
 	@echo ""
 	@echo "  To prove it works: make console-check EMAIL=you@shop.com"
 	@echo ""
@@ -428,6 +429,21 @@ user-revoke:  ## Withdraw access: make user-revoke EMAIL=... TENANT=tn_...
 user-link:  ## Print a sign-in link instead of mailing it: make user-link EMAIL=...
 	uv run python scripts/console_admin.py link --email "$(EMAIL)"
 
+# A new link for an invite an Owner sent from People (ADR-0058 §4), printed
+# instead of mailed: the old link stops, as Send again does.
+invite-link:  ## Print a new link for a waiting invite: make invite-link EMAIL=... TENANT=tn_...
+	uv run python scripts/console_admin.py invite-link --email "$(EMAIL)" --tenant "$(TENANT)"
+
+# ADR-0061: the only way the FiveNeurals admin list changes. No route writes it.
+admin-add:  ## Make a person a FiveNeurals admin: make admin-add EMAIL=...
+	uv run python scripts/console_admin.py admin-add --email "$(EMAIL)"
+
+admin-remove:  ## Stop a person being a FiveNeurals admin: make admin-remove EMAIL=...
+	uv run python scripts/console_admin.py admin-remove --email "$(EMAIL)"
+
+admin-list:  ## The FiveNeurals admins: make admin-list
+	uv run python scripts/console_admin.py admin-list
+
 tenant-new:  ## Create a tenant: make tenant-new NAME="Acme Store" AGENTS=care
 	uv run python scripts/tenant_admin.py create-tenant --name "$(NAME)" --agents "$(AGENTS)"
 
@@ -465,6 +481,18 @@ tenant-dpa:  ## Record a data-processing agreement: make tenant-dpa TENANT=tn_..
 # for RETENTION_CONVERSATIONS_DAYS, then books the next pass if anything is left.
 retention-sweep:  ## Delete what has expired, now: make retention-sweep TENANT=tn_...
 	uv run python scripts/tenant_admin.py sweep --tenant-id $(TENANT)
+
+# ADR-0058 §7: a shop that signed up waits for FiveNeurals (AD1, until the admin
+# dashboard exists). Approval gives it the assistants named, CARE when none, and
+# emails its Owner; refusal removes it, as tenant-drop does, and emails its Owner.
+tenant-waiting:  ## Shops waiting for approval: make tenant-waiting
+	uv run python scripts/tenant_admin.py waiting
+
+tenant-approve:  ## Approve a shop that signed up: make tenant-approve TENANT=tn_... [AGENTS=care,sell]
+	uv run python scripts/tenant_admin.py approve --tenant-id $(TENANT) --agents "$(AGENTS)"
+
+tenant-refuse:  ## Refuse and remove a shop that signed up: make tenant-refuse TENANT=tn_...
+	uv run python scripts/tenant_admin.py refuse --tenant-id $(TENANT)
 
 revision:  ## New migration: make revision M="add tenants"
 	uv run alembic revision --autogenerate -m "$(M)"

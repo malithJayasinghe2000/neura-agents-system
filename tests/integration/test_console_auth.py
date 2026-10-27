@@ -35,8 +35,15 @@ def client(monkeypatch: pytest.MonkeyPatch):
     suite mails every fixture address it invents, from the developer's own
     account, every run. `Mailer` skips when there is no host, which is exactly
     the behaviour these tests want to exercise anyway.
+
+    **And no sign-in limit worth the name** (G97): every request here comes from
+    the same test address, and the limit counts an hour, so a few runs in one
+    hour would otherwise be refused. The limit has its own tests
+    (`test_console_sign_in_limits.py`).
     """
     monkeypatch.setenv("SMTP_HOST", "")
+    monkeypatch.setenv("RATE_LIMIT_SIGN_IN_PER_CLIENT", "100000")
+    monkeypatch.setenv("RATE_LIMIT_SIGN_IN_PER_EMAIL", "100000")
     get_settings.cache_clear()
     try:
         with TestClient(create_app()) as test_client:
@@ -184,9 +191,16 @@ class TestVerifyAndSession:
                     "tenant_id": owner["tenant"],
                     "role": "owner",
                     "name": "Corner Bookshop",
+                    # ADR-0058 §7: a waiting shop shows its waiting screen.
+                    "status": "active",
                     "assistants": ["care", "sell"],
+                    # ADR-0058: what the role may open, from the API's own map.
+                    "permissions": response.json()["data"]["memberships"][0]["permissions"],
                 }
             ]
+            assert (
+                "people:members:write" in response.json()["data"]["memberships"][0]["permissions"]
+            )
             assert "Somebody Else" not in response.text
             assert stranger not in response.text
         finally:

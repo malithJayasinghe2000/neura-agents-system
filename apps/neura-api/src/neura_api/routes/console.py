@@ -1,8 +1,8 @@
 """Signing a human into the merchant console. ADR-0026.
 
-The console's entire authentication surface is these five endpoints, and they
-are the only ones in this API that authenticate a **person** rather than a
-program. Every other route resolves a bearer token to a tenant; these resolve a
+The console's authentication surface is these six endpoints and the two of
+sign up (``console_sign_up``), and they are the only ones in this API that
+authenticate a **person** rather than a program. Every other route resolves a bearer token to a tenant; these resolve a
 cookie to a human, then a human to the merchants they may act for.
 
 ## The rule the rest of the console rests on
@@ -35,10 +35,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from sqlalchemy import select
 
-from neura_api.dependencies import DatabaseDep
+from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
+from neura_api.dependencies import DatabaseDep, client_address
 from neura_api.envelopes import envelope
-from neura_core import Database, get_logger, get_settings
+from neura_api.ratelimit import RateLimiter, anonymous_client
+from neura_core import Database, RateLimitError, get_logger, get_settings
 from neura_core.email import Mailer
 from neura_core.identity import (
     COOKIE_NAME,
@@ -47,9 +50,13 @@ from neura_core.identity import (
     memberships_for,
     redeem,
     request_sign_in_link,
+    role_may,
     verify,
 )
-from neura_core.tenancy import TenantRepository
+from neura_core.identity.admins import is_admin
+from neura_core.identity.people import PeopleRepository
+from neura_core.identity.schema import users
+from neura_core.tenancy import TenantRepository, TenantStatus
 
 log = get_logger(__name__)
 
@@ -61,6 +68,20 @@ router = APIRouter(prefix="/console", tags=["console"])
 SENT_MESSAGE = "If that address has an account, a sign-in link is on its way."
 
 SIGN_IN_SUBJECT = "Your FiveNeurals sign-in link"
+
+#: What someone who asked for too many links is told (G97). The same words
+#: whether or not the email has an account: the limit counts the email as typed,
+#: never what it belongs to.
+SIGN_IN_LIMITED = "Too many sign-in links were asked for. Please wait a while, then try again."
+
+#: What a refused invite link says, whatever was wrong with it: unknown, used,
+#: cancelled, sent again, run out, or naming another shop (ADR-0058 §4). It
+#: cannot say which, so it gives both next steps: someone who already joined
+#: signs in (the link works once); anyone else asks the owner (G96).
+INVITE_NO_LONGER_VALID = (
+    "That invite link has already been used, or it no longer works. "
+    "If you already joined, sign in. If not, ask the shop's owner to send it again."
+)
 
 
 def _sign_in_body(url: str, minutes: int) -> str:
@@ -95,9 +116,19 @@ class VerifyLink(BaseModel):
     token: str = Field(min_length=1, max_length=512)
 
 
+class AcceptInvite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: The shop the link names. A suggestion, like every id a browser sends: the
+    #: token is looked up in that shop's own session, so a wrong shop finds nothing.
+    shop: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
+    token: str = Field(min_length=1, max_length=512)
+
+
 @router.post("/auth/request-link", summary="Email a one-time sign-in link")
 async def request_link(body: RequestLink, request: Request, db: DatabaseDep) -> dict[str, object]:
     settings = get_settings()
+    await limit_links(request, str(body.email))
 
     # No `app.tenant_id` and no user id: the person has proved nothing yet, and
     # this call is what begins to change that. The transaction can see `users`
@@ -107,7 +138,7 @@ async def request_link(body: RequestLink, request: Request, db: DatabaseDep) -> 
             session,
             email=str(body.email),
             console_base_url=settings.console_base_url,
-            requested_ip=_peer(request),
+            requested_ip=peer(request),
         )
 
     if minted.minted:
@@ -140,16 +171,78 @@ async def verify_link(
         # One message for unknown, expired, already-used and malformed. Telling
         # the holder of a stolen link *which* it was tells them whether it ever
         # worked.
-        log.info("console_sign_in_failed", ip=_peer(request))
+        log.info("console_sign_in_failed", ip=peer(request))
         return envelope({"signed_in": False, "message": "That link is no longer valid."})
 
-    _set_session_cookie(response, issue(user_id, get_settings().secret_key))
+    set_session_cookie(response, issue(user_id, get_settings().secret_key))
     log.info("console_signed_in", user_id=user_id)
     return envelope({"signed_in": True})
 
 
+@router.post("/auth/accept-invite", summary="Use an invite link: join the shop")
+async def accept_invite(
+    body: AcceptInvite,
+    response: Response,
+    request: Request,
+    db: DatabaseDep,
+    session_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
+) -> dict[str, object]:
+    """ADR-0058 §4: the link adds the person to **that shop only**, with the
+    invite's role, making their account when the email has none. Used once; the
+    audit entry is written in the same transaction.
+
+    **It signs in only a brand-new account** (R13, the owner, 2026-10-10;
+    ADR-0059). A session opens every shop a person is in, so for someone who
+    already has an account the link would be a 7-day sign-in to their other shops
+    too, for whoever the email was forwarded to. So they are added, and sign in
+    as usual; someone already signed in as that very person goes straight in,
+    and a browser signed in as somebody else is left as it is. A new account is
+    signed in wherever the link is opened: the link is its only way in.
+    """
+    async with db.tenant_session(body.shop) as session:
+        joined = await PeopleRepository(session).accept(body.shop, token=body.token)
+        shop_name = None
+        if joined is not None:
+            tenant = await TenantRepository(session).get(body.shop)
+            shop_name = tenant.name if tenant else None
+            await PostgresAuditLog(session).record(
+                AuditEntry(
+                    tenant_id=body.shop,
+                    event_type=AuditEvent.PEOPLE_CHANGE,
+                    actor=joined.user_id,
+                    outcome="invite.accepted",
+                    payload={
+                        "invite_id": joined.invite_id,
+                        "role": joined.role,
+                        "new_account": joined.made_account,
+                    },
+                )
+            )
+
+    if joined is None:
+        log.info("console_invite_failed", ip=peer(request))
+        return envelope({"signed_in": False, "message": INVITE_NO_LONGER_VALID})
+
+    log.info("console_invite_accepted", user_id=joined.user_id, tenant_id=body.shop)
+    secret = get_settings().secret_key
+    already = verify(session_cookie or "", secret)
+    if joined.made_account:
+        set_session_cookie(response, issue(joined.user_id, secret))
+    elif already is None or already.user_id != joined.user_id:
+        return envelope(
+            {
+                "signed_in": False,
+                "joined": True,
+                "tenant_id": body.shop,
+                "message": f"You've joined {shop_name or 'the shop'}. Sign in to open it.",
+            }
+        )
+    return envelope({"signed_in": True, "tenant_id": body.shop, "user_id": joined.user_id})
+
+
 @router.get("/me", summary="Who is signed in, and which merchants they may act for")
 async def me(
+    request: Request,
     db: DatabaseDep,
     session_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> dict[str, object]:
@@ -162,22 +255,53 @@ async def me(
     # working on this request, not when the cookie expires.
     async with db.identity_session(signed_in.user_id) as session:
         held = await memberships_for(session, signed_in.user_id)
+        email = await session.scalar(select(users.c.email).where(users.c.id == signed_in.user_id))
+        # For the *Admin* link on Your shops (ADR-0061). Display only: every
+        # admin route checks the list itself.
+        admin = await is_admin(session, signed_in.user_id)
 
+    # Every permission some route declares, gathered at startup. What each role
+    # holds of them is the map's answer, so the dashboard shows each person only
+    # what they may open, and never keeps a copy of the map (ADR-0058 §1).
+    known: frozenset[str] = getattr(request.app.state, "permissions", frozenset())
     memberships = []
     for m in held:
-        name, assistants = await _shop(db, m.tenant_id)
+        name, assistants, status = await _shop(db, m.tenant_id)
+        # A shop waiting for approval opens nothing (ADR-0058 §7): the API
+        # refuses its every route, and the dashboard shows the waiting screen.
+        opens = [] if status == TenantStatus.WAITING.value else known
         memberships.append(
-            {"tenant_id": m.tenant_id, "role": m.role, "name": name, "assistants": assistants}
+            {
+                "tenant_id": m.tenant_id,
+                "role": m.role,
+                "name": name,
+                "status": status,
+                "assistants": assistants,
+                "permissions": sorted(p for p in opens if role_may(m.role, p)),
+            }
         )
-    return envelope({"signed_in": True, "user_id": signed_in.user_id, "memberships": memberships})
+    return envelope(
+        {
+            "signed_in": True,
+            "user_id": signed_in.user_id,
+            # Their own address, for the waiting screen's *"We'll email [email]"*.
+            "email": str(email) if email else None,
+            "is_admin": admin,
+            "memberships": memberships,
+        }
+    )
 
 
-async def _shop(db: Database, tenant_id: str) -> tuple[str | None, list[str]]:
-    """The shop's own name, and the assistants it has.
+async def _shop(db: Database, tenant_id: str) -> tuple[str | None, list[str], str | None]:
+    """The shop's own name, the assistants it has, and its status.
 
     **The name**, so a merchant never has to recognise ``tn_01M…``. ``None`` when
     there is no name to show; the screen falls back to the id rather than
     inventing one.
+
+    **The status**, so the dashboard shows a shop waiting for approval its
+    waiting screen and nothing else (ADR-0058 §7). Display only, like the rest:
+    every shop route refuses a waiting shop itself (``acting_for``).
 
     **The assistants** are ``enabled_agents``, sorted, passed through as data:
     the console hides a screen that belongs to an assistant the shop does not
@@ -193,8 +317,8 @@ async def _shop(db: Database, tenant_id: str) -> tuple[str | None, list[str]]:
     async with db.tenant_session(tenant_id) as session:
         tenant = await TenantRepository(session).get(tenant_id)
     if tenant is None:
-        return None, []
-    return (tenant.name or None), sorted(tenant.enabled_agents)
+        return None, [], None
+    return (tenant.name or None), sorted(tenant.enabled_agents), tenant.status.value
 
 
 @router.post("/auth/sign-out", summary="End the session")
@@ -210,7 +334,39 @@ async def sign_out(response: Response) -> dict[str, object]:
     return envelope({"signed_out": True})
 
 
-def _set_session_cookie(response: Response, value: str) -> None:
+async def limit_links(request: Request, email: str, *, refusal: str = SIGN_IN_LIMITED) -> None:
+    """At most so many links an hour per network address and per email (G97).
+
+    **Sign-in and sign-up links count together** (ADR-0058 §7): the limit is on
+    the emails NEURA sends one inbox, and on the requests one address makes,
+    whichever form asked. Only the words of the refusal differ (``refusal``).
+
+    Checked **before** anything is looked up, so the answer cannot depend on
+    whether the email has an account. Both are counted as keyed hashes that
+    expire with their hour (`ratelimit.anonymous_client`): neither the address
+    nor the email is stored. Without Redis the limiter lets the request through
+    and logs that it did, as every limit here does.
+    """
+    settings = get_settings()
+    limiter = RateLimiter(
+        getattr(request.app.state, "redis", None), window_s=settings.rate_limit_sign_in_window_s
+    )
+    verdict = await limiter.check(
+        [
+            anonymous_client(
+                "sign_in_client", client_address(request), settings.rate_limit_sign_in_per_client
+            ),
+            anonymous_client(
+                "sign_in_email", email.strip().lower(), settings.rate_limit_sign_in_per_email
+            ),
+        ]
+    )
+    if not verdict.allowed:
+        log.info("sign_in_rate_limited", subject=verdict.subject)
+        raise RateLimitError(refusal, details={"retry_after": verdict.retry_after})
+
+
+def set_session_cookie(response: Response, value: str) -> None:
     """Every flag here is doing a job.
 
     ``httponly`` keeps the cookie out of reach of any script that gets onto the
@@ -232,7 +388,7 @@ def _set_session_cookie(response: Response, value: str) -> None:
     )
 
 
-def _peer(request: Request) -> str:
+def peer(request: Request) -> str:
     """The network peer, for abuse investigation only.
 
     Never `X-Forwarded-For` unless a proxy hop count is configured — trusting a

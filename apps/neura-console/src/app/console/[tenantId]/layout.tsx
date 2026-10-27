@@ -7,17 +7,22 @@
  * renders once and does not re-run when a nested page navigates, so putting the
  * check here would be a check that stops running.
  *
- * **The two reads here are for display only**: the shop's name, from the
- * person's own memberships on `/me` (a shop they do not hold has no name to
- * show, so the id stands in and the page underneath says *no access*), and how
- * many replies wait in Review, for the menu's badge. Grading calls
+ * **The reads here are for display only**: the shop's name and the person's
+ * role there, from their own memberships on `/me` (a shop they do not hold has
+ * no name to show, so the id stands in and the page underneath says *no
+ * access*), what the role may open, for the menu (ADR-0058), how many
+ * replies wait in Review, and how many handed-over shoppers wait for an answer
+ * (ADR-0062), for the menu's two counts. A shop waiting for approval
+ * gets its waiting screen instead of the menu (ADR-0058 §7). Grading calls
  * `router.refresh()`, which re-reads both, so the badge does not go stale on the
  * screen where it changes. Nothing is granted or refused by what this finds.
  */
 import { fromApi } from "@/lib/server-api";
 import type { Scorecard } from "@/lib/review";
+import { PERMISSION, may, roleName } from "@/lib/roles";
 import { ShopSidebar } from "@/components/shop/shop-sidebar";
-import { assistantsOf, hasSell, type Me } from "@/lib/shop-assistants";
+import { WaitingForApproval } from "@/components/waiting-for-approval";
+import { assistantsOf, hasGrow, hasSell, isWaiting, type Me } from "@/lib/shop-assistants";
 
 export default async function ShopLayout({
   children,
@@ -27,13 +32,36 @@ export default async function ShopLayout({
   params: Promise<{ tenantId: string }>;
 }) {
   const { tenantId } = await params;
-  const [me, card] = await Promise.all([
-    fromApi<Me>("/me"),
-    fromApi<Scorecard>(`/shops/${encodeURIComponent(tenantId)}/review/scorecard`),
+  const me = await fromApi<Me>("/me");
+  const membership = me.ok
+    ? me.data.memberships?.find((held) => held.tenant_id === tenantId)
+    : undefined;
+  const name = membership?.name;
+
+  // A shop waiting for approval has one screen and no menu (ADR-0058 §7): the
+  // API refuses its every route, so nothing below could open anyway.
+  if (isWaiting(membership)) {
+    return (
+      <WaitingForApproval
+        shop={name ?? tenantId}
+        email={me.ok ? (me.data.email ?? null) : null}
+        otherShops={(me.ok ? (me.data.memberships?.length ?? 0) : 0) > 1}
+      />
+    );
+  }
+
+  // The menu shows each role only what it may open (ADR-0058). The Review count
+  // is read only for a role that may open Review: for any other it is a 403.
+  const reviews = may(membership, PERMISSION.review);
+  // How many handed-over shoppers wait for an answer, for the menu (ADR-0062):
+  // `/home` gives it to a role that may answer them and `null` to any other.
+  const [card, home] = await Promise.all([
+    reviews ? fromApi<Scorecard>(`/shops/${encodeURIComponent(tenantId)}/review/scorecard`) : null,
+    fromApi<{ waiting: number | null }>(`/shops/${encodeURIComponent(tenantId)}/home`),
   ]);
-  const name = me.ok
-    ? me.data.memberships?.find((membership) => membership.tenant_id === tenantId)?.name
-    : null;
+  const opens = Object.fromEntries(
+    Object.entries(PERMISSION).map(([screen, permission]) => [screen, may(membership, permission)]),
+  ) as Record<keyof typeof PERMISSION, boolean>;
 
   return (
     <div className="md:flex md:min-h-dvh">
@@ -41,7 +69,11 @@ export default async function ShopLayout({
         tenantId={tenantId}
         shopName={name ?? tenantId}
         sell={hasSell(me.ok ? assistantsOf(me.data, tenantId) : null)}
-        waiting={card.ok ? card.data.ungraded : null}
+        grow={hasGrow(me.ok ? assistantsOf(me.data, tenantId) : null)}
+        waiting={card?.ok ? card.data.ungraded : null}
+        answering={home.ok ? home.data.waiting : null}
+        role={roleName(membership?.role)}
+        opens={opens}
       />
       <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 md:px-10 md:py-10">
         <div className="mx-auto max-w-5xl space-y-6">{children}</div>

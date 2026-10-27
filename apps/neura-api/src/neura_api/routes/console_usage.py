@@ -39,11 +39,12 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
-from neura_api.dependencies import acting_for
+from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_core import ValidationError, get_logger
+from neura_core.identity.roles import USAGE_READ
 from neura_core.tenancy import TenantRepository
 from neura_core.tenancy.usage import UsageMeter, UsageTotals, today
 
@@ -61,11 +62,9 @@ PERIODS: dict[str, int | None] = {"today": 0, "7d": 6, "30d": 29, "all": None}
 @router.get("/usage", summary="What this shop used, with every caveat attached")
 async def usage(
     request: Request,
-    tenant_id: str,
+    actor: Annotated[ConsoleActor, Depends(Permitted(USAGE_READ))],
     period: Annotated[str, Query()] = "30d",
 ) -> dict[str, Any]:
-    actor = await acting_for(request, tenant_id)
-
     if period not in PERIODS:
         # Refused rather than defaulted. A silently corrected period returns a
         # different window than the caller asked for while looking like the one

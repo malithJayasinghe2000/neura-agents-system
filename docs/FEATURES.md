@@ -1,6 +1,6 @@
 # FEATURES — what each assistant does, in plain words
 
-**Last checked against the code:** 2026-09-30.
+**Last checked against the code:** 2026-09-30; NEURA-GROW's lines 2026-10-27.
 
 This is the one list of what the product does. The public product site and the setup guides are written
 from it, so a line here is a promise that a page may repeat.
@@ -43,7 +43,7 @@ The shopper asks, CARE answers from the shop's own data, and hands to a person w
 | **Order status** | Tells a shopper **signed in to the shop** where their order is: status, items, tracking. It first checks the order is **theirs**; for any other number the reply is the same *"no order with that reference"*, so nobody can guess real order numbers. A shopper who is not signed in is asked to sign in, or to contact the shop. | 🟡 Built, with a limit (L1) | Chat box | `agents/care/tools/orders.py`, `neura_core/tenancy/customer_pass.py`, ADR-0057 |
 | **Product questions** | Answers questions about products — what it is, sizes, materials, whether it is in stock — from the shop's catalogue. | ✅ Built | Chat box | `agents/care/tools/catalogue.py` |
 | **Returns and shipping questions** | Answers from the shop's own policy pages — returns, shipping, refunds, warranty, payment, privacy. Chosen by plain matching in code, no AI guessing which page applies. | ✅ Built | Chat box | `agents/care/tools/policies.py` |
-| **Hand to a person** | Passes the chat to the shop's team when the shopper asks, when they want something changed or refunded, or when CARE cannot answer from the shop's data. The team gets the whole story: the question, what was looked up, and a draft reply that was **not** sent. **The shopper is told to contact the store, with the shop's own email or phone** (set on Shop connection), and is never promised a person. | 🟡 Built, with a limit (L2) | Chat box → Dashboard | `graph/nodes/escalate.py`, ADR-0055 |
+| **Hand to a person** | Passes the chat to the shop's team when the shopper asks, when they want something changed or refunded, or when CARE cannot answer from the shop's data. The team gets the whole story: the question, what was looked up, and a draft reply that was **not** sent. **A shopper who is not signed in may leave their email in the chat box; a signed-in shopper is never asked** (the shop already has their email). The chat then waits in the dashboard, and the shop's Owner or Support **answers from the shop's own email app**: NEURA sends nothing to a shopper. The shopper also reads the shop's own email or phone (set on Shop connection), and is never promised a person. **When CARE or SELL cannot help, they offer only that someone at the shop can answer**, and a shopper who says yes reaches the handover. | 🟡 Built, with a limit (L2) | Chat box → Dashboard | `graph/nodes/escalate.py`, ADR-0055, ADR-0062 |
 
 ## NEURA-SELL — helps the shopper choose
 
@@ -62,6 +62,15 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | Sold out, stage 2 — *"email me when it's back"* in chat | — | ⬜ Blocked (needs a new data category in ADR-0042) | — | ADR-0046 |
 | Sold out, stage 3 — logged-in customers | — | ⬜ Blocked (needs A21's identity token) | — | ADR-0046 |
 | Recovery list — checkouts started and not finished | Shown to the owner, exported and sent **by the owner**. We never message a shopper. | ⬜ Decided, not built | Dashboard | ADR-0043 |
+
+## NEURA-GROW — shows what the shop's pages are missing
+
+No shopper talks to GROW: it has no chat. It reads the shop's chats once a night, in the background, and shows the owner what to add to the shop's pages. **FiveNeurals ticks it per shop.**
+
+| Feature | What it does | Status | Where | Source |
+|:--|:--|:--|:--|:--|
+| **Missing from your pages** | The questions **at least 2 shoppers** asked in the last 30 days that the shop's pages don't answer (*"Is it organic?"*, *"Can I pay cash on delivery?"*), grouped by product, most asked first. Each says where to add the answer, with a link to the product's page. **GROW never writes the answer**: only the owner knows it. *See the chats* opens the chats behind a question; *I added it* takes it off the list until shoppers ask again. Counts only, never who asked. The Owner and Support see it, never the Developer. A line on Home says how many there are. | 🟡 Built, with a limit (L6) | Dashboard | `agents/grow/`, `console_gaps.py`, ADR-0064 |
+| **The night check** | Once a night, an AI reads each new reply that handed the shopper over or could not give a fact, and names the question. A free word check first sends only those replies to the AI. Code checks every answer before it is stored: no links, emails, phone numbers or instructions. Inside the shop's daily spending limit. FiveNeurals can pause it for one shop. | 🟡 Built, with a limit (L6) | — | `agents/grow/scan.py`, ADR-0064, ADR-0065 |
 
 ## What both assistants share
 
@@ -85,15 +94,19 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | Screen | What the owner does there | Status |
 |:--|:--|:--|
 | **Sign in** | A one-time link by email. No password. | ✅ Built |
-| **Home** | One shop at a glance. | ✅ Built |
-| **Conversations** | Read every chat, search, filter by assistant. | ✅ Built |
+| **Home** | One shop at a glance, starting with how many shoppers wait for an answer. Support and the Developer see only the parts about their own work, and never money or *Go live*. | ✅ Built |
+| **Conversations** | Read every chat, search, filter by assistant. **Waiting for an answer**: the handed-over shoppers who left a way to reach them, with *Answer by email* (opens your own email app) and *Mark as answered* (their email is deleted). | ✅ Built |
 | **Review** | Grade replies — the ones held in practice mode, and sent ones. | ✅ Built |
 | **Suggestions** (NEURA-SELL) | See and choose what shows with each product. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Sold out** (NEURA-SELL) | Sold-out products people kept looking at. Shown only to a shop with NEURA-SELL. | ✅ Built |
+| **Missing from your pages** (NEURA-GROW) | What shoppers asked that the shop's pages don't say, with *See the chats* and *I added it*. Shown only to a shop with NEURA-GROW, to the Owner and Support. | ✅ Built (ADR-0064) |
 | **Usage and cost** | Chats, AI use and its cost, by assistant. | ✅ Built |
-| **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words, with any *things to look at*, such as products that don't say they are on sale) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. **The shop's contact details** (email, phone), named to a shopper the assistant cannot help, with the exact sentence they read. **The secret for order questions from signed-in shoppers** (shown once, *make a new one*), which the owner gives their developer. | ✅ Built (ADR-0052, ADR-0055, ADR-0057) |
+| **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words, with any *things to look at*, such as products that don't say they are on sale) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. **The shop's contact details** (email, phone), named to a shopper the assistant cannot help, with the exact sentence they read. **The secret for order questions from signed-in shoppers** (shown once, *make a new one*), which the owner gives their developer. **Each secret says who made it.** The shop's developer, invited as Developer, sees and does everything on this page, except *Go live*. | ✅ Built (ADR-0052, ADR-0055, ADR-0057) |
 | **Help** | *Connecting your shop*, step by step, and what to send your developer: the guide for developers, the address for an AI coding tool, and the chat box line. | ✅ Built |
 | Settings and keys (the owner makes the chat box key) | — | ⬜ Not designed (needs an ADR) |
+| **People and roles** (Owner, Support, Developer; invite by email) | The owner adds people to the shop's dashboard by email, each seeing only what their role allows, checked on every click; a developer never sees shoppers' chats. The owner changes a role or removes a person at any time, and a shop always keeps one Owner. Every change is kept in the shop's record, with who did it. | ✅ Built (ADR-0058, ADR-0059) |
+| **Create an account** (sign up, then FiveNeurals approves) | A new shop owner signs up with their email, shop name and website, and confirms by an emailed link. The shop then waits for approval: nothing runs and nothing costs anything until FiveNeurals approves it and emails the owner. Someone who already has an account can sign up a second shop the same way. | ✅ Built (ADR-0058, ADR-0060) |
+| **FiveNeurals admin** (our own area, never shown to a shop) | FiveNeurals approves or refuses shops that signed up (choosing their assistants), sees every shop's state, and the AI use and cost across all shops. It can also switch one feature off for one shop, and on again, when its AI costs too much (ADR-0065; today only GROW's night check has a switch). Shop facts only: no admin page can show a shopper's chat or details. Admins are added by command; an admin signs in again after 12 hours. | ✅ Built (ADR-0061, ADR-0065) |
 
 ---
 
@@ -101,6 +114,7 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 
 | Feature | What it does | Status | Where | Source |
 |:--|:--|:--|:--|:--|
+| **A developer account** | The shop owner invites the developer by email, as Developer. The developer then opens Shop connection and Help themselves: makes the shop token and the sign-in secret and puts them straight into the shop's settings, presses Check and Connect. Never shoppers' chats, Review, Usage or *Go live*. | ✅ Built | Dashboard | `console_people.py`, ADR-0058, ADR-0059 |
 | **Help for AI coding tools (MCP)** | The developer adds one NEURA address to their AI coding tool. The tool can then ask what each of the nine addresses must answer, see a working sample for each, and read the rules bridges get wrong, and help write the bridge. Since 2026-10-09 the rules also teach the **customer pass** a shop's pages make for order questions from signed-in shoppers (ADR-0057), with the same two safety rules as the developer guide. It only teaches: it never calls a shop, needs no account and no token, and is limited per visitor. Checking a bridge stays the shop owner's, in the dashboard. The address is in the developer guide, and on the shop owner's Help, which copies it for the developer. | ✅ Built | For developers | `developer_mcp.py`, `generic/teacher.py`, ADR-0053 |
 
 ---
@@ -110,12 +124,13 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 | # | Limit | What a page may say |
 |:--|:--|:--|
 | **L1** | **Order status in the chat box answers only a shopper signed in to the shop, and only once the shop's developer has made its pages send a short-lived customer pass** (a few lines on the shop's server, with a secret the owner makes on Shop connection; [ADR-0057](architecture/adr/0057-a-signed-in-shopper-may-ask-about-their-orders-in-the-chat-box.md)). Until then, and for anyone not signed in, including a guest who bought without an account, every order question gets *"please sign in, or contact the shop"*. A guest by order number and email is not built. **Run on one test shop with demo data only** (2026-10-09); no real shop or shopper has used it. | *"Answers 'Where is my order?' for shoppers signed in to your shop"*, and that it needs a small change on the shop's server. Not *"tracks every order in the chat"*, and not *"for every shopper"*. |
-| **L2** | **We notify nobody.** A handover shows in the dashboard, and goes to the shop's server only if the shop set up notifications. No email, no SMS. | *"Your team gets the whole story"* — not *"a person replies"*. |
+| **L2** | **We notify nobody and send nothing.** A waiting shopper shows only in the dashboard (a count in the menu and on Home); nobody on the team is emailed, so shoppers wait until someone opens it. The answer goes from the shop's own email app. A handover goes to the shop's server only if the shop set up notifications. An email a shopper types is kept until the chat is marked answered, at most 30 days. **No data agreement is checked for it yet: one is needed with every shop before real shops use it** (AD9). Tried on test shops only (2026-10-12); no real shopper has left an email. | *"Shoppers can leave their email, and your team answers them from your own inbox"*. Not *"a person replies in the chat"*, not *"we email your shoppers"*, not *"you get notified"*. |
 | **L3** | **Sold out needs product views switched on** (off by default) and a data agreement. With neither, the screen is empty. | Say it is optional and needs the shop to send views. |
 | **L4** | **Nothing syncs by itself yet.** The copy of the catalogue changes when someone presses **Sync now**. | Nothing about "always up to date". |
 | **L5** | **Search by meaning covers only indexed products**; the others are found by their words. | Do not promise it for every product. |
+| **L6** | **Missing from your pages has only been tried on made-up chats.** No real shopper's chat has been read by the night check, its cost per shop is not measured, and Sinhala and Singlish are tried on a few made-up lines only. A half answer worded in an unusual way can be missed. A question shows only after the next night's check, and only when 2 shoppers asked it. | *"Shows what shoppers asked that your pages don't say"*. Not *"finds every missing answer"*, not *"writes your product pages"*, not *"in real time"*. |
 
 ## Assistants not designed
 
-**NEURA-MIND, NEURA-GROW, NEURA-GUARD** — names only. Nothing is designed ([docs/agents/README.md](agents/README.md)).
-Do not describe them on any page.
+**NEURA-MIND, NEURA-GUARD** — names only. Nothing is designed ([docs/agents/README.md](agents/README.md)).
+Do not describe them on any page. **NEURA-GROW** has one designed and built feature, above; its other ideas are not designed.

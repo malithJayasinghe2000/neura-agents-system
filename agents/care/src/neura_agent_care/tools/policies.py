@@ -173,7 +173,7 @@ async def search_policies(topic: str, ctx: ToolContext) -> str:
         # renders to something structurally valid and semantically empty.
         return (
             "This store has published no policy text. Do not describe its policies "
-            "from general knowledge — offer to pass the shopper to a colleague."
+            "from general knowledge — offer to pass their question to someone at our store."
         )
 
     idf = _idf(policies)

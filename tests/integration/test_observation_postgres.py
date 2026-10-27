@@ -32,6 +32,7 @@ from neura_agent_core.conversations import (
     conversations,
 )
 from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
+from neura_agent_core.waiting import WaitingAnswerRepository, waiting_answers
 from neura_api.jobs.retention import (
     RETENTION,
     RETENTION_SWEEP,
@@ -93,6 +94,7 @@ async def _purge(database: Database) -> None:
         async with database.tenant_session(tenant_id) as session:
             for table in (
                 observed_events,
+                waiting_answers,
                 conversation_messages,
                 conversations,
                 agent_checkpoint_writes,
@@ -161,6 +163,21 @@ async def _conversation(database: Database, tenant_id: str, cid: str, *, idle: t
             update(conversations)
             .where(conversations.c.tenant_id == tenant_id, conversations.c.id == cid)
             .values(updated_at=datetime.now(UTC) - idle)
+        )
+
+
+async def _waiting(database: Database, tenant_id: str, cid: str, *, age: timedelta) -> None:
+    """A handed-over shopper's typed email (ADR-0062), left ``age`` ago."""
+    async with database.tenant_session(tenant_id) as session:
+        assert await WaitingAnswerRepository(session).leave_email(
+            tenant_id, cid, "saman@example.com"
+        )
+        await session.execute(
+            update(waiting_answers)
+            .where(
+                waiting_answers.c.tenant_id == tenant_id, waiting_answers.c.conversation_id == cid
+            )
+            .values(created_at=datetime.now(UTC) - age)
         )
 
 
@@ -292,6 +309,53 @@ class TestDeletionRuns:
         assert await _count(db, TENANT_A, conversations, id="cnv_iobs_fresh") == 1
         assert await _count(db, TENANT_A, conversation_messages, **fresh) == 2
         assert await _count(db, TENANT_A, agent_checkpoints, thread_id="cnv_iobs_fresh") == 1
+
+    async def test_an_unanswered_email_goes_after_30_days(self, db: Database) -> None:
+        """ADR-0062 §4 (R30): unanswered after 30 days, the typed email is deleted
+        and the chat leaves the waiting list. The chat itself stays (90 days)."""
+        await _tenant(db, TENANT_A)
+        await _conversation(db, TENANT_A, "cnv_iobs_old_wait", idle=timedelta(days=1))
+        await _conversation(db, TENANT_A, "cnv_iobs_new_wait", idle=timedelta(days=1))
+        await _waiting(db, TENANT_A, "cnv_iobs_old_wait", age=timedelta(days=31))
+        await _waiting(db, TENANT_A, "cnv_iobs_new_wait", age=timedelta(days=29))
+
+        async with db.tenant_session(TENANT_A) as session:
+            result = await sweep(session, TENANT_A, now=datetime.now(UTC), settings=SETTINGS)
+
+        assert result.emails_deleted == 1
+        assert await _count(db, TENANT_A, waiting_answers, conversation_id="cnv_iobs_old_wait") == 0
+        assert await _count(db, TENANT_A, waiting_answers, conversation_id="cnv_iobs_new_wait") == 1
+        assert await _count(db, TENANT_A, conversations, id="cnv_iobs_old_wait") == 1
+
+    async def test_an_answered_chat_keeps_who_answered_and_no_email(self, db: Database) -> None:
+        """*Mark as answered* already deleted the address; what is left is who
+        answered and when, which holds no shopper, and goes with the chat."""
+        await _tenant(db, TENANT_A)
+        await _conversation(db, TENANT_A, "cnv_iobs_answered", idle=timedelta(days=1))
+        await _waiting(db, TENANT_A, "cnv_iobs_answered", age=timedelta(days=40))
+        async with db.tenant_session(TENANT_A) as session:
+            assert await WaitingAnswerRepository(session).mark_answered(
+                TENANT_A, "cnv_iobs_answered", answered_by="usr_kumari"
+            )
+
+        async with db.tenant_session(TENANT_A) as session:
+            result = await sweep(session, TENANT_A, now=datetime.now(UTC), settings=SETTINGS)
+            waiting = await WaitingAnswerRepository(session).get(TENANT_A, "cnv_iobs_answered")
+
+        assert result.emails_deleted == 0
+        assert waiting is not None
+        assert waiting.email is None
+        assert waiting.answered_by == "usr_kumari"
+
+    async def test_an_expired_chat_takes_its_waiting_row_with_it(self, db: Database) -> None:
+        await _tenant(db, TENANT_A)
+        await _conversation(db, TENANT_A, "cnv_iobs_gone", idle=timedelta(days=91))
+        await _waiting(db, TENANT_A, "cnv_iobs_gone", age=timedelta(days=1))
+
+        async with db.tenant_session(TENANT_A) as session:
+            await sweep(session, TENANT_A, now=datetime.now(UTC), settings=SETTINGS)
+
+        assert await _count(db, TENANT_A, waiting_answers, conversation_id="cnv_iobs_gone") == 0
 
     async def test_a_sweep_never_reaches_another_tenant(self, db: Database) -> None:
         await _tenant(db, TENANT_A)

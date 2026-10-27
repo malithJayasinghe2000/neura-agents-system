@@ -111,6 +111,15 @@ class ShopTokenRepository:
         )
         return token
 
+    async def made_by(self, tenant_id: str) -> str | None:
+        """The console user who made it, or ``None`` when there is none. Never what was made."""
+        value: str | None = (
+            await self._session.execute(
+                select(shop_tokens.c.made_by).where(shop_tokens.c.tenant_id == tenant_id)
+            )
+        ).scalar_one_or_none()
+        return value
+
     async def made_at(self, tenant_id: str) -> datetime | None:
         """When the waiting token was made, or ``None``. Never the token."""
         value = (
