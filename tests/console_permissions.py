@@ -34,6 +34,7 @@ USAGE = "usage:cost:read"
 PEOPLE = "people:members:write"
 HOME = "shop:home:read"
 HANDOVERS = "shop:handovers:write"
+GAPS = "shop:gaps:write"
 
 #: ADR-0058 §2, *The first permissions*, R10's B (the Developer has all of
 #: Shop connection, Connect and the contact details included), and R12 (Home is
@@ -53,6 +54,9 @@ WHO: dict[str, frozenset[str]] = {
     # ADR-0062 §8: answer a handed-over shopper (see their email, Answer by
     # email, Mark as answered). The help desk's work; never the Developer's.
     HANDOVERS: frozenset({OWNER, SUPPORT}),
+    # ADR-0064 §5: Missing from your pages, read it and *I added it*. Both
+    # already read shoppers' chats; the Developer never does.
+    GAPS: frozenset({OWNER, SUPPORT}),
 }
 
 #: A person's own routes. They come before a shop is chosen, so they name no
@@ -120,6 +124,9 @@ ROUTES: dict[tuple[str, str], str] = {
     ("GET", f"{_SHOP}/usage"): USAGE,
     # Sold out (served by the console, so it names no agent).
     ("GET", f"{_SHOP}/sold-out"): SOLD_OUT,
+    # Missing from your pages (ADR-0064; served by the console, so it names no agent).
+    ("GET", f"{_SHOP}/gaps"): GAPS,
+    ("POST", f"{_SHOP}/gaps/added"): GAPS,
     # Suggestions (served by SELL, so it is SELL's own permission).
     ("GET", f"{_SELL}/suggestions"): SUGGESTIONS,
     ("GET", f"{_SELL}/suggestions/catalogue"): SUGGESTIONS,
@@ -131,6 +138,7 @@ ROUTES: dict[tuple[str, str], str] = {
 
 __all__ = [
     "DEVELOPER",
+    "GAPS",
     "HANDOVERS",
     "HOME",
     "OWNER",

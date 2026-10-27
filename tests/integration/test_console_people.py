@@ -632,6 +632,8 @@ class TestWhatEachRoleIsShown:
 
         assert held(support) == [
             "shop:conversations:read",
+            # Missing from your pages (ADR-0064 §5).
+            "shop:gaps:write",
             # Answering handed-over shoppers (ADR-0062 §8).
             "shop:handovers:write",
             "shop:home:read",
@@ -647,6 +649,7 @@ class TestWhatEachRoleIsShown:
         assert "people:members:write" in owner
         assert "sell:suggestions:write" in owner
         assert "shop:handovers:write" in owner
+        assert "shop:gaps:write" in owner
         assert set(held(support)) | set(held(developer)) < set(owner)
 
     async def test_home_gives_support_the_handed_over_count_and_the_developer_none(

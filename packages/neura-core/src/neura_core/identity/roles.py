@@ -67,6 +67,10 @@ HOME_READ = "shop:home:read"
 #: shop's own record of a signed-in one), *Answer by email*, *Mark as answered*.
 #: Served by the console for every assistant, so it names no agent (G102).
 HANDOVERS_WRITE = "shop:handovers:write"
+#: Missing from your pages (ADR-0064 §5): what shoppers asked that the shop's
+#: pages do not say, *I added it*, and Home's count. Served by the console for
+#: whichever assistant finds them, so it names no agent (G88).
+GAPS_WRITE = "shop:gaps:write"
 
 #: The refusal of a member whose role does not include what was asked for. Its
 #: own code, so the dashboard can say *"You can't open this page"* rather than a
@@ -78,7 +82,9 @@ ROLE_NOT_ALLOWED = "ROLE_NOT_ALLOWED"
 ROLE_PERMISSIONS: Mapping[Role, frozenset[str]] = {
     # The help desk: chats, grading, and answering handed-over shoppers
     # (ADR-0058 §8, ADR-0062). Never keys, the connection, Go live, people or money.
-    Role.SUPPORT: frozenset({HOME_READ, CONVERSATIONS_READ, REVIEW_WRITE, HANDOVERS_WRITE}),
+    Role.SUPPORT: frozenset(
+        {HOME_READ, CONVERSATIONS_READ, REVIEW_WRITE, HANDOVERS_WRITE, GAPS_WRITE}
+    ),
     # Whoever builds the bridge: all of Shop connection, the same page as the
     # Owner's (R10, settled at the mockup: B). Never a shopper's chat.
     Role.DEVELOPER: frozenset({HOME_READ, CONNECTION_WRITE, CONNECT_WRITE, CONTACT_WRITE}),
@@ -114,6 +120,7 @@ __all__ = [
     "CONNECT_WRITE",
     "CONTACT_WRITE",
     "CONVERSATIONS_READ",
+    "GAPS_WRITE",
     "HANDOVERS_WRITE",
     "HOME_READ",
     "MODE_WRITE",

@@ -92,6 +92,7 @@ from neura_agent_core.conversations import (
     ConversationState,
     Message,
 )
+from neura_agent_core.gaps import MAX_FACT_CHARS, MAX_PRODUCT_ID_CHARS
 from neura_agent_core.review import no_draft_reason
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
 from neura_agent_core.waiting import WaitingAnswer, WaitingAnswerRepository
@@ -128,6 +129,8 @@ async def list_conversations(
     agent: Annotated[str | None, Query(max_length=64)] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
     waiting: Annotated[bool, Query()] = False,
+    gap: Annotated[str | None, Query(max_length=MAX_FACT_CHARS)] = None,
+    gap_product: Annotated[str | None, Query(max_length=MAX_PRODUCT_ID_CHARS)] = None,
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
@@ -142,6 +145,9 @@ async def list_conversations(
         "search": (q or "").strip() or None,
         # Only the chats whose shopper waits for the shop's answer (ADR-0062).
         "waiting": waiting,
+        # *See the chats* on Missing from your pages (ADR-0064): the chats one
+        # row counts. No product means the row is about the shop.
+        "gap": (gap_product or "", gap.strip()) if gap and gap.strip() else None,
     }
     before = _position(decode_cursor(cursor))
 

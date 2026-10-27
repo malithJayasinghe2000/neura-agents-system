@@ -1,6 +1,6 @@
 """What every member's Home reads beyond their own screens. ADR-0058, R12.
 
-    GET /v1/console/shops/{tenant_id}/home    {"mode", "practice", "handed", "waiting"}
+    GET /v1/console/shops/{tenant_id}/home    {"mode", "practice", "handed", "waiting", "gaps"}
 
 The Owner's Home reads Usage, which only the Owner may open (money). Support and
 the Developer see on Home only the parts about their own work (the owner's
@@ -18,22 +18,26 @@ So this route gives exactly those two facts and nothing else of Usage:
   permission is (`AGENTS.md` rule 3);
 * ``waiting`` only to a role that may answer them (``shop:handovers:write``):
   how many handed-over shoppers wait for the shop's answer (ADR-0062 §6), for
-  Home's *Needs you* and the menu's count; ``null`` for any other.
+  Home's *Needs you* and the menu's count; ``null`` for any other;
+* ``gaps`` only to a role that may open *Missing from your pages*
+  (``shop:gaps:write``): how many questions the page shows, the page's own
+  count (ADR-0064, Home's line); ``null`` for any other.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 
+from neura_agent_core.gaps import GAP_DAYS, PageGapRepository
 from neura_agent_core.waiting import WaitingAnswerRepository
 from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.routes.console_usage import PERIODS
 from neura_core.identity import role_may
-from neura_core.identity.roles import CONVERSATIONS_READ, HANDOVERS_WRITE, HOME_READ
+from neura_core.identity.roles import CONVERSATIONS_READ, GAPS_WRITE, HANDOVERS_WRITE, HOME_READ
 from neura_core.tenancy import TenantRepository
 from neura_core.tenancy.usage import UsageMeter, today
 
@@ -53,6 +57,7 @@ async def home(
 ) -> dict[str, Any]:
     reads_chats = role_may(actor.role, CONVERSATIONS_READ)
     answers = role_may(actor.role, HANDOVERS_WRITE)
+    finds_gaps = role_may(actor.role, GAPS_WRITE)
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         tenant = await TenantRepository(session).get(actor.tenant_id)
         handed = None
@@ -67,10 +72,23 @@ async def home(
             if answers
             else None
         )
+        gaps = (
+            await PageGapRepository(session).count_topics(
+                actor.tenant_id, since=datetime.now(UTC) - timedelta(days=GAP_DAYS)
+            )
+            if finds_gaps
+            else None
+        )
 
     mode = tenant.config.mode.value if tenant else "unknown"
     return envelope(
-        {"mode": mode, "practice": mode == "shadow", "handed": handed, "waiting": waiting},
+        {
+            "mode": mode,
+            "practice": mode == "shadow",
+            "handed": handed,
+            "waiting": waiting,
+            "gaps": gaps,
+        },
         request_id=getattr(request.state, "request_id", None),
     )
 

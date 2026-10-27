@@ -50,6 +50,7 @@ from neura_api.routes import (
     console_contact,
     console_conversations,
     console_customer_secret,
+    console_gaps,
     console_handover,
     console_home,
     console_mode,
@@ -316,6 +317,7 @@ def create_app() -> FastAPI:
     app.include_router(console_contact.router, prefix="/v1")
     app.include_router(console_customer_secret.router, prefix="/v1")
     app.include_router(console_sold_out.router, prefix="/v1")
+    app.include_router(console_gaps.router, prefix="/v1")
     app.include_router(console_home.router, prefix="/v1")
     app.include_router(console_people.router, prefix="/v1")
     app.include_router(console_sign_up.router, prefix="/v1")

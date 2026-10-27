@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, cast
 
@@ -54,7 +54,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from neura_agent_core.gaps import page_gaps
+from neura_agent_core.gaps import GAP_DAYS, page_gap_fixes, page_gaps
 from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
 from neura_agent_core.waiting import waiting_answers
 from neura_core import metadata, new_id
@@ -265,6 +265,7 @@ class ConversationRepository:
         agent: str | None = None,
         search: str | None = None,
         waiting: bool = False,
+        gap: tuple[str, str] | None = None,
         before: tuple[datetime, str] | None = None,
         limit: int = 50,
     ) -> list[Conversation]:
@@ -279,11 +280,14 @@ class ConversationRepository:
         question a merchant remembers is the customer's, and matching the
         assistant's words would find every thread it ever mentioned returns in.
 
+        ``gap`` keeps the chats one row of *Missing from your pages* counts: a
+        product id (``""`` for the shop) and a label (ADR-0064).
+
         ``waiting`` keeps the chats whose shopper waits for the shop's answer
         (ADR-0062): an address left, or a signed-in customer, not yet answered.
         """
         query = select(conversations).where(
-            *_matching(tenant_id, state=state, agent=agent, search=search, waiting=waiting)
+            *_matching(tenant_id, state=state, agent=agent, search=search, waiting=waiting, gap=gap)
         )
         if before is not None:
             moment, last_id = before
@@ -308,6 +312,7 @@ class ConversationRepository:
         agent: str | None = None,
         search: str | None = None,
         waiting: bool = False,
+        gap: tuple[str, str] | None = None,
         through: tuple[datetime, str] | None = None,
     ) -> int:
         """How many conversations match — or, with ``through``, how many sort at
@@ -321,7 +326,11 @@ class ConversationRepository:
         query = (
             select(func.count())
             .select_from(conversations)
-            .where(*_matching(tenant_id, state=state, agent=agent, search=search, waiting=waiting))
+            .where(
+                *_matching(
+                    tenant_id, state=state, agent=agent, search=search, waiting=waiting, gap=gap
+                )
+            )
         )
         if through is not None:
             query = query.where(_at_or_newer(through))
@@ -337,6 +346,7 @@ class ConversationRepository:
         agent: str | None = None,
         search: str | None = None,
         waiting: bool = False,
+        gap: tuple[str, str] | None = None,
     ) -> tuple[datetime, str] | None:
         """The position that fetches the page *before* the one after ``page_after``.
 
@@ -350,7 +360,9 @@ class ConversationRepository:
             await self._session.execute(
                 select(conversations.c.updated_at, conversations.c.id)
                 .where(
-                    *_matching(tenant_id, state=state, agent=agent, search=search, waiting=waiting)
+                    *_matching(
+                        tenant_id, state=state, agent=agent, search=search, waiting=waiting, gap=gap
+                    )
                 )
                 .where(_at_or_newer(page_after))
                 .order_by(conversations.c.updated_at.asc(), conversations.c.id.asc())
@@ -677,6 +689,7 @@ def _matching(
     agent: str | None,
     search: str | None,
     waiting: bool = False,
+    gap: tuple[str, str] | None = None,
 ) -> list[ColumnElement[bool]]:
     """The filters a conversation list is narrowed by — one definition, so a
     page, its count and its *Newer* cursor can never disagree about which rows
@@ -703,7 +716,33 @@ def _matching(
                 waiting_answers.c.answered_at.is_(None),
             )
         )
+    if gap is not None:
+        clauses.append(_asked_about(*gap))
     return clauses
+
+
+def _asked_about(product_key: str, fact: str) -> ColumnElement[bool]:
+    """A chat one row of *Missing from your pages* counts (ADR-0064, *See the
+    chats*): the same product (``""`` for the shop) and label, in the page's 30
+    days, and after *I added it* only the later ones, exactly as the row's count
+    is made, so the list shows the shoppers the row says it counts."""
+    fixed_at = (
+        select(page_gap_fixes.c.fixed_at)
+        .where(
+            page_gap_fixes.c.tenant_id == page_gaps.c.tenant_id,
+            page_gap_fixes.c.product_key == func.coalesce(page_gaps.c.product_id, ""),
+            page_gap_fixes.c.fact == page_gaps.c.fact,
+        )
+        .scalar_subquery()
+    )
+    return exists().where(
+        page_gaps.c.tenant_id == conversations.c.tenant_id,
+        page_gaps.c.conversation_id == conversations.c.id,
+        func.coalesce(page_gaps.c.product_id, "") == product_key,
+        page_gaps.c.fact == fact,
+        page_gaps.c.asked_at >= func.now() - timedelta(days=GAP_DAYS),
+        (fixed_at.is_(None)) | (page_gaps.c.asked_at > fixed_at),
+    )
 
 
 def _literal(text: str) -> str:
