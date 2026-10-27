@@ -111,6 +111,7 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
             waiting={card.ok ? card.data.ungraded : null}
             handed={usage.data.totals.escalations}
             answering={home.ok ? home.data.waiting : null}
+            gaps={home.ok ? (home.data.gaps ?? null) : null}
             connected={store.ok ? store.data.connected : null}
           />
 
@@ -149,6 +150,8 @@ type TeamView = {
   handed: number | null;
   /** Shoppers waiting for an answer (ADR-0062); `null` for a role that may not answer. */
   waiting: number | null;
+  /** Questions on Missing from your pages (ADR-0064); `null` for a role that may not open it. */
+  gaps?: number | null;
 };
 
 /**
@@ -190,6 +193,7 @@ async function TeamHome({ tenantId, membership }: { tenantId: string; membership
             waiting={card?.ok ? card.data.ungraded : null}
             handed={home.data.handed}
             answering={home.data.waiting}
+            gaps={home.data.gaps ?? null}
             connected={store?.ok ? store.data.connected : null}
             withDeveloper={false}
             empty={
@@ -225,6 +229,7 @@ function NeedsYou({
   waiting,
   handed,
   answering = null,
+  gaps = null,
   connected,
   withDeveloper = true,
   empty = "Nothing needs you right now. Replies waiting for review and conversations handed to a person will show up here.",
@@ -235,6 +240,8 @@ function NeedsYou({
   handed: number | null;
   /** Shoppers waiting for an answer (ADR-0062). `null`: not this role's to answer. */
   answering?: number | null;
+  /** Questions on Missing from your pages (ADR-0064). `null`: not this role's page. */
+  gaps?: number | null;
   connected: boolean | null;
   /** Whether *in three steps with your developer* is said: not to the developer. */
   withDeveloper?: boolean;
@@ -255,6 +262,22 @@ function NeedsYou({
       action: "Answer them",
       href: `${base}/conversations?state=waiting`,
       primary: true,
+    });
+  }
+
+  // Then what shoppers asked that the shop's pages don't say (ADR-0064, board 58).
+  if (gaps) {
+    items.push({
+      figure: gaps,
+      title:
+        gaps === 1
+          ? "thing shoppers asked that your pages don't say"
+          : "things shoppers asked that your pages don't say",
+      detail:
+        "In the last 30 days. Add each one to your shop once, and your assistant can answer the next shopper.",
+      action: "See them",
+      href: `${base}/gaps`,
+      primary: false,
     });
   }
 

@@ -28,6 +28,7 @@ import {
   ChevronsUpDown,
   CircleQuestionMark,
   ClipboardCheck,
+  FileQuestionMark,
   House,
   Menu,
   MessageSquare,
@@ -66,7 +67,8 @@ type Opens = Record<
   | "mode"
   | "usage"
   | "people"
-  | "handovers",
+  | "handovers"
+  | "gaps",
   boolean
 >;
 
@@ -76,6 +78,7 @@ export function ShopSidebar({
   waiting,
   answering,
   sell,
+  grow,
   role,
   opens,
 }: {
@@ -83,6 +86,8 @@ export function ShopSidebar({
   shopName: string;
   /** Whether the shop has NEURA-SELL. Without it, its two screens are not listed. */
   sell: boolean;
+  /** Whether the shop has NEURA-GROW. Without it, Missing from your pages is not listed. */
+  grow: boolean;
   /** Replies waiting in Review. `null` when it could not be read — then no badge, not a 0. */
   waiting: number | null;
   /** Handed-over shoppers waiting for an answer (ADR-0062). `null`: not this role's, or unread. */
@@ -173,6 +178,12 @@ export function ShopSidebar({
       shown: sell && opens.suggestions,
     },
     { href: `${base}/sold-out`, label: "Sold out", icon: PackageX, shown: sell && opens.soldOut },
+    {
+      href: `${base}/gaps`,
+      label: "Missing from your pages",
+      icon: FileQuestionMark,
+      shown: grow && opens.gaps,
+    },
   ].filter((item) => item.shown);
   const setup: Item[] = [
     { href: `${base}/shops`, label: "Shop connection", icon: Plug, shown: opens.connection },

@@ -24,6 +24,8 @@ export const PERMISSION = {
   people: "people:members:write",
   /** Answer a handed-over shopper: their email, Mark as answered (ADR-0062 §8). */
   handovers: "shop:handovers:write",
+  /** Missing from your pages: read it, *I added it* (ADR-0064 §5). Owner and Support. */
+  gaps: "shop:gaps:write",
 } as const;
 
 export type Permission = (typeof PERMISSION)[keyof typeof PERMISSION];

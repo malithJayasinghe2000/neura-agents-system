@@ -41,14 +41,31 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-type Filters = { state: string; agent: string; q: string };
+type Filters = {
+  state: string;
+  agent: string;
+  q: string;
+  /** *See the chats* on Missing from your pages (ADR-0064): one row's label, its
+   * product (none for the shop), and its question, to say what is shown. */
+  gap?: string;
+  gap_product?: string;
+  asked?: string;
+};
 
 export default async function ConversationsPage({
   params,
   searchParams,
 }: {
   params: Promise<{ tenantId: string }>;
-  searchParams: Promise<{ state?: string; agent?: string; q?: string; cursor?: string }>;
+  searchParams: Promise<{
+    state?: string;
+    agent?: string;
+    q?: string;
+    cursor?: string;
+    gap?: string;
+    gap_product?: string;
+    asked?: string;
+  }>;
 }) {
   if (!(await hasSession())) redirect("/");
 
@@ -56,8 +73,16 @@ export default async function ConversationsPage({
   // A role that does not include this screen sees why, not an error (ADR-0058).
   const refused = await refusal(tenantId, PERMISSION.conversations);
   if (refused) return <NotAllowed refusal={refused} what="shoppers' chats" />;
-  const { state = "", agent = "", q = "", cursor } = await searchParams;
-  const filters: Filters = { state, agent, q: q.trim() };
+  const {
+    state = "",
+    agent = "",
+    q = "",
+    cursor,
+    gap = "",
+    gap_product = "",
+    asked = "",
+  } = await searchParams;
+  const filters: Filters = { state, agent, q: q.trim(), gap, gap_product, asked };
 
   // *Waiting for an answer* is not a conversation state: the API is asked for
   // `?waiting=1` (ADR-0062 §6). Every other choice is the state itself.
@@ -66,6 +91,8 @@ export default async function ConversationsPage({
     present({ ...filters, state: waitingOnly ? "" : filters.state }),
   );
   if (waitingOnly) query.set("waiting", "1");
+  // `asked` is only this page's words for the line above the list.
+  query.delete("asked");
   if (cursor) query.set("cursor", cursor);
   const suffix = query.size ? `?${query}` : "";
 
@@ -171,6 +198,14 @@ export default async function ConversationsPage({
             ))}
           </nav>
 
+          {filters.gap ? (
+            <GapLine
+              asked={filters.asked || filters.gap}
+              gapsHref={`/console/${encodeURIComponent(tenantId)}/gaps`}
+              allHref={base}
+            />
+          ) : null}
+
           {waitingOnly && list.data.length > 0 ? (
             <WaitingLine count={list.meta.total ?? list.data.length} />
           ) : null}
@@ -188,7 +223,7 @@ export default async function ConversationsPage({
               </Card>
             ) : (
               <EmptyList
-                filtered={Boolean(filters.state || filters.agent || filters.q)}
+                filtered={Boolean(filters.state || filters.agent || filters.q || filters.gap)}
                 clearHref={base}
               />
             )
@@ -219,6 +254,31 @@ export default async function ConversationsPage({
         </>
       )}
     </>
+  );
+}
+
+/** Above the chats behind one row of Missing from your pages (ADR-0064). */
+function GapLine({
+  asked,
+  gapsHref,
+  allHref,
+}: {
+  asked: string;
+  gapsHref: string;
+  allHref: string;
+}) {
+  return (
+    <p data-gap-line className="text-sm leading-relaxed">
+      The chats where shoppers asked{" "}
+      <strong className="font-semibold">&ldquo;{asked}&rdquo;</strong>.{" "}
+      <Link className="underline underline-offset-3" href={gapsHref}>
+        Back to Missing from your pages
+      </Link>{" "}
+      ·{" "}
+      <Link className="underline underline-offset-3" href={allHref}>
+        Show every conversation
+      </Link>
+    </p>
   );
 }
 

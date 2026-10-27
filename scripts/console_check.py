@@ -242,6 +242,9 @@ async def main() -> int:
                 else:
                     print(f"  {DIM}no shop with SELL — the Sold out checks are skipped{OFF}")
 
+                print(f"\n  {BOLD}missing from your pages — GROW's page, Home's line{OFF}")
+                await _check_gaps(browser, console, db, minted.user_id, seeded, failures)
+
             print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
             await _check_sign_up(console, failures)
 
@@ -3246,6 +3249,227 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
         finally:
             await engine.dispose()
         await db.dispose()
+
+
+async def _check_gaps(
+    browser: Chrome,
+    console: str,
+    db: Database,
+    user_id: str,
+    seeded: dict[str, str],
+    failures: list[str],
+) -> None:
+    """*Missing from your pages* (ADR-0064, console.md §3.11, boards 57 to 62).
+
+    In **a shop of its own** with NEURA-GROW, where this person is the Owner, so
+    nothing real is touched: two products and their questions are seeded (one
+    asked by 3 shoppers, one by 2, one by only 1, which must not show; one about
+    the shop). Checked on desktop and phone: the menu item, the rows, *Open the
+    page*, *See the chats* narrowing Conversations, *I added it*, Home's line and
+    the *Paused* note (ADR-0065). The first shop, which has no GROW, must not
+    list the page. Everything made here is removed at the end.
+    """
+    from neura_agent_core.gaps import GapKind, PageGap, PageGapRepository
+    from neura_core.identity.schema import memberships
+    from neura_core.tenancy import TenantRepository
+    from neura_core.tenancy.removal import remove_tenant
+    from neura_core.tenancy.switches import SwitchRepository
+
+    tenant = ids.new_id(ids.TENANT)
+    base = f"{console}/console/{tenant}"
+    shop_name = f"Gaps Check {tenant[-6:].lower()}"
+
+    async def ask(product: str | None, fact: str, question: str, hours: int) -> None:
+        conversation = ids.new_id(ids.CONVERSATION)
+        async with db.tenant_session(tenant) as session:
+            repository = ConversationRepository(session)
+            await repository.start(tenant, conversation_id=conversation, agent_key="care")
+            await repository.append_turn(
+                tenant,
+                conversation,
+                shopper=question,
+                reply="I can't confirm that.",
+                state=ConversationState.RESOLVED,
+            )
+            await PageGapRepository(session).record(
+                tenant,
+                PageGap(
+                    conversation_id=conversation,
+                    message_id=f"msg_{conversation}",
+                    kind=GapKind.HALF_ANSWERED,
+                    product_id=product,
+                    fact=fact,
+                    question=question,
+                    asked_at=datetime.now(UTC) - timedelta(hours=hours),
+                ),
+            )
+
+    async def phone(on: bool) -> None:
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def shown(url: str, wait: float = 3.5) -> str:
+        await browser.goto(url)
+        await asyncio.sleep(wait)
+        return str(await browser.evaluate("document.body.innerText"))
+
+    try:
+        async with db.tenant_session(tenant) as session:
+            await TenantRepository(session).create(
+                tenant_id=tenant, name=shop_name, enabled_agents=["care", "grow"]
+            )
+            await session.execute(
+                memberships.insert().values(
+                    id=ids.new_id(ids.MEMBERSHIP), tenant_id=tenant, user_id=user_id, role="owner"
+                )
+            )
+            for product, title in (("5", "Gaps Check Green Tea"), ("4", "Gaps Check Black Tea")):
+                await session.execute(
+                    synced_entities.insert().values(
+                        tenant_id=tenant,
+                        platform="generic",
+                        entity_type="product",
+                        external_id=product,
+                        neura_id=f"nr_{product}",
+                        fingerprint="f" * 32,
+                        document={"title": title, "url": f"http://shop.example/product/{product}"},
+                    )
+                )
+        for hours in (2, 3, 4):
+            await ask("5", "organic", "Is it organic?", hours)
+        for hours in (5, 6):
+            await ask("4", "caffeine", "How much caffeine?", hours)
+        await ask("5", "cups per pack", "How many cups per pack?", 1)
+        for hours in (7, 8):
+            await ask(None, "cash on delivery", "Can I pay cash on delivery?", hours)
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(on)
+            page = await shown(f"{base}/gaps")
+            _check(
+                f"the page: heading, count line, products, About your shop ({size})",
+                "Missing from your pages" in page
+                and "3 things" in page
+                and "in 3 groups" in page
+                and "Gaps Check Green Tea" in page
+                and "About your shop" in page
+                and "Is it organic?" in page
+                and "Asked by 3 shoppers" in page,
+                failures,
+            )
+            _check(
+                f"a question only 1 shopper asked is not shown ({size})",
+                "How many cups per pack?" not in page,
+                failures,
+            )
+            _check(
+                f"Open the page goes to the shop's own page, in a new tab ({size})",
+                bool(
+                    await browser.evaluate(
+                        "!![...document.querySelectorAll('a[target=_blank]')]"
+                        ".find(a => a.href === 'http://shop.example/product/5')"
+                    )
+                ),
+                failures,
+            )
+            _check(
+                f"GROW never writes the answer; the page says where to add it ({size})",
+                "Add the answer to its description in your shop." in page
+                and "Only you know the answers" in page,
+                failures,
+            )
+            _check(
+                f"the page fits the screen ({size})",
+                bool(
+                    await browser.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth + 1"
+                    )
+                ),
+                failures,
+            )
+        await phone(False)
+
+        menu = await browser.evaluate(
+            "[...document.querySelectorAll('nav a')].some(a => a.innerText.trim() === "
+            "'Missing from your pages')"
+        )
+        _check("the menu lists Missing from your pages for a shop with GROW", bool(menu), failures)
+
+        home = await shown(base)
+        _check(
+            "Home's Needs you: the page's count, with See them",
+            "things shoppers asked that your pages don't say" in home
+            and bool(
+                await browser.evaluate(
+                    f"!!document.querySelector('a[href=\"/console/{tenant}/gaps\"]')"
+                )
+            ),
+            failures,
+        )
+
+        await shown(f"{base}/gaps")
+        await browser.evaluate(
+            "document.querySelector('[data-gap=\"5|organic\"] [data-see-chats]').click(), true"
+        )
+        await asyncio.sleep(3.5)
+        listed = str(await browser.evaluate("document.body.innerText"))
+        rows = await browser.evaluate(
+            "document.querySelectorAll('ul a[href*=\"/conversations/\"]').length"
+        )
+        _check(
+            "See the chats: Conversations shows exactly the 3 chats behind the row",
+            rows == 3 and "Is it organic?" in listed,
+            failures,
+        )
+
+        await shown(f"{base}/gaps")
+        await browser.evaluate(
+            "document.querySelector('[data-gap=\"5|organic\"] [data-added]').click(), true"
+        )
+        await asyncio.sleep(2.5)
+        after = str(await browser.evaluate("document.body.innerText"))
+        _check(
+            "I added it: the row says it leaves the list",
+            "Marked as added." in after and "comes back here" in after,
+            failures,
+        )
+        again = await shown(f"{base}/gaps")
+        _check(
+            "I added it: after a reload the question is gone",
+            "Is it organic?" not in again and "2 things" in again,
+            failures,
+        )
+
+        async with db.tenant_session(tenant) as session:
+            await SwitchRepository(session).set(tenant, "grow.gaps", on=False, by=user_id)
+        paused = await shown(f"{base}/gaps")
+        _check(
+            "Paused: the note says FiveNeurals paused it, and the rows stay",
+            "Paused since" in paused
+            and "FiveNeurals has paused the check" in paused
+            and "How much caffeine?" in paused,
+            failures,
+        )
+
+        if seeded.get("tenant"):
+            await shown(f"{console}/console/{seeded['tenant']}")
+            _check(
+                "a shop without GROW does not list the page",
+                not await browser.evaluate(
+                    "[...document.querySelectorAll('nav a')].some(a => a.innerText.trim() === "
+                    "'Missing from your pages')"
+                ),
+                failures,
+            )
+    finally:
+        async with db.tenant_session(tenant) as session:
+            await remove_tenant(session, tenant)
 
 
 def _check(what: str, passed: bool, failures: list[str]) -> None:

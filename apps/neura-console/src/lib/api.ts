@@ -370,6 +370,18 @@ export function connectShop(
 }
 
 /** Home's own facts; here for the menu's count of shoppers waiting (ADR-0062). */
+/** *I added it* on Missing from your pages (ADR-0064): the question leaves the list. */
+export function markGapAdded(
+  tenantId: string,
+  productId: string | null,
+  fact: string,
+): Promise<{ added: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/gaps/added`, {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId, fact }),
+  });
+}
+
 export function readHome(tenantId: string): Promise<{ waiting: number | null }> {
   return call(`/shops/${encodeURIComponent(tenantId)}/home`);
 }

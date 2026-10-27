@@ -58,3 +58,11 @@ export const CARE = "care";
 export function hasCare(assistants: string[] | null): boolean {
   return assistants === null || assistants.includes(CARE);
 }
+
+/** NEURA-GROW's key in `enabled_agents`. Its screen: Missing from your pages (ADR-0064). */
+export const GROW = "grow";
+
+/** Whether to show NEURA-GROW's screen. Unknown shows it, as `hasSell`. */
+export function hasGrow(assistants: string[] | null): boolean {
+  return assistants === null || assistants.includes(GROW);
+}

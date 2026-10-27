@@ -22,7 +22,7 @@ import type { Scorecard } from "@/lib/review";
 import { PERMISSION, may, roleName } from "@/lib/roles";
 import { ShopSidebar } from "@/components/shop/shop-sidebar";
 import { WaitingForApproval } from "@/components/waiting-for-approval";
-import { assistantsOf, hasSell, isWaiting, type Me } from "@/lib/shop-assistants";
+import { assistantsOf, hasGrow, hasSell, isWaiting, type Me } from "@/lib/shop-assistants";
 
 export default async function ShopLayout({
   children,
@@ -69,6 +69,7 @@ export default async function ShopLayout({
         tenantId={tenantId}
         shopName={name ?? tenantId}
         sell={hasSell(me.ok ? assistantsOf(me.data, tenantId) : null)}
+        grow={hasGrow(me.ok ? assistantsOf(me.data, tenantId) : null)}
         waiting={card?.ok ? card.data.ungraded : null}
         answering={home.ok ? home.data.waiting : null}
         role={roleName(membership?.role)}
