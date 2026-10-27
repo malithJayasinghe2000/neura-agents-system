@@ -22,6 +22,7 @@ date the store actually holds.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from neura_domain import (
@@ -151,6 +152,24 @@ def product_summary(product: Product) -> str:
         f"{product.external_id}: {product.title} — "
         f"{_price_range(product)}, {_availability(product)}"
     )
+
+
+#: A product's line as :func:`product_summary` (``5: Title — ...``) or
+#: :func:`product_evidence` (``Product 5: Title``) writes it. Read back by
+#: :func:`products_in`, here beside the writers so the two change together.
+_PRODUCT_LINE = re.compile(r"^(?:Product )?([^\s:]+): (.+?)(?: — .*)?$")
+
+
+def products_in(text: str) -> list[tuple[str, str]]:
+    """The ``(id, title)`` of each product a catalogue tool's text names, in order."""
+    found: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        if line.startswith(" "):
+            continue  # a detail line under a product, never a product
+        match = _PRODUCT_LINE.match(line.strip())
+        if match and (match.group(1), match.group(2)) not in found:
+            found.append((match.group(1), match.group(2).strip()))
+    return found
 
 
 def _variants(product: Product) -> str:

@@ -192,6 +192,48 @@ class TestOutcomeMapping:
             Citation(type="tool", id="search_policies"),
         ]
 
+    def test_the_products_the_answer_names_are_cited(self) -> None:
+        """G114: GROW files a gap under the product a reply looked at, read from
+        its ``product:`` citations, as SELL writes them. CARE named only the tool,
+        so every CARE gap landed under *About your shop*. Only the products the
+        answer names, and only from a catalogue lookup."""
+        search = (
+            "5: Green Tea Loose Leaf 100g — 1200.00 LKR, in stock\n"
+            "4: Ceylon Black Tea BOPF 400g — 1500.00 LKR, in stock"
+        )
+        details = "Product 5: Green Tea Loose Leaf 100g\n  availability: in stock"
+        reply = (
+            "We have the Green Tea Loose Leaf 100g in stock for 1200.00 LKR, but our "
+            "details do not state whether it is organic."
+        )
+        for value, tool in ((search, "search_products"), (details, "get_product_details")):
+            citations = _citations(
+                {
+                    "reply": reply,
+                    "invocations": [ToolInvocation(tool_name=tool, ok=True, value=value)],
+                }
+            )
+            assert citations == [
+                Citation(type="tool", id=tool),
+                Citation(type="product", id="5"),
+            ], tool
+
+    def test_a_lookup_that_may_hold_a_customers_record_cites_no_product(self) -> None:
+        citations = _citations(
+            {
+                "reply": "Your order has the Green Tea Loose Leaf 100g in it.",
+                "invocations": [
+                    ToolInvocation(
+                        tool_name="get_order",
+                        ok=True,
+                        value="Product 5: Green Tea Loose Leaf 100g",
+                        pii_output=True,
+                    )
+                ],
+            }
+        )
+        assert citations == [Citation(type="tool", id="get_order")]
+
     def test_a_failed_tool_is_not_cited(self) -> None:
         """Citations are evidence the reply was checked against. A call that
         failed produced none."""

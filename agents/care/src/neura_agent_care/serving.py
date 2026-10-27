@@ -45,6 +45,7 @@ from typing import Any
 from neura_agent_care.graph import compile_graph
 from neura_agent_care.manifest import MANIFEST
 from neura_agent_care.runtime import MAX_TOOL_CALLS, build_runtime
+from neura_agent_care.tools.render import products_in
 from neura_agent_core.conversations import ConversationState
 from neura_agent_core.graph import CONFIG_KEY, initial_state
 from neura_agent_core.serving import (
@@ -204,6 +205,10 @@ def _state(*, blocked: bool, escalated: bool) -> ConversationState:
     return ConversationState.RESOLVED
 
 
+#: The lookups whose results are the shop's catalogue, never a customer's record.
+CATALOGUE_TOOLS = frozenset({"search_products", "get_product_details"})
+
+
 def _citations(final: dict[str, Any]) -> list[Citation]:
     """The evidence this reply was checked against.
 
@@ -216,6 +221,13 @@ def _citations(final: dict[str, Any]) -> list[Citation]:
       evidence, not which record came back — the record is customer data and
       belongs in the audit log, under its retention policy, not in a response
       body that a merchant's front end may log.
+    * **Products the answer names**, from a catalogue lookup only (G114). A
+      product is the shop's own catalogue, never a customer's record, and SELL
+      cites the products it shows the same way. GROW's night check files a gap
+      under the product a reply looked at by these citations (ADR-0064 §7), so
+      without them every CARE gap landed under *About your shop*. Only a
+      product whose title the reply names: a search returns five, and the
+      answer is about one.
     """
     citations: list[Citation] = []
 
@@ -225,9 +237,16 @@ def _citations(final: dict[str, Any]) -> list[Citation]:
         if source_id:
             citations.append(Citation(type=source_type, id=source_id))
 
+    reply = str(final.get("reply", "")).lower()
     for invocation in final.get("invocations", []):
         if invocation.ok:
             citations.append(Citation(type="tool", id=invocation.tool_name))
+            if invocation.tool_name in CATALOGUE_TOOLS and not invocation.pii_output:
+                citations.extend(
+                    Citation(type="product", id=product_id)
+                    for product_id, title in products_in(str(invocation.value or ""))
+                    if title.lower() in reply
+                )
 
     # Order-preserving de-duplication: a policy answer commonly retrieves three
     # chunks of one page, and citing it three times tells an integrator nothing
