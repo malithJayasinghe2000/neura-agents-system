@@ -74,7 +74,7 @@ _COMMAND_WORDS = frozenset(
 _UNSURE = re.compile(
     r"\b(?:"
     r"(?:can't|cannot|can not|unable to|not able to)\s+(?:confirm|say|tell|find|answer|see)"
-    r"|(?:don't|do not|doesn't|does not|didn't|did not)\s+(?:have|know|say|mention|list|show|include)"
+    r"|(?:don't|do not|doesn't|does not|didn't|did not)\s+(?:have|know|say|state|specify|confirm|describe|mention|list|show|include)"
     r"|not sure|unsure|unfortunately|i'm afraid"
     r"|no (?:information|info|details|data|mention)"
     r"|(?:isn't|is not|aren't|are not|not)\s+(?:listed|mentioned|specified|stated|given|included)"

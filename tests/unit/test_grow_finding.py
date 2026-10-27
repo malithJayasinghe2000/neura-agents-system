@@ -153,6 +153,11 @@ class TestWorthAsking:
             "There is no information about the weight.",
             "I don't know, but someone at our store can answer you.",
             "Unfortunately the description has no details on that.",
+            # G112: SELL's real reply on Ceylon Harvester, 2026-10-27.
+            "The details for Green Tea Loose Leaf 100g do not state whether it is organic, only "
+            "that it is a light, grassy tea from the hills of Uva.",
+            "The description doesn't specify the caffeine.",
+            "The page does not describe how to store it.",
             "\u0db8\u0da7 \u0d91\u0dba \u0dad\u0dc4\u0dc0\u0dd4\u0dbb\u0dd4 \u0d9a\u0dbb\u0db1\u0dca\u0db1 \u0db6\u0dd0\u0dc4\u0dd0.",  # Sinhala
             "ow machan, eka gana mata kiyanna baha",  # Singlish
         ],
