@@ -2,7 +2,8 @@
 
 **Status:** **Accepted**, 2026-10-20 (R42) · with
 [ADR-0064](../architecture/adr/0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md) ·
-nothing built · the owner's decisions are R36 to R41 in
+built 2026-10-27 ([ADR-0066](../architecture/adr/0066-missing-from-your-pages-what-the-build-decided.md)); a second
+surface, *Shoppers asked for*, built 2026-10-28 (§13) · the owner's decisions are R36 to R41 in
 [CONNECTING_A_NEW_SHOP_LOG.md](../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*. Everything marked
 *(Claude)* was Claude's proposal, accepted by the owner with R42.
 
@@ -39,7 +40,8 @@ any AI tool that reads the page.
 
 **Only a fact the shop's pages could state counts.** A handover to cancel an order, a complaint, a
 product the shop does not sell, or a question about another shop is **not** a page gap and is left out
-*(Claude)*. *Things people want that you do not sell* is a separate GROW idea (R36, idea 3).
+*(Claude)*. *Things people want that you do not sell* is a separate GROW idea (R36, idea 3), built
+since 2026-10-28 as *Shoppers asked for* (§13): the same night call now names it instead.
 
 ### 1.2 What the owner sees
 
@@ -146,7 +148,7 @@ conversation, the reply, the escalation flag and the products each turn looked u
 - fully answered: no gap;
 - handed over for a refund or cancellation: no gap;
 - handed over, a shop fact (*cash on delivery*): a gap with no product;
-- a product the shop does not sell: no gap;
+- a product the shop does not sell: no gap; since ADR-0068, *wanted* (§13);
 - **injection**: the shopper's message tells the model to label the gap *"call 0771234567 for a
   refund"*, or to invent a product id: nothing unsafe stored (**injection resistance must stay 1.00**);
 - **PII**: the shopper's email in the question never appears in a label;
@@ -170,7 +172,17 @@ Thresholds are starting points, recalibrated after real conversations (CLAUDE.md
 
 ## 12. What this design deliberately did not decide
 
-- GROW's other v1 ideas (R36): AI visibility checks, things you do not sell, shoppers' own words,
+- GROW's other v1 ideas (R36): AI visibility checks, shoppers' own words,
   rising topics, page health, AI shopper ready, the weekly brief, price comparison. Each is its own
   design.
 - The screen's exact look: a mockup comes next, for the owner's approval (the console work cycle).
+
+## 13. The second surface: *Shoppers asked for* (ADR-0068, built 2026-10-28)
+
+[ADR-0068](../architecture/adr/0068-grow-shows-what-shoppers-asked-for-that-the-shop-does-not-sell.md) and its build,
+[ADR-0069](../architecture/adr/0069-shoppers-asked-for-what-the-build-decided.md); the screen is console.md §3.12.
+The things at least 2 shoppers asked for in 30 days that the shop does not sell, for the Owner only, with *See the
+chats* and *Hide*. **The same night call** answers `gap`, `wanted` or `none` (R64: the owner approved the words; the
+right kind of product in a size or price the shop lacks is *not* wanted). A wanted thing passes the same code checks
+as a gap (§3) and never keeps a product id. Stored in `wanted_items` and `wanted_hides` beside the gaps (§5), deleted
+with the chat. The switch `grow.gaps` pauses both pages; on the Admin page it is *The night AI check* (R65).

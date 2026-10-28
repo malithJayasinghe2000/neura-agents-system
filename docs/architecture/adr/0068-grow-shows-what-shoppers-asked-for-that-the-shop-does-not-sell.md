@@ -1,7 +1,7 @@
 # ADR-0068 · GROW Shows What Shoppers Asked For That The Shop Does Not Sell
 
 **Status:** **Accepted** (the owner approved the ADR and canvas row 19, 2026-10-28, R63) · owner decisions 2026-10-28, R59 to R62 (and R36's idea 3, chosen as GROW's next feature)
-([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*) · not built ·
+([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*) · **built 2026-10-28**, what the build decided is [ADR-0069](0069-shoppers-asked-for-what-the-build-decided.md) (the AI's words R64, the switch's words R65) ·
 Everything marked *(Claude)* was Claude's proposal, accepted with R63 · **Date:** 2026-10-28 · **Builds on:**
 [ADR-0064](0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md) and its build,
 [ADR-0066](0066-missing-from-your-pages-what-the-build-decided.md); [ADR-0065](0065-fiveneurals-may-switch-off-one-feature-for-one-shop.md)

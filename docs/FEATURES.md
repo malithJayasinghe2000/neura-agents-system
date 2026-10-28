@@ -1,6 +1,6 @@
 # FEATURES — what each assistant does, in plain words
 
-**Last checked against the code:** 2026-09-30; NEURA-GROW's lines 2026-10-27.
+**Last checked against the code:** 2026-09-30; NEURA-GROW's lines 2026-10-28.
 
 This is the one list of what the product does. The public product site and the setup guides are written
 from it, so a line here is a promise that a page may repeat.
@@ -65,12 +65,13 @@ Read-only, like CARE. Six parts; only the chat is an assistant in the usual sens
 
 ## NEURA-GROW — shows what the shop's pages are missing
 
-No shopper talks to GROW: it has no chat. It reads the shop's chats once a night, in the background, and shows the owner what to add to the shop's pages. **FiveNeurals ticks it per shop.**
+No shopper talks to GROW: it has no chat. It reads the shop's chats once a night, in the background, and shows the owner what to add to the shop's pages, and what shoppers asked for that the shop doesn't sell. **FiveNeurals ticks it per shop.**
 
 | Feature | What it does | Status | Where | Source |
 |:--|:--|:--|:--|:--|
 | **Missing from your pages** | The questions **at least 2 shoppers** asked in the last 30 days that the shop's pages don't answer (*"Is it organic?"*, *"Can I pay cash on delivery?"*), grouped by product, most asked first. Each says where to add the answer, with a link to the product's page. **GROW never writes the answer**: only the owner knows it. *See the chats* opens the chats behind a question; *I added it* takes it off the list until shoppers ask again. Counts only, never who asked. The Owner and Support see it, never the Developer. A line on Home says how many there are. | 🟡 Built, with a limit (L6) | Dashboard | `agents/grow/`, `console_gaps.py`, ADR-0064 |
-| **The night check** | Once a night, an AI reads each new reply that handed the shopper over or could not give a fact, and names the question. A free word check first sends only those replies to the AI. Code checks every answer before it is stored: no links, emails, phone numbers or instructions. Inside the shop's daily spending limit. FiveNeurals can pause it for one shop. | 🟡 Built, with a limit (L6) | — | `agents/grow/scan.py`, ADR-0064, ADR-0065 |
+| **Shoppers asked for** | The things **at least 2 shoppers** asked for in the last 30 days that the shop doesn't sell (*"Do you have matcha?"*), most asked first, so the owner can decide to start selling them. *See the chats* opens the chats behind each; *Hide* takes it off the list until shoppers ask for it again. Counts only, never who asked. The Owner only. A line on the Owner's Home says how many there are. | 🟡 Built, with a limit (L6) | Dashboard | `agents/grow/`, `console_wanted.py`, ADR-0068 |
+| **The night check** | Once a night, an AI reads each new reply that handed the shopper over, could not give a fact, or said the shop doesn't have something, and names the question or the thing asked for (one AI call per reply for both pages). A free word check first sends only those replies to the AI. Code checks every answer before it is stored: no links, emails, phone numbers or instructions. Inside the shop's daily spending limit. FiveNeurals can pause it for one shop. | 🟡 Built, with a limit (L6) | — | `agents/grow/scan.py`, ADR-0064, ADR-0065 |
 
 ## What both assistants share
 
@@ -100,6 +101,7 @@ No shopper talks to GROW: it has no chat. It reads the shop's chats once a night
 | **Suggestions** (NEURA-SELL) | See and choose what shows with each product. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Sold out** (NEURA-SELL) | Sold-out products people kept looking at. Shown only to a shop with NEURA-SELL. | ✅ Built |
 | **Missing from your pages** (NEURA-GROW) | What shoppers asked that the shop's pages don't say, with *See the chats* and *I added it*. Shown only to a shop with NEURA-GROW, to the Owner and Support. | ✅ Built (ADR-0064) |
+| **Shoppers asked for** (NEURA-GROW) | What shoppers asked for that the shop doesn't sell, with *See the chats* and *Hide*. Shown only to a shop with NEURA-GROW, to the Owner. | ✅ Built (ADR-0068) |
 | **Usage and cost** | Chats, AI use and its cost, by assistant. | ✅ Built |
 | **Shop connection** | **The owner connects their own shop**: makes the shop token (shown once), checks the developer's bridge (the full check, said in plain words, with any *things to look at*, such as products that don't say they are on sale) and connects. Then a setup checklist, **Check again**, **Sync now**, what the shop lets the assistant do, and **a new token** for a leaked one. **The shop's contact details** (email, phone), named to a shopper the assistant cannot help, with the exact sentence they read. **The secret for order questions from signed-in shoppers** (shown once, *make a new one*), which the owner gives their developer. **Each secret says who made it.** The shop's developer, invited as Developer, sees and does everything on this page, except *Go live*. | ✅ Built (ADR-0052, ADR-0055, ADR-0057) |
 | **Help** | *Connecting your shop*, step by step, and what to send your developer: the guide for developers, the address for an AI coding tool, and the chat box line. | ✅ Built |
@@ -128,9 +130,9 @@ No shopper talks to GROW: it has no chat. It reads the shop's chats once a night
 | **L3** | **Sold out needs product views switched on** (off by default) and a data agreement. With neither, the screen is empty. | Say it is optional and needs the shop to send views. |
 | **L4** | **Nothing syncs by itself yet.** The copy of the catalogue changes when someone presses **Sync now**. | Nothing about "always up to date". |
 | **L5** | **Search by meaning covers only indexed products**; the others are found by their words. | Do not promise it for every product. |
-| **L6** | **Missing from your pages has only been tried on made-up chats.** No real shopper's chat has been read by the night check, its cost per shop is not measured, and Sinhala and Singlish are tried on a few made-up lines only. A half answer worded in an unusual way can be missed. A question shows only after the next night's check, and only when 2 shoppers asked it. | *"Shows what shoppers asked that your pages don't say"*. Not *"finds every missing answer"*, not *"writes your product pages"*, not *"in real time"*. |
+| **L6** | **Missing from your pages and Shoppers asked for have been tried on few real chats.** Missing from your pages was tried once on a test shop (Ceylon Harvester, 2026-10-27); Shoppers asked for only on made-up chats. The night check's cost per shop is not measured, and Sinhala and Singlish are tried on a few made-up lines only. A half answer, or a *"we don't have it"*, worded in an unusual way can be missed. Something shows only after the next night's check, and only when 2 shoppers asked it. | *"Shows what shoppers asked that your pages don't say"*, *"shows what shoppers asked for that you don't sell"*. Not *"finds every missing answer"*, not *"tells you what to sell"*, not *"writes your product pages"*, not *"in real time"*. |
 
 ## Assistants not designed
 
 **NEURA-MIND, NEURA-GUARD** — names only. Nothing is designed ([docs/agents/README.md](agents/README.md)).
-Do not describe them on any page. **NEURA-GROW** has one designed and built feature, above; its other ideas are not designed.
+Do not describe them on any page. **NEURA-GROW** has two designed and built features, above; its other ideas are not designed.
