@@ -1,6 +1,6 @@
 """What every member's Home reads beyond their own screens. ADR-0058, R12.
 
-    GET /v1/console/shops/{tenant_id}/home    {"mode", "practice", "handed", "waiting", "gaps"}
+    GET /v1/console/shops/{tenant_id}/home    {"mode", "practice", "handed", "waiting", "gaps", "wanted"}
 
 The Owner's Home reads Usage, which only the Owner may open (money). Support and
 the Developer see on Home only the parts about their own work (the owner's
@@ -21,7 +21,9 @@ So this route gives exactly those two facts and nothing else of Usage:
   Home's *Needs you* and the menu's count; ``null`` for any other;
 * ``gaps`` only to a role that may open *Missing from your pages*
   (``shop:gaps:write``): how many questions the page shows, the page's own
-  count (ADR-0064, Home's line); ``null`` for any other.
+  count (ADR-0064, Home's line); ``null`` for any other;
+* ``wanted`` only to the Owner (``shop:wanted:read``, ADR-0068 §4): how many
+  things *Shoppers asked for* shows, the page's own count; ``null`` for any other.
 """
 
 from __future__ import annotations
@@ -33,11 +35,18 @@ from fastapi import APIRouter, Depends, Request
 
 from neura_agent_core.gaps import GAP_DAYS, PageGapRepository
 from neura_agent_core.waiting import WaitingAnswerRepository
+from neura_agent_core.wanted import WantedRepository
 from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.routes.console_usage import PERIODS
 from neura_core.identity import role_may
-from neura_core.identity.roles import CONVERSATIONS_READ, GAPS_WRITE, HANDOVERS_WRITE, HOME_READ
+from neura_core.identity.roles import (
+    CONVERSATIONS_READ,
+    GAPS_WRITE,
+    HANDOVERS_WRITE,
+    HOME_READ,
+    WANTED_READ,
+)
 from neura_core.tenancy import TenantRepository
 from neura_core.tenancy.usage import UsageMeter, today
 
@@ -58,6 +67,8 @@ async def home(
     reads_chats = role_may(actor.role, CONVERSATIONS_READ)
     answers = role_may(actor.role, HANDOVERS_WRITE)
     finds_gaps = role_may(actor.role, GAPS_WRITE)
+    reads_wanted = role_may(actor.role, WANTED_READ)
+    since = datetime.now(UTC) - timedelta(days=GAP_DAYS)
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         tenant = await TenantRepository(session).get(actor.tenant_id)
         handed = None
@@ -73,10 +84,13 @@ async def home(
             else None
         )
         gaps = (
-            await PageGapRepository(session).count_topics(
-                actor.tenant_id, since=datetime.now(UTC) - timedelta(days=GAP_DAYS)
-            )
+            await PageGapRepository(session).count_topics(actor.tenant_id, since=since)
             if finds_gaps
+            else None
+        )
+        wanted = (
+            await WantedRepository(session).count_topics(actor.tenant_id, since=since)
+            if reads_wanted
             else None
         )
 
@@ -88,6 +102,7 @@ async def home(
             "handed": handed,
             "waiting": waiting,
             "gaps": gaps,
+            "wanted": wanted,
         },
         request_id=getattr(request.state, "request_id", None),
     )

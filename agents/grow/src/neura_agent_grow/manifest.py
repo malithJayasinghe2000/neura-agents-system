@@ -13,6 +13,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 from neura_agent_core.gaps import PAGE_GAPS
+from neura_agent_core.wanted import WANTED_ITEMS
 from neura_domain import Capability
 
 
@@ -40,10 +41,10 @@ class AgentManifest(BaseModel):
     #: starts with this agent's key, to the words the admin reads, a name and
     #: what it does. An agent without one leaves this out.
     switches: dict[str, tuple[str, str]] = {}
-    #: Which of the console's own pages each switch pauses, by the page's name in
+    #: Which of the console's own pages each switch pauses, by each page's name in
     #: the shared core (``page_gaps``), so the console can say *Paused* without
     #: naming this agent (ADR-0065 §4).
-    pauses: dict[str, str] = {}
+    pauses: dict[str, tuple[str, ...]] = {}
 
 
 MANIFEST = AgentManifest(
@@ -71,7 +72,8 @@ MANIFEST = AgentManifest(
             "questions its pages don't answer.",
         )
     },
-    pauses={"grow.gaps": PAGE_GAPS},
+    # One night check finds both pages' rows (ADR-0068 §8).
+    pauses={"grow.gaps": (PAGE_GAPS, WANTED_ITEMS)},
 )
 
 __all__ = ["MANIFEST", "AgentManifest"]

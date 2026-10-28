@@ -71,6 +71,11 @@ HANDOVERS_WRITE = "shop:handovers:write"
 #: pages do not say, *I added it*, and Home's count. Served by the console for
 #: whichever assistant finds them, so it names no agent (G88).
 GAPS_WRITE = "shop:gaps:write"
+#: Shoppers asked for (ADR-0068 §4, R61): what shoppers asked for that the shop
+#: does not sell, *Hide*, Home's count, and *See the chats* (Conversations'
+#: ``?wanted=``). The Owner's alone: what to sell is the owner's decision, as
+#: Sold out. Named in the ADR; it covers *Hide* too.
+WANTED_READ = "shop:wanted:read"
 
 #: The refusal of a member whose role does not include what was asked for. Its
 #: own code, so the dashboard can say *"You can't open this page"* rather than a
@@ -130,6 +135,7 @@ __all__ = [
     "ROLE_PERMISSIONS",
     "SOLD_OUT_READ",
     "USAGE_READ",
+    "WANTED_READ",
     "Role",
     "is_permission",
     "role_may",

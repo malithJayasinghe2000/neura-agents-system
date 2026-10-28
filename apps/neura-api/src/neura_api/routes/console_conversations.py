@@ -96,12 +96,14 @@ from neura_agent_core.gaps import MAX_FACT_CHARS, MAX_PRODUCT_ID_CHARS
 from neura_agent_core.review import no_draft_reason
 from neura_agent_core.shadow import ShadowRepository, ShadowTurn
 from neura_agent_core.waiting import WaitingAnswer, WaitingAnswerRepository
+from neura_agent_core.wanted import MAX_LABEL_CHARS
 from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import decode_cursor, encode_cursor, envelope, page
 from neura_api.routes.console_people import who_made
 from neura_commerce.sync.schema import synced_entities
-from neura_core import NotFoundError, ValidationError, get_logger
-from neura_core.identity.roles import CONVERSATIONS_READ
+from neura_core import ForbiddenError, NotFoundError, ValidationError, get_logger
+from neura_core.identity import role_may
+from neura_core.identity.roles import CONVERSATIONS_READ, ROLE_NOT_ALLOWED, WANTED_READ
 
 log = get_logger(__name__)
 
@@ -131,6 +133,7 @@ async def list_conversations(
     waiting: Annotated[bool, Query()] = False,
     gap: Annotated[str | None, Query(max_length=MAX_FACT_CHARS)] = None,
     gap_product: Annotated[str | None, Query(max_length=MAX_PRODUCT_ID_CHARS)] = None,
+    wanted: Annotated[str | None, Query(max_length=MAX_LABEL_CHARS)] = None,
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
@@ -148,7 +151,16 @@ async def list_conversations(
         # *See the chats* on Missing from your pages (ADR-0064): the chats one
         # row counts. No product means the row is about the shop.
         "gap": (gap_product or "", gap.strip()) if gap and gap.strip() else None,
+        # *See the chats* on Shoppers asked for (ADR-0068): the chats one row
+        # counts. That page is the Owner's (R61), so this filter is too.
+        "wanted": wanted.strip() if wanted and wanted.strip() else None,
     }
+    if matching["wanted"] is not None and not role_may(actor.role, WANTED_READ):
+        raise ForbiddenError(
+            "Your role in this shop doesn't include this. If you need it, ask the shop's owner.",
+            code=ROLE_NOT_ALLOWED,
+            details={"role": actor.role, "permission": WANTED_READ},
+        )
     before = _position(decode_cursor(cursor))
 
     db = request.app.state.database

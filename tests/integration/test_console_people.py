@@ -650,6 +650,8 @@ class TestWhatEachRoleIsShown:
         assert "sell:suggestions:write" in owner
         assert "shop:handovers:write" in owner
         assert "shop:gaps:write" in owner
+        # Shoppers asked for (ADR-0068 §4): the Owner's alone.
+        assert "shop:wanted:read" in owner
         assert set(held(support)) | set(held(developer)) < set(owner)
 
     async def test_home_gives_support_the_handed_over_count_and_the_developer_none(

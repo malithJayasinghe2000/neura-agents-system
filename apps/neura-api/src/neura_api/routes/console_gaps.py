@@ -133,11 +133,13 @@ async def added(
     )
 
 
-async def paused(request: Request, session: Any, tenant_id: str) -> datetime | None:
-    """Since when this page's finder is switched off for the shop, or ``None``.
+async def paused(
+    request: Request, session: Any, tenant_id: str, page: str = PAGE_GAPS
+) -> datetime | None:
+    """Since when ``page``'s finder is switched off for the shop, or ``None``.
 
     Only a switch of an assistant the shop has, which a manifest says pauses
-    this page (ADR-0065 §4). Home reads it too.
+    that page (ADR-0065 §4). *Shoppers asked for* reads it too (ADR-0068 §8).
     """
     tenant = await TenantRepository(session).get(tenant_id)
     if tenant is None:
@@ -146,8 +148,8 @@ async def paused(request: Request, session: Any, tenant_id: str) -> datetime | N
     for agent_key, discovered in (getattr(request.app.state, "agents", {}) or {}).items():
         if agent_key not in tenant.enabled_agents:
             continue
-        for key, page in (getattr(discovered.manifest, "pauses", None) or {}).items():
-            if page != PAGE_GAPS or not key.startswith(f"{agent_key}."):
+        for key, pages in (getattr(discovered.manifest, "pauses", None) or {}).items():
+            if page not in pages or not key.startswith(f"{agent_key}."):
                 continue
             switch = await switches.get(tenant_id, key)
             if switch is not None and not switch.on:
