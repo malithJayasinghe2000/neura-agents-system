@@ -1044,6 +1044,7 @@ def tenant_tables() -> list[Any]:
     from neura_agent_core.shadow import shadow_turns
     from neura_agent_core.shadow_evidence import shadow_evidence
     from neura_agent_core.waiting import waiting_answers
+    from neura_agent_core.wanted import wanted_hides, wanted_items
     from neura_agent_sell.feed.schema import sell_feeds
     from neura_agent_sell.pairing.schema import sell_pairing_choices, sell_pairings
     from neura_commerce.sync.schema import sync_checkpoints, synced_entities
@@ -1074,6 +1075,10 @@ def tenant_tables() -> list[Any]:
         page_gaps,
         page_gap_fixes,
         page_gap_scans,
+        # What shoppers asked for that the shop does not sell (ADR-0068), and
+        # the team's *Hide*.
+        wanted_items,
+        wanted_hides,
         # Before the turns it points at: the one foreign key among these tables.
         shadow_evidence,
         shadow_turns,

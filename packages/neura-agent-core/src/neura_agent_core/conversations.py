@@ -57,6 +57,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from neura_agent_core.gaps import GAP_DAYS, page_gap_fixes, page_gaps
 from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
 from neura_agent_core.waiting import waiting_answers
+from neura_agent_core.wanted import wanted_items
 from neura_core import metadata, new_id
 from neura_core.ids import MESSAGE
 
@@ -620,7 +621,8 @@ class ConversationRepository:
         forensic reader could not reassemble.
 
         The waiting row a handover left (``waiting_answers``, ADR-0062) goes too,
-        and so does every gap GROW found in the chat (``page_gaps``, ADR-0064).
+        and so does every gap GROW found in the chat (``page_gaps``, ADR-0064)
+        and everything it found a shopper asked for (``wanted_items``, ADR-0068).
 
         **Deliberately left behind:** ``shadow_turns``, the graded review queue
         (``by_ids`` renders a deleted question as *"no longer in the
@@ -657,6 +659,12 @@ class ConversationRepository:
             delete(page_gaps)
             .where(page_gaps.c.tenant_id == tenant_id)
             .where(page_gaps.c.conversation_id.in_(expired))
+        )
+        # So does what a shopper asked for that the shop does not sell (ADR-0068).
+        await self._session.execute(
+            delete(wanted_items)
+            .where(wanted_items.c.tenant_id == tenant_id)
+            .where(wanted_items.c.conversation_id.in_(expired))
         )
         result = await self._session.execute(
             delete(conversations)
