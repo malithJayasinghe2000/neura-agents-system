@@ -244,6 +244,8 @@ async def main() -> int:
 
                 print(f"\n  {BOLD}missing from your pages — GROW's page, Home's line{OFF}")
                 await _check_gaps(browser, console, db, minted.user_id, seeded, failures)
+                print(f"\n  {BOLD}shoppers asked for: GROW's second page, Home's line{OFF}")
+                await _check_wanted(browser, console, db, minted.user_id, seeded, failures)
 
             print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
             await _check_sign_up(console, failures)
@@ -3233,8 +3235,9 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                 _check(
                     f"a shop with GROW: its night check, On ({size})",
                     "Switch a feature off" in shown
-                    and "Missing from your pages" in shown
                     and "The night AI check" in shown
+                    # R65: the switch names both pages it pauses.
+                    and "Missing from your pages and Shoppers asked for" in shown
                     and bool(await page.evaluate("!!document.querySelector('[data-switch-off]')")),
                     failures,
                 )
@@ -3545,6 +3548,210 @@ async def _check_gaps(
                 not await browser.evaluate(
                     "[...document.querySelectorAll('nav a')].some(a => a.innerText.trim() === "
                     "'Missing from your pages')"
+                ),
+                failures,
+            )
+    finally:
+        async with db.tenant_session(tenant) as session:
+            await remove_tenant(session, tenant)
+
+
+async def _check_wanted(
+    browser: Chrome,
+    console: str,
+    db: Database,
+    user_id: str,
+    seeded: dict[str, str],
+    failures: list[str],
+) -> None:
+    """*Shoppers asked for* (ADR-0068, console.md §3.12, boards 67 to 70).
+
+    In **a shop of its own** with NEURA-GROW, where this person is the Owner, so
+    nothing real is touched: things shoppers asked for are seeded (matcha by 3
+    shoppers, oolong tea by 2, honey by only 1, which must not show). Checked on
+    desktop and phone: the menu item, the rows, *See the chats* narrowing
+    Conversations, *Hide*, Home's line and the *Paused* note. The first shop,
+    which has no GROW, must not list the page. Everything made here is removed
+    at the end.
+    """
+    from neura_agent_core.wanted import WantedItem, WantedRepository
+    from neura_core.identity.schema import memberships
+    from neura_core.tenancy import TenantRepository
+    from neura_core.tenancy.removal import remove_tenant
+    from neura_core.tenancy.switches import SwitchRepository
+
+    tenant = ids.new_id(ids.TENANT)
+    base = f"{console}/console/{tenant}"
+    shop_name = f"Wanted Check {tenant[-6:].lower()}"
+
+    async def ask(label: str, question: str, hours: int) -> None:
+        conversation = ids.new_id(ids.CONVERSATION)
+        async with db.tenant_session(tenant) as session:
+            repository = ConversationRepository(session)
+            await repository.start(tenant, conversation_id=conversation, agent_key="sell")
+            await repository.append_turn(
+                tenant,
+                conversation,
+                shopper=question,
+                reply="I can't find anything matching that.",
+                state=ConversationState.RESOLVED,
+            )
+            await WantedRepository(session).record(
+                tenant,
+                WantedItem(
+                    conversation_id=conversation,
+                    message_id=f"msg_{conversation}",
+                    label=label,
+                    question=question,
+                    asked_at=datetime.now(UTC) - timedelta(hours=hours),
+                ),
+            )
+
+    async def phone(on: bool) -> None:
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def shown(url: str, wait: float = 3.5) -> str:
+        await browser.goto(url)
+        await asyncio.sleep(wait)
+        return str(await browser.evaluate("document.body.innerText"))
+
+    try:
+        async with db.tenant_session(tenant) as session:
+            await TenantRepository(session).create(
+                tenant_id=tenant, name=shop_name, enabled_agents=["care", "sell", "grow"]
+            )
+            await session.execute(
+                memberships.insert().values(
+                    id=ids.new_id(ids.MEMBERSHIP), tenant_id=tenant, user_id=user_id, role="owner"
+                )
+            )
+        for hours in (2, 3, 4):
+            await ask("matcha", "Do you have matcha?", hours)
+        for hours in (5, 6):
+            await ask("oolong tea", "Do you sell oolong tea?", hours)
+        await ask("honey", "Do you sell honey?", 1)
+
+        empty = await shown(f"{base}/wanted")
+        _check(
+            "the page is not empty once 2 shoppers asked",
+            "Nothing asked for right now" not in empty,
+            failures,
+        )
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(on)
+            page = await shown(f"{base}/wanted")
+            _check(
+                f"the page: heading, count line, things, most asked first ({size})",
+                "Shoppers asked for" in page
+                and "2 things shoppers asked for. Most asked first." in page
+                and "Matcha" in page
+                and "A shopper asked: \u201cDo you have matcha?\u201d" in page
+                and "Asked by 3 shoppers" in page
+                and page.index("Matcha") < page.index("Oolong tea"),
+                failures,
+            )
+            _check(
+                f"a thing only 1 shopper asked for is not shown ({size})",
+                "Honey" not in page,
+                failures,
+            )
+            _check(
+                f"counts only, never who asked ({size})",
+                "Counts only, never who asked." in page,
+                failures,
+            )
+            _check(
+                f"the page fits the screen ({size})",
+                bool(
+                    await browser.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth + 1"
+                    )
+                ),
+                failures,
+            )
+        await phone(False)
+
+        menu = await browser.evaluate(
+            "[...document.querySelectorAll('nav a')].map(a => a.innerText.trim())"
+        )
+        _check(
+            "the menu lists Shoppers asked for, after Missing from your pages",
+            isinstance(menu, list)
+            and "Shoppers asked for" in menu
+            and menu.index("Shoppers asked for") == menu.index("Missing from your pages") + 1,
+            failures,
+        )
+
+        home = await shown(base)
+        _check(
+            "Home's Needs you: the page's count, with See them",
+            "things shoppers asked for that you don't sell" in home
+            and bool(
+                await browser.evaluate(
+                    f"!!document.querySelector('a[href=\"/console/{tenant}/wanted\"]')"
+                )
+            ),
+            failures,
+        )
+
+        await shown(f"{base}/wanted")
+        await browser.evaluate(
+            "document.querySelector('[data-wanted=\"matcha\"] [data-see-chats]').click(), true"
+        )
+        await asyncio.sleep(3.5)
+        listed = str(await browser.evaluate("document.body.innerText"))
+        rows = await browser.evaluate(
+            "document.querySelectorAll('ul a[href*=\"/conversations/\"]').length"
+        )
+        _check(
+            "See the chats: Conversations shows exactly the 3 chats behind the row",
+            rows == 3 and "The chats where shoppers asked for" in listed,
+            failures,
+        )
+
+        await shown(f"{base}/wanted")
+        await browser.evaluate(
+            "document.querySelector('[data-wanted=\"matcha\"] [data-hide]').click(), true"
+        )
+        await asyncio.sleep(2.5)
+        after = str(await browser.evaluate("document.body.innerText"))
+        _check(
+            "Hide: the row says it leaves the list, and comes back if asked for again",
+            "Hidden." in after and "comes back here" in after,
+            failures,
+        )
+        again = await shown(f"{base}/wanted")
+        _check(
+            "Hide: after a reload the thing is gone",
+            "Matcha" not in again and "1 thing shoppers asked for" in again,
+            failures,
+        )
+
+        async with db.tenant_session(tenant) as session:
+            await SwitchRepository(session).set(tenant, "grow.gaps", on=False, by=user_id)
+        paused = await shown(f"{base}/wanted")
+        _check(
+            "Paused: the night check's switch pauses this page too, and the rows stay",
+            "Paused since" in paused
+            and "FiveNeurals has paused the check that finds these things" in paused
+            and "Oolong tea" in paused,
+            failures,
+        )
+
+        if seeded.get("tenant"):
+            await shown(f"{console}/console/{seeded['tenant']}")
+            _check(
+                "a shop without GROW does not list the page",
+                not await browser.evaluate(
+                    "[...document.querySelectorAll('nav a')].some(a => a.innerText.trim() === "
+                    "'Shoppers asked for')"
                 ),
                 failures,
             )

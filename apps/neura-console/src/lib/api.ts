@@ -405,6 +405,14 @@ export function markGapAdded(
   });
 }
 
+/** *Hide* on Shoppers asked for (ADR-0068): the thing leaves the list until asked for again. */
+export function hideWanted(tenantId: string, label: string): Promise<{ hidden: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/wanted/hidden`, {
+    method: "POST",
+    body: JSON.stringify({ label }),
+  });
+}
+
 export function readHome(tenantId: string): Promise<{ waiting: number | null }> {
   return call(`/shops/${encodeURIComponent(tenantId)}/home`);
 }

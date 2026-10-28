@@ -35,6 +35,7 @@ import {
 } from "@/lib/conversations";
 import { fromApi, hasSession, type PageMeta } from "@/lib/server-api";
 import { PERMISSION, refusal } from "@/lib/roles";
+import { thing } from "@/lib/wanted";
 import { NotAllowed } from "@/components/not-allowed";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,8 @@ type Filters = {
   gap?: string;
   gap_product?: string;
   asked?: string;
+  /** *See the chats* on Shoppers asked for (ADR-0068): one row's label. */
+  wanted?: string;
 };
 
 export default async function ConversationsPage({
@@ -65,6 +68,7 @@ export default async function ConversationsPage({
     gap?: string;
     gap_product?: string;
     asked?: string;
+    wanted?: string;
   }>;
 }) {
   if (!(await hasSession())) redirect("/");
@@ -81,8 +85,9 @@ export default async function ConversationsPage({
     gap = "",
     gap_product = "",
     asked = "",
+    wanted = "",
   } = await searchParams;
-  const filters: Filters = { state, agent, q: q.trim(), gap, gap_product, asked };
+  const filters: Filters = { state, agent, q: q.trim(), gap, gap_product, asked, wanted };
 
   // *Waiting for an answer* is not a conversation state: the API is asked for
   // `?waiting=1` (ADR-0062 §6). Every other choice is the state itself.
@@ -206,6 +211,14 @@ export default async function ConversationsPage({
             />
           ) : null}
 
+          {filters.wanted ? (
+            <WantedLine
+              label={filters.wanted}
+              wantedHref={`/console/${encodeURIComponent(tenantId)}/wanted`}
+              allHref={base}
+            />
+          ) : null}
+
           {waitingOnly && list.data.length > 0 ? (
             <WaitingLine count={list.meta.total ?? list.data.length} />
           ) : null}
@@ -223,7 +236,9 @@ export default async function ConversationsPage({
               </Card>
             ) : (
               <EmptyList
-                filtered={Boolean(filters.state || filters.agent || filters.q || filters.gap)}
+                filtered={Boolean(
+                  filters.state || filters.agent || filters.q || filters.gap || filters.wanted,
+                )}
                 clearHref={base}
               />
             )
@@ -273,6 +288,31 @@ function GapLine({
       <strong className="font-semibold">&ldquo;{asked}&rdquo;</strong>.{" "}
       <Link className="underline underline-offset-3" href={gapsHref}>
         Back to Missing from your pages
+      </Link>{" "}
+      ·{" "}
+      <Link className="underline underline-offset-3" href={allHref}>
+        Show every conversation
+      </Link>
+    </p>
+  );
+}
+
+/** Above the chats behind one row of Shoppers asked for (ADR-0068). */
+function WantedLine({
+  label,
+  wantedHref,
+  allHref,
+}: {
+  label: string;
+  wantedHref: string;
+  allHref: string;
+}) {
+  return (
+    <p data-wanted-line className="text-sm leading-relaxed">
+      The chats where shoppers asked for{" "}
+      <strong className="font-semibold">&ldquo;{thing(label)}&rdquo;</strong>.{" "}
+      <Link className="underline underline-offset-3" href={wantedHref}>
+        Back to Shoppers asked for
       </Link>{" "}
       ·{" "}
       <Link className="underline underline-offset-3" href={allHref}>

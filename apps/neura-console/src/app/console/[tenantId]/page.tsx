@@ -112,6 +112,7 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
             handed={usage.data.totals.escalations}
             answering={home.ok ? home.data.waiting : null}
             gaps={home.ok ? (home.data.gaps ?? null) : null}
+            wanted={home.ok ? (home.data.wanted ?? null) : null}
             connected={store.ok ? store.data.connected : null}
           />
 
@@ -152,6 +153,8 @@ type TeamView = {
   waiting: number | null;
   /** Questions on Missing from your pages (ADR-0064); `null` for a role that may not open it. */
   gaps?: number | null;
+  /** Things on Shoppers asked for (ADR-0068); `null` for any role but the Owner. */
+  wanted?: number | null;
 };
 
 /**
@@ -230,6 +233,7 @@ function NeedsYou({
   handed,
   answering = null,
   gaps = null,
+  wanted = null,
   connected,
   withDeveloper = true,
   empty = "Nothing needs you right now. Replies waiting for review and conversations handed to a person will show up here.",
@@ -242,6 +246,8 @@ function NeedsYou({
   answering?: number | null;
   /** Questions on Missing from your pages (ADR-0064). `null`: not this role's page. */
   gaps?: number | null;
+  /** Things on Shoppers asked for (ADR-0068). `null`: not this role's page. */
+  wanted?: number | null;
   connected: boolean | null;
   /** Whether *in three steps with your developer* is said: not to the developer. */
   withDeveloper?: boolean;
@@ -277,6 +283,22 @@ function NeedsYou({
         "In the last 30 days. Add each one to your shop once, and your assistant can answer the next shopper.",
       action: "See them",
       href: `${base}/gaps`,
+      primary: false,
+    });
+  }
+
+  // Then what shoppers asked for that the shop doesn't sell (ADR-0068, board 68).
+  if (wanted) {
+    items.push({
+      figure: wanted,
+      title:
+        wanted === 1
+          ? "thing shoppers asked for that you don't sell"
+          : "things shoppers asked for that you don't sell",
+      detail:
+        "In the last 30 days. If many people want something, you may want to start selling it.",
+      action: "See them",
+      href: `${base}/wanted`,
       primary: false,
     });
   }

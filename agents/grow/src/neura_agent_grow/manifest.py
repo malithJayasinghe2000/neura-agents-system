@@ -67,9 +67,10 @@ MANIFEST = AgentManifest(
     # The night check is the one GROW feature that spends money (R51).
     switches={
         "grow.gaps": (
-            "Missing from your pages",
-            "The night AI check: once a night, AI reads the shop's new chats to find "
-            "questions its pages don't answer.",
+            # R65: the switch is the check, which fills both GROW pages.
+            "The night AI check",
+            "Once a night, AI reads the shop's new chats to fill Missing from your "
+            "pages and Shoppers asked for.",
         )
     },
     # One night check finds both pages' rows (ADR-0068 §8).

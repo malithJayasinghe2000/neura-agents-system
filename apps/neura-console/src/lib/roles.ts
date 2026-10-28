@@ -26,6 +26,8 @@ export const PERMISSION = {
   handovers: "shop:handovers:write",
   /** Missing from your pages: read it, *I added it* (ADR-0064 §5). Owner and Support. */
   gaps: "shop:gaps:write",
+  /** Shoppers asked for: read it, *Hide*, See the chats (ADR-0068 §4). The Owner only. */
+  wanted: "shop:wanted:read",
 } as const;
 
 export type Permission = (typeof PERMISSION)[keyof typeof PERMISSION];

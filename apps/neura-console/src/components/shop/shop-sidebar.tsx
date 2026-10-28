@@ -40,6 +40,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Brand } from "@/components/brand";
+import { ShoppingBagPlus } from "@/components/shopping-bag-plus";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WAITING_CHANGED, readHome, readScorecard } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -68,7 +69,8 @@ type Opens = Record<
   | "usage"
   | "people"
   | "handovers"
-  | "gaps",
+  | "gaps"
+  | "wanted",
   boolean
 >;
 
@@ -183,6 +185,12 @@ export function ShopSidebar({
       label: "Missing from your pages",
       icon: FileQuestionMark,
       shown: grow && opens.gaps,
+    },
+    {
+      href: `${base}/wanted`,
+      label: "Shoppers asked for",
+      icon: ShoppingBagPlus,
+      shown: grow && opens.wanted,
     },
   ].filter((item) => item.shown);
   const setup: Item[] = [
