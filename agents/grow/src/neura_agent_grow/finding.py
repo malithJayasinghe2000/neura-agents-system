@@ -1,20 +1,25 @@
-"""One exchange in, one checked gap (or nothing) out. ADR-0064 §6 and §7.
+"""One exchange in, one checked gap, one wanted thing, or nothing out.
 
-The night job hands the model one shopper message and the reply it got, with
-the products that turn looked at, and asks one question: **did the shopper ask
-for a fact the shop's pages could state, which the reply could not give?**
+ADR-0064 §6 and §7, ADR-0068 §6. The night job hands the model one shopper
+message and the reply it got, with the products that turn looked at, and asks
+which **one** of three it is (R64): **a gap** (a fact the shop's pages could
+state, which the reply could not give), **wanted** (a kind of product the shop
+does not sell, and the reply said so), or **none**. One field carries the answer,
+so one reply can never be both.
 
 **Code decides what is stored, not the model** (Rule 3). The model reads shopper
 text, and what it returns reaches the owner's page, so :func:`clean` refuses
 anything that is not a short plain label and a short plain question: no link,
 no email address, no long number, nothing the injection guard's rules match,
-and no product the turn never looked at. A refused answer stores nothing; the
+and no product the turn never looked at. A wanted thing gets the same checks,
+and never a product at all: the shop does not sell it. A refused answer stores nothing; the
 cost of a missed gap is a shorter list, and the cost of a stored trick would be
 a line on the owner's page that a shopper wrote.
 
 **Not every reply is sent** (R47, the owner's choice on cost): :func:`worth_asking`
 is a free word check that runs first. A handover, a reply that says it cannot
-confirm or does not have something, and a reply not mostly in English are sent;
+confirm or does not have something (or does not carry or sell it, ADR-0068 §6),
+and a reply not mostly in English are sent;
 a reply that plainly gave its answer is not. The words it looks for are the ones
 our own assistants are told to use (CARE's ``compose.md``: *say plainly what you
 cannot confirm*), so a miss needs a half answer in unusual words.
@@ -26,6 +31,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -74,9 +80,10 @@ _COMMAND_WORDS = frozenset(
 _UNSURE = re.compile(
     r"\b(?:"
     r"(?:can't|cannot|can not|unable to|not able to)\s+(?:confirm|say|tell|find|answer|see)"
-    r"|(?:don't|do not|doesn't|does not|didn't|did not)\s+(?:have|know|say|state|specify|confirm|describe|mention|list|show|include)"
+    r"|(?:don't|do not|doesn't|does not|didn't|did not)\s+(?:have|know|say|state|specify|confirm|describe|mention|list|show|include|carry|sell|stock)"
     r"|not sure|unsure|unfortunately|i'm afraid"
     r"|no (?:information|info|details|data|mention)"
+    r"|no products? match(?:ing|es)?"
     r"|(?:isn't|is not|aren't|are not|not)\s+(?:listed|mentioned|specified|stated|given|included)"
     r"|someone at (?:our|the) (?:store|shop)|contact (?:our|the) (?:store|shop)"
     r"|leave your email|pass (?:your|this|the) question"
@@ -176,16 +183,27 @@ def worth_asking(reply: str, *, handed_over: bool) -> bool:
     return not _mostly_english(text) or bool(_UNSURE.search(text))
 
 
-class GapFinding(BaseModel):
+class Found(StrEnum):
+    """Which one of three the exchange is (R64)."""
+
+    GAP = "gap"
+    WANTED = "wanted"
+    NONE = "none"
+
+
+class Finding(BaseModel):
     """What the model returns. Every field is checked by :func:`clean`."""
 
     model_config = ConfigDict(extra="ignore")
 
-    gap: bool = Field(description="True only for a fact the shop's pages could state.")
-    product_id: str | None = Field(
-        default=None, description="An id copied from the product list, or null."
+    found: Found = Field(
+        description="gap: a fact the shop's pages could state; wanted: a kind of product "
+        "the shop does not sell; none: anything else."
     )
-    fact: str | None = Field(default=None, description="One to four plain lowercase words.")
+    product_id: str | None = Field(
+        default=None, description="For a gap, an id copied from the product list, or null."
+    )
+    topic: str | None = Field(default=None, description="One to four plain lowercase words.")
     question: str | None = Field(
         default=None, description="The shopper's question, short, ending with '?'."
     )
@@ -202,6 +220,8 @@ class Exchange:
     products: Mapping[str, str] = field(default_factory=dict)
     #: The labels already stored for each product (``""`` for the shop).
     known_facts: Mapping[str, Sequence[str]] = field(default_factory=dict)
+    #: The things already found that the shop does not sell (ADR-0068 §6).
+    known_wanted: Sequence[str] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +234,14 @@ class CheckedGap:
 
 
 @dataclass(frozen=True, slots=True)
+class CheckedWanted:
+    """A thing the shop does not sell that passed every check (ADR-0068)."""
+
+    label: str
+    question: str
+
+
+@dataclass(frozen=True, slots=True)
 class FindResult:
     """The answer, and separately whether the model was reachable at all.
 
@@ -222,11 +250,12 @@ class FindResult:
     """
 
     gap: CheckedGap | None = None
+    wanted: CheckedWanted | None = None
     error: str = ""
     #: What the model said before the checks, for the eval only: a product id it
     #: invented, or a planted question the checks refused, is worth measuring
     #: even though nothing unsafe was stored.
-    raw: GapFinding | None = None
+    raw: Finding | None = None
 
     @property
     def reachable(self) -> bool:
@@ -249,21 +278,25 @@ def _unsafe(text: str) -> bool:
     )
 
 
-def clean(finding: GapFinding, exchange: Exchange) -> CheckedGap | None:
-    """The finding as it may be stored, or ``None``. Never raises."""
-    if not finding.gap:
+def clean(finding: Finding, exchange: Exchange) -> CheckedGap | CheckedWanted | None:
+    """The finding as it may be stored, or ``None``. Never raises.
+
+    A gap and a wanted thing pass exactly the same checks on their label and
+    question (ADR-0068 §6).
+    """
+    if finding.found is Found.NONE:
         return None
-    fact = _plain(finding.fact or "").lower()
+    topic = _plain(finding.topic or "").lower()
     question = _plain(finding.question or "")
-    if not fact or not question:
+    if not topic or not question:
         return None
     if (
-        len(fact) > MAX_FACT_CHARS
-        or len(fact.split()) > MAX_FACT_WORDS
-        or not _FACT.match(fact)
-        or _unsafe(fact)
+        len(topic) > MAX_FACT_CHARS
+        or len(topic.split()) > MAX_FACT_WORDS
+        or not _FACT.match(topic)
+        or _unsafe(topic)
     ):
-        log.info("grow_gap_fact_refused", length=len(fact))
+        log.info("grow_gap_fact_refused", found=finding.found.value, length=len(topic))
         return None
     if (
         len(question) > MAX_QUESTION_CHARS
@@ -271,10 +304,12 @@ def clean(finding: GapFinding, exchange: Exchange) -> CheckedGap | None:
         or not _QUESTION.match(question)
         or _unsafe(question)
     ):
-        log.info("grow_gap_question_refused", length=len(question))
+        log.info("grow_gap_question_refused", found=finding.found.value, length=len(question))
         return None
+    if finding.found is Found.WANTED:
+        return CheckedWanted(label=topic, question=question)
     product_id = finding.product_id if finding.product_id in exchange.products else None
-    return CheckedGap(product_id=product_id, fact=fact, question=question)
+    return CheckedGap(product_id=product_id, fact=topic, question=question)
 
 
 def render(exchange: Exchange) -> str:
@@ -293,7 +328,9 @@ def render(exchange: Exchange) -> str:
         f"<untrusted_exchange>\n{exchange_text}\n</untrusted_exchange>\n\n"
         f"{outcome}\n\n"
         f"Products this turn looked at (id: title): {json.dumps(dict(exchange.products))}\n"
-        f"Topics already found (product id, or shop): {json.dumps(known)}"
+        f"Topics already found (product id, or shop): {json.dumps(known)}\n"
+        f"Things already asked for that the shop does not sell: "
+        f"{json.dumps(list(exchange.known_wanted))}"
     )
 
 
@@ -310,20 +347,27 @@ async def find_gap(exchange: Exchange, *, llm: object, prompt: str) -> FindResul
                 messages=[Message.system(prompt), Message.user(render(exchange))],
                 temperature=0.0,
             ),
-            GapFinding,
+            Finding,
         )
     except Exception as exc:
         log.warning("grow_find_gap_failed", error=type(exc).__name__)
         return FindResult(error=type(exc).__name__)
-    return FindResult(gap=clean(result.value, exchange), raw=result.value)
+    checked = clean(result.value, exchange)
+    return FindResult(
+        gap=checked if isinstance(checked, CheckedGap) else None,
+        wanted=checked if isinstance(checked, CheckedWanted) else None,
+        raw=result.value,
+    )
 
 
 __all__ = [
     "MAX_TEXT_CHARS",
     "CheckedGap",
+    "CheckedWanted",
     "Exchange",
     "FindResult",
-    "GapFinding",
+    "Finding",
+    "Found",
     "clean",
     "find_gap",
     "render",

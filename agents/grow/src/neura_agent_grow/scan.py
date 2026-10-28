@@ -3,15 +3,17 @@
 Reads every assistant reply since the last pass (or the last 30 days the first
 time), pairs it with the shopper message it answered, asks the model one
 question per reply (:func:`neura_agent_grow.finding.find_gap`), and stores the
-checked gaps. **Never while a shopper waits**: this runs on the job queue.
+checked gaps, and the things shoppers asked for that the shop does not sell
+(ADR-0068), from the same one call. **Never while a shopper waits**: this runs
+on the job queue.
 
 Four things are left out **without a model call**, because none can be a page
-gap and each would be paid for: replies to an attack (``blocked``), replies to a
+gap or a thing the shop does not sell, and each would be paid for: replies to an attack (``blocked``), replies to a
 question that is not about the shop (``out_of_scope``), replies with no shopper
 message before them, and replies that plainly gave their answer
 (:func:`neura_agent_grow.finding.worth_asking`, R47).
 
-**Progress is saved after every reply**, with the gap it found, in one short
+**Progress is saved after every reply**, with what it found, in one short
 transaction. A provider outage stops the pass where it is (the next attempt
 starts there), rather than being read as *no gap* and moving on.
 """
@@ -28,6 +30,7 @@ from sqlalchemy.orm import aliased
 
 from neura_agent_core.conversations import ConversationState, Role, conversation_messages
 from neura_agent_core.gaps import GAP_DAYS, GapKind, PageGap, PageGapRepository, page_gaps
+from neura_agent_core.wanted import WantedItem, WantedRepository
 from neura_agent_grow.finding import Exchange, find_gap, worth_asking
 from neura_commerce.sync.schema import synced_entities
 from neura_core import get_logger
@@ -60,11 +63,16 @@ class ScanResult:
     read: int = 0
     asked: int = 0
     stored: int = 0
+    #: Things shoppers asked for that the shop does not sell (ADR-0068).
+    wanted: int = 0
     #: Why the pass stopped early, if it did: ``"provider"`` (unreachable).
     stopped: str = ""
 
     def summary(self) -> str:
-        line = f"{self.read} repl(ies) read · {self.asked} asked · {self.stored} gap(s) stored"
+        line = (
+            f"{self.read} repl(ies) read · {self.asked} asked · {self.stored} gap(s) stored"
+            f" · {self.wanted} wanted"
+        )
         return line + (f" · stopped: {self.stopped}" if self.stopped else "")
 
 
@@ -205,12 +213,14 @@ async def scan_shop(
         async with db.tenant_session(tenant_id) as session:
             products = await _titles(session, tenant_id, reply.product_ids)
             known = await _known_facts(session, tenant_id, reply.product_ids, since=window)
+            known_wanted = await WantedRepository(session).labels_since(tenant_id, since=window)
         exchange = Exchange(
             shopper=reply.shopper,
             reply=reply.reply,
             handed_over=reply.state == ConversationState.ESCALATED.value,
             products=products,
             known_facts=known,
+            known_wanted=tuple(known_wanted),
         )
         found = await find_gap(exchange, llm=llm, prompt=prompt)
         result.asked += 1
@@ -234,6 +244,19 @@ async def scan_shop(
                     ),
                 )
                 result.stored += 1 if stored else 0
+            if found.wanted is not None:
+                stored = await WantedRepository(session).record(
+                    tenant_id,
+                    WantedItem(
+                        conversation_id=reply.conversation_id,
+                        message_id=reply.message_id,
+                        label=found.wanted.label,
+                        question=found.wanted.question,
+                        asked_at=reply.created_at,
+                        prompt_revision=prompt_revision,
+                    ),
+                )
+                result.wanted += 1 if stored else 0
             await repository.set_scanned_until(tenant_id, reply.created_at)
 
     if not result.stopped and len(replies) < MAX_REPLIES_PER_PASS:
@@ -246,6 +269,7 @@ async def scan_shop(
         read=result.read,
         asked=result.asked,
         stored=result.stored,
+        wanted=result.wanted,
         stopped=result.stopped,
     )
     return result

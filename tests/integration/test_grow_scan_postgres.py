@@ -30,7 +30,8 @@ from neura_agent_core.conversations import (
     conversations,
 )
 from neura_agent_core.gaps import PageGapRepository, page_gap_fixes, page_gap_scans, page_gaps
-from neura_agent_grow.finding import GapFinding
+from neura_agent_core.wanted import WantedRepository, wanted_hides, wanted_items
+from neura_agent_grow.finding import Finding
 from neura_agent_grow.jobs import GAPS_SCAN, GapScanHandler, GapScanProviderError
 from neura_agent_grow.scan import scan_shop
 from neura_api.jobs.daily import book_daily_jobs
@@ -71,6 +72,8 @@ async def _purge(database: Database) -> None:
                 page_gaps,
                 page_gap_fixes,
                 page_gap_scans,
+                wanted_items,
+                wanted_hides,
                 tenant_switches,
                 conversation_messages,
                 conversations,
@@ -139,9 +142,11 @@ class _Model:
             raise TimeoutError("down")
         shopper = text.split("Shopper: ", 1)[1].split("\n", 1)[0]
         if "organic" in shopper:
-            value = GapFinding(gap=True, product_id="5", fact="organic", question="Is it organic?")
+            value = Finding(found="gap", product_id="5", topic="organic", question="Is it organic?")
+        elif "matcha" in shopper:
+            value = Finding(found="wanted", topic="matcha", question="Do you have matcha?")
         else:
-            value = GapFinding(gap=False)
+            value = Finding(found="none")
 
         class _Result:
             pass
@@ -190,6 +195,35 @@ async def test_a_night_pass_finds_the_gaps(db: Database) -> None:
         )
     assert [r.kind for r in rows] == ["half_answered", "handed_over"]
     assert (topic.product_id, topic.question, topic.shoppers) == ("5", "Is it organic?", 2)
+
+
+async def test_a_night_pass_finds_what_shoppers_asked_for(db: Database) -> None:
+    """ADR-0068 §6: the same one call per reply names a thing the shop does not sell."""
+    await _shop(db, GROWING, ("care", "sell", "grow"))
+    await _chat(
+        db,
+        GROWING,
+        "cnv_1",
+        "do you sell matcha?",
+        "I can't find anything matching that.",
+        product=None,
+    )
+    await _chat(
+        db, GROWING, "cnv_2", "any matcha powder?", "Sorry, we don't carry that.", product=None
+    )
+    model = _Model()
+
+    result = await _scan(db, model)
+
+    assert (result.read, result.asked, result.stored, result.wanted) == (2, 2, 0, 2)
+    assert "1 wanted" not in result.summary() and "2 wanted" in result.summary()
+    assert '"matcha"' in model.seen[1], "the second call is shown the label the first found"
+    async with db.tenant_session(GROWING) as session:
+        [topic] = await WantedRepository(session).topics(
+            GROWING, since=datetime.now(UTC) - timedelta(days=30)
+        )
+        assert (await session.execute(select(page_gaps))).all() == [], "never also a gap"
+    assert (topic.label, topic.question, topic.shoppers) == ("matcha", "Do you have matcha?", 2)
 
 
 async def test_an_attack_and_an_off_topic_reply_are_never_asked(db: Database) -> None:
