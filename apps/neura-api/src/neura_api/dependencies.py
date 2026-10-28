@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import Depends, Request
@@ -53,6 +54,7 @@ from neura_core import (
 # thing to find in an authentication path.
 from neura_core.identity import COOKIE_NAME, is_permission, memberships_for, role_may
 from neura_core.identity import verify as verify_session
+from neura_core.identity.admin_codes import has_code
 from neura_core.identity.admins import fresh_enough, is_admin
 from neura_core.identity.roles import ROLE_NOT_ALLOWED
 from neura_core.identity.sign_up import SHOP_WAITING, WAITING_MESSAGE
@@ -463,6 +465,10 @@ class Permitted:
 
 #: The refusal of an admin whose sign-in is older than ``ADMIN_FRESH`` (R22).
 ADMIN_SIGN_IN_AGAIN = "ADMIN_SIGN_IN_AGAIN"
+#: ADR-0067: an admin with no code set up yet, and one who has not typed it in
+#: this sign-in. The dashboard shows the setup page and the code page for them.
+ADMIN_CODE_SETUP = "ADMIN_CODE_SETUP"
+ADMIN_CODE_NEEDED = "ADMIN_CODE_NEEDED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,6 +476,8 @@ class AdminActor:
     """A FiveNeurals admin, proved on this request. Names no shop (ADR-0061 §5)."""
 
     user_id: str
+    #: When this sign-in began: the cookie issued after the code keeps it.
+    signed_in_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,11 +494,18 @@ class AdminOnly:
     * signed in, not a live admin: **404 *No such page.***, whatever was sent:
       an admin route tells a stranger nothing, and an old sign-in does not
       change that answer;
-    * an admin signed in more than 12 hours ago: **401 ``ADMIN_SIGN_IN_AGAIN``**.
+    * an admin signed in more than 12 hours ago: **401 ``ADMIN_SIGN_IN_AGAIN``**;
+    * with ``code`` (the default), the code from the admin's phone (ADR-0067):
+      no code set up yet, **401 ``ADMIN_CODE_SETUP``**; not typed in this
+      sign-in, **401 ``ADMIN_CODE_NEEDED``**. Only the three routes that set it
+      up and take it say ``code=False``, and a test holds that.
 
     The list is read on every request, so a removed admin stops on the next
     click. Being an admin opens no shop: ``acting_for`` never reads this.
     """
+
+    #: Whether the code from the admin's phone must have been typed (ADR-0067).
+    code: bool = True
 
     async def __call__(self, request: Request) -> AdminActor:
         signed_in = verify_session(request.cookies.get(COOKIE_NAME, ""), get_settings().secret_key)
@@ -498,6 +513,7 @@ class AdminOnly:
             raise AuthenticationError("Sign in to continue.")
         async with get_database().identity_session(signed_in.user_id) as session:
             admin = await is_admin(session, signed_in.user_id)
+            set_up = await has_code(session, signed_in.user_id) if admin and self.code else True
         if not admin:
             log.info("admin_refused", user_id=signed_in.user_id)
             raise NotFoundError("No such page.")
@@ -506,7 +522,14 @@ class AdminOnly:
                 "Admin pages need a sign-in from the last 12 hours. Sign in again.",
                 code=ADMIN_SIGN_IN_AGAIN,
             )
-        return AdminActor(user_id=signed_in.user_id)
+        if self.code:
+            if not set_up:
+                raise AuthenticationError(
+                    "Set up the code from your phone first.", code=ADMIN_CODE_SETUP
+                )
+            if signed_in.code_at is None or signed_in.code_at < signed_in.issued_at:
+                raise AuthenticationError("Type the code from your phone.", code=ADMIN_CODE_NEEDED)
+        return AdminActor(user_id=signed_in.user_id, signed_in_at=signed_in.issued_at)
 
 
 def declared_permissions(routes: Sequence[BaseRoute]) -> frozenset[str]:
@@ -538,6 +561,8 @@ DatabaseDep = Annotated[Database, Depends(database)]
 
 
 __all__ = [
+    "ADMIN_CODE_NEEDED",
+    "ADMIN_CODE_SETUP",
     "ADMIN_SIGN_IN_AGAIN",
     "ROLE_NOT_ALLOWED",
     "AdminActor",

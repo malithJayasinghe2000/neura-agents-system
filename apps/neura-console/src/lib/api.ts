@@ -26,12 +26,12 @@
  */
 const BASE = "/api";
 
-import type { AdminSwitch } from "@/lib/admin";
+import type { AdminCodeSetup, AdminSwitch } from "@/lib/admin";
 import type { ReviewTurn, Scorecard, Verdict } from "@/lib/review";
 import type { ShopCheck, ShopView, SyncAsked } from "@/lib/shop";
 
 /** The API's envelope: `{ data, meta }`, on success and on error alike. */
-type Envelope<T> = { data: T; error?: { message?: string } };
+type Envelope<T> = { data: T; error?: { message?: string; code?: string } };
 
 export type Membership = { tenant_id: string; role: string };
 
@@ -54,7 +54,11 @@ async function call<T>(path: string, init?: RequestInit, prefix = "/v1/console")
     // The API's error envelope, when there is one. A raw status number tells a
     // merchant nothing, and inventing a friendly message here would hide the
     // real one from whoever has to debug it.
-    throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
+    // The API's own code rides along (`TOO_MANY_CODES`, …), for a screen that
+    // must tell one refusal from another without reading the words.
+    throw Object.assign(new Error(body?.error?.message ?? `Request failed (${response.status})`), {
+      code: body?.error?.code,
+    });
   }
   if (!body) throw new Error("The server sent a response we could not read.");
 
@@ -134,6 +138,25 @@ export function setSwitch(
     { method: "PUT", body: JSON.stringify({ on }) },
     "/v1/admin",
   );
+}
+
+/** A new key for the code from the admin's phone (ADR-0067). Refused once set up. */
+export function startAdminCode(): Promise<AdminCodeSetup> {
+  return call("/code/setup", { method: "POST" }, "/v1/admin");
+}
+
+/** The first code, which finishes setup; the API then marks this sign-in. */
+export function confirmAdminCode(code: string): Promise<{ ok: boolean }> {
+  return call(
+    "/code/setup/confirm",
+    { method: "POST", body: JSON.stringify({ code }) },
+    "/v1/admin",
+  );
+}
+
+/** The code at an admin sign-in. */
+export function typeAdminCode(code: string): Promise<{ ok: boolean }> {
+  return call("/code", { method: "POST", body: JSON.stringify({ code }) }, "/v1/admin");
 }
 
 /** Refuse a waiting shop: it is removed, and its Owners are emailed (ADR-0061 §7). */

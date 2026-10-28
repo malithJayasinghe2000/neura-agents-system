@@ -19,6 +19,11 @@ What these tests hold the build to:
 * **a switch per feature** (ADR-0065): a shop's switches come from its
   assistants' manifests; only an admin changes one, for an assistant the shop
   has; a change is in the shop's record with the admin, a no-op records nothing;
+* **the code from the admin's phone** (ADR-0067): an admin with no code must set
+  it up first (``ADMIN_CODE_SETUP``), a new sign-in must type it
+  (``ADMIN_CODE_NEEDED``); a code works once; 5 wrong codes stop it for 15
+  minutes; the key is never returned after setup; ``make admin-reset-code``
+  clears it and nothing else; a shop's own routes never ask;
 * ``/me`` says who is an admin; ``make admin-add`` and ``admin-remove`` change
   the list and nothing else.
 """
@@ -42,9 +47,11 @@ from neura_api.main import create_app
 from neura_core import Database, get_settings, ids, load_env
 from neura_core.email import Mailer, SendResult
 from neura_core.identity import COOKIE_NAME, issue
+from neura_core.identity.admin_codes import CodeResult, confirm_setup, start_setup
 from neura_core.identity.admins import add_admin, admin_shops, admin_usage, is_admin
 from neura_core.identity.schema import login_tokens, memberships, platform_admins, users
 from neura_core.identity.sign_up import confirm_sign_up, request_sign_up
+from neura_core.identity.totp import STEP_SECONDS, code_at
 from neura_core.tenancy import TenantRepository, TenantStatus, TurnMode
 from neura_core.tenancy.removal import remove_tenant
 from neura_core.tenancy.schema import tenants
@@ -137,11 +144,23 @@ async def _person(db: Database, made: Made, label: str = "person") -> tuple[str,
     return user, email
 
 
-async def _admin(db: Database, made: Made) -> str:
+async def _admin(db: Database, made: Made, *, code: bool = True) -> str:
+    """An admin; with ``code``, one whose phone is already set up (ADR-0067)."""
     user, email = await _person(db, made, "admin")
     async with db.identity_session() as session:
         await add_admin(session, email=email)
+    if code:
+        kek = get_settings().kek
+        async with db.identity_session(user) as session:
+            secret = await start_setup(session, user, kek=kek)
+            done = await confirm_setup(session, user, _code(secret, -1), kek=kek)
+        assert done is CodeResult.OK
     return user
+
+
+def _code(secret: str, offset: int = 0) -> str:
+    """The code an authenticator app shows now, or ``offset`` steps from now."""
+    return code_at(secret, int(datetime.now(UTC).timestamp()) // STEP_SECONDS + offset)
 
 
 async def _waiting_shop(
@@ -180,8 +199,14 @@ async def populated(db: Database):
     await drop_shop(db, shop)
 
 
-def cookie(user: str, *, age: timedelta = timedelta(0)) -> dict[str, str]:
-    return {COOKIE_NAME: issue(user, get_settings().secret_key, now=datetime.now(UTC) - age)}
+def cookie(user: str, *, age: timedelta = timedelta(0), code: bool = True) -> dict[str, str]:
+    """A sign-in ``age`` old; with ``code``, one in which the phone's code was typed."""
+    signed_in = datetime.now(UTC) - age
+    return {
+        COOKIE_NAME: issue(
+            user, get_settings().secret_key, now=signed_in, code_at=signed_in if code else None
+        )
+    }
 
 
 def call(client: TestClient, method: str, template: str, tenant: str, cookies: dict[str, str]):
@@ -611,6 +636,120 @@ class TestSwitches:
         assert missing.status_code == 404
         async with db.tenant_session(caring) as session:
             assert await SwitchRepository(session).all(caring) == {}
+
+
+class TestTheCode:
+    async def test_an_admin_with_no_code_must_set_it_up_first(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made, code=False)
+        refused = client.get("/v1/admin/shops", cookies=cookie(admin, code=False))
+        assert refused.status_code == 401
+        assert refused.json()["error"]["code"] == "ADMIN_CODE_SETUP"
+
+    async def test_setting_it_up_opens_the_admin_area(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made, code=False)
+        jar = cookie(admin, code=False)
+        started = client.post("/v1/admin/code/setup", cookies=jar)
+        assert started.status_code == 200, started.text
+        data = started.json()["data"]
+        key = data["key"].replace(" ", "")
+        assert data["uri"].startswith("otpauth://totp/FiveNeurals:")
+        assert data["qr_svg"].startswith("data:image/svg+xml;base64,")
+
+        wrong = client.post("/v1/admin/code/setup/confirm", json={"code": "000000"}, cookies=jar)
+        assert wrong.status_code == 400
+        assert wrong.json()["error"]["code"] == "WRONG_CODE"
+
+        right = client.post("/v1/admin/code/setup/confirm", json={"code": _code(key)}, cookies=jar)
+        assert right.status_code == 200, right.text
+        signed = {COOKIE_NAME: right.cookies[COOKIE_NAME]}
+        assert client.get("/v1/admin/shops", cookies=signed).status_code == 200
+
+        again = client.post("/v1/admin/code/setup", cookies=signed)
+        assert again.status_code == 409, "the key is never shown twice"
+        assert key not in again.text
+
+    async def test_asking_twice_before_setup_is_finished_gives_the_same_key(
+        self, db: Database, made: Made
+    ) -> None:
+        """G116: the setup page opened twice at once showed one key and stored
+        another. Until setup is finished, every request gets the same key,
+        even two at the same moment."""
+        import asyncio
+
+        admin = await _admin(db, made, code=False)
+        kek = get_settings().kek
+
+        async def ask() -> str:
+            async with db.identity_session(admin) as session:
+                return await start_setup(session, admin, kek=kek)
+
+        first, second = await asyncio.gather(ask(), ask())
+        assert first == second
+        assert await ask() == first
+
+    async def test_a_new_sign_in_must_type_the_code_and_a_code_works_once(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made, code=False)
+        kek = get_settings().kek
+        async with db.identity_session(admin) as session:
+            secret = await start_setup(session, admin, kek=kek)
+            assert await confirm_setup(session, admin, _code(secret, -1), kek=kek) is CodeResult.OK
+
+        fresh = cookie(admin, code=False)
+        needed = client.get("/v1/admin/shops", cookies=fresh)
+        assert needed.status_code == 401
+        assert needed.json()["error"]["code"] == "ADMIN_CODE_NEEDED"
+
+        typed = client.post("/v1/admin/code", json={"code": _code(secret)}, cookies=fresh)
+        assert typed.status_code == 200, typed.text
+        signed = {COOKIE_NAME: typed.cookies[COOKIE_NAME]}
+        assert client.get("/v1/admin/shops", cookies=signed).status_code == 200
+
+        reused = client.post("/v1/admin/code", json={"code": _code(secret)}, cookies=fresh)
+        assert reused.status_code == 400
+        assert reused.json()["error"]["code"] == "WRONG_CODE"
+
+    async def test_five_wrong_codes_stop_it_for_fifteen_minutes(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made, code=False)
+        kek = get_settings().kek
+        async with db.identity_session(admin) as session:
+            secret = await start_setup(session, admin, kek=kek)
+            assert await confirm_setup(session, admin, _code(secret, -1), kek=kek) is CodeResult.OK
+        fresh = cookie(admin, code=False)
+        answers = [
+            client.post("/v1/admin/code", json={"code": "000000"}, cookies=fresh) for _ in range(5)
+        ]
+        assert [a.status_code for a in answers] == [400, 400, 400, 400, 429]
+        assert answers[-1].json()["error"]["code"] == "TOO_MANY_CODES"
+        right = client.post("/v1/admin/code", json={"code": _code(secret)}, cookies=fresh)
+        assert right.status_code == 429, "even the right code waits"
+
+    async def test_the_reset_command_clears_the_code_and_nothing_else(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made)
+        async with db.identity_session() as session:
+            email = await session.scalar(select(users.c.email).where(users.c.id == admin))
+        assert await console_admin.admin_reset_code(str(email)) == 0
+        after = client.get("/v1/admin/shops", cookies=cookie(admin))
+        assert after.json()["error"]["code"] == "ADMIN_CODE_SETUP"
+        async with db.identity_session() as session:
+            assert await is_admin(session, admin), "still an admin"
+
+    async def test_a_shops_own_routes_never_ask(
+        self, client: TestClient, db: Database, made: Made
+    ) -> None:
+        admin = await _admin(db, made, code=False)
+        me = client.get("/v1/console/me", cookies=cookie(admin, code=False))
+        assert me.status_code == 200
+        assert me.json()["data"]["is_admin"] is True
 
 
 class TestWhoIsAnAdmin:

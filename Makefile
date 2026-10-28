@@ -9,7 +9,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
         spec conformance conformance-self-test sync-check sync-watch job-check job-drop rag-check rag-ask agent-check \
         care-check care-ask sell-ask chat-ask llm-check judge-check \
         tenant-new tenant-show tenant-usage key-new key-revoke webhook-drain \
-        tenant-dpa retention-sweep tenant-waiting tenant-approve tenant-refuse admin-add admin-remove admin-list \
+        tenant-dpa retention-sweep tenant-waiting tenant-approve tenant-refuse admin-add admin-remove admin-list admin-reset-code \
         api-check verify-probe router-probe console console-check web-check
 
 help:  ## Show this help
@@ -443,6 +443,9 @@ admin-remove:  ## Stop a person being a FiveNeurals admin: make admin-remove EMA
 
 admin-list:  ## The FiveNeurals admins: make admin-list
 	uv run python scripts/console_admin.py admin-list
+
+admin-reset-code:  ## Clear an admin's phone code (a lost phone, ADR-0067): make admin-reset-code EMAIL=...
+	uv run python scripts/console_admin.py admin-reset-code --email "$(EMAIL)"
 
 tenant-new:  ## Create a tenant: make tenant-new NAME="Acme Store" AGENTS=care
 	uv run python scripts/tenant_admin.py create-tenant --name "$(NAME)" --agents "$(AGENTS)"

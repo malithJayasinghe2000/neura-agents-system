@@ -39,6 +39,7 @@ import neura_agent_sell.feed.schema
 import neura_agent_sell.pairing.schema  # noqa: F401
 import neura_commerce.sync.schema  # noqa: F401
 import neura_core.idempotency
+import neura_core.identity.admin_codes
 import neura_core.identity.schema
 import neura_core.jobs.schema
 import neura_core.observation.schema

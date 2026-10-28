@@ -66,6 +66,13 @@ export type AdminUsage = {
 /** The API's code for an admin whose sign-in is older than 12 hours (R22). */
 export const ADMIN_SIGN_IN_AGAIN = "ADMIN_SIGN_IN_AGAIN";
 
+/** ADR-0067: no code from the admin's phone set up yet, and not typed in this sign-in. */
+export const ADMIN_CODE_SETUP = "ADMIN_CODE_SETUP";
+export const ADMIN_CODE_NEEDED = "ADMIN_CODE_NEEDED";
+
+/** A new key for the admin's phone: shown once, never stored by the dashboard. */
+export type AdminCodeSetup = { key: string; uri: string; qr_svg: string };
+
 /** The badge each state wears (board 46). */
 export function stateOf(shop: Pick<AdminShop, "status" | "mode">): {
   label: string;

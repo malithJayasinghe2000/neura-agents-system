@@ -29,7 +29,7 @@ from neura_api.dependencies import AdminActor, AdminOnly, Permitted
 from neura_api.main import create_app
 from neura_core import get_settings
 from neura_core.identity.admins import ADMIN_FRESH, fresh_enough
-from tests.console_permissions import ADMIN_ROUTES
+from tests.console_permissions import ADMIN_CODE_ROUTES, ADMIN_ROUTES
 
 
 def _guards(route: APIRoute) -> tuple[bool, list[str]]:
@@ -71,6 +71,41 @@ def mounted() -> Iterator[dict[tuple[str, str], tuple[bool, list[str]]]]:
         finally:
             get_settings.cache_clear()
     yield routes
+
+
+def _needs_code(route: APIRoute) -> bool:
+    """Whether the route's ``AdminOnly`` also asks for the phone's code (ADR-0067)."""
+    stack = list(route.dependant.dependencies)
+    while stack:
+        dependency = stack.pop()
+        if isinstance(dependency.call, AdminOnly):
+            return dependency.call.code
+        stack.extend(dependency.dependencies)
+    return False
+
+
+def test_every_admin_route_but_the_codes_own_needs_the_code() -> None:
+    """ADR-0067 §4: nothing of the admin area opens before the code is typed,
+    except the three routes that set it up and take it."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("SMTP_HOST", "")
+        get_settings.cache_clear()
+        try:
+            app = create_app()
+            with TestClient(app):
+                wrong = []
+                for context in iter_route_contexts(app.routes):
+                    path = context.path or ""
+                    route = context.original_route
+                    if not path.startswith("/v1/admin") or not isinstance(route, APIRoute):
+                        continue
+                    for method in sorted(context.methods or ()):
+                        expected = (method, path) not in ADMIN_CODE_ROUTES
+                        if _needs_code(route) is not expected:
+                            wrong.append(f"{method} {path}: needs the code {not expected}")
+        finally:
+            get_settings.cache_clear()
+    assert not wrong, "\n".join(wrong)
 
 
 class TestEveryAdminRouteChecksTheAdmin:

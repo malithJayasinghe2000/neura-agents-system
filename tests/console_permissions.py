@@ -162,5 +162,20 @@ ADMIN_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/v1/admin/shops/{tenant_id}/refuse"),
         ("GET", "/v1/admin/usage"),
         ("PUT", "/v1/admin/shops/{tenant_id}/switches/{key}"),
+        # The code from the admin's phone (ADR-0067): the only admin routes that
+        # open before it is typed. They still need a live admin, signed in within
+        # 12 hours.
+        ("POST", "/v1/admin/code/setup"),
+        ("POST", "/v1/admin/code/setup/confirm"),
+        ("POST", "/v1/admin/code"),
+    }
+)
+
+#: The admin routes that work before the phone's code is typed (ADR-0067 §4, §5).
+ADMIN_CODE_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("POST", "/v1/admin/code/setup"),
+        ("POST", "/v1/admin/code/setup/confirm"),
+        ("POST", "/v1/admin/code"),
     }
 )

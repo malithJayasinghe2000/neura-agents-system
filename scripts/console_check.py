@@ -2992,7 +2992,9 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
 
     from neura_core.identity import COOKIE_NAME as SESSION
     from neura_core.identity import issue
+    from neura_core.identity.admin_codes import reset as reset_admin_code
     from neura_core.identity.admins import add_admin
+    from neura_core.identity.totp import STEP_SECONDS, code_at
     from neura_core.tenancy import TenantConfig, TenantRepository, TenantStatus, TurnMode
     from neura_core.tenancy.removal import remove_tenant
     from neura_core.tenancy.switches import SwitchRepository
@@ -3002,6 +3004,7 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
     approve_name, refuse_name = f"Admin Check Approve {suffix}", f"Admin Check Refuse {suffix}"
     switch_name = f"Admin Check Switch {suffix}"
     made: list[str] = []
+    user = ""
 
     async def phone(page: Chrome, on: bool) -> None:
         await page.call(
@@ -3026,6 +3029,33 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
         await page.evaluate(f"document.querySelector('{selector}').click(), true")
         await asyncio.sleep(wait)
         return str(await page.evaluate("document.body.innerText"))
+
+    async def type_code(page: Chrome, value: str) -> None:
+        await page.evaluate(
+            f"""(() => {{
+              const el = document.querySelector('[data-code-input]');
+              const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              set.call(el, {value!r});
+              el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              return true;
+            }})()"""
+        )
+
+    def now_code(key: str, ahead: int = 0) -> str:
+        step = int(datetime.now(UTC).timestamp()) // STEP_SECONDS
+        return code_at(key.replace(" ", ""), step + ahead)
+
+    async def sign_in_cookie(page: Chrome, signed_in: datetime) -> None:
+        """A sign-in made at ``signed_in``, with no code typed in it (ADR-0067)."""
+        await page.call(
+            "Network.setCookie",
+            name=SESSION,
+            value=issue(user, get_settings().secret_key, now=signed_in),
+            url=console,
+            path="/",
+            secure=True,
+            httpOnly=True,
+        )
 
     async def waiting_shop(name: str) -> str:
         tenant_id = ids.new_id(ids.TENANT)
@@ -3066,6 +3096,33 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
             _check(
                 "an admin: Your shops has the Admin link",
                 bool(await page.evaluate("!!document.querySelector('[data-admin-link]')")),
+                failures,
+            )
+
+            # ADR-0067: before any admin page, the code from the admin's phone.
+            shown = await opened(page, f"{console}/admin", wait=4)
+            key = str(
+                await page.evaluate("document.querySelector('[data-code-key]')?.innerText ?? ''")
+            )
+            _check(
+                "the code: an admin with none sets it up first (QR code and key)",
+                "Protect your admin sign-in" in shown
+                and bool(await page.evaluate("!!document.querySelector('[data-admin-code] img')"))
+                and len(key.replace(" ", "")) == 32
+                and "Shops"
+                not in str(await page.evaluate("document.querySelector('nav')?.innerText ?? ''")),
+                failures,
+            )
+            await type_code(page, "000000")
+            shown = await click(page, "[data-code-submit]", wait=2)
+            _check("the code: a wrong first code is refused", "didn't work" in shown, failures)
+            await type_code(page, now_code(key))
+            shown = await click(page, "[data-code-submit]", wait=2.5)
+            _check("the code: the right one sets it up", "Your phone is set up" in shown, failures)
+            shown = await click(page, "[data-go-to-shops]", wait=4)
+            _check(
+                "the code: then the admin area opens",
+                "All shops ·" in shown or "Waiting for approval ·" in shown,
                 failures,
             )
             for on in (False, True):
@@ -3213,6 +3270,28 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                 failures,
             )
 
+            for on in (False, True):
+                size = "phone" if on else "desktop"
+                await phone(page, on)
+                await sign_in_cookie(page, datetime.now(UTC) - timedelta(seconds=5))
+                shown = await opened(page, f"{console}/admin")
+                _check(
+                    f"the code: a new sign-in asks for it before any admin page ({size})",
+                    "Type the code from your phone" in shown and "Lost your phone?" in shown,
+                    failures,
+                )
+                _check(f"the code page fits the screen ({size})", await fits(page), failures)
+            await type_code(page, "000000")
+            shown = await click(page, "[data-code-submit]", wait=2)
+            _check("the code: a wrong code at sign-in is refused", "didn't work" in shown, failures)
+            await type_code(page, now_code(key, ahead=1))
+            shown = await click(page, "[data-code-submit]", wait=4)
+            _check(
+                "the code: the right one opens the admin area",
+                "All shops ·" in shown or "Waiting for approval ·" in shown,
+                failures,
+            )
+
             await phone(page, False)
             old = issue(
                 user, get_settings().secret_key, now=datetime.now(UTC) - timedelta(hours=13)
@@ -3236,6 +3315,8 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
         for tenant_id in made:
             async with db.tenant_session(tenant_id) as session:
                 await remove_tenant(session, tenant_id)
+        async with db.identity_session() as session:
+            await reset_admin_code(session, user)
         engine = create_async_engine(str(get_settings().database_migration_url))
         try:
             async with engine.begin() as conn:

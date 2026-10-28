@@ -1,8 +1,7 @@
 # ADR-0067 · An Admin Signs In With A Code From Their Phone
 
-**Status:** **Proposed** · owner decisions R22 (2026-10-11: a second step is a MUST before going online), R55 and
-R56 (2026-10-27) ([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *AD8*) · not built,
-mockup first · Everything marked *(Claude)* is Claude's proposal, for the owner's yes · **Date:** 2026-10-27 ·
+**Status:** **Accepted** (the owner approved the ADR and canvas row 18, 2026-10-28, R57) · **built 2026-10-28** (console.md §3.9, *The code from the admin's phone*; the QR code by `segno`; the reset is logged, not in a shop's record, because an admin belongs to no shop) · owner decisions R22 (2026-10-11: a second step is a MUST before going online), R55 and
+R56 (2026-10-27) ([CONNECTING_A_NEW_SHOP_LOG.md](../../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *AD8*) · Everything marked *(Claude)* was Claude's proposal, accepted with R57 · **Date:** 2026-10-27 ·
 **Amends:** [ADR-0061](0061-fiveneurals-has-an-admin-dashboard-that-sees-shop-facts-never-shoppers.md) §4 (*"Not
 designed here"*: the second step) · **Answers:** AD8
 
@@ -31,14 +30,14 @@ pages already limit to 12 hours. A new sign-in asks again. A shop's pages never 
 ### 3. A lost phone: another admin clears it with one command (R55: A)
 
 `make admin-reset-code EMAIL=…` clears the admin's code; at their next admin page they set up a new phone. No backup
-codes. Like adding an admin (ADR-0061 §4), it is a command, never a button, and it is written in the record.
+codes. Like adding an admin (ADR-0061 §4), it is a command, never a button.
 
 ### 4. Setting it up *(Claude)*
 
 - **An admin with no code yet sees only the setup page** at `/admin`: a QR code to scan, the same key as text for an
   app that cannot scan, and a box for the first code. **Nothing else of the admin area opens until a correct code is
   typed**, so every admin has the second step from their next sign-in after this ships.
-- The key is shown **once**, on that page. It is stored **encrypted**, as a shop's credentials are (`neura_core`'s
+- The key is shown **only on that page, and only until setup is finished** (as built, G116: the same key each time the page opens, so a page opened twice at once cannot show one key and store another). It is stored **encrypted**, as a shop's credentials are (`neura_core`'s
   envelope encryption), and no route ever returns it again.
 
 ### 5. How it is checked *(Claude)*

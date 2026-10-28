@@ -9,6 +9,7 @@
     make admin-add EMAIL=you@fiveneurals.com
     make admin-remove EMAIL=you@fiveneurals.com
     make admin-list
+    make admin-reset-code EMAIL=you@fiveneurals.com
 
 **A shop owner may now sign up themselves** (ADR-0058 §7, ADR-0060): the
 dashboard's *Create an account* makes the account only when the emailed link is
@@ -41,12 +42,13 @@ import asyncio
 import sys
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_core import Database, get_settings, ids, load_env
 from neura_core.identity import request_sign_in_link
-from neura_core.identity.admins import add_admin, list_admins, remove_admin
+from neura_core.identity.admin_codes import reset as reset_admin_code
+from neura_core.identity.admins import add_admin, is_admin, list_admins, remove_admin
 from neura_core.identity.people import PeopleRepository
 from neura_core.identity.schema import memberships, users
 
@@ -275,6 +277,28 @@ async def admin_remove(email: str) -> int:
         await db.dispose()
 
 
+async def admin_reset_code(email: str) -> int:
+    """Clear an admin's phone code (ADR-0067, R55): they set up a new phone at
+    their next admin page. Nothing else about them changes."""
+    db = Database.from_settings()
+    try:
+        async with db.identity_session() as session:
+            user_id = await session.scalar(
+                select(users.c.id).where(func.lower(users.c.email) == email.strip().lower())
+            )
+            if user_id is None or not await is_admin(session, str(user_id)):
+                print(f"  {email} is not an admin: nothing changed")
+                return 1
+            cleared = await reset_admin_code(session, str(user_id))
+        if not cleared:
+            print(f"  {email} had no code set up: nothing changed")
+            return 0
+        print(f"  code cleared   {email}  (they set up a new phone at their next admin page)")
+        return 0
+    finally:
+        await db.dispose()
+
+
 async def admin_list() -> int:
     db = Database.from_settings()
     try:
@@ -316,6 +340,7 @@ def main() -> None:
     for name, text in (
         ("admin-add", "Make a person a FiveNeurals admin (ADR-0061)"),
         ("admin-remove", "Stop a person being a FiveNeurals admin"),
+        ("admin-reset-code", "Clear an admin's phone code: they set up a new phone (ADR-0067)"),
     ):
         sub.add_parser(name, help=text).add_argument("--email", required=True)
     sub.add_parser("admin-list", help="The FiveNeurals admins")
@@ -340,6 +365,8 @@ def main() -> None:
             sys.exit(asyncio.run(admin_remove(args.email)))
         case "admin-list":
             sys.exit(asyncio.run(admin_list()))
+        case "admin-reset-code":
+            sys.exit(asyncio.run(admin_reset_code(args.email)))
 
 
 if __name__ == "__main__":

@@ -64,14 +64,23 @@ class Session:
     user_id: str
     issued_at: datetime
     expires_at: datetime
+    #: When the admin typed the code from their phone in this sign-in
+    #: (ADR-0067), or ``None``. Only admin pages read it.
+    code_at: datetime | None = None
 
 
-def issue(user_id: str, secret: str, *, now: datetime | None = None) -> str:
+def issue(
+    user_id: str, secret: str, *, now: datetime | None = None, code_at: datetime | None = None
+) -> str:
     """Sign a session for ``user_id``.
 
     ``user_id`` must already have been proved — by redeeming a one-time token.
     Signing an unverified id produces a perfectly valid cookie for a person who
     never authenticated, and nothing downstream could tell.
+
+    ``now`` is the sign-in's own time: after an admin types their code the
+    cookie is issued again with the **same** ``now`` and a ``code_at``, so the
+    12 hours an admin page allows still count from the email link (ADR-0067).
     """
     if not user_id:
         raise ValueError("refusing to issue a session with no user id")
@@ -83,6 +92,8 @@ def issue(user_id: str, secret: str, *, now: datetime | None = None) -> str:
         "iat": int(moment.timestamp()),
         "exp": int((moment + SESSION_TTL).timestamp()),
     }
+    if code_at is not None:
+        payload["code"] = int(code_at.timestamp())
     body = _b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
     return f"{body}.{_sign(body, secret)}"
 
@@ -111,6 +122,9 @@ def verify(cookie: str, secret: str, *, now: datetime | None = None) -> Session 
         user_id = str(payload["sub"])
         issued_at = datetime.fromtimestamp(int(payload["iat"]), tz=UTC)
         expires_at = datetime.fromtimestamp(int(payload["exp"]), tz=UTC)
+        code_at = (
+            datetime.fromtimestamp(int(payload["code"]), tz=UTC) if "code" in payload else None
+        )
     except (ValueError, KeyError, TypeError):
         # A well-signed cookie that will not parse means our own format changed
         # under a live session, not an attack — but the answer is the same.
@@ -119,7 +133,7 @@ def verify(cookie: str, secret: str, *, now: datetime | None = None) -> Session 
     if not user_id or expires_at <= (now or datetime.now(UTC)):
         return None
 
-    return Session(user_id=user_id, issued_at=issued_at, expires_at=expires_at)
+    return Session(user_id=user_id, issued_at=issued_at, expires_at=expires_at, code_at=code_at)
 
 
 def _sign(body: str, secret: str) -> str:
