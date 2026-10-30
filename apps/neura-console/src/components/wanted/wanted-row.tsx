@@ -6,12 +6,13 @@
  * **Hide** stores who pressed it; the row turns grey and says the thing leaves
  * the list, and comes back only if shoppers ask for it again after today (R62).
  * The result stays until the owner leaves the page, as *I added it*'s does.
+ * **Show again** on the grey row undoes a *Hide* pressed by mistake (ADR-0070).
  */
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRight, EyeOff } from "lucide-react";
 import { When } from "@/components/when";
-import { hideWanted } from "@/lib/api";
+import { hideWanted, showWantedAgain } from "@/lib/api";
 import { askedBy } from "@/lib/gaps";
 import { thing, wantedChatsHref, type WantedThing } from "@/lib/wanted";
 import { Button } from "@/components/ui/button";
@@ -21,12 +22,13 @@ export function WantedRow({ tenantId, item }: { tenantId: string; item: WantedTh
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function hide() {
+  async function change(hide: boolean) {
     setBusy(true);
     setError("");
     try {
-      await hideWanted(tenantId, item.label);
-      setHidden(true);
+      if (hide) await hideWanted(tenantId, item.label);
+      else await showWantedAgain(tenantId, item.label);
+      setHidden(hide);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
     } finally {
@@ -39,13 +41,31 @@ export function WantedRow({ tenantId, item }: { tenantId: string; item: WantedTh
       <li
         role="status"
         data-wanted={item.label}
-        className="flex items-start gap-3 bg-muted/50 px-4 py-4 sm:px-5"
+        className="flex flex-col gap-3 bg-muted/50 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5"
       >
-        <EyeOff className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden />
-        <p className="text-sm leading-relaxed">
-          <strong className="font-semibold">Hidden.</strong> &ldquo;{thing(item.label)}&rdquo;
-          leaves this list. If shoppers ask for it again after today, it comes back here.
-        </p>
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <EyeOff className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden />
+          <div className="space-y-1">
+            <p className="text-sm leading-relaxed">
+              <strong className="font-semibold">Hidden.</strong> &ldquo;{thing(item.label)}&rdquo;
+              leaves this list. If shoppers ask for it again after today, it comes back here.
+            </p>
+            {error ? (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          className="h-11 px-4 sm:h-10 sm:shrink-0"
+          disabled={busy}
+          data-show-again
+          onClick={() => change(false)}
+        >
+          {busy ? "Showing…" : "Show again"}
+        </Button>
       </li>
     );
   }
@@ -85,7 +105,7 @@ export function WantedRow({ tenantId, item }: { tenantId: string; item: WantedTh
           className="h-11 px-4 sm:h-10"
           disabled={busy}
           data-hide
-          onClick={hide}
+          onClick={() => change(true)}
         >
           {busy ? "Hiding…" : "Hide"}
         </Button>

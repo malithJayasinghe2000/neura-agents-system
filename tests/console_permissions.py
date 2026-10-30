@@ -134,6 +134,7 @@ ROUTES: dict[tuple[str, str], str] = {
     # Shoppers asked for (ADR-0068; served by the console, so it names no agent).
     ("GET", f"{_SHOP}/wanted"): WANTED,
     ("POST", f"{_SHOP}/wanted/hidden"): WANTED,
+    ("DELETE", f"{_SHOP}/wanted/hidden/{{label}}"): WANTED,
     # Suggestions (served by SELL, so it is SELL's own permission).
     ("GET", f"{_SELL}/suggestions"): SUGGESTIONS,
     ("GET", f"{_SELL}/suggestions/catalogue"): SUGGESTIONS,

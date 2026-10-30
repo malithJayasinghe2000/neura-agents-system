@@ -3570,7 +3570,8 @@ async def _check_wanted(
     nothing real is touched: things shoppers asked for are seeded (matcha by 3
     shoppers, oolong tea by 2, honey by only 1, which must not show). Checked on
     desktop and phone: the menu item, the rows, *See the chats* narrowing
-    Conversations, *Hide*, Home's line and the *Paused* note. The first shop,
+    Conversations, *Hide*, *Hidden* and *Show again* (ADR-0070), Home's line
+    and the *Paused* note. The first shop,
     which has no GROW, must not list the page. Everything made here is removed
     at the end.
     """
@@ -3727,10 +3728,69 @@ async def _check_wanted(
             "Hidden." in after and "comes back here" in after,
             failures,
         )
+        await browser.evaluate(
+            "document.querySelector('[data-wanted=\"matcha\"] [data-show-again]').click(), true"
+        )
+        await asyncio.sleep(2.5)
+        _check(
+            "Show again on the grey row puts the row back (ADR-0070)",
+            bool(
+                await browser.evaluate(
+                    "!!document.querySelector('[data-wanted=\"matcha\"] [data-hide]')"
+                )
+            )
+            and "2 things shoppers asked for" in await shown(f"{base}/wanted"),
+            failures,
+        )
+        await browser.evaluate(
+            "document.querySelector('[data-wanted=\"matcha\"] [data-hide]').click(), true"
+        )
+        await asyncio.sleep(2.5)
         again = await shown(f"{base}/wanted")
         _check(
-            "Hide: after a reload the thing is gone",
-            "Matcha" not in again and "1 thing shoppers asked for" in again,
+            "Hide: after a reload the thing is gone, and Hidden (1) is closed under the list",
+            "Matcha" not in again
+            and "1 thing shoppers asked for" in again
+            and "Hidden (1)" in again,
+            failures,
+        )
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(on)
+            await shown(f"{base}/wanted")
+            await browser.evaluate(
+                "document.querySelector('[data-hidden-things] summary').click(), true"
+            )
+            await asyncio.sleep(0.5)
+            opened = str(await browser.evaluate("document.body.innerText"))
+            _check(
+                f"Hidden, opened: what was hidden, with Show again ({size})",
+                "Things you hid." in opened
+                and "Matcha" in opened
+                and "Asked by 3 shoppers \u00b7 hidden on" in opened
+                and bool(
+                    await browser.evaluate(
+                        '!!document.querySelector(\'[data-hidden-thing="matcha"] '
+                        "[data-show-again]')"
+                    )
+                )
+                and bool(
+                    await browser.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth + 1"
+                    )
+                ),
+                failures,
+            )
+        await phone(False)
+        await browser.evaluate(
+            "document.querySelector('[data-hidden-thing=\"matcha\"] [data-show-again]').click(),"
+            " true"
+        )
+        await asyncio.sleep(3.5)
+        back = str(await browser.evaluate("document.body.innerText"))
+        _check(
+            "Show again in Hidden: the thing is back on the list and Hidden is gone",
+            "2 things shoppers asked for" in back and "Matcha" in back and "Hidden (" not in back,
             failures,
         )
 

@@ -224,3 +224,50 @@ async def test_labels_for_the_model_to_reuse(db: Database) -> None:
     async with db.tenant_session(TENANT_A) as session:
         labels = await WantedRepository(session).labels_since(TENANT_A, since=SINCE)
     assert labels == ["matcha", "oolong tea"], "one shopper is enough to be reused; 31 days is not"
+
+
+async def _hidden(database: Database, tenant_id: str) -> list:  # type: ignore[type-arg]
+    async with database.tenant_session(tenant_id) as session:
+        return await WantedRepository(session).hidden(tenant_id, since=SINCE)
+
+
+async def test_the_hidden_list_is_what_would_be_on_the_page(db: Database) -> None:
+    """ADR-0070 §1: hidden, 2 shoppers in 30 days counting every ask, not back already."""
+    await _record(
+        db,
+        TENANT_A,
+        _item("cnv_1", "msg_1"),
+        _item("cnv_2", "msg_2"),
+        _item("cnv_3", "msg_3", label="honey", question="Honey?"),  # one shopper
+        _item("cnv_4", "msg_4", label="oolong tea", question="Oolong?"),
+        _item("cnv_5", "msg_5", label="oolong tea", question="Oolong?"),
+    )
+    async with db.tenant_session(TENANT_A) as session:
+        repository = WantedRepository(session)
+        for label in ("matcha", "honey", "oolong tea"):
+            await repository.hide(TENANT_A, label=label, by="usr_owner")
+    for n in (6, 7):  # oolong comes back by itself: it is on the page, not hidden
+        await _record(
+            db,
+            TENANT_A,
+            _item(f"cnv_{n}", f"msg_{n}", label="oolong tea", age=-timedelta(minutes=n)),
+        )
+
+    [hidden] = await _hidden(db, TENANT_A)
+    assert (hidden.label, hidden.question, hidden.shoppers) == ("matcha", "Do you have matcha?", 2)
+    assert hidden.hidden_at is not None
+    assert [t.label for t in await _topics(db, TENANT_A)] == ["oolong tea"]
+    assert await _hidden(db, TENANT_B) == [], "another shop sees nothing"
+
+
+async def test_show_again_brings_every_ask_back(db: Database) -> None:
+    """ADR-0070 §2: the Hide is forgotten, so the asks before it count again."""
+    await _record(db, TENANT_A, _item("cnv_1", "msg_1"), _item("cnv_2", "msg_2"))
+    async with db.tenant_session(TENANT_A) as session:
+        repository = WantedRepository(session)
+        await repository.hide(TENANT_A, label="matcha", by="usr_owner")
+        assert await repository.show_again(TENANT_A, label="matcha") is True
+        assert await repository.show_again(TENANT_A, label="matcha") is False, "not hidden now"
+    [topic] = await _topics(db, TENANT_A)
+    assert (topic.label, topic.shoppers) == ("matcha", 2)
+    assert await _hidden(db, TENANT_A) == []

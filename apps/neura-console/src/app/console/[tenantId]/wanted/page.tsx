@@ -9,12 +9,16 @@
  *
  * **Paused** (ADR-0065, ADR-0068 §8): the night check's switch pauses this page
  * too, said as Missing from your pages says it.
+ *
+ * **Hidden** (ADR-0070): what the owner hid, closed under the list, with
+ * *Show again*.
  */
 import { redirect } from "next/navigation";
 import { Pause } from "lucide-react";
 import { NotAllowed } from "@/components/not-allowed";
 import { ShoppingBagPlus } from "@/components/shopping-bag-plus";
 import { When } from "@/components/when";
+import { HiddenThings } from "@/components/wanted/hidden-things";
 import { WantedRow } from "@/components/wanted/wanted-row";
 import { things } from "@/lib/gaps";
 import { PERMISSION, refusal } from "@/lib/roles";
@@ -94,6 +98,9 @@ export default async function WantedPage({ params }: { params: Promise<{ tenantI
               </p>
             </>
           )}
+          {result.data.hidden.length > 0 ? (
+            <HiddenThings tenantId={tenantId} items={result.data.hidden} />
+          ) : null}
         </>
       )}
     </>

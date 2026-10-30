@@ -9,6 +9,8 @@ What these tests hold the build to (ADR-0068 §2 to §8):
   stranger sees no shop;
 * **Hide** (R62: A): the thing leaves the page and Home's count; an unknown one
   is refused and stores nothing;
+* **Hidden, and Show again** (ADR-0070): the page lists what was hidden, and
+  Show again brings it back on the page, Home and *See the chats*;
 * **See the chats**: Conversations narrowed to exactly the chats a row counts;
 * **Paused** (ADR-0065): the night check's switch pauses this page too, learnt
   from the manifests, never by naming an assistant;
@@ -199,6 +201,56 @@ class TestHide:
             cookies=cookie(team.people[SUPPORT]),
         )
         assert support.status_code == 403
+
+
+class TestHiddenAndShowAgain:
+    """ADR-0070: what was hidden is listed, and Show again brings it back."""
+
+    async def test_the_page_lists_what_was_hidden(self, client: TestClient, team: Team) -> None:
+        owner = cookie(team.people[OWNER])
+        data = client.get(f"{team.base()}/wanted", cookies=owner).json()["data"]
+        assert data["hidden"] == []
+        client.post(f"{team.base()}/wanted/hidden", json={"label": "matcha"}, cookies=owner)
+        data = client.get(f"{team.base()}/wanted", cookies=owner).json()["data"]
+        [hidden] = data["hidden"]
+        assert (hidden["label"], hidden["question"], hidden["shoppers"]) == (
+            "matcha",
+            "Do you have matcha?",
+            3,
+        )
+        assert set(hidden) == {"label", "question", "shoppers", "last_asked", "hidden_at"}
+
+    async def test_show_again_puts_it_back_everywhere(self, client: TestClient, team: Team) -> None:
+        owner = cookie(team.people[OWNER])
+        client.post(f"{team.base()}/wanted/hidden", json={"label": "matcha"}, cookies=owner)
+        shown = client.delete(f"{team.base()}/wanted/hidden/matcha", cookies=owner)
+        assert shown.status_code == 200, shown.text
+        assert shown.json()["data"] == {"hidden": False, "label": "matcha"}
+        data = client.get(f"{team.base()}/wanted", cookies=owner).json()["data"]
+        assert ([i["label"] for i in data["items"]], data["hidden"]) == (
+            ["matcha", "oolong tea"],
+            [],
+        )
+        assert client.get(f"{team.base()}/home", cookies=owner).json()["data"]["wanted"] == 2
+        listed = client.get(
+            f"{team.base()}/conversations", params={"wanted": "matcha"}, cookies=owner
+        ).json()
+        assert listed["meta"]["total"] == 3, "See the chats counts every ask again"
+
+    async def test_a_label_with_a_space_and_the_refusals(
+        self, client: TestClient, team: Team
+    ) -> None:
+        owner = cookie(team.people[OWNER])
+        client.post(f"{team.base()}/wanted/hidden", json={"label": "oolong tea"}, cookies=owner)
+        path = f"{team.base()}/wanted/hidden/oolong%20tea"
+        for role in (SUPPORT, DEVELOPER):
+            refused = client.delete(path, cookies=cookie(team.people[role]))
+            assert refused.status_code == 403, role
+        assert client.delete(path, cookies=owner).status_code == 200
+        assert client.delete(path, cookies=owner).status_code == 404, "not hidden any more"
+        assert (
+            client.delete(f"{team.base()}/wanted/hidden/matcha", cookies=owner).status_code == 404
+        )
 
 
 class TestSeeTheChats:

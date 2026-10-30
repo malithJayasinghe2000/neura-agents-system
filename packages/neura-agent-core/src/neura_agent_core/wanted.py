@@ -10,6 +10,9 @@ from two (ADR-0068 §3), over the last 30 days, the most recent question shown.
 reason: the page is the console's own, and the console may not learn an agent's
 name (AGENTS.md, G88). Only GROW's job writes these rows.
 
+*Hide* has an undo (ADR-0070): the hidden things that would be on the page are
+listed, and *Show again* forgets the *Hide*, so every ask counts again.
+
 **What a row holds is derived from a shopper's words** (a short label and a
 short question, checked in code by the same rules as a gap's), so it goes with
 its conversation: ``ConversationRepository.delete_older_than`` deletes it with
@@ -23,7 +26,20 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import Column, DateTime, Index, String, Table, and_, distinct, func, or_, select
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Index,
+    String,
+    Table,
+    and_,
+    delete,
+    distinct,
+    func,
+    or_,
+    select,
+    true,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
@@ -91,6 +107,17 @@ class WantedTopic:
     last_asked: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class HiddenTopic:
+    """A thing the owner hid that would otherwise be on the page (ADR-0070 §1)."""
+
+    label: str
+    question: str
+    shoppers: int
+    last_asked: datetime
+    hidden_at: datetime
+
+
 def counted_since_hide() -> Any:
     """A row counts if its label was never hidden, or was asked for after *Hide*.
 
@@ -133,8 +160,10 @@ class WantedRepository:
         )
         return bool(cast("CursorResult[Any]", result).rowcount)
 
-    def _topics_query(self, tenant_id: str, *, since: datetime, min_shoppers: int) -> Any:
-        """Grouped by label; after *Hide*, only later asks count."""
+    def _topics_query(
+        self, tenant_id: str, *, since: datetime, min_shoppers: int, after_hide: bool = True
+    ) -> Any:
+        """Grouped by label; after *Hide*, only later asks count, unless ``after_hide`` is off."""
         shoppers = func.count(distinct(wanted_items.c.conversation_id))
         last_asked = func.max(wanted_items.c.asked_at)
         latest_question = func.array_agg(
@@ -152,7 +181,7 @@ class WantedRepository:
                 and_(
                     wanted_items.c.tenant_id == tenant_id,
                     wanted_items.c.asked_at >= since,
-                    counted_since_hide(),
+                    counted_since_hide() if after_hide else true(),
                 )
             )
             .group_by(wanted_items.c.label)
@@ -191,6 +220,43 @@ class WantedRepository:
             await self._session.scalar(select(func.count()).select_from(query.subquery())) or 0
         )
 
+    async def hidden(
+        self, tenant_id: str, *, since: datetime, min_shoppers: int = MIN_SHOPPERS
+    ) -> list[HiddenTopic]:
+        """What *Show again* would bring back: hidden, asked by enough shoppers
+        counting every ask, and not back on the page by itself. Latest hidden first."""
+        query = self._topics_query(
+            tenant_id, since=since, min_shoppers=min_shoppers, after_hide=False
+        ).subquery()
+        rows = (
+            await self._session.execute(
+                select(query, wanted_hides.c.hidden_at)
+                .join(
+                    wanted_hides,
+                    and_(
+                        wanted_hides.c.tenant_id == tenant_id,
+                        wanted_hides.c.label == query.c.label,
+                    ),
+                )
+                .order_by(wanted_hides.c.hidden_at.desc(), query.c.label)
+            )
+        ).all()
+        shown = {
+            topic.label
+            for topic in await self.topics(tenant_id, since=since, min_shoppers=min_shoppers)
+        }
+        return [
+            HiddenTopic(
+                label=row.label,
+                question=row.question,
+                shoppers=int(row.shoppers),
+                last_asked=row.last_asked,
+                hidden_at=row.hidden_at,
+            )
+            for row in rows
+            if row.label not in shown
+        ]
+
     async def labels_since(self, tenant_id: str, *, since: datetime) -> list[str]:
         """Every label stored in the window, for the model to reuse (ADR-0068 §6)."""
         rows = await self._session.scalars(
@@ -211,11 +277,21 @@ class WantedRepository:
             )
         )
 
+    async def show_again(self, tenant_id: str, *, label: str) -> bool:
+        """*Show again* (ADR-0070 §2): forget the *Hide*. False when it was not hidden."""
+        result = await self._session.execute(
+            delete(wanted_hides).where(
+                wanted_hides.c.tenant_id == tenant_id, wanted_hides.c.label == label
+            )
+        )
+        return bool(cast("CursorResult[Any]", result).rowcount)
+
 
 __all__ = [
     "MAX_LABEL_CHARS",
     "WANTED_HIDES",
     "WANTED_ITEMS",
+    "HiddenTopic",
     "WantedItem",
     "WantedRepository",
     "WantedTopic",

@@ -13,6 +13,11 @@ export type WantedThing = {
   last_asked: string;
 };
 
+/** A thing the owner hid that would otherwise be on the page (ADR-0070). */
+export type HiddenThing = WantedThing & {
+  hidden_at: string;
+};
+
 export type Wanted = {
   days: number;
   min_shoppers: number;
@@ -20,6 +25,8 @@ export type Wanted = {
   paused_since: string | null;
   total: number;
   items: WantedThing[];
+  /** What *Show again* would bring back, latest hidden first (ADR-0070). */
+  hidden: HiddenThing[];
 };
 
 /** *Matcha* for `matcha`: the label as the page shows it (board 67). */

@@ -2,6 +2,7 @@
 
     GET  /v1/console/shops/{tenant_id}/wanted          the page's rows
     POST /v1/console/shops/{tenant_id}/wanted/hidden   *Hide*
+    DELETE …/wanted/hidden/{label}                     *Show again* (ADR-0070)
 
 **The console's own route, not GROW's** (as *Missing from your pages*, G88): the
 rows live in the shared core (``neura_agent_core.wanted``), only GROW's night job
@@ -24,7 +25,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
@@ -32,6 +33,7 @@ from neura_agent_core.gaps import GAP_DAYS, MIN_SHOPPERS
 from neura_agent_core.wanted import (
     MAX_LABEL_CHARS,
     WANTED_ITEMS,
+    HiddenTopic,
     WantedRepository,
     WantedTopic,
     wanted_items,
@@ -60,7 +62,9 @@ async def wanted(
 ) -> dict[str, Any]:
     since = datetime.now(UTC) - timedelta(days=GAP_DAYS)
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
-        topics = await WantedRepository(session).topics(actor.tenant_id, since=since)
+        repository = WantedRepository(session)
+        topics = await repository.topics(actor.tenant_id, since=since)
+        hidden_topics = await repository.hidden(actor.tenant_id, since=since)
         paused_since = await paused(request, session, actor.tenant_id, WANTED_ITEMS)
 
     return envelope(
@@ -70,6 +74,7 @@ async def wanted(
             "paused_since": paused_since.isoformat() if paused_since else None,
             "total": len(topics),
             "items": [_topic(t) for t in topics],
+            "hidden": [_hidden(t) for t in hidden_topics],
         },
         request_id=getattr(request.state, "request_id", None),
     )
@@ -96,6 +101,34 @@ async def hidden(
         {"hidden": True, "label": label},
         request_id=getattr(request.state, "request_id", None),
     )
+
+
+@router.delete("/wanted/hidden/{label}", summary="Show again: forget the Hide")
+async def show_again(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(WANTED_READ))],
+    label: Annotated[str, Path(min_length=1, max_length=MAX_LABEL_CHARS)],
+) -> dict[str, Any]:
+    label = label.strip()
+    async with request.app.state.database.tenant_session(actor.tenant_id) as session:
+        forgotten = await WantedRepository(session).show_again(actor.tenant_id, label=label)
+    if not forgotten:
+        raise NotFoundError("Not hidden.", details={"label": label})
+    log.info("console_wanted_shown_again", tenant_id=actor.tenant_id, by=actor.user_id)
+    return envelope(
+        {"hidden": False, "label": label},
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
+def _hidden(topic: HiddenTopic) -> dict[str, Any]:
+    return {
+        "label": topic.label,
+        "question": topic.question,
+        "shoppers": topic.shoppers,
+        "last_asked": topic.last_asked.isoformat(),
+        "hidden_at": topic.hidden_at.isoformat(),
+    }
 
 
 def _topic(topic: WantedTopic) -> dict[str, Any]:

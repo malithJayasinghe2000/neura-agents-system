@@ -1,6 +1,6 @@
 # ADR-0070 · A Hidden Thing Can Be Seen, And Shown Again
 
-**Status:** **Accepted** · the owner, 2026-10-30 (R66: build D13 now, no mockup) · the design is Claude's · **Date:**
+**Status:** **Accepted** · the owner, 2026-10-30 (R66: build D13 now, no mockup) · the design is Claude's · **built 2026-10-30** · **Date:**
 2026-10-30 · **Amends:** [ADR-0068](0068-grow-shows-what-shoppers-asked-for-that-the-shop-does-not-sell.md) §5 ·
 **Related:** [ADR-0069](0069-shoppers-asked-for-what-the-build-decided.md), console.md §3.12, D13
 
@@ -48,6 +48,16 @@ fixed questions is a different idea. It stays open in D13.
 - One more click target per hidden thing; nothing new is stored, and no table changes.
 - A hidden thing's own row on the page still waits for 2 shoppers after *Hide* (ADR-0068 §5 is unchanged); only the
   undo is new.
+
+## As built (2026-10-30)
+
+`WantedRepository.hidden` and `show_again` (`neura_agent_core/wanted.py`; no table changes), the route's `hidden`
+and `DELETE …/wanted/hidden/{label}` (`console_wanted.py`), `components/wanted/hidden-things.tsx` and *Show again* on
+the grey row (`wanted-row.tsx`). **Tested:** 2 data tests and 3 route tests (the hidden list is what would be on the
+page; Show again brings every ask back on the page, Home and *See the chats*; a label with a space; Support and the
+Developer refused; not hidden is 404), all shown failing on the old code first; `make console-check` 277 passed,
+0 failed (4 new: the grey row's Show again, *Hidden (1)* closed, opened on desktop and phone, Show again from it).
+**Not tested:** two people pressing Hide and Show again on the same thing at once (the last one wins).
 
 ## Alternatives considered
 

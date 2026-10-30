@@ -413,6 +413,13 @@ export function hideWanted(tenantId: string, label: string): Promise<{ hidden: b
   });
 }
 
+/** *Show again* (ADR-0070): forget the *Hide*, so every ask counts again. */
+export function showWantedAgain(tenantId: string, label: string): Promise<{ hidden: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/wanted/hidden/${encodeURIComponent(label)}`, {
+    method: "DELETE",
+  });
+}
+
 export function readHome(tenantId: string): Promise<{ waiting: number | null }> {
   return call(`/shops/${encodeURIComponent(tenantId)}/home`);
 }
