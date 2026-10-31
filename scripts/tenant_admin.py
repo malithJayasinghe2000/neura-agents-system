@@ -37,6 +37,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
+from neura_api.jobs.daily import book_daily_jobs
 from neura_core import (
     ConfigurationError,
     ConflictError,
@@ -324,6 +325,9 @@ async def approve(db: Database, tenant_id: str, agents: list[str]) -> int:
         except ConflictError:
             print(f"{RED}{tenant_id} is not waiting for approval: nothing changed{OFF}")
             return 1
+        # As the admin dashboard does: the daily jobs of its assistants, from now
+        # (GROW's night run reaches a shop with no chats, ADR-0072 §8).
+        await book_daily_jobs(session, tenant_id)
         await PostgresAuditLog(session).record(
             AuditEntry(
                 tenant_id=tenant_id,

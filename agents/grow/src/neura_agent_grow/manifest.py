@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from neura_agent_core.calendar import CALENDAR_PLANS
 from neura_agent_core.gaps import PAGE_GAPS
 from neura_agent_core.wanted import WANTED_ITEMS
 from neura_domain import Capability
@@ -45,6 +46,11 @@ class AgentManifest(BaseModel):
     #: the shared core (``page_gaps``), so the console can say *Paused* without
     #: naming this agent (ADR-0065 §4).
     pauses: dict[str, tuple[str, ...]] = {}
+    #: A job kind the console may book to run now, by the name of the console
+    #: page it fills (``calendar_plans``): *Make it again* asks for a plan at
+    #: once without the API naming this agent (ADR-0072 §5). An agent without
+    #: one leaves this out.
+    on_demand: dict[str, str] = {}
 
 
 MANIFEST = AgentManifest(
@@ -52,29 +58,39 @@ MANIFEST = AgentManifest(
     name="NEURA-GROW",
     version="0.1.0",
     description=(
-        "The marketing agent. First surface: Missing from your pages, the "
-        "questions shoppers asked that the shop's own pages do not answer, "
-        "found once a night in the shop's chats. Read-only; writes nothing to "
-        "the shop and sends nothing to anyone."
+        "The marketing agent. Three pages: Missing from your pages and "
+        "Shoppers asked for, found once a night in the shop's chats, and the "
+        "Marketing calendar, a campaign plan 21 days before each date the shop "
+        "keeps. Read-only; writes nothing to the shop and sends nothing to "
+        "anyone."
     ),
     # None: GROW reads NEURA's own record of the shop's chats and synced
     # catalogue, and never calls the shop.
     requires_capabilities=frozenset(),
     route_prefix="/v1/grow",
     chat=False,
-    # The night check (neura_agent_grow.jobs): it reads the shop's chats.
+    # The night run (neura_agent_grow.jobs): the night check reads the shop's
+    # chats, and the calendar step writes the plans that are due.
     daily_job="grow.gaps.scan",
-    # The night check is the one GROW feature that spends money (R51).
+    # Each GROW feature that spends money has its own switch (R51, ADR-0072 §5).
     switches={
         "grow.gaps": (
             # R65: the switch is the check, which fills both GROW pages.
             "The night AI check",
             "Once a night, AI reads the shop's new chats to fill Missing from your "
             "pages and Shoppers asked for.",
-        )
+        ),
+        "grow.calendar": (
+            "The calendar's AI plans",
+            "21 days before each date the shop keeps on its Marketing calendar, AI "
+            "writes a campaign plan. Make it again asks for another.",
+        ),
     },
-    # One night check finds both pages' rows (ADR-0068 §8).
-    pauses={"grow.gaps": (PAGE_GAPS, WANTED_ITEMS)},
+    # One night check finds both pages' rows (ADR-0068 §8); the calendar's own
+    # switch pauses its plans.
+    pauses={"grow.gaps": (PAGE_GAPS, WANTED_ITEMS), "grow.calendar": (CALENDAR_PLANS,)},
+    # Make it again (neura_agent_grow.jobs.CalendarPlansHandler).
+    on_demand={CALENDAR_PLANS: "grow.calendar.plans"},
 )
 
 __all__ = ["MANIFEST", "AgentManifest"]

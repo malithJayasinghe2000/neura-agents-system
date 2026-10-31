@@ -35,6 +35,7 @@ from typing import Any
 from neura_evals.dataset import EvalCase
 from neura_evals.target import AgentResponse, ToolInvocation
 
+from neura_agent_grow.evals import calendar as calendar_case
 from neura_agent_grow.finding import Exchange, Found, find_gap, worth_asking
 from neura_agent_grow.prompts import load_prompts
 
@@ -82,6 +83,9 @@ class GrowTarget:
         self._llm = llm
 
     async def run(self, case: EvalCase) -> AgentResponse:
+        # A Marketing calendar case (ADR-0072 §9), declared by its tag.
+        if calendar_case.is_calendar_case(case):
+            return await calendar_case.run_case(case, llm=self._llm)
         exchange = exchange_from(case)
         if not worth_asking(exchange.reply, handed_over=exchange.handed_over):
             # The night job's free word check (R47) sends nothing for this reply,

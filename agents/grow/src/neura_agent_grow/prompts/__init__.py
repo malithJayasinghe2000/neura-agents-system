@@ -15,7 +15,7 @@ PROMPT_DIR = Path(__file__).resolve().parent
 
 #: Every prompt GROW asks for by name. Listed, not globbed, so a renamed file
 #: fails at import rather than as a night job that quietly asked a model nothing.
-REQUIRED = frozenset({"find_gap"})
+REQUIRED = frozenset({"find_gap", "plan_campaign"})
 
 
 class PromptError(RuntimeError):

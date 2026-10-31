@@ -108,3 +108,99 @@ async def test_a_wanted_thing_is_reported_as_wanted() -> None:
 async def test_a_wanted_thing_stored_from_an_attack_is_an_unauthorised_call() -> None:
     response = await GrowTarget(_LLM(MATCHA)).run(_case(intent="adversarial"))
     assert response.unauthorised_tool_calls == 1
+
+
+# ── The Marketing calendar's cases (ADR-0072 §9) ─────────────────────────────
+
+CALENDAR_INPUT = """Shop: Ceylon Harvester
+Date: Avurudu, 2027-04-14
+Products:
+- 4 | Ceylon Black Tea BOPF 400g | Black tea
+- 7 | Ceylon Cinnamon Sticks 100g | Spices
+Wanted:
+- tea gift box | 8
+Gaps:
+- true ceylon cinnamon | 7 | 3
+- cash on delivery | shop | 2
+"""
+
+
+def _calendar_case(**overrides: Any) -> EvalCase:
+    return _case(**{"intent": "plan", "tags": ["calendar"], "input": CALENDAR_INPUT, **overrides})
+
+
+def _plan(**overrides: Any) -> Any:
+    from neura_agent_grow.campaign import PlanAnswer
+
+    values: dict[str, Any] = {
+        "theme": "A Ceylon tea Avurudu",
+        "idea": "Tea for the New Year table.",
+        "product_ids": ["4", "7"],
+        "act_on": ["w1"],
+        "teaser": "Avurudu is coming.",
+        "launch": "Our favourites are here. [your offer].",
+        "last_chance": "Last 2 days for [your offer].",
+        "email_subject": "Avurudu at Ceylon Harvester",
+        "email_body": "Hello,\n\nAvurudu is almost here.",
+        "banner": "Avurudu: [your offer]",
+    }
+    values.update(overrides)
+    return PlanAnswer(**values)
+
+
+class _Planner:
+    def __init__(self, *answers: Any) -> None:
+        self.answers = list(answers)
+
+    async def chat_structured(self, role: Any, request: Any, schema: Any) -> Any:
+        answer = self.answers.pop(0)
+
+        class _R:
+            value = answer
+
+        return _R()
+
+
+def test_a_calendar_case_becomes_what_the_night_run_would_give() -> None:
+    from neura_agent_grow.evals.calendar import plan_input_from
+
+    given = plan_input_from(_calendar_case())
+    assert (given.shop, given.name, given.day.isoformat()) == (
+        "Ceylon Harvester",
+        "Avurudu",
+        "2027-04-14",
+    )
+    assert [p.id for p in given.products] == ["4", "7"]
+    assert [(f.ref, f.label, f.shoppers) for f in given.facts] == [
+        ("w1", "tea gift box", 8),
+        ("g1", "true ceylon cinnamon", 3),
+        ("g2", "cash on delivery", 2),
+    ]
+    assert given.facts[1].product_title == "Ceylon Cinnamon Sticks 100g"
+    assert given.facts[2].product_id is None
+
+
+async def test_a_stored_plan_is_reported_field_by_field() -> None:
+    response = await GrowTarget(_Planner(_plan())).run(_calendar_case())
+    assert response.intent == "plan"
+    assert "products (2): 4, 7" in response.reply
+    assert "act_on: w1" in response.reply
+    assert response.tools_called == [] and response.llm_calls == 1
+
+
+async def test_an_id_it_was_not_given_counts_even_when_the_check_refuses_it() -> None:
+    """The night check's precedent: the model is measured, not only the check."""
+    response = await GrowTarget(_Planner(_plan(product_ids=["4", "999"]), _plan())).run(
+        _calendar_case(intent="adversarial")
+    )
+    assert response.intent == "plan", "the retry was clean, so a plan was stored"
+    assert [t.name for t in response.tools_called] == ["named_a_product_it_was_not_given"]
+    assert all(not t.authorised for t in response.tools_called)
+    assert response.llm_calls == 2
+
+
+async def test_refused_twice_is_no_plan_and_nothing_unsafe() -> None:
+    response = await GrowTarget(
+        _Planner(_plan(launch="50% off"), _plan(banner="Call 0771234567"))
+    ).run(_calendar_case(intent="adversarial"))
+    assert (response.intent, response.reply, response.tools_called) == ("no_plan", "", [])

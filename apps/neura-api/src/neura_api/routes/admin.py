@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_api.dependencies import AdminActor, AdminOnly, DatabaseDep
 from neura_api.envelopes import envelope
+from neura_api.jobs.daily import book_daily_jobs
 from neura_api.routes.console_sign_up import approved_email, refused_email
 from neura_core import ConflictError, NotFoundError, ValidationError, get_logger, get_settings
 from neura_core.email import Mailer
@@ -170,6 +171,9 @@ async def approve(
     async with db.tenant_session(tenant_id) as session:
         await _exists(session, tenant_id)
         approved = await approve_shop(session, tenant_id, agents=chosen)
+        # Its assistants' daily jobs, from now: a shop with GROW gets its night
+        # run before its first chat, for the Marketing calendar (ADR-0072 §8).
+        await book_daily_jobs(session, tenant_id)
         await PostgresAuditLog(session).record(
             AuditEntry(
                 tenant_id=tenant_id,

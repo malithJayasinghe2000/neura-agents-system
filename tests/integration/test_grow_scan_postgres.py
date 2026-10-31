@@ -32,7 +32,7 @@ from neura_agent_core.conversations import (
 from neura_agent_core.gaps import PageGapRepository, page_gap_fixes, page_gap_scans, page_gaps
 from neura_agent_core.wanted import WantedRepository, wanted_hides, wanted_items
 from neura_agent_grow.finding import Finding
-from neura_agent_grow.jobs import GAPS_SCAN, GapScanHandler, GapScanProviderError
+from neura_agent_grow.jobs import GAPS_SCAN, GapScanProviderError, NightRunHandler
 from neura_agent_grow.scan import scan_shop
 from neura_api.jobs.daily import book_daily_jobs
 from neura_commerce.sync.schema import synced_entities
@@ -305,7 +305,7 @@ async def test_the_job_runs_and_books_tomorrow(db: Database) -> None:
     await _chat(db, GROWING, "cnv_1", "organic?", "I can't confirm that.")
     job = await _job(db, GROWING)
 
-    summary = await GapScanHandler(_Model())(_Context(db, GROWING, job))
+    summary = await NightRunHandler(_Model())(_Context(db, GROWING, job))
 
     assert "1 gap(s) stored" in summary
     async with db.tenant_session(GROWING) as session:
@@ -323,7 +323,7 @@ async def test_the_job_stops_when_the_shop_no_longer_has_grow(db: Database) -> N
         await TenantRepository(session).set_enabled_agents(GROWING, ["care"])
 
     model = _Model()
-    summary = await GapScanHandler(model)(_Context(db, GROWING, job))
+    summary = await NightRunHandler(model)(_Context(db, GROWING, job))
 
     assert "no longer has NEURA-GROW" in summary
     assert model.seen == []
@@ -337,7 +337,7 @@ async def test_an_outage_makes_the_queue_retry(db: Database) -> None:
     await _chat(db, GROWING, "cnv_1", "organic?", "I can't confirm that.")
     job = await _job(db, GROWING)
     with pytest.raises(GapScanProviderError):
-        await GapScanHandler(_Model(fail_on=1))(_Context(db, GROWING, job))
+        await NightRunHandler(_Model(fail_on=1))(_Context(db, GROWING, job))
 
 
 async def test_switched_off_the_job_reads_nothing_and_books_tomorrow(db: Database) -> None:
@@ -348,7 +348,7 @@ async def test_switched_off_the_job_reads_nothing_and_books_tomorrow(db: Databas
     job = await _job(db, GROWING)
     model = _Model()
 
-    summary = await GapScanHandler(model)(_Context(db, GROWING, job))
+    summary = await NightRunHandler(model)(_Context(db, GROWING, job))
 
     assert model.seen == [], "no model is asked while it is off"
     assert "switched off" in summary
@@ -372,7 +372,7 @@ async def test_switched_on_again_it_reads_only_what_came_after(db: Database) -> 
     job = await _job(db, GROWING)
     model = _Model()
 
-    await GapScanHandler(model)(_Context(db, GROWING, job))
+    await NightRunHandler(model)(_Context(db, GROWING, job))
 
     assert len(model.seen) == 1
     assert "after?" in model.seen[0]

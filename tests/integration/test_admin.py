@@ -52,6 +52,7 @@ from neura_core.identity.admins import add_admin, admin_shops, admin_usage, is_a
 from neura_core.identity.schema import login_tokens, memberships, platform_admins, users
 from neura_core.identity.sign_up import confirm_sign_up, request_sign_up
 from neura_core.identity.totp import STEP_SECONDS, code_at
+from neura_core.jobs.schema import job_queue
 from neura_core.tenancy import TenantRepository, TenantStatus, TurnMode
 from neura_core.tenancy.removal import remove_tenant
 from neura_core.tenancy.schema import tenants
@@ -420,6 +421,22 @@ class TestApproveAndRefuse:
         assert again.status_code == 409
         assert again.json()["error"]["code"] == "NOT_WAITING"
 
+    async def test_approving_a_shop_with_grow_books_its_night_run(
+        self, client: TestClient, db: Database, made: Made, mail: list[dict[str, str]]
+    ) -> None:
+        """ADR-0072 §8: the Marketing calendar needs the night run before any chat."""
+        admin = await _admin(db, made)
+        waiting, _ = await _waiting_shop(db, made)
+        response = client.post(
+            f"/v1/admin/shops/{waiting}/approve",
+            json={"agents": ["care", "grow"]},
+            cookies=cookie(admin),
+        )
+        assert response.status_code == 200
+        async with db.tenant_session(waiting) as session:
+            kinds = (await session.execute(select(job_queue.c.kind))).scalars().all()
+        assert kinds == ["grow.gaps.scan"]
+
     async def test_an_assistant_must_be_chosen_and_a_typo_is_refused(
         self, client: TestClient, db: Database, made: Made, mail: list[dict[str, str]]
     ) -> None:
@@ -574,7 +591,9 @@ class TestSwitches:
         shop = client.get(f"/v1/admin/shops/{growing}", cookies=cookie(admin)).json()["data"][
             "shop"
         ]
-        [switch] = shop["switches"]
+        # Sorted by key: the calendar's own switch (ADR-0072 §5), then the night check.
+        assert [s["key"] for s in shop["switches"]] == ["grow.calendar", GAPS]
+        switch = shop["switches"][1]
         assert switch["key"] == GAPS
         assert switch["assistant"] == "grow"
         assert switch["on"] is True
