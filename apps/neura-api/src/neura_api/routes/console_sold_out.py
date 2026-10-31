@@ -20,6 +20,12 @@ restocked on Friday still shows Monday's demand.
   (it said the test shop's sold-out jumper was in stock). Home reads this
   route without the parameter and never reaches the shop.
 
+**A second tab, *Rarely added to cart*** (ADR-0071), is ``GET …/sold-out/rarely-added``:
+in-stock products that 10 or more visitors opened in 7 days and fewer than 1 in
+10 of them added to the cart. The same events, the same permission, the same
+catalogue read, and the same refusals: counts only, no session token, nothing
+for a shopper, no model, and the shop is never asked.
+
 **Not gated by the SELL entitlement.** 0046 calls this a SELL surface, and the
 argument for that is in the ADR — but ``neura-api`` may not learn an agent's
 name (AGENTS.md), and every console screen so far is agent-agnostic. What gates
@@ -44,7 +50,13 @@ from neura_commerce.identity import EntityType
 from neura_commerce.sync.schema import synced_entities
 from neura_core import ValidationError, get_logger, get_settings
 from neura_core.identity.roles import SOLD_OUT_READ
-from neura_core.observation import ObservedEventRepository, SoldOutDemand
+from neura_core.observation import (
+    RARELY_MIN_VISITORS,
+    RARELY_ONE_IN,
+    ObservedEventRepository,
+    RarelyAdded,
+    SoldOutDemand,
+)
 from neura_core.tenancy import TenantRepository
 from neura_domain import Capability, InventoryLevel
 
@@ -148,6 +160,46 @@ async def sold_out(
     )
 
 
+@router.get(
+    "/sold-out/rarely-added",
+    summary="In-stock products many visitors opened and few added to the cart",
+)
+async def rarely_added(
+    request: Request,
+    actor: Annotated[ConsoleActor, Depends(Permitted(SOLD_OUT_READ))],
+) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    since = now - timedelta(days=WINDOW_DAYS)
+
+    async with request.app.state.database.tenant_session(actor.tenant_id) as session:
+        events = ObservedEventRepository(session)
+        listed = await events.rarely_added(actor.tenant_id, since=since, limit=LIMIT + 1)
+        receiving = await events.any_views_since(actor.tenant_id, since=since)
+        tenant = await TenantRepository(session).get(actor.tenant_id)
+        shown = listed[:LIMIT]
+        catalogue = await _catalogue(session, actor.tenant_id, [p.product_id for p in shown])
+
+    return envelope(
+        {
+            "period": {"since": since.isoformat(), "through": now.isoformat(), "days": WINDOW_DAYS},
+            "agreement": bool(tenant and tenant.may_hold_personal_data),
+            "agreement_since": (
+                tenant.dpa_signed_at.isoformat() if tenant and tenant.dpa_signed_at else None
+            ),
+            "receiving": receiving,
+            "kept_days": get_settings().retention_observed_events_days,
+            # The rule, from the code that applies it, so the screen's
+            # *How this works* cannot drift from it (ADR-0071 §1).
+            "min_visitors": RARELY_MIN_VISITORS,
+            "one_in": RARELY_ONE_IN,
+            "products": [_rarely(p, catalogue.get(p.product_id)) for p in shown],
+            "truncated": len(listed) > LIMIT,
+            "caveats": _rarely_caveats(shown),
+        },
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
 async def _stock_now(
     request: Request,
     tenant_id: str,
@@ -240,6 +292,7 @@ def _entry(document: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "title": document.get("title"),
         "url": document.get("url"),
+        "image": next(iter(document.get("image_urls") or []), None),
         "cats": [str(c) for c in (document.get("category_ids") or [])],
         "price": (
             {"amount": str(price["amount"]), "currency": str(price.get("currency") or "")}
@@ -297,6 +350,32 @@ def _product(
         # answer, or said nothing about this product.
         "in_stock_now": (live.in_stock.get(demand.product_id) if live else None),
     }
+
+
+def _rarely(product: RarelyAdded, catalogue: Mapping[str, Any] | None) -> dict[str, Any]:
+    entry = catalogue or {}
+    return {
+        "product_id": product.product_id,
+        # `None` when the synced catalogue does not hold it, as on Sold out.
+        "title": entry.get("title"),
+        "url": entry.get("url"),
+        "image": entry.get("image"),
+        "price": entry.get("price"),
+        "visitors": product.visitors,
+        "added": product.added,
+        "last_viewed_at": product.last_viewed_at.isoformat(),
+    }
+
+
+def _rarely_caveats(products: Sequence[RarelyAdded]) -> list[str]:
+    """What these counts do not say. Only when something is listed, as on Sold out."""
+    if not products:
+        return []
+    return [
+        "A visitor is one browsing session, not one person: someone on two devices counts "
+        "twice, and search-engine crawlers are counted too. We never know who the shopper was.",
+        "We see cart adds, not orders, so we can't say who bought.",
+    ]
 
 
 def _caveats(products: Sequence[SoldOutDemand], unknown: int) -> list[str]:

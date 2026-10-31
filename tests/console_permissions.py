@@ -128,6 +128,8 @@ ROUTES: dict[tuple[str, str], str] = {
     ("GET", f"{_SHOP}/usage"): USAGE,
     # Sold out (served by the console, so it names no agent).
     ("GET", f"{_SHOP}/sold-out"): SOLD_OUT,
+    # Rarely added to cart (ADR-0071): Sold out's second tab, the same permission.
+    ("GET", f"{_SHOP}/sold-out/rarely-added"): SOLD_OUT,
     # Missing from your pages (ADR-0064; served by the console, so it names no agent).
     ("GET", f"{_SHOP}/gaps"): GAPS,
     ("POST", f"{_SHOP}/gaps/added"): GAPS,
