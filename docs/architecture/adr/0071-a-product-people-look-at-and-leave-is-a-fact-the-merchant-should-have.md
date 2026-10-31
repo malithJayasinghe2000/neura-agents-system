@@ -1,7 +1,7 @@
 # ADR-0071 · A Product People Look At And Leave Is A Fact The Merchant Should Have
 
-**Status:** **Accepted** · the owner, 2026-11-01 (R74 to R79) · the design is Claude's · **not built**, the mockup
-comes first · **Date:** 2026-11-01 · **Extends:** [ADR-0046](0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md)'s
+**Status:** **Accepted** · the owner, 2026-11-01 (R74 to R79) · the design is Claude's · **mockup approved 2026-11-01** (R80; canvas row 20, boards
+71 to 74; console.md §3.13) · **not built**: the owner asked to wait · **Date:** 2026-11-01 · **Extends:** [ADR-0046](0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md)'s
 screen with a second tab · **Requires:** [ADR-0044](0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)
 (cited, as its §1 asks) and [ADR-0048](0048-observation-phase-1-what-the-build-decided.md)'s two events ·
 **Related:** [ADR-0033](0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md),
