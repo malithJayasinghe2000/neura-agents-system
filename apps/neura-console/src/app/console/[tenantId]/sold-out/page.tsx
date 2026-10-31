@@ -1,5 +1,5 @@
 /**
- * Screen 6 — Sold out. ADR-0046 stage 1, redesigned 2026-09-28 from the
+ * Screen 6 — Product views (named *Sold out* until G118, R81). ADR-0046 stage 1, redesigned 2026-09-28 from the
  * owner's approved mockup (console.md §3.7).
  *
  * Products shoppers opened while they could not be bought, in the last seven
@@ -67,17 +67,17 @@ export default async function SoldOutPage({
   const rarely = (await searchParams).tab === RARELY;
   // A role that does not include this screen sees why, not an error (ADR-0058).
   const refused = await refusal(tenantId, PERMISSION.soldOut);
-  if (refused) return <NotAllowed refusal={refused} what="Sold out" />;
+  if (refused) return <NotAllowed refusal={refused} what="Product views" />;
   // Reached by its address only: the menu does not list it for a shop without
   // NEURA-SELL. Said the way Suggestions says it, and nothing is asked of the shop.
   if (!hasSell(await shopAssistants(tenantId))) {
     return (
       <>
-        <h1 className="text-2xl font-semibold tracking-tight">Sold out</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Product views</h1>
         <Alert>
-          <AlertTitle>Sold out is not part of this shop&apos;s plan</AlertTitle>
+          <AlertTitle>Product views is not part of this shop&apos;s plan</AlertTitle>
           <AlertDescription>
-            Sold out comes with NEURA-SELL, which this shop doesn&apos;t have.
+            Product views comes with NEURA-SELL, which this shop doesn&apos;t have.
           </AlertDescription>
         </Alert>
       </>
@@ -87,7 +87,7 @@ export default async function SoldOutPage({
   const heading = (
     <>
       <div className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight">Sold out</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Product views</h1>
         <p className="text-muted-foreground">
           What shoppers looked at and couldn&apos;t buy, or didn&apos;t buy.
         </p>
@@ -181,7 +181,7 @@ function Tabs({ base, rarely }: { base: string; rarely: boolean }) {
     </Link>
   );
   return (
-    <nav aria-label="Sold out tabs" data-tabs className="flex gap-6 border-b">
+    <nav aria-label="Product views tabs" data-tabs className="flex gap-6 border-b">
       {tab(base, "Sold out", !rarely)}
       {tab(`${base}?tab=${RARELY}`, "Rarely added to cart", rarely)}
     </nav>

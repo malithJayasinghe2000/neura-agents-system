@@ -31,8 +31,8 @@ import {
   FileQuestionMark,
   House,
   Menu,
+  Eye,
   MessageSquare,
-  PackageX,
   Plug,
   ShoppingBag,
   Users,
@@ -179,7 +179,13 @@ export function ShopSidebar({
       icon: ShoppingBag,
       shown: sell && opens.suggestions,
     },
-    { href: `${base}/sold-out`, label: "Sold out", icon: PackageX, shown: sell && opens.soldOut },
+    // Two tabs since ADR-0071 (Sold out, Rarely added to cart), named for what both are made of (G118, R81).
+    {
+      href: `${base}/sold-out`,
+      label: "Product views",
+      icon: Eye,
+      shown: sell && opens.soldOut,
+    },
     {
       href: `${base}/gaps`,
       label: "Missing from your pages",

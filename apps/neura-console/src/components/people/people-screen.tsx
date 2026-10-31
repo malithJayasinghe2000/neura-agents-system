@@ -47,7 +47,7 @@ const ROLE_WORDS: Record<(typeof ROLES)[number], string> = {
   owner:
     "Everything, including inviting and removing people. A shop always keeps at least one Owner.",
   support:
-    "Reads chats and grades replies in Review. Can't open settings, keys, Usage, Suggestions or Sold out.",
+    "Reads chats and grades replies in Review. Can't open settings, keys, Usage, Suggestions or Product views.",
   developer:
     "Shop connection and Help: connects your shop, makes its secrets and edits its contact details. Never sees shoppers' chats.",
 };

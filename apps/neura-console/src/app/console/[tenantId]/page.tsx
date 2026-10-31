@@ -597,7 +597,7 @@ function SoldOutCard({ soldOut, href }: { soldOut: SoldOut | null; href: string 
         label="Sold out"
         headline="Could not be read"
         body="Try again in a moment."
-        action="Open Sold out"
+        action="Open Product views"
         href={href}
       />
     );
@@ -608,7 +608,7 @@ function SoldOutCard({ soldOut, href }: { soldOut: SoldOut | null; href: string 
         label="Sold out"
         headline="Not collected"
         body="No data-processing agreement is on record for this shop, so nothing about your shoppers' visits is stored."
-        action="Open Sold out"
+        action="Open Product views"
         href={href}
       />
     );
@@ -621,7 +621,7 @@ function SoldOutCard({ soldOut, href }: { soldOut: SoldOut | null; href: string 
         headline="Nothing to show"
         body={`No product was viewed while sold out in the last ${soldOut.period.days} days.`}
         note="This also stays empty while product views are switched off in your shop's own settings."
-        action="Open Sold out"
+        action="Open Product views"
         href={href}
       />
     );
@@ -637,7 +637,7 @@ function SoldOutCard({ soldOut, href }: { soldOut: SoldOut | null; href: string 
             : `${count} products`
       }
       body={`Viewed while sold out in the last ${soldOut.period.days} days.`}
-      action="Open Sold out"
+      action="Open Product views"
       href={href}
     />
   );

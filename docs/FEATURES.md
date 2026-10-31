@@ -100,7 +100,7 @@ No shopper talks to GROW: it has no chat. It reads the shop's chats once a night
 | **Conversations** | Read every chat, search, filter by assistant. **Waiting for an answer**: the handed-over shoppers who left a way to reach them, with *Answer by email* (opens your own email app) and *Mark as answered* (their email is deleted). | ✅ Built |
 | **Review** | Grade replies — the ones held in practice mode, and sent ones. | ✅ Built |
 | **Suggestions** (NEURA-SELL) | See and choose what shows with each product. Shown only to a shop with NEURA-SELL. | ✅ Built |
-| **Sold out** (NEURA-SELL) | Sold-out products people kept looking at, and a second tab, *Rarely added to cart*: in-stock products many opened and few added to the cart. Shown only to a shop with NEURA-SELL, to the Owner. | ✅ Built (ADR-0046, ADR-0071) |
+| **Product views** (NEURA-SELL; called *Sold out* until 2026-11-01) | Two tabs: *Sold out*, sold-out products people kept looking at, and *Rarely added to cart*: in-stock products many opened and few added to the cart. Shown only to a shop with NEURA-SELL, to the Owner. | ✅ Built (ADR-0046, ADR-0071) |
 | **Missing from your pages** (NEURA-GROW) | What shoppers asked that the shop's pages don't say, with *See the chats* and *I added it*. Shown only to a shop with NEURA-GROW, to the Owner and Support. | ✅ Built (ADR-0064) |
 | **Shoppers asked for** (NEURA-GROW) | What shoppers asked for that the shop doesn't sell, with *See the chats* and *Hide*, and a *Hidden* list with *Show again*. Shown only to a shop with NEURA-GROW, to the Owner. | ✅ Built (ADR-0068, ADR-0070) |
 | **Usage and cost** | Chats, AI use and its cost, by assistant. | ✅ Built |

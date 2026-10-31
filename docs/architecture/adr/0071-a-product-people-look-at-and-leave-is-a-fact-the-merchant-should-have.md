@@ -124,7 +124,8 @@ count as visitors and can put a product on the list with no shopper. **Fixed the
 reference bridge sends nothing for a known robot or a request with no user agent, judged on the shop's own server
 (the user agent is still never sent); the spec and the developer guide ask the same of every shop; the sentence
 under both tabs says known robots are left out and an unknown one may still count. Tested against 20 real robot
-and 9 real browser user agents (0 wrong); **not run live**, because sending is switched off on the test shop. **Not tested:** any
+and 9 real browser user agents (0 wrong); **not run live**, because sending is switched off on the test shop. **Renamed the same day (G118, R81):** the menu item and the page say **Product views**, since
+the page holds two tabs; the tabs and the address are unchanged. **Not tested:** any
 real shop's traffic (no real shop sends views); a shop's photo drawn from another address.
 
 ## Alternatives considered

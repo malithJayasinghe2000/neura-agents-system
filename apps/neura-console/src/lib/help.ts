@@ -71,16 +71,16 @@ export const TROUBLE: { seen: string; fix: string; sell?: true }[] = [
   },
   {
     seen: "A new product is missing from your dashboard's lists",
-    fix: "Suggestions, Sold out and Review use NEURA's copy of your catalogue, which doesn't update by itself. Press Sync now on Shop connection. Your assistant asks your shop live, so it can already find the product.",
+    fix: "Suggestions, Product views and Review use NEURA's copy of your catalogue, which doesn't update by itself. Press Sync now on Shop connection. Your assistant asks your shop live, so it can already find the product.",
   },
   {
     seen: "Your assistant doesn't know a new product",
     fix: "It asks your shop live, so your shop isn't sending it yet. Your developer can check the bridge.",
   },
   {
-    seen: "Sold out stays empty",
+    seen: "Product views stays empty",
     sell: true,
-    fix: "Either no data agreement is recorded, or product views are switched off in your shop's settings. 'Is it working?' on Sold out says which.",
+    fix: "Either no data agreement is recorded, or product views are switched off in your shop's settings. 'Is it working?' on Product views says which.",
   },
 ];
 

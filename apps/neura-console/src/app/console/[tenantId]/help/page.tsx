@@ -71,11 +71,11 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
           <Who title="Your developer">
             Builds the NEURA bridge in your shop, puts your token in it, and adds the chat box to
             your shop&apos;s pages.
-            {sell ? " Switches on product views if you want Sold out." : null}
+            {sell ? " Switches on product views if you want Product views." : null}
           </Who>
           <Who title="FiveNeurals" aside="(for now)">
             Creates your account and gives you the chat box key.
-            {sell ? " Records a data agreement if you want Sold out." : null}
+            {sell ? " Records a data agreement if you want Product views." : null}
           </Who>
         </div>
       </section>

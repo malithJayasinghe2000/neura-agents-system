@@ -1719,18 +1719,20 @@ async def _check_without_sell(
         "[...document.querySelectorAll('nav[aria-label=Screens] a')].map(a => a.innerText).join('|')"
     )
     _check(
-        "its menu lists neither Suggestions nor Sold out",
-        "Home" in menu and "Suggestions" not in menu and "Sold out" not in menu,
+        "its menu lists neither Suggestions nor Product views",
+        "Home" in menu and "Suggestions" not in menu and "Product views" not in menu,
         failures,
     )
     home = await browser.evaluate("document.body.innerText")
-    _check("its Home shows no Suggestions or Sold out card", "Open Sold out" not in home, failures)
+    _check(
+        "its Home shows no Suggestions or Sold out card", "Open Product views" not in home, failures
+    )
 
     await browser.goto(f"{base}/sold-out")
     await asyncio.sleep(3)
     page = await browser.evaluate("document.body.innerText")
     _check(
-        "opened by its address, Sold out says it is not part of this shop's plan",
+        "opened by its address, Product views says it is not part of this shop's plan",
         "comes with NEURA-SELL" in page and "Is it working?" not in page,
         failures,
     )
@@ -1748,7 +1750,11 @@ async def _check_without_sell(
     await browser.goto(f"{base}/help")
     await asyncio.sleep(3)
     help_page = await browser.evaluate("document.body.innerText")
-    _check("its Help does not mention Sold out", "Sold out" not in help_page, failures)
+    _check(
+        "its Help does not mention Product views or Sold out",
+        "Product views" not in help_page and "Sold out" not in help_page,
+        failures,
+    )
 
 
 async def _check_sold_out(
@@ -1779,6 +1785,16 @@ async def _check_sold_out(
     _check(
         "the sold-out screen renders, saying what it is for",
         "couldn't buy, or didn't buy" in page,
+        failures,
+    )
+    _check(
+        "the page and its menu item are called Product views (G118)",
+        await browser.evaluate("document.querySelector('main h1')?.innerText") == "Product views"
+        and "Product views"
+        in await browser.evaluate(
+            "[...document.querySelectorAll('nav[aria-label=Screens] a')].map(a => a.innerText)"
+            ".join('|')"
+        ),
         failures,
     )
     _check(

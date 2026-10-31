@@ -196,7 +196,7 @@ function GetSetUp({ tenantId, view, sell }: { tenantId: string; view: ShopView; 
       {setup && sell ? (
         <>
           <p className="border-t px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground sm:px-5">
-            Optional — needed for Sold out
+            Optional: needed for Product views
           </p>
           <ul className="divide-y">
             <SetupItem
