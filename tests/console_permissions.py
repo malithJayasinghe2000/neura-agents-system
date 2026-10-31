@@ -36,6 +36,7 @@ HOME = "shop:home:read"
 HANDOVERS = "shop:handovers:write"
 GAPS = "shop:gaps:write"
 WANTED = "shop:wanted:read"
+CALENDAR = "shop:calendar:write"
 
 #: ADR-0058 §2, *The first permissions*, R10's B (the Developer has all of
 #: Shop connection, Connect and the contact details included), and R12 (Home is
@@ -61,6 +62,9 @@ WHO: dict[str, frozenset[str]] = {
     # ADR-0068 §4 (R61: A): Shoppers asked for, read it and *Hide*. What to sell
     # is the owner's decision, as Sold out.
     WANTED: frozenset({OWNER}),
+    # ADR-0072 §4 (R86: B): the Marketing calendar, its dates, the plans, Edit
+    # and Make it again. The Owner and Support; never the Developer.
+    CALENDAR: frozenset({OWNER, SUPPORT}),
 }
 
 #: A person's own routes. They come before a shop is chosen, so they name no
@@ -147,6 +151,7 @@ ROUTES: dict[tuple[str, str], str] = {
 
 
 __all__ = [
+    "CALENDAR",
     "DEVELOPER",
     "GAPS",
     "HANDOVERS",

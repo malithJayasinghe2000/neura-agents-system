@@ -22,6 +22,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Import for side effects: each module registers its tables on `metadata`.
+import neura_agent_core.calendar
 import neura_agent_core.conversations
 import neura_agent_core.graph.schema
 import neura_agent_core.rag.schema

@@ -55,6 +55,11 @@ WEBHOOK_DELIVERY: Final = "whd"
 #: One run of the full check against a shop's bridge (ADR-0052 §4). Not "chk",
 #: which a search-index chunk already uses.
 SHOP_CHECK: Final = "shc"
+#: One date on a shop's Marketing calendar, a suggested one or the shop's own
+#: (ADR-0072 §3).
+CALENDAR_DATE: Final = "cal"
+#: One campaign plan GROW wrote for a date (ADR-0072 §5).
+CALENDAR_PLAN: Final = "pln"
 
 
 def new_id(prefix: str) -> str:

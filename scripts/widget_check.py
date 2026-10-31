@@ -1037,6 +1037,7 @@ def tenant_tables() -> list[Any]:
     the pairings, the owner's choices and practice-mode evidence were all added
     after it, and their rows outlived every dropped tenant (G76).
     """
+    from neura_agent_core.calendar import calendar_dates, calendar_plans, calendar_settings
     from neura_agent_core.conversations import conversation_messages, conversations
     from neura_agent_core.gaps import page_gap_fixes, page_gap_scans, page_gaps
     from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
@@ -1079,6 +1080,10 @@ def tenant_tables() -> list[Any]:
         # the team's *Hide*.
         wanted_items,
         wanted_hides,
+        # The Marketing calendar (ADR-0072): the shop's dates and GROW's plans.
+        calendar_plans,
+        calendar_dates,
+        calendar_settings,
         # Before the turns it points at: the one foreign key among these tables.
         shadow_evidence,
         shadow_turns,

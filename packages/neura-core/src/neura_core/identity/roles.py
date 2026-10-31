@@ -76,6 +76,10 @@ GAPS_WRITE = "shop:gaps:write"
 #: ``?wanted=``). The Owner's alone: what to sell is the owner's decision, as
 #: Sold out. Named in the ADR; it covers *Hide* too.
 WANTED_READ = "shop:wanted:read"
+#: Marketing calendar (ADR-0072 §4, R86): the shop's dates, the plans, *Edit*,
+#: *Make it again*, and Home's calendar lines. The Owner and Support; never the
+#: Developer. Served by the console, so it names no agent (G88).
+CALENDAR_WRITE = "shop:calendar:write"
 
 #: The refusal of a member whose role does not include what was asked for. Its
 #: own code, so the dashboard can say *"You can't open this page"* rather than a
@@ -88,7 +92,7 @@ ROLE_PERMISSIONS: Mapping[Role, frozenset[str]] = {
     # The help desk: chats, grading, and answering handed-over shoppers
     # (ADR-0058 §8, ADR-0062). Never keys, the connection, Go live, people or money.
     Role.SUPPORT: frozenset(
-        {HOME_READ, CONVERSATIONS_READ, REVIEW_WRITE, HANDOVERS_WRITE, GAPS_WRITE}
+        {HOME_READ, CONVERSATIONS_READ, REVIEW_WRITE, HANDOVERS_WRITE, GAPS_WRITE, CALENDAR_WRITE}
     ),
     # Whoever builds the bridge: all of Shop connection, the same page as the
     # Owner's (R10, settled at the mockup: B). Never a shopper's chat.
@@ -121,6 +125,7 @@ def role_may(role: str, permission: str) -> bool:
 
 
 __all__ = [
+    "CALENDAR_WRITE",
     "CONNECTION_WRITE",
     "CONNECT_WRITE",
     "CONTACT_WRITE",

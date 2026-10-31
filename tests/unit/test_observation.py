@@ -245,15 +245,18 @@ class TestTheSweepJob:
             events_deleted=3,
             conversations_deleted=1,
             emails_deleted=2,
+            plans_deleted=4,
             no_agreement=False,
             remaining=False,
         )
         assert "not re-armed" in done.summary()
-        assert "2 unanswered email(s) deleted" in done.summary()
+        assert "2 unanswered email(s)" in done.summary()
+        assert "4 calendar plan(s) deleted" in done.summary()
         withdrawn = SweepResult(
             events_deleted=5,
             conversations_deleted=0,
             emails_deleted=0,
+            plans_deleted=0,
             no_agreement=True,
             remaining=True,
         )
