@@ -71,3 +71,40 @@ export function notCheckedLine(stock: NonNullable<SoldOut["stock"]>): string {
     ? "Your shop's connection doesn't share stock levels, so we can't say what is in stock today. The counts are still right."
     : "Your shop did not answer just now, so we can't say what is in stock today. The counts are still right.";
 }
+
+/**
+ * *Rarely added to cart*, Sold out's second tab (ADR-0071, console.md §3.13):
+ * in-stock products many visitors opened and few added to the cart. Counts,
+ * never who, exactly as above; the shop is never asked.
+ */
+export type RarelyAddedProduct = {
+  product_id: string;
+  /** `null` when the synced catalogue does not hold this product. */
+  title: string | null;
+  url: string | null;
+  /** The catalogue's first photo, `null` when it has none. */
+  image: string | null;
+  price: Price | null;
+  /** Browsing sessions that opened it while it was in stock. */
+  visitors: number;
+  /** How many of those sessions added it to the cart. */
+  added: number;
+  last_viewed_at: string;
+};
+
+export type RarelyAdded = Pick<
+  SoldOut,
+  "period" | "agreement" | "agreement_since" | "receiving" | "kept_days" | "truncated" | "caveats"
+> & {
+  /** The rule, from the code that applies it (ADR-0071 §1). */
+  min_visitors: number;
+  one_in: number;
+  products: RarelyAddedProduct[];
+};
+
+/** *"none added it to the cart"* / *"1 added it to the cart"*. */
+export function addedLine(product: RarelyAddedProduct): string {
+  return product.added === 0
+    ? "none added it to the cart"
+    : `${product.added} added it to the cart`;
+}

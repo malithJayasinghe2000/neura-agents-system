@@ -828,6 +828,8 @@ route missing from it, or declaring another permission, fails `tests/unit/test_c
 
 **Phone** (board 74): one column; the tabs at the top; **Open the page** under each product.
 
+**As built, 2026-11-01 (pieces 1 to 3):** the count is `ObservedEventRepository.rarely_added` and `count_rarely_added` (`neura_core/observation`, no table changes); the route is **`GET /v1/console/shops/{id}/sold-out/rarely-added`** (`console_sold_out.py`, `shop:sold_out:read`): `period`, `agreement`, `agreement_since`, `receiving`, `kept_days`, `min_visitors`, `one_in`, `products` (`product_id`, `title`, `url`, `image`, `price`, `visitors`, `added`, `last_viewed_at`), `truncated`, `caveats`; never a session token, and the shop is never asked. Home's payload gains **`rarely_added`** for a role with `shop:sold_out:read`, `null` for any other; the screen shows the line only in a shop with NEURA-SELL, after *Shoppers asked for*' line. The tabs are links (`?tab=rarely`), so Home's line opens the second tab. **Differences from the boards, Claude's:** the caveats under the list come from the server, as on the first tab, and keep *"search-engine crawlers are counted too"* while G117 is open; a shop with no data agreement gets *Nothing is collected for this shop*, as the first tab says it; the photo is the catalogue's first, a placeholder when it has none. Checked by `test_rarely_added_postgres.py` (7), `test_console_rarely_added.py` (6) and `make console-check` (10 new checks, 287 passed, 0 failed).
+
 ## 4. Identity — the part that is genuinely new
 
 ### 4.1 The tables

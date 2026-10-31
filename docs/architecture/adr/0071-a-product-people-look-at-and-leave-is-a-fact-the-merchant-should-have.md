@@ -1,7 +1,7 @@
 # ADR-0071 · A Product People Look At And Leave Is A Fact The Merchant Should Have
 
 **Status:** **Accepted** · the owner, 2026-11-01 (R74 to R79) · the design is Claude's · **mockup approved 2026-11-01** (R80; canvas row 20, boards
-71 to 74; console.md §3.13) · **not built**: the owner asked to wait · **Date:** 2026-11-01 · **Extends:** [ADR-0046](0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md)'s
+71 to 74; console.md §3.13) · **built 2026-11-01** (pieces 1 to 3) · **Date:** 2026-11-01 · **Extends:** [ADR-0046](0046-a-sold-out-product-that-people-want-is-a-fact-the-merchant-should-have.md)'s
 screen with a second tab · **Requires:** [ADR-0044](0044-a-shopper-may-be-observed-only-when-the-shop-switches-it-on.md)
 (cited, as its §1 asks) and [ADR-0048](0048-observation-phase-1-what-the-build-decided.md)'s two events ·
 **Related:** [ADR-0033](0033-care-answers-what-the-store-has-sell-helps-the-shopper-choose.md),
@@ -108,6 +108,20 @@ ADR-0046 §8.
   a product listed here was in stock when viewed, and whether it still is changes nothing the owner should do.
 - **It does not change the retention or the window.**
 - **It does not give the tab to Support or the Developer.**
+
+## As built (2026-11-01)
+
+The count is `ObservedEventRepository.rarely_added` and `count_rarely_added` (`neura_core/observation/repository.py`,
+`RARELY_MIN_VISITORS` 10, `RARELY_ONE_IN` 10; no table changes); the route is `GET …/sold-out/rarely-added`
+(`console_sold_out.py`); Home's payload gains `rarely_added`; the screens are the second tab on
+`app/console/[tenantId]/sold-out/page.tsx` (`?tab=rarely`) and Home's line. **Tested:** 7 Postgres tests of the
+count's edges (exactly 1 in 10 stays off, 9 visitors stay off, one session opening it 15 times is one visitor, an add
+from a session that never opened the page does not count, sold-out, unknown and old views do not count, another
+shop's views never count); 6 route tests (the rows and the rule, no session token, the Owner only, both empty causes,
+Home's number); `make console-check` 287 passed, 0 failed (10 new: the tabs, the row, *Open the page*, what is left
+off, the rule and the caveat, no token, Home's line, a phone). **Found while building: G117**, search-engine crawlers
+count as visitors and can put a product on the list with no shopper; open, asked of the owner. **Not tested:** any
+real shop's traffic (no real shop sends views); a shop's photo drawn from another address.
 
 ## Alternatives considered
 

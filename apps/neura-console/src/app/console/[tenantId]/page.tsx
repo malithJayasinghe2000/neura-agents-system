@@ -113,6 +113,7 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
             answering={home.ok ? home.data.waiting : null}
             gaps={home.ok ? (home.data.gaps ?? null) : null}
             wanted={home.ok ? (home.data.wanted ?? null) : null}
+            rarely={sell && home.ok ? (home.data.rarely_added ?? null) : null}
             connected={store.ok ? store.data.connected : null}
           />
 
@@ -155,6 +156,8 @@ type TeamView = {
   gaps?: number | null;
   /** Things on Shoppers asked for (ADR-0068); `null` for any role but the Owner. */
   wanted?: number | null;
+  /** Products on Rarely added to cart (ADR-0071); `null` for any role but the Owner. */
+  rarely_added?: number | null;
 };
 
 /**
@@ -234,6 +237,7 @@ function NeedsYou({
   answering = null,
   gaps = null,
   wanted = null,
+  rarely = null,
   connected,
   withDeveloper = true,
   empty = "Nothing needs you right now. Replies waiting for review and conversations handed to a person will show up here.",
@@ -248,6 +252,8 @@ function NeedsYou({
   gaps?: number | null;
   /** Things on Shoppers asked for (ADR-0068). `null`: not this role's page. */
   wanted?: number | null;
+  /** Products on Rarely added to cart (ADR-0071). `null`: not this role's, or no NEURA-SELL. */
+  rarely?: number | null;
   connected: boolean | null;
   /** Whether *in three steps with your developer* is said: not to the developer. */
   withDeveloper?: boolean;
@@ -299,6 +305,21 @@ function NeedsYou({
         "In the last 30 days. If many people want something, you may want to start selling it.",
       action: "See them",
       href: `${base}/wanted`,
+      primary: false,
+    });
+  }
+
+  // Then in-stock products many opened and few added to the cart (ADR-0071, board 72).
+  if (rarely) {
+    items.push({
+      figure: rarely,
+      title:
+        rarely === 1
+          ? "product is viewed a lot but rarely added to cart"
+          : "products are viewed a lot but rarely added to cart",
+      detail: "In the last 7 days. Check their price, photos and description.",
+      action: "See them",
+      href: `${base}/sold-out?tab=rarely`,
       primary: false,
     });
   }

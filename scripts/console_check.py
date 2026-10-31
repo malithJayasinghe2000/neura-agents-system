@@ -239,6 +239,8 @@ async def main() -> int:
                 if sell_seeded:
                     print(f"\n  {BOLD}sold out — demand, counted, never who{OFF}")
                     await _check_sold_out(browser, console, sell_seeded, failures)
+                    print(f"\n  {BOLD}rarely added to cart: Sold out's second tab{OFF}")
+                    await _check_rarely_added(browser, console, sell_seeded, failures)
                 else:
                     print(f"  {DIM}no shop with SELL — the Sold out checks are skipped{OFF}")
 
@@ -360,6 +362,12 @@ SEEDED_IN_STOCK_TITLE = "Console-check In-stock Jumper"
 SEEDED_SOLD_OUT_ID = "console-check-sold-out"
 SEEDED_IN_STOCK_ID = "console-check-in-stock"
 SEEDED_SESSIONS = ("consolechecksessionAAAAAAAAAAAAAAAA", "consolechecksessionBBBBBBBBBBBBBBBB")
+#: *Rarely added to cart* (ADR-0071): an in-stock product 12 visitors opened
+#: and 1 of them added to the cart, so it is listed (fewer than 1 in 10).
+SEEDED_RARELY_TITLE = "Console-check Rarely-added Teapot"
+SEEDED_RARELY_ID = "console-check-rarely-added"
+SEEDED_RARELY_URL = "https://shop.example/console-check-teapot"
+SEEDED_RARELY_SESSIONS = tuple(f"consolechecksessionR{n:015d}" for n in range(12))
 
 #: Screen 7's seeded products (ADR-0050). Two, so the owner's choice of one
 #: for the other can be seen on the page. Filed under this check's own
@@ -1770,7 +1778,21 @@ async def _check_sold_out(
 
     _check(
         "the sold-out screen renders, saying what it is for",
-        "so you know what to restock" in page,
+        "couldn't buy, or didn't buy" in page,
+        failures,
+    )
+    _check(
+        "two tabs, the first one open (ADR-0071)",
+        await browser.evaluate(
+            "[...document.querySelectorAll('[data-tabs] a')].map(a => "
+            "a.innerText + (a.getAttribute('aria-current') ? '*' : '')).join('|')"
+        )
+        == "Sold out*|Rarely added to cart",
+        failures,
+    )
+    _check(
+        "the in-stock teapot is not on the sold-out tab",
+        SEEDED_RARELY_TITLE not in page,
         failures,
     )
     _check(
@@ -1828,6 +1850,103 @@ async def _check_sold_out(
         _check(
             "on a phone the sold-out screen does not scroll sideways",
             await browser.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+            failures,
+        )
+    finally:
+        await browser.call("Emulation.clearDeviceMetricsOverride")
+
+
+async def _check_rarely_added(
+    browser: Chrome, console: str, seeded: dict[str, str], failures: list[str]
+) -> None:
+    """ADR-0071, console.md §3.13: the second tab, Home's line, and a phone.
+
+    The teapot is listed (12 visitors, 1 added); the jumper viewed once in
+    stock is not (fewer than 10 visitors), nor the sold-out one (Sold out's).
+    No session token, and the shop is never asked from this tab.
+    """
+    base = f"{console}/console/{seeded['tenant']}"
+    await browser.goto(f"{base}/sold-out?tab=rarely")
+    await asyncio.sleep(4)
+    page = await browser.evaluate("document.body.innerText")
+    row = await browser.evaluate(
+        f"document.querySelector('[data-product=\"{SEEDED_RARELY_ID}\"]')?.innerText ?? ''"
+    )
+    _check(
+        "the second tab is open, its line and its hint above the list",
+        "Rarely added to cart*"
+        in await browser.evaluate(
+            "[...document.querySelectorAll('[data-tabs] a')].map(a => "
+            "a.innerText + (a.getAttribute('aria-current') ? '*' : '')).join('|')"
+        )
+        and "few added to the cart" in page
+        and "Check the price, photos and description." in page,
+        failures,
+    )
+    _check(
+        "the teapot: 12 visitors, 1 added it to the cart, its price",
+        SEEDED_RARELY_TITLE in row
+        and "12 visitors, 1 added it to the cart" in row
+        and "LKR" in row,
+        failures,
+    )
+    _check(
+        "Open the page opens the shop's page in a new tab",
+        await browser.evaluate(
+            f'(() => {{ const a = document.querySelector(\'[data-product="{SEEDED_RARELY_ID}"] '
+            f"[data-open-page]'); return !!a && a.href === '{SEEDED_RARELY_URL}' "
+            "&& a.target === '_blank'; })()"
+        ),
+        failures,
+    )
+    _check(
+        "a product with too few visitors and a sold-out one are not listed",
+        SEEDED_IN_STOCK_TITLE not in page and SEEDED_SOLD_OUT_TITLE not in page,
+        failures,
+    )
+    _check(
+        "'How this works' states the rule, and the cart-adds caveat is shown",
+        "10 or more visitors" in page
+        and "fewer than 1 in 10" in page
+        and "We see cart adds, not orders" in page,
+        failures,
+    )
+    _check(
+        "no session token reaches the tab",
+        not any(token in page for token in (*SEEDED_SESSIONS, *SEEDED_RARELY_SESSIONS)),
+        failures,
+    )
+
+    await browser.goto(base)
+    await asyncio.sleep(3)
+    line = await browser.evaluate(
+        "(() => { const li = [...document.querySelectorAll('li')].find(l => "
+        "l.innerText.includes('rarely added to cart')); if (!li) return ''; "
+        "const a = li.querySelector('a'); return li.innerText + '|' + (a ? a.href : ''); })()"
+    )
+    _check(
+        "Home says how many products are rarely added, opening the tab",
+        "viewed a lot but rarely added to cart" in line and line.endswith("sold-out?tab=rarely"),
+        failures,
+    )
+
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        width=390,
+        height=844,
+        deviceScaleFactor=1,
+        mobile=True,
+    )
+    try:
+        await browser.goto(f"{base}/sold-out?tab=rarely")
+        await asyncio.sleep(4)
+        _check(
+            "on a phone the second tab does not scroll sideways, Open the page shown",
+            await browser.evaluate(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+                f' && !!document.querySelector(\'[data-product="{SEEDED_RARELY_ID}"] '
+                "[data-open-page]')?.offsetWidth"
+            ),
             failures,
         )
     finally:
@@ -2346,10 +2465,19 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
         made["observed"] = ",".join(
             await _seed_views(events, tenant_id, SEEDED_SOLD_OUT_ID, in_stock=False, count=3)
             + await _seed_views(events, tenant_id, SEEDED_IN_STOCK_ID, in_stock=True, count=1)
+            + await _seed_rarely(events, tenant_id)
         )
-        for product, title in (
-            (SEEDED_SOLD_OUT_ID, SEEDED_SOLD_OUT_TITLE),
-            (SEEDED_IN_STOCK_ID, SEEDED_IN_STOCK_TITLE),
+        for product, document in (
+            (SEEDED_SOLD_OUT_ID, {"title": SEEDED_SOLD_OUT_TITLE}),
+            (SEEDED_IN_STOCK_ID, {"title": SEEDED_IN_STOCK_TITLE}),
+            (
+                SEEDED_RARELY_ID,
+                {
+                    "title": SEEDED_RARELY_TITLE,
+                    "url": SEEDED_RARELY_URL,
+                    "price_range_min": {"amount": "2450.00", "currency": "LKR"},
+                },
+            ),
         ):
             await session.execute(
                 synced_entities.insert().values(
@@ -2359,7 +2487,7 @@ async def _seed_shop(db: Database, tenant_id: str) -> dict[str, str]:
                     external_id=product,
                     neura_id=ids.new_id(ids.NEURA_ENTITY),
                     fingerprint="console-check",
-                    document={"title": title},
+                    document=document,
                 )
             )
         # The policy the escalated reply cited, by its title, as a real shop's
@@ -2457,6 +2585,27 @@ async def _seed_views(
                 product_id=product,
                 occurred_at=datetime.now(UTC),
                 in_stock=in_stock,
+            ),
+        )
+        made.append(event_id)
+    return made
+
+
+async def _seed_rarely(events: ObservedEventRepository, tenant_id: str) -> list[str]:
+    """12 visitors opened the teapot in stock; the first added it to the cart."""
+    made: list[str] = []
+    kinds = [(ObservedEventType.PRODUCT_VIEWED, s) for s in SEEDED_RARELY_SESSIONS]
+    for kind, session_id in [*kinds, (ObservedEventType.CART_ADDED, SEEDED_RARELY_SESSIONS[0])]:
+        event_id = ids.new_id("obs")
+        await events.record(
+            tenant_id,
+            ObservedEvent(
+                event_id=event_id,
+                session_id=session_id,
+                type=kind,
+                product_id=SEEDED_RARELY_ID,
+                occurred_at=datetime.now(UTC),
+                in_stock=True if kind is ObservedEventType.PRODUCT_VIEWED else None,
             ),
         )
         made.append(event_id)
