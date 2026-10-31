@@ -14,8 +14,9 @@ What this package does enforce, in code rather than in a prompt:
 * how long it lives — the retention sweep in ``neura_api.jobs.retention``.
 
 **Nothing is scored, and nothing is shown to a shopper.** Phase 2 is the
-points table. The one thing shown is ADR-0046 stage 1's merchant-facing count of
-views of sold-out products — counts only, never a session.
+points table. What is shown is merchant-facing and counts only, never a
+session: ADR-0046 stage 1's views of sold-out products, and ADR-0071's in-stock
+products many visitors opened and few added to the cart.
 """
 
 from neura_core.observation.models import (
@@ -25,16 +26,25 @@ from neura_core.observation.models import (
     ObservedEventType,
     inadmissible,
 )
-from neura_core.observation.repository import ObservedEventRepository, SoldOutDemand
+from neura_core.observation.repository import (
+    RARELY_MIN_VISITORS,
+    RARELY_ONE_IN,
+    ObservedEventRepository,
+    RarelyAdded,
+    SoldOutDemand,
+)
 from neura_core.observation.schema import OBSERVED_EVENTS, observed_events
 
 __all__ = [
     "CLOCK_SKEW",
     "OBSERVED_EVENTS",
     "OBSERVE_WRITE",
+    "RARELY_MIN_VISITORS",
+    "RARELY_ONE_IN",
     "ObservedEvent",
     "ObservedEventRepository",
     "ObservedEventType",
+    "RarelyAdded",
     "SoldOutDemand",
     "inadmissible",
     "observed_events",
