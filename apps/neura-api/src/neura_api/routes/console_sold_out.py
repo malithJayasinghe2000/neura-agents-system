@@ -373,7 +373,8 @@ def _rarely_caveats(products: Sequence[RarelyAdded]) -> list[str]:
         return []
     return [
         "A visitor is one browsing session, not one person: someone on two devices counts "
-        "twice, and search-engine crawlers are counted too. We never know who the shopper was.",
+        "twice. Your shop leaves out known search-engine robots; one it doesn't recognise "
+        "may still be counted. We never know who the shopper was.",
         "We see cart adds, not orders, so we can't say who bought.",
     ]
 
@@ -389,7 +390,8 @@ def _caveats(products: Sequence[SoldOutDemand], unknown: int) -> list[str]:
     if products:
         caveats.append(
             "A visit is one browsing session, not one person: someone on two devices counts "
-            "twice, and search-engine crawlers are counted too. We never know who the shopper was."
+            "twice. Your shop leaves out known search-engine robots; one it doesn't recognise "
+            "may still be counted. We never know who the shopper was."
         )
     if unknown:
         caveats.append(

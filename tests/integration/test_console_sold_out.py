@@ -376,7 +376,7 @@ class TestEachRow:
     async def test_a_session_is_said_not_to_be_a_person(self, client: TestClient, db, shop) -> None:
         await _seed(db, shop)
         caveats = " ".join(_get(client, shop).json()["data"]["caveats"])
-        assert "not one person" in caveats and "crawlers" in caveats
+        assert "not one person" in caveats and "known search-engine robots" in caveats
 
 
 class TestStockNow:

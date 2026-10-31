@@ -190,6 +190,8 @@ class TestTheTab:
             "last_viewed_at": green_tea["last_viewed_at"],
         }
         assert len(data["caveats"]) == 2
+        # G117: the shop leaves known robots out, and an unknown one is said plainly.
+        assert "leaves out known search-engine robots" in data["caveats"][0]
 
     def test_no_session_token_leaves(self, client: TestClient, team: Team) -> None:
         assert SESSION_PREFIX not in _tab(client, team, team.people[OWNER]).text

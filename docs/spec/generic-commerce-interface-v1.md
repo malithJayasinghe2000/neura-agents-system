@@ -262,6 +262,14 @@ can be issued without one in the first place. A `4xx` is permanent, a `5xx` or a
 timeout is worth a few retries, and a failed payload should not be kept forever
 on your side either.
 
+**Send nothing for a search-engine robot.** A crawler keeps no cookie, so every
+page it reads is a new session: sent, each crawl counts as a visitor who never
+adds to the cart, and a product a search engine reads often shows up on *Rarely
+added to cart* with no shopper at all (G117). Check the user agent on your
+server against a list of known robots (the reference bridge has one; a library
+such as CrawlerDetect is fuller) and send nothing for a match, or for a request
+with no user agent. The user agent itself is still never sent.
+
 **If your shop has a full-page cache, count cache hits.** A cached product page
 is served without being rendered, so a hook on rendering sees only the first
 visit — and loses most views of exactly the pages visited most. The reference

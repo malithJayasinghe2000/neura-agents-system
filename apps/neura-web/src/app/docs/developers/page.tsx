@@ -1068,6 +1068,12 @@ const VIEW_RULES: React.ReactNode[] = [
   <>{b("Nothing about who the shopper is.")} No name, email, IP address or browser details.</>,
   <>{b("Never slow a page down.")} Send in the background, for example from a queue.</>,
   <>
+    {b("Nothing for search-engine robots.")} Check the browser details on your server against a
+    list of known robots, and send nothing for one, or for a request with none. A robot keeps no
+    cookie, so each page it reads would count as a new visitor who never adds to the cart. The
+    browser details themselves are still never sent.
+  </>,
+  <>
     {b("Kept for 7 days, then deleted.")} If the agreement ends, everything is deleted at once.
   </>,
 ];

@@ -120,7 +120,11 @@ from a session that never opened the page does not count, sold-out, unknown and 
 shop's views never count); 6 route tests (the rows and the rule, no session token, the Owner only, both empty causes,
 Home's number); `make console-check` 287 passed, 0 failed (10 new: the tabs, the row, *Open the page*, what is left
 off, the rule and the caveat, no token, Home's line, a phone). **Found while building: G117**, search-engine crawlers
-count as visitors and can put a product on the list with no shopper; open, asked of the owner. **Not tested:** any
+count as visitors and can put a product on the list with no shopper. **Fixed the same day (the owner: A):** the
+reference bridge sends nothing for a known robot or a request with no user agent, judged on the shop's own server
+(the user agent is still never sent); the spec and the developer guide ask the same of every shop; the sentence
+under both tabs says known robots are left out and an unknown one may still count. Tested against 20 real robot
+and 9 real browser user agents (0 wrong); **not run live**, because sending is switched off on the test shop. **Not tested:** any
 real shop's traffic (no real shop sends views); a shop's photo drawn from another address.
 
 ## Alternatives considered
