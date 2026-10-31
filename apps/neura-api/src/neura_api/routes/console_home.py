@@ -1,6 +1,6 @@
 """What every member's Home reads beyond their own screens. ADR-0058, R12.
 
-    GET /v1/console/shops/{tenant_id}/home    {"mode", "practice", "handed", "waiting", "gaps", "wanted", "rarely_added"}
+    GET /v1/console/shops/{tenant_id}/home    {"mode", "practice", "handed", "waiting", "gaps", "wanted", "rarely_added", "calendar"}
 
 The Owner's Home reads Usage, which only the Owner may open (money). Support and
 the Developer see on Home only the parts about their own work (the owner's
@@ -27,7 +27,12 @@ So this route gives exactly those two facts and nothing else of Usage:
 * ``rarely_added`` only to a role that may open *Sold out* (``shop:sold_out:read``,
   the Owner, ADR-0071 §4): how many products *Rarely added to cart* lists, the
   tab's own count; ``null`` for any other. Whether the shop has NEURA-SELL is
-  the screen's to check, as for the Sold out card.
+  the screen's to check, as for the Sold out card;
+* ``calendar`` only to a role that may open the Marketing calendar
+  (``shop:calendar:write``, the Owner and Support, ADR-0072 §7): ``add_dates``
+  (*Add this year's special dates*) and ``ready`` (one line per plan ready for a
+  date still ahead); ``null`` for any other. Whether the shop has NEURA-GROW is
+  the screen's to check.
 """
 
 from __future__ import annotations
@@ -42,10 +47,12 @@ from neura_agent_core.waiting import WaitingAnswerRepository
 from neura_agent_core.wanted import WantedRepository
 from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
+from neura_api.routes.console_calendar import home_lines
 from neura_api.routes.console_sold_out import WINDOW_DAYS
 from neura_api.routes.console_usage import PERIODS
 from neura_core.identity import role_may
 from neura_core.identity.roles import (
+    CALENDAR_WRITE,
     CONVERSATIONS_READ,
     GAPS_WRITE,
     HANDOVERS_WRITE,
@@ -76,6 +83,7 @@ async def home(
     finds_gaps = role_may(actor.role, GAPS_WRITE)
     reads_wanted = role_may(actor.role, WANTED_READ)
     reads_sold_out = role_may(actor.role, SOLD_OUT_READ)
+    plans = role_may(actor.role, CALENDAR_WRITE)
     since = datetime.now(UTC) - timedelta(days=GAP_DAYS)
     async with request.app.state.database.tenant_session(actor.tenant_id) as session:
         tenant = await TenantRepository(session).get(actor.tenant_id)
@@ -108,6 +116,9 @@ async def home(
             if reads_sold_out
             else None
         )
+        calendar = (
+            await home_lines(session, actor.tenant_id, now=datetime.now(UTC)) if plans else None
+        )
 
     mode = tenant.config.mode.value if tenant else "unknown"
     return envelope(
@@ -119,6 +130,7 @@ async def home(
             "gaps": gaps,
             "wanted": wanted,
             "rarely_added": rarely_added,
+            "calendar": calendar,
         },
         request_id=getattr(request.state, "request_id", None),
     )

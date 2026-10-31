@@ -141,6 +141,15 @@ ROUTES: dict[tuple[str, str], str] = {
     ("GET", f"{_SHOP}/wanted"): WANTED,
     ("POST", f"{_SHOP}/wanted/hidden"): WANTED,
     ("DELETE", f"{_SHOP}/wanted/hidden/{{label}}"): WANTED,
+    # The Marketing calendar (ADR-0072; served by the console, so it names no agent).
+    ("GET", f"{_SHOP}/calendar"): CALENDAR,
+    ("GET", f"{_SHOP}/calendar/dates"): CALENDAR,
+    ("PUT", f"{_SHOP}/calendar/dates"): CALENDAR,
+    ("POST", f"{_SHOP}/calendar/dates/own"): CALENDAR,
+    ("DELETE", f"{_SHOP}/calendar/dates/own/{{date_id}}"): CALENDAR,
+    ("GET", f"{_SHOP}/calendar/plans/{{plan_id}}"): CALENDAR,
+    ("PUT", f"{_SHOP}/calendar/plans/{{plan_id}}/texts"): CALENDAR,
+    ("POST", f"{_SHOP}/calendar/plans/{{plan_id}}/again"): CALENDAR,
     # Suggestions (served by SELL, so it is SELL's own permission).
     ("GET", f"{_SELL}/suggestions"): SUGGESTIONS,
     ("GET", f"{_SELL}/suggestions/catalogue"): SUGGESTIONS,
