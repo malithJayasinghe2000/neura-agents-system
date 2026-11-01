@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
@@ -501,14 +501,6 @@ def short_link(base_url: str, code: str) -> str:
     return f"{base_url.rstrip('/')}/{code}"
 
 
-def by_place(values: Sequence[Link]) -> dict[Place, int]:
-    """Clicks per place, added together."""
-    totals: dict[Place, int] = {}
-    for link in values:
-        totals[link.place] = totals.get(link.place, 0) + link.clicks
-    return totals
-
-
 __all__ = [
     "CODE_ALPHABET",
     "CODE_LENGTH",
@@ -522,7 +514,6 @@ __all__ = [
     "Place",
     "Post",
     "PostClicks",
-    "by_place",
     "campaign_labels",
     "follow",
     "is_code",

@@ -62,6 +62,7 @@ from neura_agent_core.calendar import (
     this_years_list,
     year_saved,
 )
+from neura_agent_core.links import LinkRepository, Post, PostClicks
 from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.jobs.daily import book_daily_jobs
@@ -69,7 +70,7 @@ from neura_api.routes.console_gaps import paused
 from neura_commerce.sync.schema import synced_entities
 from neura_core import ConflictError, NotFoundError, ValidationError, get_logger
 from neura_core.identity import role_may
-from neura_core.identity.roles import CALENDAR_WRITE, GAPS_WRITE, WANTED_READ
+from neura_core.identity.roles import CALENDAR_WRITE, GAPS_WRITE, LINKS_WRITE, WANTED_READ
 from neura_core.jobs import JobQueue
 from neura_core.tenancy import TenantRepository
 
@@ -368,6 +369,14 @@ async def plan(
         ids += [str(f["product_id"]) for f in facts if f.get("product_id")]
         catalogue = await _catalogue(session, actor.tenant_id, ids)
         paused_since = await paused(request, session, actor.tenant_id, CALENDAR_PLANS)
+        # Each post's link chooser and clicks (ADR-0074 §6, board 80).
+        post_links = (
+            await LinkRepository(session).plan_posts(
+                actor.tenant_id, date_key=found.date_key, day=found.day
+            )
+            if role_may(actor.role, LINKS_WRITE)
+            else None
+        )
     return envelope(
         _plan(
             found,
@@ -380,6 +389,7 @@ async def plan(
                 "wanted": role_may(actor.role, WANTED_READ),
                 "gaps": role_may(actor.role, GAPS_WRITE),
             },
+            post_links=post_links,
         ),
         request_id=getattr(request.state, "request_id", None),
     )
@@ -394,6 +404,7 @@ def _plan(
     now: datetime,
     paused_since: datetime | None,
     links: Mapping[str, bool],
+    post_links: Mapping[Post, PostClicks] | None = None,
 ) -> dict[str, Any]:
     today = shop_today(country, now)
     zone = TIME_ZONES[country]
@@ -446,6 +457,16 @@ def _plan(
         and found.day >= today
         and found.state is not PlanState.MAKING,
         "links": dict(links),
+        # ``null`` for a role without Links; else each post's chooser and clicks.
+        "post_links": None
+        if post_links is None
+        else {
+            post.value: {
+                "product_id": found_post.product_id,
+                "clicks": {place.value: count for place, count in found_post.clicks.items()},
+            }
+            for post, found_post in post_links.items()
+        },
     }
 
 
