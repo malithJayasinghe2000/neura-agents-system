@@ -372,6 +372,7 @@ class TestAPlan:
             "url": "https://shop.example/p/4",
             "image": "https://shop.example/4.jpg",
             "price": {"amount": "1850.00", "currency": "LKR"},
+            "in_stock": True,
         }
         assert cinnamon["url"] is None, "only an http or https address is a link"
         assert [(f["kind"], f["shoppers"]) for f in data["act_on"]] == [("wanted", 8), ("gap", 3)]
@@ -454,6 +455,86 @@ class TestAPlan:
         assert paused.status_code == 409 and paused.json()["error"]["code"] == "PAUSED"
         data = client.get(f"{team.base()}/plans/{plan_id}", cookies=owner).json()["data"]
         assert data["paused_since"] is not None and data["can_make_again"] is False
+
+    async def test_change_products_keeps_the_owners_and_books_grows_job_at_once(
+        self, client: TestClient, db: Database, team: Team
+    ) -> None:
+        """D20 (R124 to R126): 1 to 3 of the shop's products, sold out or not."""
+        async with db.tenant_session(team.tenant) as session:
+            await session.execute(
+                insert(synced_entities).values(
+                    tenant_id=team.tenant,
+                    platform="generic",
+                    entity_type="product",
+                    external_id="9",
+                    neura_id="nr_9",
+                    fingerprint="f" * 32,
+                    document={
+                        "title": "Avurudu Fire Crackers",
+                        "url": "https://shop.example/p/9",
+                        "variants": [{"external_id": "9a", "in_stock": False}],
+                    },
+                )
+            )
+        plan_id = await _plan(db, team, await _own(db, team, 5), 5, "Sale")
+        support = cookie(team.people[SUPPORT])
+        path = f"{team.base()}/plans/{plan_id}/products"
+
+        chooser = client.get(f"{team.base()}/products?q=fire", cookies=support).json()["data"]
+        assert chooser["products"] == [
+            {"product_id": "9", "title": "Avurudu Fire Crackers", "in_stock": False}
+        ]
+        for body, code in (
+            ({"product_ids": []}, None),
+            ({"product_ids": ["4", "7", "9", "4"]}, None),
+            ({"product_ids": ["4", "4"]}, "PRODUCTS"),
+            ({"product_ids": ["4", "nope"]}, "PRODUCT_NOT_FOUND"),
+        ):
+            refused = client.put(path, json=body, cookies=support)
+            assert refused.status_code == 400, body
+            if code:
+                assert refused.json()["error"]["code"] == code
+
+        asked = client.put(path, json={"product_ids": ["9", "4"]}, cookies=support)
+        assert asked.status_code == 200, asked.text
+        assert asked.json()["data"] == {
+            "state": "making",
+            "booked": True,
+            "product_ids": ["9", "4"],
+        }
+        async with db.tenant_session(team.tenant) as session:
+            kept = await CalendarRepository(session).plan(team.tenant, plan_id)
+            kinds = (await session.execute(select(job_queue.c.kind))).scalars().all()
+        assert kept is not None and kept.owner_products == ("9", "4")
+        assert "grow.calendar.plans" in kinds
+        data = client.get(f"{team.base()}/plans/{plan_id}", cookies=support).json()["data"]
+        assert data["state"] == "making" and data["owner_products"] is True
+
+    async def test_change_products_is_refused_while_paused_or_once_the_date_passed(
+        self, client: TestClient, db: Database, team: Team
+    ) -> None:
+        owner = cookie(team.people[OWNER])
+        body = {"product_ids": ["4"]}
+        passed = await _plan(db, team, "s:christmas", -1, "Christmas")
+        refused = client.put(f"{team.base()}/plans/{passed}/products", json=body, cookies=owner)
+        assert refused.json()["error"]["code"] == "DATE_PASSED"
+        plan_id = await _plan(db, team, await _own(db, team, 5), 5, "Sale")
+        async with db.tenant_session(team.tenant) as session:
+            await SwitchRepository(session).set(team.tenant, "grow.calendar", on=False, by="usr_a")
+        paused = client.put(f"{team.base()}/plans/{plan_id}/products", json=body, cookies=owner)
+        assert paused.status_code == 409 and paused.json()["error"]["code"] == "PAUSED"
+
+    async def test_a_plan_says_what_is_sold_out_and_how_many_facts_it_was_given(
+        self, client: TestClient, db: Database, team: Team
+    ) -> None:
+        plan_id = await _plan(db, team, await _own(db, team, 5), 5, "Sale")
+        data = client.get(
+            f"{team.base()}/plans/{plan_id}", cookies=cookie(team.people[OWNER])
+        ).json()["data"]
+        assert [p["in_stock"] for p in data["products"]] == [True, True]
+        assert data["owner_products"] is False
+        # A plan stored before facts_given was kept says nothing either way.
+        assert data["facts_given"] is None
 
     async def test_another_shops_plan_is_no_such_plan(
         self, client: TestClient, db: Database, team: Team

@@ -4626,6 +4626,7 @@ async def _check_links(
     from neura_core.identity.schema import login_tokens, memberships, users
     from neura_core.tenancy import TenantRepository
     from neura_core.tenancy.removal import remove_tenant
+    from neura_core.tenancy.switches import SwitchRepository
 
     tenant = ids.new_id(ids.TENANT)
     base = f"{console}/console/{tenant}"
@@ -4724,9 +4725,10 @@ async def _check_links(
                     id=ids.new_id(ids.MEMBERSHIP), tenant_id=tenant, user_id=user_id, role="owner"
                 )
             )
-            for product_id, title in (
-                ("cl-tea", "Console-check Links Tea"),
-                ("cl-cinnamon", "Console-check Links Cinnamon"),
+            for product_id, title, stocked in (
+                ("cl-tea", "Console-check Links Tea", True),
+                ("cl-cinnamon", "Console-check Links Cinnamon", True),
+                ("cl-crackers", "Console-check Links Crackers", False),
             ):
                 await session.execute(
                     synced_entities.insert().values(
@@ -4736,7 +4738,11 @@ async def _check_links(
                         external_id=product_id,
                         neura_id=f"nr_{product_id}",
                         fingerprint="c" * 32,
-                        document={"title": title, "url": f"https://shop.example/{product_id}"},
+                        document={
+                            "title": title,
+                            "url": f"https://shop.example/{product_id}",
+                            "variants": [{"external_id": f"{product_id}-v", "in_stock": stocked}],
+                        },
                     )
                 )
             repository = CalendarRepository(session)
@@ -4898,6 +4904,65 @@ async def _check_links(
             failures,
         )
 
+        # D20 (R124 to R126): Change products, without asking the AI.
+        _check(
+            "a plan with nothing that fits says so, not that shoppers asked nothing (G125)",
+            "Nothing your shoppers asked fits this date" in page,
+            failures,
+        )
+        panel = await click("[data-change-products]", wait=3)
+        _check(
+            "Change products: the plan's two, and a sold-out one to add, said so",
+            "Products for this plan" in panel
+            and "Choose 1 to 3." in panel
+            and bool(
+                await browser.evaluate(
+                    "document.querySelectorAll('[data-chosen-product]').length === 2"
+                    " && [...document.querySelectorAll('[data-add-product-choice] option')]"
+                    ".some(o => o.textContent.includes('Crackers (sold out now)'))"
+                )
+            ),
+            failures,
+        )
+        await click("[data-add-product]", wait=1)
+        full = str(await browser.evaluate("document.body.innerText"))
+        _check(
+            "added: three products, Sold out now on the new one, and no more can be added",
+            bool(
+                await browser.evaluate(
+                    "document.querySelectorAll('[data-chosen-product]').length === 3"
+                    ' && !!document.querySelector(\'[data-chosen-product="cl-crackers"]'
+                    " [data-sold-out-now]')"
+                    " && !document.querySelector('[data-add-product]')"
+                )
+            )
+            and "A plan has at most 3 products." in full,
+            failures,
+        )
+        await click("[data-remove-product]", wait=1)
+        _check(
+            "removed: two left",
+            bool(
+                await browser.evaluate(
+                    "document.querySelectorAll('[data-chosen-product]').length === 2"
+                )
+            ),
+            failures,
+        )
+        async with db.tenant_session(tenant) as session:
+            await SwitchRepository(session).set(tenant, "grow.calendar", on=False, by=user_id)
+        refused = await click("[data-write-again]", wait=3)
+        async with db.tenant_session(tenant) as session:
+            kept = await CalendarRepository(session).plan(tenant, plan.id)
+            await SwitchRepository(session).set(tenant, "grow.calendar", on=True, by=user_id)
+        _check(
+            "Write the plan again while paused: refused, said, and nothing is kept",
+            "FiveNeurals has paused the plans for this shop." in refused
+            and kept is not None
+            and kept.owner_products is None
+            and kept.requested_at is None,
+            failures,
+        )
         page = await shown(browser, f"{base}/links/new", wait=4)
         _check(
             "Make a link: product, where you'll post it, name",

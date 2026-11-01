@@ -113,6 +113,38 @@ class TestProducts:
         assert isinstance(check(_answer(product_ids=[], act_on=[]), empty), CheckedPlan)
 
 
+class TestTheOwnersProducts:
+    """D20 (R124, R125): the owner chose 1 to 3 products; the plan uses every one."""
+
+    def test_every_chosen_product_and_no_other(self) -> None:
+        chosen = PlanInput(
+            shop="s", name="Avurudu", day=date(2027, 4, 14), products=PRODUCTS, chosen=True
+        )
+        assert chosen.shown == (3, 3)
+        assert isinstance(
+            check(_answer(product_ids=["8", "4", "7"], act_on=[]), chosen), CheckedPlan
+        )
+        assert check(_answer(product_ids=["4", "7"], act_on=[]), chosen) == "product"
+        assert check(_answer(product_ids=["4", "7", "999"], act_on=[]), chosen) == "product"
+
+    def test_one_chosen_product_is_enough_and_said_in_the_singular(self) -> None:
+        one = PlanInput(
+            shop="s", name="Avurudu", day=date(2027, 4, 14), products=PRODUCTS[:1], chosen=True
+        )
+        assert one.shown == (1, 1)
+        assert isinstance(check(_answer(product_ids=["4"], act_on=[]), one), CheckedPlan)
+        assert render(one).endswith("Choose 1 product.")
+        assert render(GIVEN).endswith("Choose 2 or 3 products.")
+
+    def test_the_plan_says_how_many_facts_it_was_given(self) -> None:
+        checked = check(_answer(act_on=[]), GIVEN)
+        assert isinstance(checked, CheckedPlan)
+        assert checked.stored()["facts_given"] == 2
+        none = PlanInput(shop="s", name="n", day=date(2027, 1, 1), products=PRODUCTS)
+        alone = check(_answer(act_on=[]), none)
+        assert isinstance(alone, CheckedPlan) and alone.stored()["facts_given"] == 0
+
+
 class TestFacts:
     def test_a_ref_it_was_not_given_is_refused(self) -> None:
         assert check(_answer(act_on=["w9"]), GIVEN) == "fact"

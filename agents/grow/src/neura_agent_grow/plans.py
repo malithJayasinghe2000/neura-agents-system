@@ -12,7 +12,8 @@ as *could not be made* and is not tried again by itself: the page offers *Make
 it again*, so a date never costs more than two calls a night unasked.
 
 **What the model is given** comes from the shared core, never from a chat: the
-synced catalogue (up to 100 products in stock), and the labels and counts on
+synced catalogue (up to 100 products in stock; **or exactly the products the
+owner chose for the plan**, sold out or not, D20), and the labels and counts on
 *Shoppers asked for* and *Missing from your pages*, with the same 30 days and
 2-shopper rule as those pages (a thing the owner hid stays out).
 
@@ -32,6 +33,7 @@ from sqlalchemy import select
 from neura_agent_core.calendar import (
     PLAN_DAYS_BEFORE,
     CalendarRepository,
+    in_stock,
     kept_occurrences,
     shop_today,
 )
@@ -78,24 +80,29 @@ class _Work:
     date_key: str
     day: date
     name: str
+    #: The owner's products for this plan (D20), or ``None``: the AI chooses.
+    chosen: tuple[str, ...] | None = None
 
 
-def _in_stock(document: Mapping[str, Any]) -> bool:
-    """Published, and not every variant that reports stock says it is out."""
-    if str(document.get("status") or "").lower() in {"draft", "archived"}:
-        return False
-    reported = [
-        variant.get("in_stock")
-        for variant in document.get("variants") or []
-        if isinstance(variant, dict) and variant.get("in_stock") is not None
-    ]
-    return not reported or any(reported)
+@dataclass(frozen=True, slots=True)
+class Catalogue:
+    """What the night run reads of the synced catalogue, once per shop."""
+
+    #: Up to 100 products in stock, by title: what the AI chooses from.
+    stocked: list[CatalogueItem]
+    #: More than 100 were in stock.
+    cut: bool
+    #: Every product with a title, in stock or not, by id: the owner's choices
+    #: are found here (R126), and a gap's product is named from it.
+    every: dict[str, CatalogueItem]
+
+    @property
+    def titles(self) -> dict[str, str]:
+        return {product_id: item.title for product_id, item in self.every.items()}
 
 
-async def catalogue(
-    session: Any, tenant_id: str
-) -> tuple[list[CatalogueItem], bool, dict[str, str]]:
-    """Up to 100 products in stock, by title; whether more were cut; every title."""
+async def catalogue(session: Any, tenant_id: str) -> Catalogue:
+    """Up to 100 products in stock, by title; whether more were cut; every product."""
     entities = synced_entities.c
     rows = (
         await session.execute(
@@ -111,7 +118,7 @@ async def catalogue(
         for row in rows
         if row.entity_type == "category"
     }
-    titles: dict[str, str] = {}
+    every: dict[str, CatalogueItem] = {}
     stocked: list[CatalogueItem] = []
     for row in rows:
         if row.entity_type != "product":
@@ -120,18 +127,17 @@ async def catalogue(
         title = str(document.get("title") or "").strip()
         if not title:
             continue
-        titles[str(row.external_id)] = title
-        if _in_stock(document):
-            categories = [str(c) for c in document.get("category_ids") or []]
-            stocked.append(
-                CatalogueItem(
-                    id=str(row.external_id),
-                    title=title,
-                    category=next((names[c] for c in categories if names.get(c)), ""),
-                )
-            )
+        categories = [str(c) for c in document.get("category_ids") or []]
+        item = CatalogueItem(
+            id=str(row.external_id),
+            title=title,
+            category=next((names[c] for c in categories if names.get(c)), ""),
+        )
+        every[item.id] = item
+        if in_stock(document):
+            stocked.append(item)
     stocked.sort(key=lambda item: (item.title.lower(), item.id))
-    return stocked[:MAX_PRODUCTS], len(stocked) > MAX_PRODUCTS, titles
+    return Catalogue(stocked=stocked[:MAX_PRODUCTS], cut=len(stocked) > MAX_PRODUCTS, every=every)
 
 
 async def facts(
@@ -182,7 +188,7 @@ async def make_plans(
             if plan.day < today:
                 await repository.forget_request(tenant_id, plan.id)
             else:
-                work.append(_Work(plan.date_key, plan.day, plan.name))
+                work.append(_Work(plan.date_key, plan.day, plan.name, plan.owner_products))
         if not asked_only:
             made = {(p.date_key, p.day) for p in await repository.plans(tenant_id, since=today)}
             due = kept_occurrences(
@@ -200,14 +206,12 @@ async def make_plans(
         if not work:
             return result
         tenant = await TenantRepository(session).get(tenant_id)
-        products, cut, titles = await catalogue(session, tenant_id)
-        known = await facts(session, tenant_id, now=now, titles=titles)
+        found_catalogue = await catalogue(session, tenant_id)
+        known = await facts(session, tenant_id, now=now, titles=found_catalogue.titles)
 
     shop = (tenant.name if tenant is not None else None) or "the shop"
     for item in work:
-        given = PlanInput(
-            shop=shop, name=item.name, day=item.day, products=products, facts=known, cut=cut
-        )
+        given = _given(item, shop=shop, found=found_catalogue, known=known)
         found = await write_plan(given, llm=llm, prompt=prompt)
         result.calls += found.calls
         if not found.reachable:
@@ -249,4 +253,22 @@ async def make_plans(
     return result
 
 
-__all__ = ["MAX_PLANS_PER_RUN", "PlansResult", "catalogue", "facts", "make_plans"]
+def _given(item: _Work, *, shop: str, found: Catalogue, known: list[Fact]) -> PlanInput:
+    """What the model is given for one date: the owner's products when they chose
+    (those still in the catalogue), else the products in stock for it to choose."""
+    chosen = [found.every[i] for i in item.chosen or () if i in found.every]
+    if chosen:
+        return PlanInput(
+            shop=shop, name=item.name, day=item.day, products=chosen, facts=known, chosen=True
+        )
+    return PlanInput(
+        shop=shop,
+        name=item.name,
+        day=item.day,
+        products=found.stocked,
+        facts=known,
+        cut=found.cut,
+    )
+
+
+__all__ = ["MAX_PLANS_PER_RUN", "Catalogue", "PlansResult", "catalogue", "facts", "make_plans"]

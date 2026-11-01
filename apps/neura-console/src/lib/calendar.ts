@@ -94,7 +94,12 @@ export type PlanProduct = {
   url?: string | null;
   image?: string | null;
   price?: Price | null;
+  /** `false`: *Sold out now* (R126). */
+  in_stock?: boolean;
 };
+
+/** *Change products*' chooser (D20): any product the shop sells, sold out or not. */
+export type PlanChoice = { product_id: string; title: string | null; in_stock: boolean };
 
 /** The draft texts, in the order the page shows them. */
 export const TEXT_FIELDS = [
@@ -135,6 +140,10 @@ export type Plan = {
   can_make_again: boolean;
   /** Which GROW pages this role may open, for the links under *Act on this first*. */
   links: { wanted: boolean; gaps: boolean };
+  /** The owner chose the products (D20): *Chosen by you*. */
+  owner_products: boolean;
+  /** How many shoppers' facts the AI was given; `null` for an older plan (G125). */
+  facts_given: number | null;
   /** Each post's link chooser and clicks (ADR-0074, board 80); `null` without Links. */
   post_links: PostLinks;
 };

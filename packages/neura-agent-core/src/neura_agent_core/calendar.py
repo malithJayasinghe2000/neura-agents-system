@@ -87,6 +87,8 @@ LAUNCH_DAYS = 7
 LAST_CHANCE_DAYS = 2
 
 MAX_NAME_CHARS = 60
+#: The most products the owner may choose for a plan (D20, R125: 1 to 3).
+MAX_OWNER_PRODUCTS = 3
 #: The longest text the owner may save over a draft. The owner's own words are
 #: not checked as the model's are: filling in *[your offer]* is their job.
 MAX_EDIT_CHARS = 3000
@@ -310,6 +312,10 @@ calendar_plans = Table(
     #: *Make it again*, pressed and not yet answered.
     Column("requested_at", DateTime(timezone=True), nullable=True),
     Column("requested_by", String(64), nullable=True),
+    #: The products the owner chose (D20, R124), by id: the plan is written
+    #: around exactly these, and *Make it again* keeps them. ``NULL``: the AI
+    #: chooses from the products in stock (ADR-0072 §5).
+    Column("owner_products", JSONB, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Index("uq_calendar_plans_date", "tenant_id", "date_key", "day", unique=True),
     Index("ix_calendar_plans_day", "tenant_id", "day"),
@@ -533,6 +539,8 @@ class Plan:
     failed_at: datetime | None = None
     failure: str | None = None
     requested_at: datetime | None = None
+    #: The owner's products (D20), or ``None`` when the AI chooses.
+    owner_products: tuple[str, ...] | None = None
 
     @property
     def state(self) -> PlanState:
@@ -571,7 +579,23 @@ def _plan(row: Any) -> Plan:
         failed_at=row.failed_at,
         failure=row.failure,
         requested_at=row.requested_at,
+        owner_products=(tuple(str(i) for i in row.owner_products) if row.owner_products else None),
     )
+
+
+def in_stock(document: Mapping[str, Any]) -> bool:
+    """A synced product that can be bought now: published, and not every variant
+    that reports stock says it is out. The plan writer offers the AI only these
+    (ADR-0072 §5); the owner may choose any, and the page says *Sold out now*
+    (R126)."""
+    if str(document.get("status") or "").lower() in {"draft", "archived"}:
+        return False
+    reported = [
+        variant.get("in_stock")
+        for variant in document.get("variants") or []
+        if isinstance(variant, dict) and variant.get("in_stock") is not None
+    ]
+    return not reported or any(reported)
 
 
 class CalendarRepository:
@@ -803,6 +827,18 @@ class CalendarRepository:
         )
         return await self.plan(tenant_id, plan_id)
 
+    async def choose_products(
+        self, tenant_id: str, plan_id: str, product_ids: Sequence[str], *, by: str
+    ) -> Plan | None:
+        """*Write the plan again* with the owner's products (D20, R124): kept on
+        the plan, so a later *Make it again* keeps them too, and asked at once."""
+        await self._session.execute(
+            update(calendar_plans)
+            .where(calendar_plans.c.tenant_id == tenant_id, calendar_plans.c.id == plan_id)
+            .values(owner_products=list(product_ids), requested_at=func.now(), requested_by=by)
+        )
+        return await self.plan(tenant_id, plan_id)
+
     async def asked_again(self, tenant_id: str) -> list[Plan]:
         """The plans waiting for *Make it again*, oldest request first."""
         result = await self._session.execute(
@@ -850,6 +886,7 @@ __all__ = [
     "LAUNCH_DAYS",
     "MAX_EDIT_CHARS",
     "MAX_NAME_CHARS",
+    "MAX_OWNER_PRODUCTS",
     "MOVING_DAYS",
     "PLANS_KEPT_DAYS",
     "PLAN_DAYS_BEFORE",
@@ -873,6 +910,7 @@ __all__ = [
     "calendar_dates",
     "calendar_plans",
     "calendar_settings",
+    "in_stock",
     "kept_occurrences",
     "last_working_day",
     "moving_day",

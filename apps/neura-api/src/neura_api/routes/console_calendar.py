@@ -8,6 +8,8 @@
     GET    /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}      a plan
     PUT    /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}/texts   Save an edit
     POST   /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}/again   Make it again
+    PUT    /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}/products   Change products
+    GET    /v1/console/shops/{tenant_id}/calendar/products              Change products' chooser
 
 **The console's own route, not GROW's** (as the other GROW pages, G88): the dates
 and plans live in the shared core (``neura_agent_core.calendar``), only GROW's
@@ -24,7 +26,10 @@ idea and the drafts are the model's words, after the checks.
 **Every write books the shop's daily jobs** (a no-op when they are booked), so
 GROW's night run reaches a shop with no chats (ADR-0072 §8, R96). *Make it
 again* books the job a manifest's ``on_demand`` names for this page, to run at
-once (R95), and is refused while FiveNeurals has paused the plans.
+once (R95), and is refused while FiveNeurals has paused the plans. *Change
+products* (D20, R124 to R126, ADR-0076) is the same request with the owner's 1 to
+3 products, any the shop sells, sold out or not: they are kept on the plan, so a
+later *Make it again* keeps them.
 """
 
 from __future__ import annotations
@@ -34,7 +39,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
@@ -43,6 +48,7 @@ from neura_agent_core.calendar import (
     COMING_UP_MONTHS,
     MAX_EDIT_CHARS,
     MAX_NAME_CHARS,
+    MAX_OWNER_PRODUCTS,
     PLAN_DAYS_BEFORE,
     QUIET_MONTHS,
     SUGGESTED_BY_KEY,
@@ -55,6 +61,7 @@ from neura_agent_core.calendar import (
     Plan,
     PlanState,
     add_months,
+    in_stock,
     kept_occurrences,
     post_days,
     shop_today,
@@ -67,6 +74,7 @@ from neura_api.dependencies import ConsoleActor, Permitted
 from neura_api.envelopes import envelope
 from neura_api.jobs.daily import book_daily_jobs
 from neura_api.routes.console_gaps import paused
+from neura_api.routes.console_links import product_choices
 from neura_commerce.sync.schema import synced_entities
 from neura_core import ConflictError, NotFoundError, ValidationError, get_logger
 from neura_core.identity import role_may
@@ -120,6 +128,13 @@ class Texts(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     texts: dict[str, str] = Field(min_length=1, max_length=len(TEXT_FIELDS))
+
+
+class Products(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: The owner's products, by id: 1 to 3 (R125).
+    product_ids: list[str] = Field(min_length=1, max_length=MAX_OWNER_PRODUCTS)
 
 
 # ── The page: Coming up ──────────────────────────────────────────────────────
@@ -457,6 +472,11 @@ def _plan(
         and found.day >= today
         and found.state is not PlanState.MAKING,
         "links": dict(links),
+        # The owner chose the products (D20): *Chosen by you*, kept by *Make it again*.
+        "owner_products": found.owner_products is not None,
+        # How many shoppers' facts the AI was given; ``null`` for a plan made
+        # before it was stored. With none chosen, the page says why (G125).
+        "facts_given": answer.get("facts_given"),
         # ``null`` for a role without Links; else each post's chooser and clicks.
         "post_links": None
         if post_links is None
@@ -528,6 +548,67 @@ async def make_it_again(
     )
 
 
+@router.put(
+    "/calendar/plans/{plan_id}/products",
+    summary="Change products: the plan written again around the owner's, at once",
+)
+async def change_products(
+    body: Products,
+    request: Request,
+    actor: Writer,
+    plan_id: Annotated[str, Path(min_length=1, max_length=64)],
+) -> dict[str, Any]:
+    ids = [product_id.strip() for product_id in body.product_ids]
+    if any(not i or len(i) > 255 for i in ids) or len(set(ids)) != len(ids):
+        raise ValidationError(
+            f"Choose 1 to {MAX_OWNER_PRODUCTS} different products.", code="PRODUCTS"
+        )
+    now = datetime.now(UTC)
+    async with request.app.state.database.tenant_session(actor.tenant_id) as session:
+        repository = CalendarRepository(session)
+        found = await repository.plan(actor.tenant_id, plan_id)
+        if found is None or found.answer is None:
+            raise NotFoundError("No such plan.", details={"id": plan_id})
+        if await paused(request, session, actor.tenant_id, CALENDAR_PLANS) is not None:
+            raise ConflictError("FiveNeurals has paused the plans for this shop.", code="PAUSED")
+        if found.day < shop_today(await repository.country(actor.tenant_id), now):
+            raise ConflictError("This date has passed.", code="DATE_PASSED")
+        catalogue = await _catalogue(session, actor.tenant_id, ids)
+        missing = [i for i in ids if not (catalogue.get(i) or {}).get("title")]
+        if missing:
+            raise ValidationError(
+                "No such product in your shop.",
+                code="PRODUCT_NOT_FOUND",
+                details={"product_ids": missing},
+            )
+        await repository.choose_products(actor.tenant_id, plan_id, ids, by=actor.user_id)
+        booked = await _book_now(request, session, actor.tenant_id, now=now)
+    log.info(
+        "console_calendar_products",
+        tenant_id=actor.tenant_id,
+        by=actor.user_id,
+        products=len(ids),
+        booked=booked,
+    )
+    return envelope(
+        {"state": PlanState.MAKING.value, "booked": booked, "product_ids": ids},
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
+@router.get("/calendar/products", summary="Change products: the products the owner may choose")
+async def calendar_products(
+    request: Request,
+    actor: Writer,
+    q: Annotated[str, Query(max_length=100)] = "",
+) -> dict[str, Any]:
+    async with request.app.state.database.tenant_session(actor.tenant_id) as session:
+        found, more = await product_choices(session, actor.tenant_id, q)
+    return envelope(
+        {"products": found, "more": more}, request_id=getattr(request.state, "request_id", None)
+    )
+
+
 async def _book_now(request: Request, session: Any, tenant_id: str, *, now: datetime) -> bool:
     """Book, to run now, the job a manifest says makes this page's plans (R95)."""
     tenant = await TenantRepository(session).get(tenant_id)
@@ -571,6 +652,8 @@ async def _catalogue(session: Any, tenant_id: str, ids: Sequence[str]) -> dict[s
             "title": document.get("title"),
             "url": _http(document.get("url")),
             "image": _http(next(iter(document.get("image_urls") or []), None)),
+            # *Sold out now* (R126): the owner may choose one, and is told.
+            "in_stock": in_stock(document),
             "price": (
                 {"amount": str(price["amount"]), "currency": str(price.get("currency") or "")}
                 if isinstance(price, dict) and price.get("amount")

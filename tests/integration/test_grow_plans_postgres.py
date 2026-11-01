@@ -392,6 +392,54 @@ async def test_make_it_again_is_answered_at_once_and_the_edits_go(db: Database) 
     assert again.edits == {}
 
 
+async def test_the_owners_products_are_written_around_and_kept_for_make_it_again(
+    db: Database,
+) -> None:
+    """D20 (R124 to R126): exactly the owner's products, a sold-out one included."""
+    await _shop(db)
+    await _own(db, 10)
+    await _make(db, _Model())
+    [plan] = await _plans(db)
+    async with db.tenant_session(GROWING) as session:
+        await CalendarRepository(session).choose_products(GROWING, plan.id, ["7", "4"], by=BY)
+    model = _Model(_answer(product_ids=["4", "5"]), _answer(product_ids=["7", "4"]))
+
+    await CalendarPlansHandler(model)(_Context(db, GROWING, await _running(db, CALENDAR_PLANS)))
+
+    # Not the products in stock: the owner's two, the sold-out tea too, and
+    # the first answer (which swapped one) refused for it.
+    assert "Sold Out Tea" in model.seen[0] and "Green Tea Loose Leaf" not in model.seen[0]
+    assert model.seen[0].endswith("Choose 2 products.")
+    assert len(model.seen) == 2
+    [made] = await _plans(db)
+    assert made.answer is not None and made.answer["products"] == ["7", "4"]
+    assert made.owner_products == ("7", "4")
+
+    async with db.tenant_session(GROWING) as session:
+        await CalendarRepository(session).ask_again(GROWING, plan.id, by=BY)
+    again = _Model(_answer(product_ids=["4", "7"]))
+    await CalendarPlansHandler(again)(_Context(db, GROWING, await _running(db, CALENDAR_PLANS)))
+    assert "Sold Out Tea" in again.seen[0]
+    [kept] = await _plans(db)
+    assert kept.owner_products == ("7", "4")
+
+
+async def test_an_owners_product_gone_from_the_catalogue_is_left_out(db: Database) -> None:
+    await _shop(db)
+    await _own(db, 10)
+    await _make(db, _Model())
+    [plan] = await _plans(db)
+    async with db.tenant_session(GROWING) as session:
+        await CalendarRepository(session).choose_products(GROWING, plan.id, ["gone", "5"], by=BY)
+    model = _Model(_answer(product_ids=["5"]))
+
+    await CalendarPlansHandler(model)(_Context(db, GROWING, await _running(db, CALENDAR_PLANS)))
+
+    assert model.seen[0].endswith("Choose 1 product.")
+    [made] = await _plans(db)
+    assert made.answer is not None and made.answer["products"] == ["5"]
+
+
 async def test_make_it_again_with_an_outage_makes_the_queue_retry(db: Database) -> None:
     await _shop(db)
     await _own(db, 10)

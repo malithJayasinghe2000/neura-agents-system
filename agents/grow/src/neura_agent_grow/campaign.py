@@ -11,7 +11,8 @@ shop's catalogue and labels derived from shoppers' words, and what it writes is
 published by the shop under its own name, so :func:`check` refuses an answer
 that:
 
-* names a product id it was not given, or the wrong number of products;
+* names a product id it was not given, or the wrong number of products (when
+  the owner chose the products, D20, every one of them and no other);
 * names a fact it was not given, or more than three;
 * holds a price or an offer (a ``%``, a currency sign or code, a number followed
   by *off*, *free*, *half price*): the place for one is **[your offer]**;
@@ -176,11 +177,16 @@ class PlanInput:
     facts: Sequence[Fact] = ()
     #: The catalogue had more in-stock products than :data:`MAX_PRODUCTS`.
     cut: bool = False
+    #: ``products`` are the owner's own choice (D20, R124): the plan uses every
+    #: one of them, sold out or not, and no other.
+    chosen: bool = False
 
     @property
     def shown(self) -> tuple[int, int]:
         """How many products the plan must choose: at least, at most."""
         have = len(self.products)
+        if self.chosen:
+            return have, have
         return min(MIN_PRODUCTS, have), min(MAX_SHOWN, have)
 
 
@@ -211,6 +217,9 @@ class CheckedPlan:
     act_on: tuple[Fact, ...]
     texts: dict[str, str]
     cut: bool = False
+    #: How many facts the model was given: with none chosen, the page says
+    #: whether there was nothing to choose from or nothing fitted (G125).
+    facts_given: int = 0
 
     def stored(self) -> dict[str, Any]:
         """The plan as ``calendar_plans.answer`` holds it: labels and counts only."""
@@ -229,6 +238,7 @@ class CheckedPlan:
             ],
             "texts": dict(self.texts),
             "catalogue_cut": self.cut,
+            "facts_given": self.facts_given,
         }
 
 
@@ -319,6 +329,7 @@ def check(answer: PlanAnswer, given: PlanInput) -> CheckedPlan | str:
         act_on=tuple(facts[ref] for ref in refs),
         texts={name: cleaned[name] for name in TEXT_FIELDS},
         cut=given.cut,
+        facts_given=len(given.facts),
     )
 
 
@@ -361,7 +372,8 @@ def render(given: PlanInput) -> str:
         f"email on {_long(posts['launch'])}, the last chance post on "
         f"{_long(posts['last_chance'])}. The banner runs from {_long(posts['launch'])} "
         f"to the day before the date.\n"
-        f"Choose {least if least == most else f'{least} or {most}'} products."
+        f"Choose {least if least == most else f'{least} or {most}'} "
+        f"{'product' if most == 1 else 'products'}."
     )
 
 

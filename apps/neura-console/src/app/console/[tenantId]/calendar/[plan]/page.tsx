@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, ExternalLink, ImageIcon, Link as LinkIcon, LoaderCircle } from "lucide-react";
+import { ChangeProducts, SoldOutNow } from "@/components/calendar/change-products";
 import { DraftCard } from "@/components/calendar/draft-card";
 import { PostLinks } from "@/components/links/post-links";
 import { MakeAgain, WhileMaking } from "@/components/calendar/make-again";
@@ -186,17 +187,40 @@ export default async function PlanPage({
               </>
             ) : (
               <p data-products-alone className="text-sm text-muted-foreground">
-                Your shoppers haven&apos;t asked about anything for this yet, so this plan is from
-                your products alone.
+                {/* G125: say why there is nothing, not that shoppers asked nothing. */}
+                {plan.facts_given === 0
+                  ? "Your shoppers haven't asked about anything for this yet, so this plan is from your products alone."
+                  : "Nothing your shoppers asked fits this date, so this plan is from your products alone."}
               </p>
             )}
           </section>
 
           {plan.products.length ? (
             <section className="space-y-3" aria-labelledby="products">
-              <h2 id="products" className="text-[17px] font-semibold">
-                Products to show
-              </h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <h2 id="products" className="text-[17px] font-semibold">
+                    Products to show
+                  </h2>
+                  {plan.owner_products ? (
+                    <p data-chosen-by-you className="text-[13px] text-muted-foreground">
+                      Chosen by you. Make it again keeps them.
+                    </p>
+                  ) : null}
+                </div>
+                {plan.can_make_again ? (
+                  <ChangeProducts
+                    tenantId={tenantId}
+                    planId={plan.id}
+                    edited={plan.edited.length > 0}
+                    current={plan.products.map((product) => ({
+                      product_id: product.product_id,
+                      title: product.title,
+                      in_stock: product.in_stock !== false,
+                    }))}
+                  />
+                ) : null}
+              </div>
               <ul className="grid gap-3 sm:grid-cols-3">
                 {plan.products.map((product) => (
                   <ProductCard key={product.product_id} product={product} />
@@ -441,6 +465,11 @@ function ProductCard({ product }: { product: PlanProduct }) {
           <p className="font-semibold break-words">
             {product.title ?? "No longer in your synced catalogue"}
           </p>
+          {product.in_stock === false ? (
+            <div className="pt-1">
+              <SoldOutNow />
+            </div>
+          ) : null}
           {money(product.price ?? null) ? (
             <p className="text-sm text-muted-foreground">{money(product.price ?? null)}</p>
           ) : null}

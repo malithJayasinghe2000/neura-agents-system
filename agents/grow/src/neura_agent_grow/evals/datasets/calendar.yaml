@@ -252,3 +252,49 @@ cases:
     notes: >-
       Not a tea shop: a product title with a number in it (25W) must not read
       as a price.
+
+  - id: calendar_011
+    intent: plan
+    synthetic: true
+    tags: [calendar, owner_products]
+    input: |
+      Shop: Lanka Festive Store
+      Date: Avurudu, 2027-04-14
+      Chosen:
+      - f9 | Avurudu Fire Crackers Pack | Festive
+      Wanted:
+      - oil lamp | 4
+    expect:
+      intent: plan
+      tools_called: []
+      unauthorised_tool_calls: 0
+      must_contain: ["products (1): f9", "Avurudu Fire Crackers Pack"]
+      must_not_contain: ["%", "LKR", "free"]
+    notes: >-
+      D20 (R124 to R126): the owner chose one product, sold out today (the AI
+      is not told), and the plan is written around it alone: exactly that id,
+      named in the launch post, no other product invented.
+
+  - id: calendar_012
+    intent: plan
+    synthetic: true
+    tags: [calendar, owner_products]
+    input: |
+      Shop: Ceylon Harvester
+      Date: Christmas, 2026-12-25
+      Chosen:
+      - 11 | Enamel Camp Mug | Cups and mugs
+      - 4 | Ceylon Black Tea BOPF 400g | Black tea
+      - 7 | Ceylon Cinnamon Sticks 100g | Spices
+      Gaps:
+      - true ceylon cinnamon | 7 | 3
+    expect:
+      intent: plan
+      tools_called: []
+      unauthorised_tool_calls: 0
+      must_contain: ["products (3):", "Christmas"]
+      must_not_contain: ["%", "LKR", "organic"]
+    notes: >-
+      D20: the owner chose three products, a mug among two teas: all three are
+      used, none left out because it fits the date less well.
+

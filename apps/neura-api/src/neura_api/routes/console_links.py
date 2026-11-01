@@ -32,7 +32,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, or_, select
 
-from neura_agent_core.calendar import CalendarRepository, calendar_plans
+from neura_agent_core.calendar import CalendarRepository, calendar_plans, in_stock
 from neura_agent_core.links import (
     MAX_NAME_CHARS,
     POST_PLACES,
@@ -110,13 +110,26 @@ async def products(
     actor: Writer,
     q: Annotated[str, Query(max_length=100)] = "",
 ) -> dict[str, Any]:
+    async with request.app.state.database.tenant_session(actor.tenant_id) as session:
+        found, more = await product_choices(session, actor.tenant_id, q)
+    return envelope(
+        {"products": found, "more": more}, request_id=getattr(request.state, "request_id", None)
+    )
+
+
+async def product_choices(
+    session: Any, tenant_id: str, q: str = ""
+) -> tuple[list[dict[str, Any]], bool]:
+    """A chooser's products: published, with a web page, by name, 20 at a time
+    (``more``: there are others, so the owner types to narrow), each saying
+    whether it is in stock now. Also *Change products*' on a plan (D20)."""
     title = synced_entities.c.document["title"].astext
     address = synced_entities.c.document["url"].astext
     status = synced_entities.c.document["status"].astext
     statement = (
-        select(synced_entities.c.external_id, title.label("title"))
+        select(synced_entities.c.external_id, synced_entities.c.document, title.label("title"))
         .where(
-            synced_entities.c.tenant_id == actor.tenant_id,
+            synced_entities.c.tenant_id == tenant_id,
             synced_entities.c.entity_type == "product",
             address.op("~*")("^https?://"),
             or_(status.is_(None), status == "active"),
@@ -126,18 +139,15 @@ async def products(
     )
     if q.strip():
         statement = statement.where(title.ilike(f"%{_like(q.strip())}%", escape="\\"))
-    async with request.app.state.database.tenant_session(actor.tenant_id) as session:
-        rows = (await session.execute(statement)).all()
-    return envelope(
+    rows = (await session.execute(statement)).all()
+    return [
         {
-            "products": [
-                {"product_id": str(row.external_id), "title": row.title}
-                for row in rows[:CHOOSER_LIMIT]
-            ],
-            "more": len(rows) > CHOOSER_LIMIT,
-        },
-        request_id=getattr(request.state, "request_id", None),
-    )
+            "product_id": str(row.external_id),
+            "title": row.title,
+            "in_stock": in_stock(dict(row.document or {})),
+        }
+        for row in rows[:CHOOSER_LIMIT]
+    ], len(rows) > CHOOSER_LIMIT
 
 
 @router.post("/links", summary="Make a link for any product")
@@ -351,4 +361,4 @@ def _like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-__all__ = ["router"]
+__all__ = ["product_choices", "router"]

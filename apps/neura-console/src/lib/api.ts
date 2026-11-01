@@ -28,6 +28,7 @@ const BASE = "/api";
 
 import type { AdminCodeSetup, AdminSwitch } from "@/lib/admin";
 import type { ChooserProduct, MadePostLink, OwnLink, Place, Post } from "@/lib/links";
+import type { PlanChoice } from "@/lib/calendar";
 import type { ReviewTurn, Scorecard, Verdict } from "@/lib/review";
 import type { ShopCheck, ShopView, SyncAsked } from "@/lib/shop";
 
@@ -465,6 +466,27 @@ export function savePlanTexts(
     `/shops/${encodeURIComponent(tenantId)}/calendar/plans/${encodeURIComponent(planId)}/texts`,
     { method: "PUT", body: JSON.stringify({ texts }) },
   );
+}
+
+/** *Write the plan again* with the owner's 1 to 3 products (D20, ADR-0076). */
+export function changePlanProducts(
+  tenantId: string,
+  planId: string,
+  productIds: string[],
+): Promise<{ state: string }> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/calendar/plans/${encodeURIComponent(planId)}/products`,
+    { method: "PUT", body: JSON.stringify({ product_ids: productIds }) },
+  );
+}
+
+/** *Change products*' chooser: the shop's products, narrowed by what was typed. */
+export function findPlanProducts(
+  tenantId: string,
+  query: string,
+): Promise<{ products: PlanChoice[]; more: boolean }> {
+  const q = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  return call(`/shops/${encodeURIComponent(tenantId)}/calendar/products${q}`);
 }
 
 /** *Make it again*: a fresh plan, made at once (ADR-0072 §5). */

@@ -1,7 +1,7 @@
 # ADR-0072 · GROW Plans A Campaign For Each Date The Shop Keeps
 
 **Status:** **Accepted** · the owner's decisions 2026-11-01, R82 to R89 (D15) · everything marked *(Claude)* is
-Claude's design, approved with the mockup (R90; canvas row 21, boards 75 to 79; console.md §3.14) · **built 2026-11-01** ([ADR-0073](0073-the-marketing-calendar-what-the-build-decided.md): what the build decided, and what was and was not tested) · **Date:** 2026-11-01 · **Builds on:**
+Claude's design, approved with the mockup (R90; canvas row 21, boards 75 to 79; console.md §3.14) · **built 2026-11-01** ([ADR-0073](0073-the-marketing-calendar-what-the-build-decided.md): what the build decided, and what was and was not tested) · **§5's *chosen by Gemini* changed in part by [ADR-0076](0076-the-owner-may-choose-a-plans-products.md)** (the owner may choose the products) · **Date:** 2026-11-01 · **Builds on:**
 [ADR-0064](0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md),
 [ADR-0068](0068-grow-shows-what-shoppers-asked-for-that-the-shop-does-not-sell.md) (their data feeds the plans),
 [ADR-0065](0065-fiveneurals-may-switch-off-one-feature-for-one-shop.md) (the switch) · **Departs from:**

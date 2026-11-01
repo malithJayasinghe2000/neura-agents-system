@@ -60,6 +60,7 @@ def plan_input_from(case: EvalCase) -> PlanInput:
     """The input a case describes. Raises ``ValueError`` on a malformed case."""
     shop, name, day = "", "", None
     products: list[CatalogueItem] = []
+    chosen: list[CatalogueItem] = []
     facts: list[Fact] = []
     section = ""
     for raw in case.input.splitlines():
@@ -77,6 +78,9 @@ def plan_input_from(case: EvalCase) -> PlanInput:
             parts = [part.strip() for part in line[1:].split("|")]
             if section == "products" and len(parts) == 3:
                 products.append(CatalogueItem(id=parts[0], title=parts[1], category=parts[2]))
+            elif section == "chosen" and len(parts) == 3:
+                # The owner's own products (D20): the plan uses every one.
+                chosen.append(CatalogueItem(id=parts[0], title=parts[1], category=parts[2]))
             elif section == "wanted" and len(parts) == 2:
                 n = sum(f.kind == "wanted" for f in facts) + 1
                 facts.append(
@@ -100,6 +104,8 @@ def plan_input_from(case: EvalCase) -> PlanInput:
                 raise ValueError(f"{case.id}: cannot read {line!r} under {section!r}")
     if not shop or not name or day is None:
         raise ValueError(f"{case.id}: a calendar case needs 'Shop:' and 'Date: <name>, <day>'")
+    if chosen:
+        return PlanInput(shop=shop, name=name, day=day, products=chosen, facts=facts, chosen=True)
     return PlanInput(shop=shop, name=name, day=day, products=products, facts=facts)
 
 

@@ -154,6 +154,9 @@ ROUTES: dict[tuple[str, str], str] = {
     ("GET", f"{_SHOP}/calendar/plans/{{plan_id}}"): CALENDAR,
     ("PUT", f"{_SHOP}/calendar/plans/{{plan_id}}/texts"): CALENDAR,
     ("POST", f"{_SHOP}/calendar/plans/{{plan_id}}/again"): CALENDAR,
+    # D20 (R124): Change products, and its chooser.
+    ("PUT", f"{_SHOP}/calendar/plans/{{plan_id}}/products"): CALENDAR,
+    ("GET", f"{_SHOP}/calendar/products"): CALENDAR,
     # ADR-0074 §6 (R115): Links, and a plan's post link on its first Copy.
     ("GET", f"{_SHOP}/links"): LINKS,
     ("GET", f"{_SHOP}/links/products"): LINKS,
