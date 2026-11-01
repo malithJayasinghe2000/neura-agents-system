@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 import neura_agent_core.calendar
 import neura_agent_core.conversations
 import neura_agent_core.graph.schema
+import neura_agent_core.links
 import neura_agent_core.rag.schema
 import neura_agent_core.shadow
 import neura_agent_core.shadow_evidence

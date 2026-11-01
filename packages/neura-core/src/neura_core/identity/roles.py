@@ -80,6 +80,10 @@ WANTED_READ = "shop:wanted:read"
 #: *Make it again*, and Home's calendar lines. The Owner and Support; never the
 #: Developer. Served by the console, so it names no agent (G88).
 CALENDAR_WRITE = "shop:calendar:write"
+#: Links (ADR-0074 §6, R115): links that count their clicks, on a plan's posts
+#: and on the Links page; *Make a link*, *Remove*. The Owner and Support; never
+#: the Developer. Served by the console, so it names no agent (G88).
+LINKS_WRITE = "shop:links:write"
 
 #: The refusal of a member whose role does not include what was asked for. Its
 #: own code, so the dashboard can say *"You can't open this page"* rather than a
@@ -92,7 +96,15 @@ ROLE_PERMISSIONS: Mapping[Role, frozenset[str]] = {
     # The help desk: chats, grading, and answering handed-over shoppers
     # (ADR-0058 §8, ADR-0062). Never keys, the connection, Go live, people or money.
     Role.SUPPORT: frozenset(
-        {HOME_READ, CONVERSATIONS_READ, REVIEW_WRITE, HANDOVERS_WRITE, GAPS_WRITE, CALENDAR_WRITE}
+        {
+            HOME_READ,
+            CONVERSATIONS_READ,
+            REVIEW_WRITE,
+            HANDOVERS_WRITE,
+            GAPS_WRITE,
+            CALENDAR_WRITE,
+            LINKS_WRITE,
+        }
     ),
     # Whoever builds the bridge: all of Shop connection, the same page as the
     # Owner's (R10, settled at the mockup: B). Never a shopper's chat.
@@ -133,6 +145,7 @@ __all__ = [
     "GAPS_WRITE",
     "HANDOVERS_WRITE",
     "HOME_READ",
+    "LINKS_WRITE",
     "MODE_WRITE",
     "PEOPLE_WRITE",
     "REVIEW_WRITE",

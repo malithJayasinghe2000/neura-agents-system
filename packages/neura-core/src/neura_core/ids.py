@@ -60,6 +60,8 @@ SHOP_CHECK: Final = "shc"
 CALENDAR_DATE: Final = "cal"
 #: One campaign plan GROW wrote for a date (ADR-0072 §5).
 CALENDAR_PLAN: Final = "pln"
+#: One link that counts its clicks (ADR-0074 §2).
+LINK: Final = "lnk"
 
 
 def new_id(prefix: str) -> str:

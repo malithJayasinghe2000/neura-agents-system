@@ -1041,6 +1041,7 @@ def tenant_tables() -> list[Any]:
     from neura_agent_core.conversations import conversation_messages, conversations
     from neura_agent_core.gaps import page_gap_fixes, page_gap_scans, page_gaps
     from neura_agent_core.graph.schema import agent_checkpoint_writes, agent_checkpoints
+    from neura_agent_core.links import link_clicks, links
     from neura_agent_core.rag.schema import document_chunks
     from neura_agent_core.shadow import shadow_turns
     from neura_agent_core.shadow_evidence import shadow_evidence
@@ -1084,6 +1085,9 @@ def tenant_tables() -> list[Any]:
         calendar_plans,
         calendar_dates,
         calendar_settings,
+        # Links that count clicks (ADR-0074): the links and their days.
+        link_clicks,
+        links,
         # Before the turns it points at: the one foreign key among these tables.
         shadow_evidence,
         shadow_turns,

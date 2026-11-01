@@ -225,6 +225,25 @@ class Database:
             await session.execute(text("SET TRANSACTION READ ONLY"))
             yield session
 
+    @asynccontextmanager
+    async def follow_session(self) -> AsyncIterator[AsyncSession]:
+        """The transaction a tap on a counted link runs in (ADR-0074 §7).
+
+        The third chicken-and-egg, answered the way the first two were. A tap
+        on ``/go/<code>`` carries a code and nothing else, so the shop is not
+        known until the link is found. This session sets **no**
+        ``app.tenant_id`` and sees nothing; the one useful statement it can make
+        is ``neura_follow_link()``, a ``SECURITY DEFINER`` function owned by a
+        ``NOLOGIN`` role, which adds 1 to that link's day and returns the
+        address to send the shopper to, and nothing else.
+
+        **Not** ``READ ONLY``, unlike :meth:`dispatch_session`: counting the
+        click is a write, and the function is the only thing here that can make
+        one.
+        """
+        async with self._sessions() as session, session.begin():
+            yield session
+
     async def assert_isolation_applies(self) -> None:
         """Verify that Row-Level Security actually applies to this connection.
 
