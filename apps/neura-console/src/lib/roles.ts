@@ -28,6 +28,8 @@ export const PERMISSION = {
   gaps: "shop:gaps:write",
   /** Shoppers asked for: read it, *Hide*, See the chats (ADR-0068 §4). The Owner only. */
   wanted: "shop:wanted:read",
+  /** Marketing calendar: dates, plans, Edit, Make it again (ADR-0072 §4). Owner and Support. */
+  calendar: "shop:calendar:write",
 } as const;
 
 export type Permission = (typeof PERMISSION)[keyof typeof PERMISSION];

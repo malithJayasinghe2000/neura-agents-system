@@ -42,6 +42,11 @@ class AgentManifest(BaseModel):
     #: starts with this agent's key, to the words the admin reads, a name and
     #: what it does. An agent without one leaves this out.
     switches: dict[str, tuple[str, str]] = {}
+    #: What the admin is told when a switch goes off and on again (ADR-0065:
+    #: *Turn off asks first*), by switch key: the question (``{shop}`` is the
+    #: shop's name), what happens while it is off, and the line under *On again
+    #: since*. A switch without them gets general words.
+    switch_notes: dict[str, tuple[str, str, str]] = {}
     #: Which of the console's own pages each switch pauses, by each page's name in
     #: the shared core (``page_gaps``), so the console can say *Paused* without
     #: naming this agent (ADR-0065 §4).
@@ -84,6 +89,24 @@ MANIFEST = AgentManifest(
             "The calendar's AI plans",
             "21 days before each date the shop keeps on its Marketing calendar, AI "
             "writes a campaign plan. Make it again asks for another.",
+        ),
+    },
+    # The night check's words are the approved ones (board 61); the calendar's
+    # are Claude's (ADR-0073).
+    switch_notes={
+        "grow.gaps": (
+            "Turn off the night check for {shop}?",
+            "While it is off, no chat is read and no AI is used. Chats from that time are "
+            "never read later. What was already found stays on the shop's page, marked "
+            "Paused. The shop can't turn it back on.",
+            "It reads chats from now on, not the ones from while it was off.",
+        ),
+        "grow.calendar": (
+            "Turn off the calendar's AI plans for {shop}?",
+            "While it is off, no plan is made and no AI is used, and the shop can't press "
+            "Make it again. Its dates and the plans already made stay on its Marketing "
+            "calendar, marked Paused. The shop can't turn it back on.",
+            "Plans that are due are made again from the next night.",
         ),
     },
     # One night check finds both pages' rows (ADR-0068 §8); the calendar's own

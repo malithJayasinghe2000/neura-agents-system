@@ -37,6 +37,11 @@ export type AdminSwitch = {
   /** The words the agent's manifest gives: a name and what it does. */
   name: string;
   text: string;
+  /** What *Turn off* asks (`{shop}` is the shop's name), what happens while it is
+   * off, and the line under *On again since*; `""` when the manifest gives none. */
+  ask?: string;
+  while_off?: string;
+  on_again?: string;
   on: boolean;
   /** `null`: never changed, so on. */
   changed_at: string | null;

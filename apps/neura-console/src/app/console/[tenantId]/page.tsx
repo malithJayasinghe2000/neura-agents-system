@@ -21,15 +21,16 @@
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, Info } from "lucide-react";
+import { ArrowRight, CalendarDays, Info } from "lucide-react";
 import { ModeLine } from "@/components/home/mode-line";
 import { ModeSwitch } from "@/components/home/mode-switch";
 import { When } from "@/components/when";
+import { readyLine, type CalendarHome } from "@/lib/calendar";
 import { fromApi, hasSession } from "@/lib/server-api";
 import { PERMISSION, may, membershipOf } from "@/lib/roles";
 import type { Scorecard } from "@/lib/review";
 import type { ShopView } from "@/lib/shop";
-import { hasSell, shopAssistants, type Membership } from "@/lib/shop-assistants";
+import { hasGrow, hasSell, shopAssistants, type Membership } from "@/lib/shop-assistants";
 import type { SoldOut } from "@/lib/sold-out";
 import type { SuggestionsMeta, SuggestionsPage } from "@/lib/suggestions";
 import type { Usage } from "@/lib/usage";
@@ -51,8 +52,10 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
   }
 
   // A shop without NEURA-SELL is not shown its two screens, so Home does not
-  // ask for them either (lib/assistants.ts).
-  const sell = hasSell(await shopAssistants(tenantId));
+  // ask for them either (lib/assistants.ts). Likewise GROW's calendar lines.
+  const assistants = await shopAssistants(tenantId);
+  const sell = hasSell(assistants);
+  const grow = hasGrow(assistants);
   const [usage, card, store, soldOut, suggestions, home] = await Promise.all([
     fromApi<Usage>(`/shops/${shop}/usage?period=7d`),
     fromApi<Scorecard>(`/shops/${shop}/review/scorecard`),
@@ -114,6 +117,7 @@ export default async function ShopHome({ params }: { params: Promise<{ tenantId:
             gaps={home.ok ? (home.data.gaps ?? null) : null}
             wanted={home.ok ? (home.data.wanted ?? null) : null}
             rarely={sell && home.ok ? (home.data.rarely_added ?? null) : null}
+            calendar={grow && home.ok ? (home.data.calendar ?? null) : null}
             connected={store.ok ? store.data.connected : null}
           />
 
@@ -158,6 +162,8 @@ type TeamView = {
   wanted?: number | null;
   /** Products on Rarely added to cart (ADR-0071); `null` for any role but the Owner. */
   rarely_added?: number | null;
+  /** The Marketing calendar's lines (ADR-0072 §7); `null` for any role but the Owner and Support. */
+  calendar?: CalendarHome | null;
 };
 
 /**
@@ -172,6 +178,7 @@ async function TeamHome({ tenantId, membership }: { tenantId: string; membership
   const base = `/console/${shop}`;
   const reviews = may(membership, PERMISSION.review);
   const connects = may(membership, PERMISSION.connection);
+  const grow = hasGrow(await shopAssistants(tenantId));
   const [home, card, store] = await Promise.all([
     fromApi<TeamView>(`/shops/${shop}/home`),
     reviews ? fromApi<Scorecard>(`/shops/${shop}/review/scorecard`) : null,
@@ -200,6 +207,7 @@ async function TeamHome({ tenantId, membership }: { tenantId: string; membership
             handed={home.data.handed}
             answering={home.data.waiting}
             gaps={home.data.gaps ?? null}
+            calendar={grow ? (home.data.calendar ?? null) : null}
             connected={store?.ok ? store.data.connected : null}
             withDeveloper={false}
             empty={
@@ -238,6 +246,7 @@ function NeedsYou({
   gaps = null,
   wanted = null,
   rarely = null,
+  calendar = null,
   connected,
   withDeveloper = true,
   empty = "Nothing needs you right now. Replies waiting for review and conversations handed to a person will show up here.",
@@ -254,6 +263,8 @@ function NeedsYou({
   wanted?: number | null;
   /** Products on Rarely added to cart (ADR-0071). `null`: not this role's, or no NEURA-SELL. */
   rarely?: number | null;
+  /** The Marketing calendar's lines (ADR-0072 §7). `null`: not this role's, or no NEURA-GROW. */
+  calendar?: CalendarHome | null;
   connected: boolean | null;
   /** Whether *in three steps with your developer* is said: not to the developer. */
   withDeveloper?: boolean;
@@ -274,6 +285,33 @@ function NeedsYou({
       action: "Answer them",
       href: `${base}/conversations?state=waiting`,
       primary: true,
+    });
+  }
+
+  // Then the Marketing calendar (ADR-0072 §7, board 78): a line per ready plan,
+  // and *Add this year's special dates*, each with a calendar where others have
+  // a number. After the shoppers waiting, as board 78 places them (G123).
+  for (const ready of calendar?.ready ?? []) {
+    items.push({
+      figure: null,
+      icon: true,
+      title: readyLine(ready.name, ready.days_left),
+      detail: "Read it, fill in your offer, and post it yourself.",
+      action: "See the plan",
+      href: `${base}/calendar/${encodeURIComponent(ready.plan_id)}`,
+      primary: false,
+    });
+  }
+  if (calendar?.add_dates) {
+    items.push({
+      figure: null,
+      icon: true,
+      title: "Add this year's special dates",
+      detail:
+        "Untick the ones that don't fit your shop and add your own. Your assistant plans a campaign 21 days before each.",
+      action: "Add dates",
+      href: `${base}/calendar/dates`,
+      primary: false,
     });
   }
 
@@ -380,6 +418,13 @@ function NeedsYou({
                   <span className="min-w-10 text-3xl font-semibold tracking-tight tabular-nums">
                     {item.figure}
                   </span>
+                ) : item.icon ? (
+                  <span
+                    className="flex w-10 shrink-0 justify-center self-center"
+                    data-calendar-line
+                  >
+                    <CalendarDays className="size-[26px]" aria-hidden />
+                  </span>
                 ) : null}
                 <div className="min-w-0 space-y-0.5">
                   <p className="font-medium">{item.title}</p>
@@ -405,6 +450,8 @@ function NeedsYou({
 
 type Need = {
   figure: number | null;
+  /** A calendar where other lines show a number (ADR-0072, board 78). */
+  icon?: boolean;
   title: string;
   detail: string;
   action: string;

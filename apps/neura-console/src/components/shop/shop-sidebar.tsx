@@ -25,6 +25,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   BarChart3,
+  CalendarDays,
   ChevronsUpDown,
   CircleQuestionMark,
   ClipboardCheck,
@@ -70,7 +71,8 @@ type Opens = Record<
   | "people"
   | "handovers"
   | "gaps"
-  | "wanted",
+  | "wanted"
+  | "calendar",
   boolean
 >;
 
@@ -88,7 +90,7 @@ export function ShopSidebar({
   shopName: string;
   /** Whether the shop has NEURA-SELL. Without it, its two screens are not listed. */
   sell: boolean;
-  /** Whether the shop has NEURA-GROW. Without it, Missing from your pages is not listed. */
+  /** Whether the shop has NEURA-GROW. Without it, its three pages are not listed. */
   grow: boolean;
   /** Replies waiting in Review. `null` when it could not be read — then no badge, not a 0. */
   waiting: number | null;
@@ -197,6 +199,13 @@ export function ShopSidebar({
       label: "Shoppers asked for",
       icon: ShoppingBagPlus,
       shown: grow && opens.wanted,
+    },
+    // ADR-0072, board 75: the Owner's and Support's (R86).
+    {
+      href: `${base}/calendar`,
+      label: "Marketing calendar",
+      icon: CalendarDays,
+      shown: grow && opens.calendar,
     },
   ].filter((item) => item.shown);
   const setup: Item[] = [

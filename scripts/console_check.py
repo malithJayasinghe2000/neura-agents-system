@@ -248,6 +248,8 @@ async def main() -> int:
                 await _check_gaps(browser, console, db, minted.user_id, seeded, failures)
                 print(f"\n  {BOLD}shoppers asked for: GROW's second page, Home's line{OFF}")
                 await _check_wanted(browser, console, db, minted.user_id, seeded, failures)
+                print(f"\n  {BOLD}marketing calendar: GROW's third page, Home's lines{OFF}")
+                await _check_calendar(browser, console, db, minted.user_id, seeded, failures)
 
             print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
             await _check_sign_up(console, failures)
@@ -3403,10 +3405,14 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                     and "The night AI check" in shown
                     # R65: the switch names both pages it pauses.
                     and "Missing from your pages and Shoppers asked for" in shown
-                    and bool(await page.evaluate("!!document.querySelector('[data-switch-off]')")),
+                    and bool(
+                        await page.evaluate(
+                            "!!document.querySelector('[data-switch=\"grow.gaps\"] [data-switch-off]')"
+                        )
+                    ),
                     failures,
                 )
-                shown = await click(page, "[data-switch-off]", wait=1.5)
+                shown = await click(page, '[data-switch="grow.gaps"] [data-switch-off]', wait=1.5)
                 _check(
                     f"Turn off asks first, and says those chats are never read ({size})",
                     f"Turn off the night check for {switch_name}?" in shown
@@ -3415,7 +3421,9 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                     failures,
                 )
                 _check(f"the shop page fits the screen ({size})", await fits(page), failures)
-                shown = await click(page, "[data-confirm-switch-off]", wait=3)
+                shown = await click(
+                    page, '[data-switch="grow.gaps"] [data-confirm-switch-off]', wait=3
+                )
                 async with db.tenant_session(switch_id) as session:
                     off = not await SwitchRepository(session).is_on(switch_id, "grow.gaps")
                 _check(
@@ -3423,7 +3431,7 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                     "Off since" in shown and "by you" in shown and off,
                     failures,
                 )
-                shown = await click(page, "[data-switch-on]", wait=3)
+                shown = await click(page, '[data-switch="grow.gaps"] [data-switch-on]', wait=3)
                 async with db.tenant_session(switch_id) as session:
                     back = await SwitchRepository(session).is_on(switch_id, "grow.gaps")
                 _check(
@@ -3431,6 +3439,45 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                     "On again since" in shown and "from now on" in shown and back,
                     failures,
                 )
+            # ADR-0072 §5: the calendar's own switch, with its own words (G123).
+            await phone(page, False)
+            shown = await opened(page, f"{console}/admin/shops/{switch_id}")
+            _check(
+                "a shop with GROW: the calendar's AI plans, a switch of its own",
+                "The calendar's AI plans" in shown
+                and "AI writes a campaign plan" in shown
+                and bool(
+                    await page.evaluate(
+                        "!!document.querySelector('[data-switch=\"grow.calendar\"] [data-switch-off]')"
+                    )
+                ),
+                failures,
+            )
+            shown = await click(page, '[data-switch="grow.calendar"] [data-switch-off]', wait=1.5)
+            _check(
+                "Turn off asks first, in the calendar's own words",
+                f"Turn off the calendar's AI plans for {switch_name}?" in shown
+                and "no plan is made" in shown
+                and "Chats from that time" not in shown,
+                failures,
+            )
+            shown = await click(
+                page, '[data-switch="grow.calendar"] [data-confirm-switch-off]', wait=3
+            )
+            async with db.tenant_session(switch_id) as session:
+                calendar_off = not await SwitchRepository(session).is_on(switch_id, "grow.calendar")
+                night_on = await SwitchRepository(session).is_on(switch_id, "grow.gaps")
+            _check(
+                "the calendar's plans off, the night check still on",
+                "Off since" in shown and calendar_off and night_on,
+                failures,
+            )
+            shown = await click(page, '[data-switch="grow.calendar"] [data-switch-on]', wait=3)
+            _check(
+                "on again, in its own words",
+                "Plans that are due are made again from the next night." in shown,
+                failures,
+            )
             shown = await opened(page, f"{console}/admin/shops/{approve_id}")
             _check(
                 "a shop without GROW has no switch",
@@ -3983,6 +4030,569 @@ async def _check_wanted(
     finally:
         async with db.tenant_session(tenant) as session:
             await remove_tenant(session, tenant)
+
+
+async def _check_calendar(
+    browser: Chrome,
+    console: str,
+    db: Database,
+    user_id: str,
+    seeded: dict[str, str],
+    failures: list[str],
+) -> None:
+    """The Marketing calendar (ADR-0072, console.md §3.14, boards 75 to 79).
+
+    In **a shop of its own** with NEURA-GROW, where this person is the Owner, so
+    nothing real is touched: four own dates (a ready plan, one due tonight, one
+    planned later, one whose plan could not be made) and, once the year is saved,
+    the suggested list. Checked on desktop and phone: the menu item, *Coming up*,
+    a plan (its sections, *Copy*, *Edit* and *Save*, *Make it again* asking
+    first), *Making a new plan*, a failed plan, *This year's dates* (untick, set a
+    moving date, *Save*, another country, *Add* and *Remove*), Home's lines and
+    *Paused*. Support and the Developer, each in a browser of their own: Support
+    sees the page without the link to the Owner's page; the Developer is refused.
+    **No AI is called**: *Make it again* is only asked, never confirmed, and no
+    job of the shop's is ever due. Everything made here is removed at the end.
+    """
+    from neura_agent_core.calendar import CalendarRepository, calendar_plans, shop_today
+    from neura_agent_core.calendar import Country as CalendarCountry
+    from neura_core.identity.schema import login_tokens, memberships, users
+    from neura_core.tenancy import TenantRepository
+    from neura_core.tenancy.removal import remove_tenant
+    from neura_core.tenancy.switches import SwitchRepository
+
+    tenant = ids.new_id(ids.TENANT)
+    base = f"{console}/console/{tenant}"
+    shop_name = f"Calendar Check {tenant[-6:].lower()}"
+    today = shop_today(CalendarCountry.SRI_LANKA, datetime.now(UTC))
+    people: list[str] = []
+    answer = {
+        "theme": "A console-check tea week",
+        "idea": "Tea for the whole family. Show three teas and remind shoppers 2 days before.",
+        "products": ["cc-tea", "cc-cinnamon"],
+        "act_on": [
+            {"kind": "wanted", "label": "tea gift box", "shoppers": 8, "product_id": None},
+            {"kind": "gap", "label": "caffeine", "shoppers": 3, "product_id": "cc-tea"},
+        ],
+        "texts": {
+            "teaser": "Something is coming to our shop. [your offer] soon.",
+            "launch": "Our console-check teas are here: [your offer].",
+            "last_chance": "Last 2 days for [your offer].",
+            "email_subject": "Our console-check tea week",
+            "email_body": "Hello,\n\nOur tea week is here. [your offer].\n\nThe shop",
+            "banner": "Tea week: [your offer]",
+        },
+        "catalogue_cut": False,
+    }
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def shown(page: Chrome, url: str, wait: float = 3.5) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def click(selector: str, wait: float = 2.5) -> str:
+        await browser.evaluate(f"document.querySelector('{selector}').click(), true")
+        await asyncio.sleep(wait)
+        return str(await browser.evaluate("document.body.innerText"))
+
+    async def type_into(selector: str, value: str, kind: str = "HTMLInputElement") -> None:
+        await browser.evaluate(
+            f"""(() => {{
+              const el = document.querySelector('{selector}');
+              const set = Object.getOwnPropertyDescriptor({kind}.prototype, 'value').set;
+              set.call(el, {value!r});
+              el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              return true;
+            }})()"""
+        )
+
+    async def menu(page: Chrome) -> list[str]:
+        return list(
+            await page.evaluate(
+                "[...document.querySelectorAll('nav[aria-label=Screens] a')]"
+                ".map(a => a.innerText.trim().split('\\n')[0])"
+            )
+        )
+
+    async def own(name: str, days: int, *, every_year: bool = False) -> Any:
+        async with db.tenant_session(tenant) as session:
+            return await CalendarRepository(session).add_own(
+                tenant,
+                name=name,
+                day=today + timedelta(days=days),
+                every_year=every_year,
+                by=user_id,
+            )
+
+    try:
+        async with db.tenant_session(tenant) as session:
+            await TenantRepository(session).create(
+                tenant_id=tenant, name=shop_name, enabled_agents=["care", "grow"]
+            )
+            await session.execute(
+                memberships.insert().values(
+                    id=ids.new_id(ids.MEMBERSHIP), tenant_id=tenant, user_id=user_id, role="owner"
+                )
+            )
+            for product_id, title, amount in (
+                ("cc-tea", "Console-check Breakfast Tea", "1850.00"),
+                ("cc-cinnamon", "Console-check Cinnamon", "1290.00"),
+            ):
+                await session.execute(
+                    synced_entities.insert().values(
+                        tenant_id=tenant,
+                        platform=SEEDED_PLATFORM,
+                        entity_type="product",
+                        external_id=product_id,
+                        neura_id=f"nr_{product_id}",
+                        fingerprint="c" * 32,
+                        document={
+                            "title": title,
+                            "url": f"https://shop.example/{product_id}",
+                            "price_range_min": {"amount": amount, "currency": "LKR"},
+                        },
+                    )
+                )
+        launch = await own("Console-check launch", 12)
+        await own("Console-check sale", 20)
+        await own("Console-check birthday", 45, every_year=True)
+        fair = await own("Console-check fair", 8)
+        async with db.tenant_session(tenant) as session:
+            repository = CalendarRepository(session)
+            plan = await repository.store_plan(
+                tenant,
+                date_key=launch.date_key,
+                day=launch.day,
+                name="Console-check launch",
+                answer=answer,
+                prompt_revision="console-check",
+                at=datetime.now(UTC),
+            )
+            failed = await repository.fail_plan(
+                tenant,
+                date_key=fair.date_key,
+                day=fair.day,
+                name="Console-check fair",
+                failure="price",
+                at=datetime.now(UTC),
+            )
+        plan_url = f"{base}/calendar/{plan.id}"
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(browser, on)
+            page = await shown(browser, f"{base}/calendar")
+            _check(
+                f"the page: heading, its line, This year's dates ({size})",
+                "Marketing calendar" in page
+                and "21 days before each one, your assistant writes a campaign plan" in page
+                and "This year's dates" in page,
+                failures,
+            )
+            _check(
+                f"Coming up: a ready plan, one tonight, one later, one that failed ({size})",
+                "Plan ready" in page
+                and "See the plan" in page
+                and "Plan tonight" in page
+                and "Plan on " in page
+                and "Plan could not be made" in page
+                and "Make it again" in page
+                and page.index("Console-check fair")
+                < page.index("Console-check launch")
+                < page.index("Console-check sale")
+                < page.index("Console-check birthday"),
+                failures,
+            )
+            _check(
+                f"before the year is saved, only own dates count, and the page says so ({size})",
+                "Add this year's special dates" in page
+                and "only your own dates get a plan" in page
+                and "Black Friday" not in page,
+                failures,
+            )
+            _check(
+                f"it never posts for you, and fits the screen ({size})",
+                "We never post or send anything for you." in page and await fits(browser),
+                failures,
+            )
+        await phone(browser, False)
+
+        names = await menu(browser)
+        _check(
+            "the menu lists Marketing calendar, after Shoppers asked for",
+            "Marketing calendar" in names
+            and names.index("Marketing calendar") == names.index("Shoppers asked for") + 1,
+            failures,
+        )
+
+        home = await shown(browser, base)
+        _check(
+            "Home: the ready plan's line and Add this year's special dates, each a calendar",
+            "Console-check launch is in 12 days. Your plan is ready." in home
+            and "Read it, fill in your offer, and post it yourself." in home
+            and "Add this year's special dates" in home
+            and bool(
+                await browser.evaluate(
+                    f"!!document.querySelector('a[href=\"/console/{tenant}/calendar/{plan.id}\"]')"
+                    f" && !!document.querySelector('a[href=\"/console/{tenant}/calendar/dates\"]')"
+                    " && document.querySelectorAll('[data-calendar-line]').length === 2"
+                )
+            ),
+            failures,
+        )
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(browser, on)
+            page = await shown(browser, plan_url)
+            _check(
+                f"a plan: its date, when it was made, the idea ({size})",
+                "Console-check launch \u00b7 " in page
+                and "Your plan, made today by your assistant from your shop's own data." in page
+                and "A console-check tea week" in page,
+                failures,
+            )
+            _check(
+                f"Act on this first: the counts from the plan, links to both pages ({size})",
+                "8 shoppers asked for \u201ctea gift box\u201d" in page
+                and "3 shoppers asked about \u201ccaffeine\u201d for Console-check Breakfast Tea"
+                in page
+                and "See Shoppers asked for" in page
+                and "See Missing from your pages" in page,
+                failures,
+            )
+            _check(
+                f"Products to show: names and prices from the catalogue, Open the page ({size})",
+                "Console-check Breakfast Tea" in page
+                and "LKR\u00a01,850.00" in page.replace("LKR 1,850.00", "LKR\u00a01,850.00")
+                and bool(
+                    await browser.evaluate(
+                        '!!document.querySelector(\'[data-plan-product="cc-tea"] '
+                        'a[href="https://shop.example/cc-tea"][target=_blank]\')'
+                    )
+                ),
+                failures,
+            )
+            _check(
+                f"When to post: five days, and five drafts with [your offer] marked ({size})",
+                bool(
+                    await browser.evaluate(
+                        "document.querySelectorAll('[data-schedule] li').length === 5"
+                        " && document.querySelectorAll('[data-draft]').length === 5"
+                        " && document.querySelectorAll('[data-your-offer]').length >= 5"
+                    )
+                )
+                and "Post the launch and send the email" in page
+                and "Fill in [your offer] yourself." in page
+                and "Check every word before you post it" in page,
+                failures,
+            )
+            _check(
+                f"a plan fits the screen, Edit and Copy under each draft ({size})",
+                await fits(browser)
+                and bool(
+                    await browser.evaluate(
+                        "(() => { const card = document.querySelector('[data-draft=\"teaser\"]');"
+                        " const text = card.querySelector('[data-draft-shown]').getBoundingClientRect();"
+                        " const copy = card.querySelector('[data-draft-copy]').getBoundingClientRect();"
+                        " return copy.top >= text.bottom; })()"
+                    )
+                ),
+                failures,
+            )
+        await phone(browser, False)
+
+        await shown(browser, plan_url)
+        # A person's click, on a page allowed the clipboard: a script's click() is
+        # not one, and Chrome rightly refuses it the clipboard (the page then says
+        # so). The clipboard is read back, so the check is about what was copied.
+        await browser.call(
+            "Browser.grantPermissions",
+            permissions=["clipboardReadWrite", "clipboardSanitizedWrite"],
+            origin=console,
+        )
+        await browser.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        where = await browser.evaluate(
+            "(() => { const b = document.querySelector('[data-draft=\"banner\"] [data-draft-copy]');"
+            " b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect();"
+            " return [r.x + r.width / 2, r.y + r.height / 2]; })()"
+        )
+        for kind in ("mousePressed", "mouseReleased"):
+            await browser.call(
+                "Input.dispatchMouseEvent",
+                type=kind,
+                x=where[0],
+                y=where[1],
+                button="left",
+                clickCount=1,
+            )
+        await asyncio.sleep(1)
+        label = await browser.evaluate(
+            "document.querySelector('[data-draft=\"banner\"] [data-draft-copy]').innerText"
+        )
+        pasted = (
+            (
+                await browser.call(
+                    "Runtime.evaluate",
+                    expression="navigator.clipboard.readText()",
+                    awaitPromise=True,
+                    returnByValue=True,
+                )
+            )
+            .get("result", {})
+            .get("value")
+        )
+        await browser.call("Emulation.setFocusEmulationEnabled", enabled=False)
+        _check(
+            "Copy: the banner is on the clipboard, word for word, and the button says Copied",
+            "Copied" in str(label) and pasted == "Tea week: [your offer]",
+            failures,
+        )
+
+        await click('[data-draft="teaser"] [data-draft-edit]', wait=1)
+        await type_into(
+            '[data-draft="teaser"] [data-draft-text]',
+            "Our console-check words: 20% off.",
+            "HTMLTextAreaElement",
+        )
+        await click('[data-draft="teaser"] [data-draft-save]', wait=3)
+        again = await shown(browser, plan_url)
+        _check(
+            "Edit, then Save: the owner's words stay after a reload, unchecked",
+            "Our console-check words: 20% off." in again,
+            failures,
+        )
+        asked = await click("[data-make-again]", wait=1.5)
+        _check(
+            "Make it again, after an edit, asks first",
+            "Your edits will be replaced. Make it again?" in asked,
+            failures,
+        )
+        # Never confirmed: that would book GROW's job and call the AI.
+        await browser.evaluate(
+            "[...document.querySelectorAll('[data-make-again-area] button')]"
+            ".find(b => b.innerText.trim() === 'Cancel').click(), true"
+        )
+
+        async with db.tenant_session(tenant) as session:
+            await session.execute(
+                calendar_plans.update()
+                .where(calendar_plans.c.id == plan.id)
+                .values(requested_at=datetime.now(UTC))
+            )
+        making = await shown(browser, plan_url)
+        _check(
+            "a plan asked for again says Making a new plan, and keeps the old one meanwhile",
+            "Making a new plan" in making and "A console-check tea week" in making,
+            failures,
+        )
+        async with db.tenant_session(tenant) as session:
+            await CalendarRepository(session).forget_request(tenant, plan.id)
+
+        broken = await shown(browser, f"{base}/calendar/{failed.id}")
+        _check(
+            "a plan that failed the checks twice says so, with Make it again",
+            "Your plan could not be made" in broken
+            and bool(await browser.evaluate("!!document.querySelector('[data-make-again]')")),
+            failures,
+        )
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(browser, on)
+            page = await shown(browser, f"{base}/calendar/dates")
+            _check(
+                f"This year's dates: the lists, ticked, and where the shop is ({size})",
+                f"This year's dates \u00b7 {today.year}" in page
+                and "Your shop is in" in page
+                and "Festivals in Sri Lanka" in page
+                and "Every month" in page
+                and "Shopping days" in page
+                and "Your own dates" in page
+                and "The last working day of each month \u00b7 12 plans a year" in page
+                and bool(
+                    await browser.evaluate(
+                        "[...document.querySelectorAll('[data-tick]')].every(b => b.checked)"
+                    )
+                ),
+                failures,
+            )
+            _check(
+                f"a moving date is not set, with Set the date; Save and the January line ({size})",
+                "Date not set yet \u00b7 usually in April" in page
+                and bool(
+                    await browser.evaluate("!!document.querySelector('[data-set-date=\"vesak\"]')")
+                )
+                and "Save this year's dates" in page
+                and "Moving dates are checked by FiveNeurals each January." in page
+                and await fits(browser),
+                failures,
+            )
+        await phone(browser, False)
+
+        await shown(browser, f"{base}/calendar/dates")
+        await click('[data-tick="black_friday"]', wait=0.5)
+        unticked = str(
+            await browser.evaluate(
+                "document.querySelector('[data-date=\"black_friday\"]').innerText"
+            )
+        )
+        _check(
+            "untick: the date says No plan will be made",
+            "No plan will be made" in unticked,
+            failures,
+        )
+        await click('[data-set-date="vesak"]', wait=0.5)
+        await type_into('[data-date-day="vesak"]', f"{today.year}-05-20")
+        saved = await click("[data-save-dates]", wait=3)
+        _check(
+            "Save this year's dates: saved",
+            "Saved. Your assistant writes a plan 21 days before each ticked date." in saved,
+            failures,
+        )
+        await shown(browser, f"{base}/calendar/dates")
+        _check(
+            "after a reload: Black Friday unticked, Vesak on the day the owner set",
+            bool(
+                await browser.evaluate(
+                    "document.querySelector('[data-date=\"black_friday\"]').dataset.kept === 'no'"
+                    f" && document.querySelector('[data-date-day=\"vesak\"]').value === '{today.year}-05-20'"
+                )
+            ),
+            failures,
+        )
+        elsewhere = await click('[data-country-choice="other"]', wait=0.5)
+        _check(
+            "Another country: the shopping days and own dates only",
+            "Festivals in Sri Lanka" not in elsewhere
+            and "Every month" not in elsewhere
+            and "Shopping days" in elsewhere,
+            failures,
+        )
+        await click('[data-country-choice="lk"]', wait=0.5)
+
+        await type_into("[data-own-name]", "Console-check added")
+        await type_into("[data-own-day]", (today + timedelta(days=30)).isoformat())
+        added = await click("[data-add-own]", wait=3)
+        _check("Add: an own date is listed at once", "Console-check added" in added, failures)
+        added_id = await browser.evaluate(
+            "[...document.querySelectorAll('[data-own-date]')]"
+            ".find(li => li.innerText.includes('Console-check added'))?.dataset.ownDate ?? ''"
+        )
+        removed = await click(f'[data-remove-own="{added_id}"]', wait=3)
+        _check("Remove: it goes at once", "Console-check added" not in removed, failures)
+
+        page = await shown(browser, f"{base}/calendar")
+        _check(
+            "once saved, the suggested dates come up, a moving one not set yet",
+            "Add this year's special dates" not in page
+            and "Christmas" in page
+            and "Black Friday" not in page,
+            failures,
+        )
+        home = await shown(browser, base)
+        _check(
+            "Home: Add this year's special dates goes once saved and a date is near",
+            "Add this year's special dates" not in home and "Your plan is ready." in home,
+            failures,
+        )
+
+        async with db.tenant_session(tenant) as session:
+            await SwitchRepository(session).set(tenant, "grow.calendar", on=False, by=user_id)
+        paused = await shown(browser, f"{base}/calendar")
+        _check(
+            "Paused: the note, no plan promised, no Make it again; the plans stay",
+            "Paused since" in paused
+            and "FiveNeurals has paused the plans for this shop" in paused
+            and "No plan while paused" in paused
+            and "Plan ready" in paused
+            and "Make it again" not in paused,
+            failures,
+        )
+        paused_plan = await shown(browser, plan_url)
+        _check(
+            "Paused: the plan page says so and offers no Make it again",
+            "FiveNeurals has paused the plans for this shop" in paused_plan
+            and not await browser.evaluate("!!document.querySelector('[data-make-again]')"),
+            failures,
+        )
+
+        links: dict[str, str] = {}
+        for role in ("support", "developer"):
+            person = ids.new_id(ids.USER)
+            email = f"calendar-check-{role}-{person.lower()[-8:]}@example.com"
+            async with db.identity_session() as session:
+                await session.execute(users.insert().values(id=person, email=email))
+            people.append(person)
+            async with db.tenant_session(tenant) as session:
+                await session.execute(
+                    memberships.insert().values(
+                        id=ids.new_id(ids.MEMBERSHIP), tenant_id=tenant, user_id=person, role=role
+                    )
+                )
+            async with db.identity_session() as session:
+                minted = await request_sign_in_link(session, email=email, console_base_url=console)
+            links[role] = minted.url
+
+        async with Chrome(find_chrome()) as support:
+            await phone(support, False)
+            await shown(support, links["support"], wait=4)
+            page = await shown(support, f"{base}/calendar")
+            names = await menu(support)
+            _check(
+                "Support: Marketing calendar in the menu, and the page opens",
+                "Marketing calendar" in names and "Coming up" in page,
+                failures,
+            )
+            page = await shown(support, plan_url)
+            _check(
+                "Support: a plan whole, without the link to the Owner's page (R99)",
+                "8 shoppers asked for" in page
+                and "See Shoppers asked for" not in page
+                and "See Missing from your pages" in page,
+                failures,
+            )
+        async with Chrome(find_chrome()) as developer:
+            await phone(developer, False)
+            await shown(developer, links["developer"], wait=4)
+            page = await shown(developer, f"{base}/calendar")
+            _check(
+                "the Developer: no menu item, and You can't open this page",
+                "Marketing calendar" not in await menu(developer)
+                and "You can't open this page" in page.replace("\u2019", "'"),
+                failures,
+            )
+
+        if seeded.get("tenant"):
+            await shown(browser, f"{console}/console/{seeded['tenant']}")
+            _check(
+                "a shop without GROW does not list the Marketing calendar",
+                "Marketing calendar" not in await menu(browser),
+                failures,
+            )
+    finally:
+        async with db.tenant_session(tenant) as session:
+            await remove_tenant(session, tenant)
+        if people:
+            async with db.identity_session() as session:
+                await session.execute(
+                    delete(login_tokens).where(login_tokens.c.user_id.in_(people))
+                )
+                await session.execute(delete(users).where(users.c.id.in_(people)))
 
 
 def _check(what: str, passed: bool, failures: list[str]) -> None:

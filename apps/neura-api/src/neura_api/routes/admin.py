@@ -320,29 +320,41 @@ def _shop(shop: ShopFacts, week: list[UsageFacts] | None) -> dict[str, object]:
     }
 
 
-def _declared(request: Request) -> dict[str, tuple[str, str, str]]:
-    """Every switch the discovered agents declare: key to (agent, name, text).
+#: A declared switch: its agent, name and text, and the three notes the admin
+#: reads when turning it off and on again (``""`` when the manifest gives none).
+Declared = tuple[str, str, str, str, str, str]
+
+
+def _declared(request: Request) -> dict[str, Declared]:
+    """Every switch the discovered agents declare: key to (agent, name, text, and
+    the notes for *Turn off* and *On again*).
 
     A key must start with its own agent's key, so one agent cannot declare a
     switch that reads as another's.
     """
-    declared: dict[str, tuple[str, str, str]] = {}
+    declared: dict[str, Declared] = {}
     for agent_key, discovered in (getattr(request.app.state, "agents", {}) or {}).items():
+        notes = getattr(discovered.manifest, "switch_notes", None) or {}
         for key, (name, text) in (getattr(discovered.manifest, "switches", None) or {}).items():
             if key.startswith(f"{agent_key}."):
-                declared[key] = (agent_key, name, text)
+                ask, while_off, on_again = notes.get(key, ("", "", ""))
+                declared[key] = (agent_key, name, text, ask, while_off, on_again)
     return declared
 
 
 def _switch(
-    key: str, declared: tuple[str, str, str], record: Switch | None, actor: AdminActor
+    key: str, declared: Declared, record: Switch | None, actor: AdminActor
 ) -> dict[str, object]:
-    agent, name, text = declared
+    agent, name, text, ask, while_off, on_again = declared
     return {
         "key": key,
         "assistant": agent,
         "name": name,
         "text": text,
+        # What *Turn off* asks, and what is said once it is on again (ADR-0065).
+        "ask": ask,
+        "while_off": while_off,
+        "on_again": on_again,
         # No record: never changed, so on (ADR-0065 §1).
         "on": record is None or record.on,
         "changed_at": record.changed_at.isoformat() if record else None,

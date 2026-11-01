@@ -420,6 +420,60 @@ export function showWantedAgain(tenantId: string, label: string): Promise<{ hidd
   });
 }
 
+/** *Save this year's dates* (ADR-0072 §3): the ticks, a moving date's day, where the shop is. */
+export function saveCalendarDates(
+  tenantId: string,
+  body: {
+    country: "lk" | "other";
+    dates: { key: string; kept: boolean; day?: string | null }[];
+    own: { id: string; kept: boolean }[];
+  },
+): Promise<{ saved: boolean; year: number }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/calendar/dates`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+/** *Add* an own date (R82): kept at once. */
+export function addOwnDate(
+  tenantId: string,
+  date: { name: string; day: string; every_year: boolean },
+): Promise<{ id: string; name: string; day: string; every_year: boolean; kept: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/calendar/dates/own`, {
+    method: "POST",
+    body: JSON.stringify(date),
+  });
+}
+
+/** *Remove* an own date, and its plans. */
+export function removeOwnDate(tenantId: string, dateId: string): Promise<{ removed: boolean }> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/calendar/dates/own/${encodeURIComponent(dateId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** *Save* on a draft: the owner's words replace the AI's on the page. */
+export function savePlanTexts(
+  tenantId: string,
+  planId: string,
+  texts: Record<string, string>,
+): Promise<{ texts: Record<string, string>; edited: string[] }> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/calendar/plans/${encodeURIComponent(planId)}/texts`,
+    { method: "PUT", body: JSON.stringify({ texts }) },
+  );
+}
+
+/** *Make it again*: a fresh plan, made at once (ADR-0072 §5). */
+export function makePlanAgain(tenantId: string, planId: string): Promise<{ state: string }> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/calendar/plans/${encodeURIComponent(planId)}/again`,
+    { method: "POST" },
+  );
+}
+
 export function readHome(tenantId: string): Promise<{ waiting: number | null }> {
   return call(`/shops/${encodeURIComponent(tenantId)}/home`);
 }

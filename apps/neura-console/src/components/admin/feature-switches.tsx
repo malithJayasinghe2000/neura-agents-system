@@ -5,8 +5,9 @@
  *
  * **Turn off asks first**, because the chats from while it is off are never read
  * later (R52) and the shop cannot undo it (R50); **Turn on does not**, because it
- * costs nothing until the night. Each switch's words come from its agent's
- * manifest, through the API, so a later feature needs nothing here.
+ * costs nothing until the night. Each switch's words, the question *Turn off*
+ * asks included, come from its agent's manifest, through the API, so a later
+ * feature needs nothing here (the calendar's plans were the first, G123).
  */
 import { useState } from "react";
 import { day, type AdminSwitch } from "@/lib/admin";
@@ -94,8 +95,8 @@ function OneSwitch({
           ) : null}
           {item.changed_at && item.on ? (
             <p className="text-[13px] leading-snug text-foreground/80">
-              On again since {day(item.changed_at, true)}, {who}. It reads chats from now on, not
-              the ones from while it was off.
+              On again since {day(item.changed_at, true)}, {who}.
+              {item.on_again ? ` ${item.on_again}` : ""}
             </p>
           ) : null}
         </div>
@@ -127,12 +128,11 @@ function OneSwitch({
           className="space-y-2.5 rounded-xl border border-red-300 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/40"
         >
           <h3 id={`off-${item.key}`} className="text-base font-semibold">
-            Turn off the night check for {name}?
+            {item.ask ? item.ask.replace("{shop}", name) : `Turn off ${item.name} for ${name}?`}
           </h3>
           <p className="text-sm leading-relaxed text-foreground/80">
-            While it is off, no chat is read and no AI is used. Chats from that time are never read
-            later. What was already found stays on the shop&apos;s page, marked Paused. The shop
-            can&apos;t turn it back on.
+            {item.while_off ||
+              "While it is off, this feature uses no AI. What it already made stays on the shop's page, marked Paused. The shop can't turn it back on."}
           </p>
           <div className="flex flex-col gap-3 pt-1 sm:flex-row">
             <Button
