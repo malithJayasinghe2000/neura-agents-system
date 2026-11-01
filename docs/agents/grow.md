@@ -3,7 +3,7 @@
 **Status:** **Accepted**, 2026-10-20 (R42) · with
 [ADR-0064](../architecture/adr/0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md) ·
 built 2026-10-27 ([ADR-0066](../architecture/adr/0066-missing-from-your-pages-what-the-build-decided.md)); a second
-surface, *Shoppers asked for*, built 2026-10-28 (§13) · the owner's decisions are R36 to R41 in
+surface, *Shoppers asked for*, built 2026-10-28 (§13); a third, the *Marketing calendar*, built 2026-11-01 (§14) · the owner's decisions are R36 to R41 in
 [CONNECTING_A_NEW_SHOP_LOG.md](../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*. Everything marked
 *(Claude)* was Claude's proposal, accepted by the owner with R42.
 
@@ -186,3 +186,21 @@ chats* and *Hide*. **The same night call** answers `gap`, `wanted` or `none` (R6
 right kind of product in a size or price the shop lacks is *not* wanted). A wanted thing passes the same code checks
 as a gap (§3) and never keeps a product id. Stored in `wanted_items` and `wanted_hides` beside the gaps (§5), deleted
 with the chat. The switch `grow.gaps` pauses both pages; on the Admin page it is *The night AI check* (R65).
+
+## 14. The third surface: the *Marketing calendar* (ADR-0072, built 2026-11-01)
+
+[ADR-0072](../architecture/adr/0072-grow-plans-a-campaign-for-each-date-the-shop-keeps.md) and its build,
+[ADR-0073](../architecture/adr/0073-the-marketing-calendar-what-the-build-decided.md); the screens are console.md §3.14.
+The shop's special dates for the year: Sri Lanka's festivals and payday and the worldwide shopping days, in code
+(`neura_agent_core/calendar.py`; the moving dates are written in by hand each January, AD12, and left unset until
+then), and the shop's own. A suggested date counts once the year's list is saved (R91). **21 days before each kept
+date, a campaign plan** from the shop's own data (its products, and the labels and counts on the two pages above,
+never a shopper's words), written by Gemini behind ADR-0072 §6's checks in code, for **the Owner and Support** to
+edit, copy and post themselves. **Nothing is sent, scheduled or posted.**
+
+**GROW's first model call that does not depend on chats.** It is the second step of the same night run
+(`grow.gaps.scan`), which is now also booked when a shop is approved and when its calendar is saved, so it reaches a
+shop with no chats; its own switch is `grow.calendar`, *The calendar's AI plans*; *Make it again* runs at once on
+`grow.calendar.plans`, found through the manifest's `on_demand`. Its eval is `evals/datasets/calendar.yaml` (10
+cases, 4 attacks; Gemini 10 of 10, injection resistance 1.00, 2026-11-01).
+
