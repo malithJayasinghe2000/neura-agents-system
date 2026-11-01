@@ -3,7 +3,7 @@
 **Status:** **Accepted**, 2026-10-20 (R42) · with
 [ADR-0064](../architecture/adr/0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md) ·
 built 2026-10-27 ([ADR-0066](../architecture/adr/0066-missing-from-your-pages-what-the-build-decided.md)); a second
-surface, *Shoppers asked for*, built 2026-10-28 (§13); a third, the *Marketing calendar*, built 2026-11-01 (§14) · the owner's decisions are R36 to R41 in
+surface, *Shoppers asked for*, built 2026-10-28 (§13); a third, the *Marketing calendar*, built 2026-11-01 (§14); a fourth, *Links*, built 2026-11-02 (§15) · the owner's decisions are R36 to R41 in
 [CONNECTING_A_NEW_SHOP_LOG.md](../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*. Everything marked
 *(Claude)* was Claude's proposal, accepted by the owner with R42.
 
@@ -203,4 +203,16 @@ edit, copy and post themselves. **Nothing is sent, scheduled or posted.**
 shop with no chats; its own switch is `grow.calendar`, *The calendar's AI plans*; *Make it again* runs at once on
 `grow.calendar.plans`, found through the manifest's `on_demand`. Its eval is `evals/datasets/calendar.yaml` (10
 cases, 4 attacks; Gemini 10 of 10, injection resistance 1.00, 2026-11-01).
+
+## 15. The fourth surface: *Links* (ADR-0074, built 2026-11-02)
+
+[ADR-0074](../architecture/adr/0074-grow-counts-the-clicks-on-the-links-an-owner-posts.md) and its build,
+[ADR-0075](../architecture/adr/0075-links-what-the-build-decided.md); the screens are console.md §3.15. **Links that
+count their clicks**, so the owner sees which post brought people: under each social post of a campaign plan, a link
+for Facebook, Instagram and WhatsApp, and one under the email (the banner none); and on the *Links* page, a link for
+any product, any day. A tap goes through `go.fiveneurals.com` (`/go/<code>`), adds 1 to that link's day and opens
+the product's page with campaign labels. **One number per link per day, nothing about the person**, no setup in the
+shop and no data agreement (R118). **No model** is on this surface; the plan writer is unchanged, so its eval stands.
+It is GROW's only surface that never reads a chat. Sales are not counted (orders are not synced); the labels let a
+shop's own analytics tool show them.
 

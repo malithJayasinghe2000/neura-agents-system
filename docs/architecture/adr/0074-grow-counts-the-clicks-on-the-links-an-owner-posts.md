@@ -2,7 +2,7 @@
 
 **Status:** **Accepted** · the owner's decisions 2026-11-01, R105 to R118 (D16, D18) · everything marked
 *(Claude)* is Claude's design, approved with the mockup (R119; canvas row 22, boards 80 to 83, version 65;
-console.md §3.15) · **not built** · **Date:** 2026-11-01 · **Builds on:**
+console.md §3.15) · **built 2026-11-02** ([ADR-0075](0075-links-what-the-build-decided.md): what the build decided, and what was and was not tested; one sentence of §6 differs, R122) · **Date:** 2026-11-01 · **Builds on:**
 [ADR-0072](0072-grow-plans-a-campaign-for-each-date-the-shop-keeps.md) (the plans the links belong to) · **Changes, in
 part:** ADR-0072 §1's *"Not built: a results report"*: clicks per post are now counted; sales still are not ·
 **Related:** [ADR-0042](0042-we-may-hold-what-the-merchant-already-holds-and-never-watch-a-shopper.md),
