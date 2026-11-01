@@ -639,6 +639,8 @@ class TestWhatEachRoleIsShown:
             # Answering handed-over shoppers (ADR-0062 §8).
             "shop:handovers:write",
             "shop:home:read",
+            # Links that count clicks (ADR-0074 §6, R115).
+            "shop:links:write",
             "shop:review:write",
         ]
         assert held(developer) == [

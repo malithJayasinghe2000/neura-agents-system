@@ -250,6 +250,8 @@ async def main() -> int:
                 await _check_wanted(browser, console, db, minted.user_id, seeded, failures)
                 print(f"\n  {BOLD}marketing calendar: GROW's third page, Home's lines{OFF}")
                 await _check_calendar(browser, console, db, minted.user_id, seeded, failures)
+                print(f"\n  {BOLD}links: GROW's fourth page, a plan's post links{OFF}")
+                await _check_links(browser, console, api, db, minted.user_id, seeded, failures)
 
             print(f"\n  {BOLD}sign up — Create an account, the waiting screen, approval{OFF}")
             await _check_sign_up(console, failures)
@@ -4582,6 +4584,457 @@ async def _check_calendar(
             _check(
                 "a shop without GROW does not list the Marketing calendar",
                 "Marketing calendar" not in await menu(browser),
+                failures,
+            )
+    finally:
+        async with db.tenant_session(tenant) as session:
+            await remove_tenant(session, tenant)
+        if people:
+            async with db.identity_session() as session:
+                await session.execute(
+                    delete(login_tokens).where(login_tokens.c.user_id.in_(people))
+                )
+                await session.execute(delete(users).where(users.c.id.in_(people)))
+
+
+async def _check_links(
+    browser: Chrome,
+    console: str,
+    api: str,
+    db: Database,
+    user_id: str,
+    seeded: dict[str, str],
+    failures: list[str],
+) -> None:
+    """Links that count clicks (ADR-0074, console.md §3.15, boards 80 to 83).
+
+    In **a shop of its own** with NEURA-GROW, where this person is the Owner, so
+    nothing real is touched: one plan with two products. Checked: a plan's posts,
+    each with its product chooser and its link buttons (the email one, the
+    banner none), on desktop and phone; a **real click** on *Copy Facebook
+    link* with the clipboard read back (the link is made while the click waits,
+    which is what Safari's rule is about); **a tap through ``/go/``** that is
+    counted, and a link preview that is not; the plan showing the click and
+    starting its chooser on the product last copied; *Make a link*; the Links
+    page with both lists; *Remove* asking first; the menu; Support and the
+    Developer each in a browser of their own. **No AI is called.** Everything
+    made here is removed at the end.
+    """
+    from neura_agent_core.calendar import CalendarRepository, shop_today
+    from neura_agent_core.calendar import Country as CalendarCountry
+    from neura_agent_core.links import LinkRepository, link_clicks
+    from neura_core.identity.schema import login_tokens, memberships, users
+    from neura_core.tenancy import TenantRepository
+    from neura_core.tenancy.removal import remove_tenant
+
+    tenant = ids.new_id(ids.TENANT)
+    base = f"{console}/console/{tenant}"
+    today = shop_today(CalendarCountry.SRI_LANKA, datetime.now(UTC))
+    people: list[str] = []
+    safari = (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    )
+    answer = {
+        "theme": "A console-check links week",
+        "idea": "Two teas, a link for every post.",
+        "products": ["cl-tea", "cl-cinnamon"],
+        "act_on": [],
+        "texts": {
+            "teaser": "Something is coming. [your offer] soon.",
+            "launch": "Here now: [your offer].",
+            "last_chance": "Last 2 days for [your offer].",
+            "email_subject": "Our links week",
+            "email_body": "Hello,\n\nIt is here. [your offer].",
+            "banner": "Links week: [your offer]",
+        },
+        "catalogue_cut": False,
+    }
+
+    async def phone(page: Chrome, on: bool) -> None:
+        await page.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=390 if on else 1280,
+            height=844 if on else 900,
+            deviceScaleFactor=1,
+            mobile=on,
+        )
+
+    async def shown(page: Chrome, url: str, wait: float = 3.5) -> str:
+        await page.goto(url)
+        await asyncio.sleep(wait)
+        return str(await page.evaluate("document.body.innerText"))
+
+    async def fits(page: Chrome) -> bool:
+        return bool(
+            await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        )
+
+    async def click(selector: str, wait: float = 2.5) -> str:
+        await browser.evaluate(f"document.querySelector('{selector}').click(), true")
+        await asyncio.sleep(wait)
+        return str(await browser.evaluate("document.body.innerText"))
+
+    async def press(selector: str) -> None:
+        """A person's click, the only kind Chrome lets write to the clipboard."""
+        where = await browser.evaluate(
+            f"(() => {{ const b = document.querySelector('{selector}');"
+            " b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect();"
+            " return [r.x + r.width / 2, r.y + r.height / 2]; })()"
+        )
+        for kind in ("mousePressed", "mouseReleased"):
+            await browser.call(
+                "Input.dispatchMouseEvent",
+                type=kind,
+                x=where[0],
+                y=where[1],
+                button="left",
+                clickCount=1,
+            )
+
+    async def menu(page: Chrome) -> list[str]:
+        return list(
+            await page.evaluate(
+                "[...document.querySelectorAll('nav[aria-label=Screens] a')]"
+                ".map(a => a.innerText.trim().split('\\n')[0])"
+            )
+        )
+
+    async def taps(code: str, agent: str) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=5) as client:
+            return await client.get(
+                f"{api}/go/{code}", headers={"User-Agent": agent}, follow_redirects=False
+            )
+
+    async def counted() -> int:
+        async with db.tenant_session(tenant) as session:
+            return int(
+                await session.scalar(select(func.coalesce(func.sum(link_clicks.c.clicks), 0)))
+            )
+
+    try:
+        async with db.tenant_session(tenant) as session:
+            await TenantRepository(session).create(
+                tenant_id=tenant,
+                name=f"Links Check {tenant[-6:].lower()}",
+                enabled_agents=["care", "grow"],
+            )
+            await session.execute(
+                memberships.insert().values(
+                    id=ids.new_id(ids.MEMBERSHIP), tenant_id=tenant, user_id=user_id, role="owner"
+                )
+            )
+            for product_id, title in (
+                ("cl-tea", "Console-check Links Tea"),
+                ("cl-cinnamon", "Console-check Links Cinnamon"),
+            ):
+                await session.execute(
+                    synced_entities.insert().values(
+                        tenant_id=tenant,
+                        platform=SEEDED_PLATFORM,
+                        entity_type="product",
+                        external_id=product_id,
+                        neura_id=f"nr_{product_id}",
+                        fingerprint="c" * 32,
+                        document={"title": title, "url": f"https://shop.example/{product_id}"},
+                    )
+                )
+            repository = CalendarRepository(session)
+            own = await repository.add_own(
+                tenant,
+                name="Console-check links sale",
+                day=today + timedelta(days=12),
+                every_year=False,
+                by=user_id,
+            )
+            plan = await repository.store_plan(
+                tenant,
+                date_key=own.date_key,
+                day=today + timedelta(days=12),
+                name="Console-check links sale",
+                answer=answer,
+                prompt_revision="console-check",
+                at=datetime.now(UTC),
+            )
+        plan_url = f"{base}/calendar/{plan.id}"
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(browser, on)
+            page = await shown(browser, plan_url)
+            _check(
+                f"a plan: Each post has its own links, the Instagram line ({size})",
+                "Each post has its own links" in page
+                and "put the Instagram link in your bio or a story" in page.replace("\u2019", "'"),
+                failures,
+            )
+            _check(
+                f"three link buttons under each post, one under the email, none on the banner ({size})",
+                bool(
+                    await browser.evaluate(
+                        "['teaser','launch','last_chance'].every(p =>"
+                        ' document.querySelectorAll(`[data-post-links="${p}"] [data-copy-link]`)'
+                        ".length === 3)"
+                        " && document.querySelectorAll('[data-post-links=\"email\"] [data-copy-link]')"
+                        ".length === 1"
+                        " && !document.querySelector('[data-draft=\"banner\"] [data-post-links]')"
+                        " && !!document.querySelector('[data-banner-no-link]')"
+                    )
+                )
+                and "Copy Facebook link" in page
+                and "Copy the link" in page
+                and "whoever sees your banner is already in your shop" in page,
+                failures,
+            )
+            _check(
+                f"no clicks yet, the dashboard made the links, and it fits ({size})",
+                "No clicks yet." in page
+                and "The links are made by your dashboard, not by AI" in page
+                and await fits(browser),
+                failures,
+            )
+        await phone(browser, False)
+
+        await shown(browser, plan_url)
+        # The teaser's link opens the second product: chosen first, then copied.
+        await browser.evaluate(
+            """(() => {
+              const s = document.querySelector('[data-post-links="teaser"] [data-link-product]');
+              const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+              set.call(s, 'cl-cinnamon');
+              s.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            })()"""
+        )
+        await browser.call(
+            "Browser.grantPermissions",
+            permissions=["clipboardReadWrite", "clipboardSanitizedWrite"],
+            origin=console,
+        )
+        await browser.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        await press('[data-post-links="teaser"] [data-copy-link="facebook"]')
+        await asyncio.sleep(2)
+        label = await browser.evaluate(
+            'document.querySelector(\'[data-post-links="teaser"] [data-copy-link="facebook"]\')'
+            ".innerText"
+        )
+        line = str(
+            await browser.evaluate(
+                "document.querySelector('[data-post-links=\"teaser\"] [data-link-copied]')"
+                "?.innerText ?? ''"
+            )
+        )
+        pasted = str(
+            (
+                await browser.call(
+                    "Runtime.evaluate",
+                    expression="navigator.clipboard.readText()",
+                    awaitPromise=True,
+                    returnByValue=True,
+                )
+            )
+            .get("result", {})
+            .get("value")
+            or ""
+        )
+        await browser.call("Emulation.setFocusEmulationEnabled", enabled=False)
+        code = pasted.rstrip("/").rsplit("/", 1)[-1]
+        _check(
+            "Copy Facebook link: a real click puts the link on the clipboard, Copied",
+            "Copied" in str(label)
+            and re.fullmatch(r"https?://\S+/[a-z2-9]{6}", pasted) is not None,
+            failures,
+        )
+        _check(
+            "the green line names the link and the product it opens",
+            line.startswith("Copied ")
+            and code in line
+            and "It opens Console-check Links Cinnamon on your shop." in line,
+            failures,
+        )
+
+        person = await taps(code, safari)
+        preview = await taps(code, "facebookexternalhit/1.1")
+        _check(
+            "a tap goes to the product with the labels, 302, not stored",
+            person.status_code == 302
+            and person.headers.get("location", "").startswith(
+                "https://shop.example/cl-cinnamon?utm_source=facebook&utm_medium=social"
+            )
+            and person.headers.get("cache-control") == "no-store"
+            and "set-cookie" not in person.headers,
+            failures,
+        )
+        _check(
+            "a person's tap is counted, a link preview's is not",
+            preview.status_code == 302 and await counted() == 1,
+            failures,
+        )
+        gone = await taps("zzzzzz", safari)
+        _check(
+            "a code nobody made: This link is no longer active.",
+            gone.status_code == 404 and "This link is no longer active." in gone.text,
+            failures,
+        )
+
+        page = await shown(browser, plan_url)
+        _check(
+            "the plan shows the click, and the chooser starts on the product copied",
+            "Clicks so far: Facebook 1"
+            in str(
+                await browser.evaluate(
+                    "document.querySelector('[data-post-links=\"teaser\"] [data-link-clicks]')"
+                    ".innerText"
+                )
+            )
+            and await browser.evaluate(
+                "document.querySelector('[data-post-links=\"teaser\"] [data-link-product]').value"
+            )
+            == "cl-cinnamon"
+            and await browser.evaluate(
+                "document.querySelector('[data-post-links=\"launch\"] [data-link-product]').value"
+            )
+            == "cl-tea",
+            failures,
+        )
+
+        page = await shown(browser, f"{base}/links/new", wait=4)
+        _check(
+            "Make a link: product, where you'll post it, name",
+            "Make a link" in page
+            and "Where you'll post it" in page.replace("\u2019", "'")
+            and "Somewhere else" in page
+            and "Shoppers don't see it." in page.replace("\u2019", "'")
+            and "A link can only open your own shop's product pages."
+            in page.replace("\u2019", "'"),
+            failures,
+        )
+        await browser.evaluate(
+            """(() => {
+              const el = document.querySelector('[data-link-name]');
+              const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              set.call(el, 'Tuesday post');
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              return true;
+            })()"""
+        )
+        await click('[data-link-place="whatsapp"]', wait=0.5)
+        made = await click("[data-make-the-link]", wait=3)
+        _check(
+            "Make the link: Your link, its address and Copy",
+            "Your link" in made
+            and bool(re.search(r"/[a-z2-9]{6}\b", made))
+            and "on your shop. Its clicks show on Links." in made,
+            failures,
+        )
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(browser, on)
+            page = await shown(browser, f"{base}/links")
+            _check(
+                f"Links: Your links, with its product, place and clicks ({size})",
+                "Your links" in page
+                and "Tuesday post" in page
+                and "WhatsApp" in page
+                and "0 clicks" in page
+                and "Make a link" in page,
+                failures,
+            )
+            _check(
+                f"Links: the campaign, its post's click, See the plan ({size})",
+                "From your campaigns" in page
+                and f"Console-check links sale {plan.day.year}" in page
+                and "Facebook 1" in page
+                and bool(
+                    await browser.evaluate(
+                        f"!!document.querySelector('a[href=\"/console/{tenant}/calendar/{plan.id}\"]')"
+                    )
+                ),
+                failures,
+            )
+            _check(
+                f"Links: a click is a tap, never who clicked, and it fits ({size})",
+                "We count clicks only, never who clicked." in page
+                and "one person tapping twice counts twice" in page
+                and await fits(browser),
+                failures,
+            )
+        await phone(browser, False)
+
+        names = await menu(browser)
+        _check(
+            "the menu lists Links, after Marketing calendar",
+            "Links" in names and names.index("Links") == names.index("Marketing calendar") + 1,
+            failures,
+        )
+
+        await shown(browser, f"{base}/links")
+        asking = await click("[data-remove-link]", wait=1)
+        _check(
+            "Remove asks first: its clicks are deleted, the link keeps opening its product",
+            "Remove this link? Its clicks are deleted. The link keeps opening its product."
+            in asking,
+            failures,
+        )
+        await click("[data-confirm-remove]", wait=3)
+        page = await shown(browser, f"{base}/links")
+        async with db.tenant_session(tenant) as session:
+            left = [link.name for link in await LinkRepository(session).listed(tenant)]
+        _check(
+            "Removed: No links yet, and the campaign's link stays",
+            "No links yet." in page and "Tuesday post" not in left and None in left,
+            failures,
+        )
+
+        signs: dict[str, str] = {}
+        for role in ("support", "developer"):
+            person_id = ids.new_id(ids.USER)
+            email = f"links-check-{role}-{person_id.lower()[-8:]}@example.com"
+            async with db.identity_session() as session:
+                await session.execute(users.insert().values(id=person_id, email=email))
+            people.append(person_id)
+            async with db.tenant_session(tenant) as session:
+                await session.execute(
+                    memberships.insert().values(
+                        id=ids.new_id(ids.MEMBERSHIP),
+                        tenant_id=tenant,
+                        user_id=person_id,
+                        role=role,
+                    )
+                )
+            async with db.identity_session() as session:
+                minted = await request_sign_in_link(session, email=email, console_base_url=console)
+            signs[role] = minted.url
+
+        async with Chrome(find_chrome()) as support:
+            await phone(support, False)
+            await shown(support, signs["support"], wait=4)
+            page = await shown(support, f"{base}/links")
+            plan_page = await shown(support, plan_url)
+            _check(
+                "Support: Links in the menu, the page and the plan's link buttons",
+                "Links" in await menu(support)
+                and "Your links" in page
+                and "Copy Facebook link" in plan_page,
+                failures,
+            )
+        async with Chrome(find_chrome()) as developer:
+            await phone(developer, False)
+            await shown(developer, signs["developer"], wait=4)
+            page = await shown(developer, f"{base}/links")
+            _check(
+                "the Developer: no menu item, and You can't open this page",
+                "Links" not in await menu(developer)
+                and "You can't open this page" in page.replace("\u2019", "'"),
+                failures,
+            )
+
+        if seeded.get("tenant"):
+            await shown(browser, f"{console}/console/{seeded['tenant']}")
+            _check(
+                "a shop without GROW does not list Links",
+                "Links" not in await menu(browser),
                 failures,
             )
     finally:

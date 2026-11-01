@@ -29,6 +29,7 @@ export function DraftCard({
   text,
   subject,
   editable,
+  children,
 }: {
   tenantId: string;
   planId: string;
@@ -41,6 +42,8 @@ export function DraftCard({
   /** The email's subject. */
   subject?: string;
   editable: boolean;
+  /** What goes under the draft: its links (ADR-0074, board 80), or why it has none. */
+  children?: React.ReactNode;
 }) {
   const router = useRouter();
   const [shown, setShown] = useState({ text, subject: subject ?? "" });
@@ -172,6 +175,7 @@ export function DraftCard({
           {error}
         </p>
       ) : null}
+      {children}
     </article>
   );
 }

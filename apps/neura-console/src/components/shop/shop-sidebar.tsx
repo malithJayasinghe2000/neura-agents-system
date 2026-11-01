@@ -26,6 +26,7 @@ import { useEffect, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
+  Link as LinkIcon,
   ChevronsUpDown,
   CircleQuestionMark,
   ClipboardCheck,
@@ -72,7 +73,8 @@ type Opens = Record<
   | "handovers"
   | "gaps"
   | "wanted"
-  | "calendar",
+  | "calendar"
+  | "links",
   boolean
 >;
 
@@ -90,7 +92,7 @@ export function ShopSidebar({
   shopName: string;
   /** Whether the shop has NEURA-SELL. Without it, its two screens are not listed. */
   sell: boolean;
-  /** Whether the shop has NEURA-GROW. Without it, its three pages are not listed. */
+  /** Whether the shop has NEURA-GROW. Without it, its four pages are not listed. */
   grow: boolean;
   /** Replies waiting in Review. `null` when it could not be read — then no badge, not a 0. */
   waiting: number | null;
@@ -206,6 +208,13 @@ export function ShopSidebar({
       label: "Marketing calendar",
       icon: CalendarDays,
       shown: grow && opens.calendar,
+    },
+    // ADR-0074, board 81: links that count clicks, the Owner's and Support's (R115).
+    {
+      href: `${base}/links`,
+      label: "Links",
+      icon: LinkIcon,
+      shown: grow && opens.links,
     },
   ].filter((item) => item.shown);
   const setup: Item[] = [

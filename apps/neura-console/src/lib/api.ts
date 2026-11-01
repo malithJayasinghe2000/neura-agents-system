@@ -27,6 +27,7 @@
 const BASE = "/api";
 
 import type { AdminCodeSetup, AdminSwitch } from "@/lib/admin";
+import type { ChooserProduct, MadePostLink, OwnLink, Place, Post } from "@/lib/links";
 import type { ReviewTurn, Scorecard, Verdict } from "@/lib/review";
 import type { ShopCheck, ShopView, SyncAsked } from "@/lib/shop";
 
@@ -472,6 +473,45 @@ export function makePlanAgain(tenantId: string, planId: string): Promise<{ state
     `/shops/${encodeURIComponent(tenantId)}/calendar/plans/${encodeURIComponent(planId)}/again`,
     { method: "POST" },
   );
+}
+
+/** *Copy … link* under a plan's post: made on the first copy, the same one after (ADR-0074 §2). */
+export function makePostLink(
+  tenantId: string,
+  planId: string,
+  body: { post: Post; place: Place; product_id: string },
+): Promise<MadePostLink> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/calendar/plans/${encodeURIComponent(planId)}/links`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+/** *Make the link* (board 82): a counted link for any product with a page. */
+export function makeLink(
+  tenantId: string,
+  body: { product_id: string; place: Place; name: string },
+): Promise<OwnLink> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/links`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** *Remove*: its clicks go; the link keeps opening its product (R113). */
+export function removeLink(tenantId: string, linkId: string): Promise<{ removed: boolean }> {
+  return call(`/shops/${encodeURIComponent(tenantId)}/links/${encodeURIComponent(linkId)}`, {
+    method: "DELETE",
+  });
+}
+
+/** Make a link's product chooser: products with a page, narrowed by what was typed. */
+export function findLinkProducts(
+  tenantId: string,
+  query: string,
+): Promise<{ products: ChooserProduct[]; more: boolean }> {
+  const q = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  return call(`/shops/${encodeURIComponent(tenantId)}/links/products${q}`);
 }
 
 export function readHome(tenantId: string): Promise<{ waiting: number | null }> {

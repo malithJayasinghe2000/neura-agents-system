@@ -10,8 +10,9 @@
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, ExternalLink, ImageIcon, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ExternalLink, ImageIcon, Link as LinkIcon, LoaderCircle } from "lucide-react";
 import { DraftCard } from "@/components/calendar/draft-card";
+import { PostLinks } from "@/components/links/post-links";
 import { MakeAgain, WhileMaking } from "@/components/calendar/make-again";
 import { CouldNotLoad, NotThisShopsPlan, PausedNote, TITLE } from "@/components/calendar/notes";
 import { NotAllowed } from "@/components/not-allowed";
@@ -73,6 +74,10 @@ export default async function PlanPage({
     : null;
   const day = (step: Plan["schedule"][number]["step"]) =>
     plan.schedule.find((s) => s.step === step)?.day ?? plan.day;
+  // A post's link opens one of the plan's products that has a page (R110).
+  const linkable = plan.products
+    .filter((product) => product.url)
+    .map((product) => ({ product_id: product.product_id, title: product.title ?? null }));
   const dayBefore = new Date(`${plan.day}T00:00:00Z`);
   dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
 
@@ -244,6 +249,23 @@ export default async function PlanPage({
                 Instagram or email tool.
               </p>
             </div>
+            {plan.post_links ? (
+              <div
+                data-links-intro
+                className="flex items-start gap-3 rounded-xl border bg-muted/40 px-4 py-3.5 sm:px-5"
+              >
+                <LinkIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Each post has its own links</p>
+                  <p className="text-sm leading-relaxed text-foreground/80">
+                    Paste the link with the post. When someone taps it, we count the click and open
+                    the product on your shop, so you can see which post brought people. On Instagram
+                    a link inside a post can&apos;t be tapped: put the Instagram link in your bio or
+                    a story.
+                  </p>
+                </div>
+              </div>
+            ) : null}
             <div className="space-y-3">
               {(
                 [
@@ -275,7 +297,24 @@ export default async function PlanPage({
                   text={(kind === "email" ? plan.texts.email_body : plan.texts[kind]) ?? ""}
                   subject={kind === "email" ? (plan.texts.email_subject ?? "") : undefined}
                   editable={plan.state !== "making"}
-                />
+                >
+                  {plan.post_links === null ? null : kind === "banner" ? (
+                    <div data-banner-no-link className="border-t pt-3">
+                      <p className="text-[13px] leading-relaxed text-muted-foreground">
+                        No counted link here: whoever sees your banner is already in your shop. Link
+                        it to your product as you usually do.
+                      </p>
+                    </div>
+                  ) : (
+                    <PostLinks
+                      tenantId={tenantId}
+                      planId={plan.id}
+                      post={kind}
+                      products={linkable}
+                      current={plan.post_links[kind]}
+                    />
+                  )}
+                </DraftCard>
               ))}
             </div>
           </section>
@@ -283,6 +322,9 @@ export default async function PlanPage({
           <p className="max-w-3xl text-[13px] leading-relaxed text-muted-foreground">
             Written by AI from your shop&apos;s data. Check every word before you post it: your shop
             publishes it under its own name. We never post or send anything.
+            {plan.post_links
+              ? " The links are made by your dashboard, not by AI, and count clicks only, never who clicked."
+              : null}
           </p>
         </>
       ) : null}

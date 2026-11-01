@@ -30,6 +30,8 @@ export const PERMISSION = {
   wanted: "shop:wanted:read",
   /** Marketing calendar: dates, plans, Edit, Make it again (ADR-0072 §4). Owner and Support. */
   calendar: "shop:calendar:write",
+  /** Links: a plan's post links, Make a link, Remove (ADR-0074 §6). Owner and Support. */
+  links: "shop:links:write",
 } as const;
 
 export type Permission = (typeof PERMISSION)[keyof typeof PERMISSION];

@@ -7,6 +7,7 @@
  * browser's clock (the `When` component is for moments). The shop's own *today*
  * comes from the API, counted in the shop's time (G119).
  */
+import type { PostLinks } from "@/lib/links";
 import type { Price } from "@/lib/suggestions";
 
 /** What a kept date's plan is, on *Coming up*. */
@@ -134,6 +135,8 @@ export type Plan = {
   can_make_again: boolean;
   /** Which GROW pages this role may open, for the links under *Act on this first*. */
   links: { wanted: boolean; gaps: boolean };
+  /** Each post's link chooser and clicks (ADR-0074, board 80); `null` without Links. */
+  post_links: PostLinks;
 };
 
 /** Home's calendar lines (ADR-0072 §7), for the Owner and Support. */
