@@ -183,6 +183,10 @@ class Settings(BaseSettings):
     #: machine at `NEURA_API_PORT`; outside development it must be set** (G24):
     #: a default there is never right, and nothing would say so.
     public_base_url: str = Field(default="", alias="PUBLIC_BASE_URL")
+    #: Where a counted link starts (ADR-0074 §2, AD13): ``https://go.fiveneurals.com``
+    #: in production, which the proxy maps to this API's ``/go``. **Empty means
+    #: ``PUBLIC_BASE_URL/go``**, which works anywhere, only longer (R117 B).
+    links_base_url: str = Field(default="", alias="LINKS_BASE_URL")
 
     # ── Email (ADR-0026, open question K1) ────────────────────────────────────
     #
@@ -246,6 +250,9 @@ class Settings(BaseSettings):
         self.public_base_url = self.public_base_url.strip().rstrip("/")
         if not self.public_base_url and self.env is Environment.DEVELOPMENT:
             self.public_base_url = f"http://localhost:{self.api_port}"
+        self.links_base_url = self.links_base_url.strip().rstrip("/")
+        if not self.links_base_url and self.public_base_url:
+            self.links_base_url = f"{self.public_base_url}/go"
         return self
 
     def validate_for_runtime(self) -> None:

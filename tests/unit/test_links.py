@@ -157,3 +157,31 @@ class TestRobots:
     )
     def test_a_persons_browser_is_counted(self, agent: str) -> None:
         assert not is_robot(agent)
+
+
+class TestTheAccessLog:
+    """uvicorn's access line prints the phone's address first: dropped for a tap."""
+
+    def _record(self, path: str):
+        import logging
+
+        return logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            __file__,
+            1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("203.0.113.9:51234", "GET", path, "1.1", 302),
+            None,
+        )
+
+    def test_a_tap_has_no_access_line(self) -> None:
+        from neura_api.routes.go import TapAddressFilter
+
+        assert not TapAddressFilter().filter(self._record("/go/k7m2qa"))
+
+    def test_every_other_path_keeps_its_line(self) -> None:
+        from neura_api.routes.go import TapAddressFilter
+
+        assert TapAddressFilter().filter(self._record("/v1/health/ready"))
+        assert TapAddressFilter().filter(self._record("/v1/console/shops/tn_1/links"))

@@ -64,6 +64,7 @@ from neura_api.routes import (
     console_usage,
     console_wanted,
     dispatch,
+    go,
     handover_email,
     health,
     observe,
@@ -343,6 +344,11 @@ def create_app() -> FastAPI:
     # ADR-0044 phase 1. Mounted for every deployment; what gates it is the key's
     # scope and the tenant's agreement, never whether this line is here.
     app.include_router(observe.router, prefix="/v1")
+    # ADR-0074: a tap on a counted link. Public and without /v1, because the
+    # address is in shoppers' posts for good (R113, AD13); uvicorn's access line
+    # for it is dropped, because it prints the phone's address (§5).
+    app.include_router(go.router)
+    go.quiet_taps()
     # ADR-0053: teaches a developer's AI tool how to build a bridge. Public, no
     # key; it reads nothing but our own fixed content. The limiter is built in
     # the lifespan, so it is looked up per request.
