@@ -17,7 +17,8 @@ that:
 * holds a price or an offer (a ``%``, a currency sign or code, a number followed
   by *off*, *free*, *half price*): the place for one is **[your offer]**;
 * holds a claim from a fixed list (*organic*, *cures*, *guaranteed*, *No. 1* and
-  the like), **in English only** (R88);
+  the like), or *treats* said of what a product does (*treats colds*; as a noun,
+  *sweet treats*, it passes, G120), **in English only** (R88);
 * holds a link, a phone number, an email address or an ``@`` handle;
 * states a count of shoppers, customers or orders (the page shows the real one);
 * holds a bracket other than **[your offer]**, or anything the injection
@@ -85,7 +86,6 @@ CLAIM_WORDS = (
     "heal",
     "heals",
     "healing",
-    "treats",
     "treatment",
     "guaranteed",
     "guarantee",
@@ -107,6 +107,17 @@ CLAIM_WORDS = (
 )
 _CLAIM = re.compile(
     r"(?<![a-z0-9])(?:" + "|".join(re.escape(word) for word in CLAIM_WORDS) + r")(?![a-z0-9])"
+)
+#: *Treats* said of what a product does to someone (G120, the owner 2026-11-02):
+#: followed by whom or what it is done to. As a noun (*sweet treats*, *treats for
+#: the family*) it is an ordinary food word and passes. Conservative on purpose:
+#: *treats your family to* is refused too, and the model writes it another way.
+_TREATS_AS_A_CLAIM = re.compile(
+    r"(?<![a-z0-9])treats\s+(?:your|you|the|a|an|all|any|many|most|common|it|them|this|these"
+    r"|those|my|our|his|her|their|colds?|coughs?|flu|fevers?|pains?|aches?|headaches?"
+    r"|diabetes|acne|eczema|skin|illness(?:es)?|diseases?|infections?|symptoms?"
+    r"|inflammation|wounds?|burns?|insomnia|anxiety|stress|stomach|indigestion|arthritis"
+    r"|asthma|allergies)(?![a-z0-9])"
 )
 #: A price or an offer, in any language: a percentage, a currency, *off*, *free*.
 _PRICE = re.compile(
@@ -274,7 +285,7 @@ def text_refusal(text: str) -> str | None:
         return "price"
     if _CONTACT.search(lowered):
         return "contact"
-    if _CLAIM.search(lowered):
+    if _CLAIM.search(lowered) or _TREATS_AS_A_CLAIM.search(lowered):
         return "claim"
     if _COUNT.search(lowered):
         return "count"
@@ -294,9 +305,12 @@ def claim_in(answer: PlanAnswer) -> str:
     of our own list, never the model's or a shopper's text.
     """
     for name in ("theme", "idea", *TEXT_FIELDS):
-        found = _CLAIM.search(str(getattr(answer, name) or "").lower())
+        text = str(getattr(answer, name) or "").lower()
+        found = _CLAIM.search(text)
         if found:
             return found.group(0)
+        if _TREATS_AS_A_CLAIM.search(text):
+            return "treats"
     return ""
 
 
@@ -395,7 +409,12 @@ async def write_plan(given: PlanInput, *, llm: object, prompt: str) -> PlanResul
         if refusals:
             reason = RETRY_REASONS[refusals[-1]]
             if refusals[-1] == "claim" and (word := claim_in(raw[-1])):
-                reason += f' ("{word}"; leave it out in every form, also as an ordinary word)'
+                reason += (
+                    ' ("treats" said of what a product does to someone; write it only as a '
+                    'noun, as in "sweet treats")'
+                    if word == "treats"
+                    else f' ("{word}"; leave it out in every form, also as an ordinary word)'
+                )
             user += (
                 f"\n\nYour last answer was refused by a check: {reason}. "
                 "Write the whole answer again and follow every rule."

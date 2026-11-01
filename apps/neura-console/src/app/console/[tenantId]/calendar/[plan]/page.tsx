@@ -78,7 +78,11 @@ export default async function PlanPage({
   // A post's link opens one of the plan's products that has a page (R110).
   const linkable = plan.products
     .filter((product) => product.url)
-    .map((product) => ({ product_id: product.product_id, title: product.title ?? null }));
+    .map((product) => ({
+      product_id: product.product_id,
+      title: product.title ?? null,
+      image: product.image ?? null,
+    }));
   const dayBefore = new Date(`${plan.day}T00:00:00Z`);
   dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
 
@@ -200,7 +204,7 @@ export default async function PlanPage({
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-0.5">
                   <h2 id="products" className="text-[17px] font-semibold">
-                    Products to show
+                    Products to promote
                   </h2>
                   {plan.owner_products ? (
                     <p data-chosen-by-you className="text-[13px] text-muted-foreground">
@@ -456,8 +460,12 @@ function ProductCard({ product }: { product: PlanProduct }) {
           className="aspect-[4/3] w-full bg-muted object-cover"
         />
       ) : (
-        <span className="flex aspect-[4/3] w-full items-center justify-center bg-muted">
-          <ImageIcon className="size-6 text-muted-foreground" aria-hidden />
+        <span
+          data-no-photo
+          className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1.5 bg-muted text-[13px] text-muted-foreground"
+        >
+          <ImageIcon className="size-6" aria-hidden />
+          No photo in your shop
         </span>
       )}
       <div className="flex flex-1 flex-col gap-3 p-4">

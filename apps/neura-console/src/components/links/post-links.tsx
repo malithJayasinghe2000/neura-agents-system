@@ -26,7 +26,7 @@ import {
 } from "@/lib/links";
 import { Button } from "@/components/ui/button";
 
-export type LinkProduct = { product_id: string; title: string | null };
+export type LinkProduct = { product_id: string; title: string | null; image?: string | null };
 
 export function PostLinks({
   tenantId,
@@ -98,6 +98,8 @@ export function PostLinks({
 
   const counted = clicksByPlace(current?.clicks ?? {});
   const title = (id: string) => products.find((p) => p.product_id === id)?.title ?? "this product";
+  // G126: which of the shop's own photos goes with the post (never an AI picture, D17).
+  const photo = products.find((p) => p.product_id === productId)?.image ?? null;
 
   return (
     <div data-post-links={post} className="space-y-3 border-t pt-3">
@@ -128,6 +130,38 @@ export function PostLinks({
             aria-hidden
           />
         </span>
+      </div>
+
+      <div data-post-photo className="flex items-center gap-3">
+        {photo ? (
+          <>
+            {/* The shop's own photo, from the synced catalogue. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={photo}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="size-12 shrink-0 rounded-md border bg-muted object-cover"
+            />
+            <p className="text-sm">
+              Post it with this photo.{" "}
+              <a
+                href={photo}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium underline underline-offset-3"
+              >
+                Open the photo
+              </a>{" "}
+              <span className="text-muted-foreground">to save it.</span>
+            </p>
+          </>
+        ) : (
+          <p className="text-[13px] text-muted-foreground">
+            No photo of {title(productId)} in your shop yet.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

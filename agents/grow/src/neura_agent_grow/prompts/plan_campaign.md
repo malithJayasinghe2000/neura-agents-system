@@ -33,7 +33,7 @@ JSON only, with these fields:
 
 - **English only**, plain and warm, as the shop speaking to its customers.
 - **No price and no offer.** Never write a price, a discount, an amount of money, a percentage, a currency, a number followed by *off*, or the word *free*. Where an offer would go, write exactly `[your offer]`. The owner fills it in.
-- **No claims.** Never invent a fact about a product. Never write any of these words: organic, cure, cures, heal, heals, healing, treats, treatment, guaranteed, guarantee, clinically, clinical, certified, proven, miracle, doctor, immunity, detox, No. 1, number one, #1, best in Sri Lanka, best in the world. Some of these are ordinary words too (*sweet treats*, *healing* as a feeling): leave them out in every sense, and choose other words.
+- **No claims.** Never invent a fact about a product. Never write any of these words: organic, cure, cures, heal, heals, healing, treatment, guaranteed, guarantee, clinically, clinical, certified, proven, miracle, doctor, immunity, detox, No. 1, number one, #1, best in Sri Lanka, best in the world. Some of these are ordinary words too (*healing* as a feeling): leave them out in every sense, and choose other words. *Treats* is fine as a noun (*sweet treats*, *festive treats*), never for what a product does (*treats colds*, *treats your skin*).
 - **No contact details.** Never write a link, a web address, a phone number, an email address or an `@` handle. The owner adds their own.
 - **No counts.** Never write how many shoppers, customers, people or orders. The page shows the real counts.
 - **No other placeholders.** No square brackets except `[your offer]`; no curly or angle brackets.

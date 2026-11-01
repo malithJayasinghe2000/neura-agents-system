@@ -204,7 +204,7 @@ shop with no chats; its own switch is `grow.calendar`, *The calendar's AI plans*
 `grow.calendar.plans`, found through the manifest's `on_demand`. Its eval is `evals/datasets/calendar.yaml` (10
 cases, 4 attacks; Gemini 10 of 10, injection resistance 1.00, 2026-11-01).
 
-**The owner may choose a plan's products** (D20, [ADR-0076](../architecture/adr/0076-the-owner-may-choose-a-plans-products.md), built 2026-11-02): *Change products* on a ready plan, 1 to 3, sold out or not; the model is then given exactly those and code holds it to them; *Make it again* keeps them. The eval has 12 cases since (Gemini 12 of 12, injection resistance 1.00, 2026-11-02).
+**The owner may choose a plan's products** (D20, [ADR-0076](../architecture/adr/0076-the-owner-may-choose-a-plans-products.md), built 2026-11-02): *Change products* on a ready plan, 1 to 3, sold out or not; the model is then given exactly those and code holds it to them; *Make it again* keeps them. **G120 and G126** ([ADR-0077](../architecture/adr/0077-the-calendars-open-points-settled.md)): *treats* passes as a noun and is refused as what a product does; each post says which of the shop's own photos goes with it. The eval has 13 cases since (Gemini 13 of 13, injection resistance 1.00, 2026-11-02).
 
 ## 15. The fourth surface: *Links* (ADR-0074, built 2026-11-02)
 

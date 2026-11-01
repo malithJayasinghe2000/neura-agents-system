@@ -4278,7 +4278,7 @@ async def _check_calendar(
                 failures,
             )
             _check(
-                f"Products to show: names and prices from the catalogue, Open the page ({size})",
+                f"Products to promote: names and prices from the catalogue, Open the page ({size})",
                 "Console-check Breakfast Tea" in page
                 and "LKR\u00a01,850.00" in page.replace("LKR 1,850.00", "LKR\u00a01,850.00")
                 and bool(
@@ -4790,6 +4790,19 @@ async def _check_links(
                 and "Copy Facebook link" in page
                 and "Copy the link" in page
                 and "whoever sees your banner is already in your shop" in page,
+                failures,
+            )
+            _check(
+                f"Products to promote, No photo in your shop, and the post's photo line ({size})",
+                "Products to promote" in page
+                and "No photo in your shop" in page
+                and "No photo of Console-check Links Tea in your shop yet."
+                in str(
+                    await browser.evaluate(
+                        "document.querySelector('[data-post-links=\"teaser\"] [data-post-photo]')"
+                        ".innerText"
+                    )
+                ),
                 failures,
             )
             _check(

@@ -197,6 +197,21 @@ class TestClaims:
     def test_a_claim_inside_another_word_is_not(self) -> None:
         assert text_refusal("A health-giving cup, secured fresh, retreats of calm") is None
 
+    @pytest.mark.parametrize(
+        "text",
+        ["Sweet treats for Avurudu", "Festive treats and gifts", "Treats for the whole family"],
+    )
+    def test_treats_as_a_food_word_passes(self, text: str) -> None:
+        """G120 (the owner, 2026-11-02): a food shop's ordinary word."""
+        assert text_refusal(text) is None
+
+    @pytest.mark.parametrize(
+        "text",
+        ["Our honey treats colds", "It treats your skin", "Treats the symptoms of flu"],
+    )
+    def test_treats_as_what_a_product_does_is_a_claim(self, text: str) -> None:
+        assert text_refusal(text) == "claim"
+
 
 class TestContactDetails:
     @pytest.mark.parametrize(
@@ -277,11 +292,17 @@ class TestWritePlan:
         assert "refused by a check" in retry and OFFER in retry
 
     async def test_a_claim_is_named_on_the_retry(self) -> None:
-        """Found in the Gemini eval: *sweet treats* was refused twice, unnamed."""
-        model = _Model(_answer(teaser="Sweet treats for Avurudu"), _answer())
+        """Found in the Gemini eval: a claim was refused twice, unnamed (G120)."""
+        model = _Model(_answer(teaser="Our cinnamon cures colds"), _answer())
         result = await write_plan(GIVEN, llm=model, prompt="plan")
         assert result.plan is not None and result.refusals == ("claim",)
-        assert '("treats";' in model.seen[1][1].messages[-1].content
+        assert '("cures";' in model.seen[1][1].messages[-1].content
+
+    async def test_treats_as_a_claim_is_explained_on_the_retry(self) -> None:
+        model = _Model(_answer(teaser="Our honey treats colds"), _answer())
+        result = await write_plan(GIVEN, llm=model, prompt="plan")
+        assert result.plan is not None and result.refusals == ("claim",)
+        assert 'as in "sweet treats"' in model.seen[1][1].messages[-1].content
 
     async def test_refused_twice_there_is_no_plan(self) -> None:
         model = _Model(_answer(product_ids=["999"]), _answer(banner="Call 0771234567"))
