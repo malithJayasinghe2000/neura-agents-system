@@ -40,6 +40,12 @@ const nextConfig: NextConfig = {
    */
   agentRules: false,
 
+  /**
+   * The deploy image runs the standalone server (infra/docker/console.Dockerfile,
+   * ADR-0079). Only there: `next dev` and `next start` stay as they were.
+   */
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
+
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API_BASE}/:path*` }];
   },

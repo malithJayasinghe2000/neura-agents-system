@@ -113,8 +113,13 @@ def _redis() -> Any | None:
         log.error("redis_unavailable", detail="package not installed")
         return None
 
+    url = get_settings().redis_url
+    if url is None:
+        # Chosen, not broken (ADR-0079 §3): said once here, not per request.
+        log.warning("redis_off", detail="REDIS_URL is empty; rate limits are off")
+        return None
     try:
-        return redis.from_url(str(get_settings().redis_url))
+        return redis.from_url(str(url))
     except Exception as exc:  # a bad URL must not stop the process booting
         log.error("redis_unavailable", error=str(exc))
         return None

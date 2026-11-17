@@ -133,6 +133,11 @@ class TestContext:
 
 
 class TestSettings:
+    def test_an_empty_redis_url_means_no_redis(self) -> None:
+        """ADR-0079 §3 (R130): no Redis is a choice, not a typo."""
+        assert Settings(_env_file=None, REDIS_URL="").redis_url is None
+        assert Settings(_env_file=None, REDIS_URL="redis://r:6379/0").redis_url is not None
+
     def test_development_tolerates_placeholder_secrets(self) -> None:
         """A fresh clone must boot without ceremony."""
         Settings(NEURA_ENV="development").validate_for_runtime()

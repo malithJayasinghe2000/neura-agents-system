@@ -1,0 +1,14 @@
+# What a docker build never needs: secrets, caches, local builds.
+.env
+.env.*
+!.env.example
+**/.venv
+**/__pycache__
+**/node_modules
+**/.next
+**/out
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+.git
+docs/archive

@@ -68,7 +68,11 @@ class Settings(BaseSettings):
     )
     database_pool_size: int = Field(default=10, alias="DATABASE_POOL_SIZE")
     database_max_overflow: int = Field(default=5, alias="DATABASE_MAX_OVERFLOW")
-    redis_url: RedisDsn = Field(default=RedisDsn("redis://localhost:6379/0"), alias="REDIS_URL")
+    #: Empty means **no Redis**, on purpose (ADR-0079 §3, R130): the rate limiter
+    #: then fails open (ADR-0017) without trying a server on every request.
+    redis_url: RedisDsn | None = Field(
+        default=RedisDsn("redis://localhost:6379/0"), alias="REDIS_URL"
+    )
 
     # ── Encryption ───────────────────────────────────────────────────────────
     kek: str = Field(default=_PLACEHOLDER, alias="NEURA_KEK")
@@ -232,6 +236,12 @@ class Settings(BaseSettings):
     @property
     def widget_origins(self) -> list[str]:
         return [o.strip() for o in self.widget_allowed_origins.split(",") if o.strip()]
+
+    @field_validator("redis_url", mode="before")
+    @classmethod
+    def _no_redis(cls, value: object) -> object:
+        """``REDIS_URL=`` (empty) is a choice, not a typo: no Redis."""
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("budget_daily_cost_usd_hard")
     @classmethod
