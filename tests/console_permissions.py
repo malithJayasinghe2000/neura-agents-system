@@ -153,6 +153,8 @@ ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", f"{_SHOP}/calendar/dates/own/{{date_id}}"): CALENDAR,
     ("GET", f"{_SHOP}/calendar/plans/{{plan_id}}"): CALENDAR,
     ("PUT", f"{_SHOP}/calendar/plans/{{plan_id}}/texts"): CALENDAR,
+    # ADR-0078 §2: the owner's choice before a plan is written.
+    ("POST", f"{_SHOP}/calendar/plans/{{plan_id}}/choose"): CALENDAR,
     ("POST", f"{_SHOP}/calendar/plans/{{plan_id}}/again"): CALENDAR,
     # D20 (R124): Change products, and its chooser.
     ("PUT", f"{_SHOP}/calendar/plans/{{plan_id}}/products"): CALENDAR,

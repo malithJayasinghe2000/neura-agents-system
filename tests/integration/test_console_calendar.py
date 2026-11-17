@@ -20,12 +20,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 
-from neura_agent_core.calendar import CalendarRepository, Country, shop_today
+from neura_agent_core.calendar import CalendarRepository, Country, PlanKind, PlanState, shop_today
 from neura_api.main import create_app
 from neura_commerce.sync.schema import synced_entities
 from neura_core import Database, get_settings, ids, load_env
@@ -175,6 +176,27 @@ async def _plan(db: Database, team: Team, date_key: str, days: int, name: str) -
     return stored.id
 
 
+async def _suggest(
+    db: Database,
+    team: Team,
+    date_key: str,
+    days: int,
+    name: str,
+    suggestion: dict[str, Any] | None = None,
+) -> str:
+    """What the night run stores 28 days before (ADR-0078 §1)."""
+    async with db.tenant_session(team.tenant) as session:
+        stored = await CalendarRepository(session).store_suggestion(
+            team.tenant,
+            date_key=date_key,
+            day=TODAY + timedelta(days=days),
+            name=name,
+            suggestion=suggestion or {"kind": "products", "reason": "fit", "products": ["4"]},
+            at=datetime.now(UTC),
+        )
+    return stored.id
+
+
 async def _kinds(db: Database, team: Team) -> list[str]:
     async with db.tenant_session(team.tenant) as session:
         return sorted((await session.execute(select(job_queue.c.kind))).scalars().all())
@@ -199,6 +221,7 @@ class TestWhoMayOpenIt:
             ("GET", f"{team.base()}/plans/{plan_id}", None),
             ("PUT", f"{team.base()}/plans/{plan_id}/texts", {"texts": {"banner": "x"}}),
             ("POST", f"{team.base()}/plans/{plan_id}/again", None),
+            ("POST", f"{team.base()}/plans/{plan_id}/choose", {"choice": "skip"}),
         ]
         for method, path, body in calls:
             refused = client.request(method, path, json=body, cookies=developer)
@@ -213,22 +236,29 @@ class TestComingUp:
     ) -> None:
         ready_key = await _own(db, team, 12, "Ready")
         plan_id = await _plan(db, team, ready_key, 12, "Ready")
+        choose = await _suggest(db, team, await _own(db, team, 15, "Choose"), 15, "Choose")
         await _own(db, team, 20, "Due")
         await _own(db, team, 40, "Later")
 
         data = client.get(team.base(), cookies=cookie(team.people[SUPPORT])).json()["data"]
 
-        assert (data["country"], data["time_zone"], data["plan_days_before"]) == (
+        assert (data["country"], data["time_zone"], data["ask_days_before"]) == (
             "lk",
             "Asia/Colombo",
-            21,
+            28,
         )
         assert data["saved"] is False and data["paused_since"] is None
         rows = [(r["name"], r["status"], r["days_left"]) for r in data["coming_up"]]
-        assert rows == [("Ready", "ready", 12), ("Due", "tonight", 20), ("Later", "planned", 40)]
+        assert rows == [
+            ("Ready", "ready", 12),
+            ("Choose", "choose", 15),
+            ("Due", "tonight", 20),
+            ("Later", "planned", 40),
+        ]
         assert data["coming_up"][0]["plan_id"] == plan_id
-        later = data["coming_up"][2]
-        assert later["plan_day"] == (TODAY + timedelta(days=19)).isoformat()
+        assert data["coming_up"][1]["plan_id"] == choose
+        later = data["coming_up"][3]
+        assert later["plan_day"] == (TODAY + timedelta(days=12)).isoformat()
         assert later["own"] is True and later["plan_id"] is None
 
     async def test_paused_says_so_and_no_plan_is_promised(
@@ -565,6 +595,7 @@ class TestHome:
         self, client: TestClient, db: Database, team: Team
     ) -> None:
         plan_id = await _plan(db, team, await _own(db, team, 12, "Avurudu"), 12, "Avurudu")
+        waiting = await _suggest(db, team, await _own(db, team, 26, "Vesak"), 26, "Vesak")
         home = f"/v1/console/shops/{team.tenant}/home"
         for role in (OWNER, SUPPORT):
             lines = client.get(home, cookies=cookie(team.people[role])).json()["data"]["calendar"]
@@ -576,6 +607,14 @@ class TestHome:
                         "name": "Avurudu",
                         "day": (TODAY + timedelta(days=12)).isoformat(),
                         "days_left": 12,
+                    }
+                ],
+                "choose": [
+                    {
+                        "plan_id": waiting,
+                        "name": "Vesak",
+                        "day": (TODAY + timedelta(days=26)).isoformat(),
+                        "days_left": 26,
                     }
                 ],
             }
@@ -590,3 +629,114 @@ class TestHome:
         assert client.put(f"{team.base()}/dates", json={"country": "lk"}, cookies=owner).is_success
         await _own(db, team, 30, "Near")
         assert client.get(home, cookies=owner).json()["data"]["calendar"]["add_dates"] is False
+
+
+class TestChoose:
+    """ADR-0078 §2 (D21): the owner chooses before a plan is written."""
+
+    async def test_a_suggestion_waits_and_make_it_again_is_refused(
+        self, client: TestClient, db: Database, team: Team
+    ) -> None:
+        plan_id = await _suggest(db, team, await _own(db, team, 20, "Sale"), 20, "Sale")
+        owner = cookie(team.people[OWNER])
+        data = client.get(f"{team.base()}/plans/{plan_id}", cookies=owner).json()["data"]
+        assert (data["state"], data["kind"], data["has_plan"]) == ("choose", None, False)
+        assert data["can_choose"] is True and data["can_make_again"] is False
+        assert data["suggestion"]["reason"] == "fit"
+        assert [p["title"] for p in data["suggestion"]["products"]] == [
+            "Ceylon Black Tea BOPF 400g"
+        ]
+        refused = client.post(f"{team.base()}/plans/{plan_id}/again", cookies=owner)
+        assert refused.status_code == 409 and refused.json()["error"]["code"] == "NOT_CHOSEN"
+
+    async def test_skip_then_a_greeting_books_grows_job_at_once(
+        self, client: TestClient, db: Database, team: Team
+    ) -> None:
+        plan_id = await _suggest(
+            db,
+            team,
+            "s:vesak",
+            20,
+            "Vesak",
+            {"kind": "greeting", "reason": "religious", "products": []},
+        )
+        support = cookie(team.people[SUPPORT])
+        path = f"{team.base()}/plans/{plan_id}/choose"
+
+        skipped = client.post(path, json={"choice": "skip"}, cookies=support)
+        assert skipped.json()["data"] == {"state": "skipped", "booked": False}
+        data = client.get(f"{team.base()}/plans/{plan_id}", cookies=support).json()["data"]
+        assert (data["state"], data["skipped"], data["can_choose"]) == ("skipped", True, True)
+        assert await _kinds(db, team) == []
+
+        chosen = client.post(path, json={"choice": "greeting"}, cookies=support)
+        assert chosen.json()["data"] == {"state": "making", "booked": True}
+        async with db.tenant_session(team.tenant) as session:
+            plan = await CalendarRepository(session).plan(team.tenant, plan_id)
+        assert plan is not None and plan.plan_kind is PlanKind.GREETING
+        assert plan.skipped_at is None and plan.state is PlanState.MAKING
+        assert "grow.calendar.plans" in await _kinds(db, team)
+        again = client.post(path, json={"choice": "skip"}, cookies=support)
+        assert again.json()["error"]["code"] == "ALREADY_CHOSEN"
+
+    async def test_products_are_the_owners_and_what_cannot_be_chosen(
+        self, client: TestClient, db: Database, team: Team
+    ) -> None:
+        plan_id = await _suggest(db, team, await _own(db, team, 20, "Sale"), 20, "Sale")
+        owner = cookie(team.people[OWNER])
+        path = f"{team.base()}/plans/{plan_id}/choose"
+        for body, code in (
+            ({"choice": "products"}, "PRODUCTS"),
+            ({"choice": "products", "product_ids": ["4", "4"]}, "PRODUCTS"),
+            ({"choice": "greeting", "product_ids": ["4"]}, "PRODUCTS"),
+            ({"choice": "products", "product_ids": ["nope"]}, "PRODUCT_NOT_FOUND"),
+        ):
+            refused = client.post(path, json=body, cookies=owner)
+            assert refused.status_code == 400 and refused.json()["error"]["code"] == code, body
+        asked = client.post(
+            path, json={"choice": "products", "product_ids": ["4", "7"]}, cookies=owner
+        )
+        assert asked.status_code == 200, asked.text
+        async with db.tenant_session(team.tenant) as session:
+            plan = await CalendarRepository(session).plan(team.tenant, plan_id)
+        assert plan is not None and plan.owner_products == ("4", "7")
+        assert plan.plan_kind is PlanKind.PRODUCTS
+
+        ready = await _plan(db, team, await _own(db, team, 5), 5, "Ready")
+        refused = client.post(
+            f"{team.base()}/plans/{ready}/choose", json={"choice": "skip"}, cookies=owner
+        )
+        assert refused.json()["error"]["code"] == "ALREADY_CHOSEN"
+
+    async def test_a_greeting_plan_has_its_own_texts_and_schedule(
+        self, client: TestClient, db: Database, team: Team
+    ) -> None:
+        plan_id = await _suggest(db, team, "s:vesak", 20, "Vesak")
+        async with db.tenant_session(team.tenant) as session:
+            repository = CalendarRepository(session)
+            await repository.choose_greeting(team.tenant, plan_id, by="usr_x")
+            await repository.store_plan(
+                team.tenant,
+                date_key="s:vesak",
+                day=TODAY + timedelta(days=20),
+                name="Vesak",
+                answer={
+                    "theme": "A peaceful Vesak",
+                    "idea": "",
+                    "products": [],
+                    "act_on": [],
+                    "texts": {"greeting": "A peaceful Vesak to you.", "banner": "Peaceful Vesak"},
+                },
+                prompt_revision="test",
+                at=datetime.now(UTC),
+            )
+        owner = cookie(team.people[OWNER])
+        data = client.get(f"{team.base()}/plans/{plan_id}", cookies=owner).json()["data"]
+        assert (data["state"], data["kind"]) == ("ready", "greeting")
+        assert [s["step"] for s in data["schedule"]] == ["ready", "greeting"]
+        assert data["texts"] == {"greeting": "A peaceful Vesak to you.", "banner": "Peaceful Vesak"}
+        path = f"{team.base()}/plans/{plan_id}/texts"
+        saved = client.put(path, json={"texts": {"greeting": "Peace"}}, cookies=owner)
+        assert saved.json()["data"]["edited"] == ["greeting"]
+        refused = client.put(path, json={"texts": {"teaser": "x"}}, cookies=owner)
+        assert refused.json()["error"]["code"] == "UNKNOWN_TEXT"

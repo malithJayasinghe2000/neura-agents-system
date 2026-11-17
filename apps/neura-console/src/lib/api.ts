@@ -480,6 +480,21 @@ export function changePlanProducts(
   );
 }
 
+/**
+ * The owner's answer to a suggestion (ADR-0078 §2): products (1 to 3), a
+ * greeting only, or skip this date. Products or a greeting are written at once.
+ */
+export function choosePlan(
+  tenantId: string,
+  planId: string,
+  body: { choice: "products" | "greeting" | "skip"; product_ids?: string[] },
+): Promise<{ state: string }> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/calendar/plans/${encodeURIComponent(planId)}/choose`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
 /** *Change products*' chooser: the shop's products, narrowed by what was typed. */
 export function findPlanProducts(
   tenantId: string,

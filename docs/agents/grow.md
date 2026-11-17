@@ -3,7 +3,7 @@
 **Status:** **Accepted**, 2026-10-20 (R42) · with
 [ADR-0064](../architecture/adr/0064-grow-shows-what-shoppers-asked-that-the-shop-s-pages-do-not-say.md) ·
 built 2026-10-27 ([ADR-0066](../architecture/adr/0066-missing-from-your-pages-what-the-build-decided.md)); a second
-surface, *Shoppers asked for*, built 2026-10-28 (§13); a third, the *Marketing calendar*, built 2026-11-01 (§14); a fourth, *Links*, built 2026-11-02 (§15) · the owner's decisions are R36 to R41 in
+surface, *Shoppers asked for*, built 2026-10-28 (§13); a third, the *Marketing calendar*, built 2026-11-01 and changed to ask the owner first 2026-11-17 (§14); a fourth, *Links*, built 2026-11-02 (§15) · the owner's decisions are R36 to R41 in
 [CONNECTING_A_NEW_SHOP_LOG.md](../CONNECTING_A_NEW_SHOP_LOG.md), *Decisions*, *GROW*. Everything marked
 *(Claude)* was Claude's proposal, accepted by the owner with R42.
 
@@ -205,6 +205,8 @@ shop with no chats; its own switch is `grow.calendar`, *The calendar's AI plans*
 cases, 4 attacks; Gemini 10 of 10, injection resistance 1.00, 2026-11-01).
 
 **The owner may choose a plan's products** (D20, [ADR-0076](../architecture/adr/0076-the-owner-may-choose-a-plans-products.md), built 2026-11-02): *Change products* on a ready plan, 1 to 3, sold out or not; the model is then given exactly those and code holds it to them; *Make it again* keeps them. **G120 and G126** ([ADR-0077](../architecture/adr/0077-the-calendars-open-points-settled.md)): *treats* passes as a noun and is refused as what a product does; each post says which of the shop's own photos goes with it. The eval has 13 cases since (Gemini 13 of 13, injection resistance 1.00, 2026-11-02).
+
+**Ask the owner first** (D21, [ADR-0078](../architecture/adr/0078-ask-the-owner-first-then-write-the-plan.md), built 2026-11-17): **28 days before** a kept date the night run stores a **suggestion**, never a plan: 1 to 3 products in stock that fit the date (`suggest_products.md`, ids only, checked in code, `evals/datasets/suggest.yaml`), or a greeting when none fits (G131); **Vesak and Poson** are a greeting with no model call. The owner chooses (these products, other products, a greeting only, or skip), and **only then** is the plan written, at once. No choice, no plan, nothing spent. **A greeting plan** (`write_greeting.md`) is a post for the day and a banner, no products and no offer, refused for selling words. **No plan says anything about stock** (G130, a new check). G121 is closed: the owner read the plan writer's words and kept them.
 
 ## 15. The fourth surface: *Links* (ADR-0074, built 2026-11-02)
 

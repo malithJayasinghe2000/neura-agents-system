@@ -25,7 +25,7 @@ import { ArrowRight, CalendarDays, Info } from "lucide-react";
 import { ModeLine } from "@/components/home/mode-line";
 import { ModeSwitch } from "@/components/home/mode-switch";
 import { When } from "@/components/when";
-import { readyLine, type CalendarHome } from "@/lib/calendar";
+import { chooseLine, readyLine, type CalendarHome } from "@/lib/calendar";
 import { fromApi, hasSession } from "@/lib/server-api";
 import { PERMISSION, may, membershipOf } from "@/lib/roles";
 import type { Scorecard } from "@/lib/review";
@@ -288,9 +288,21 @@ function NeedsYou({
     });
   }
 
-  // Then the Marketing calendar (ADR-0072 §7, board 78): a line per ready plan,
-  // and *Add this year's special dates*, each with a calendar where others have
-  // a number. After the shoppers waiting, as board 78 places them (G123).
+  // Then the Marketing calendar (ADR-0072 §7, board 78): a line per date whose
+  // plan waits for the owner's choice (ADR-0078 §2), a line per ready plan, and
+  // *Add this year's special dates*, each with a calendar where others have a
+  // number. After the shoppers waiting, as board 78 places them (G123).
+  for (const waiting of calendar?.choose ?? []) {
+    items.push({
+      figure: null,
+      icon: true,
+      title: chooseLine(waiting.name, waiting.days_left),
+      detail: "Your assistant has a suggestion. Nothing is made until you choose.",
+      action: "Choose",
+      href: `${base}/calendar/${encodeURIComponent(waiting.plan_id)}`,
+      primary: false,
+    });
+  }
   for (const ready of calendar?.ready ?? []) {
     items.push({
       figure: null,
@@ -308,7 +320,7 @@ function NeedsYou({
       icon: true,
       title: "Add this year's special dates",
       detail:
-        "Untick the ones that don't fit your shop and add your own. Your assistant plans a campaign 21 days before each.",
+        "Untick the ones that don't fit your shop and add your own. Your assistant suggests a plan 4 weeks before each.",
       action: "Add dates",
       href: `${base}/calendar/dates`,
       primary: false,

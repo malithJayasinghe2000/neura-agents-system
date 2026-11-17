@@ -4,11 +4,13 @@ A fake model stands in for the real one (the real one is measured by the eval,
 Rule 4); everything else is real: the dates, the plans, the synced catalogue,
 the two GROW pages' rows, the switches, the queue.
 
-* **When**: a kept date 21 days away or closer gets a plan; 22 days away does
-  not yet; a date kept late gets one on the next run; a suggested date only once
-  its year's list is saved (R91).
+* **When** (ADR-0078): a kept date 28 days away or closer gets a *suggestion*,
+  never a plan; 29 days away does not yet; a date kept late gets one on the next
+  run; a suggested date only once its year's list is saved (R91). Vesak is a
+  greeting with no call; nothing fitting is a greeting. **No choice, no plan.**
 * **What the model is given**: labels and counts, never a shopper's question or
-  a conversation id; only products in stock.
+  a conversation id; the suggestion only products in stock; a greeting only the
+  shop and the date.
 * **Refused twice**: stored as *could not be made*, and not asked again unasked.
 * **Make it again**: answered at once by its own job; the owner's edits go.
 * **The switch** ``grow.calendar``: off, no plan and no call; the night check
@@ -27,6 +29,7 @@ from sqlalchemy import delete, insert, select, update
 
 from neura_agent_core.calendar import (
     CalendarRepository,
+    PlanKind,
     PlanState,
     calendar_dates,
     calendar_plans,
@@ -38,7 +41,7 @@ from neura_agent_core.calendar import Country as CalendarCountry
 from neura_agent_core.conversations import conversation_messages, conversations
 from neura_agent_core.gaps import page_gap_fixes, page_gap_scans, page_gaps
 from neura_agent_core.wanted import WantedItem, WantedRepository, wanted_hides, wanted_items
-from neura_agent_grow.campaign import PlanAnswer
+from neura_agent_grow.campaign import GreetingAnswer, PlanAnswer
 from neura_agent_grow.jobs import (
     CALENDAR_PLANS,
     CalendarPlansHandler,
@@ -46,6 +49,7 @@ from neura_agent_grow.jobs import (
     NightRunHandler,
 )
 from neura_agent_grow.plans import make_plans
+from neura_agent_grow.suggest import SuggestAnswer
 from neura_api.jobs.daily import book_daily_jobs
 from neura_api.jobs.retention import RETENTION_SWEEP, enqueue_sweep
 from neura_commerce.sync.schema import synced_entities
@@ -165,16 +169,36 @@ def _answer(**overrides: Any) -> PlanAnswer:
     return PlanAnswer(**values)
 
 
-class _Model:
-    """Answers with the given answers in turn (the last one repeats)."""
+GREETING = GreetingAnswer(
+    theme="A peaceful day",
+    greeting="Ceylon Test Tea wishes you and your family a peaceful day.",
+    banner="Wishing you a peaceful day",
+)
 
-    def __init__(self, *answers: PlanAnswer | Exception) -> None:
+
+class _Model:
+    """A plan's answers in turn (the last one repeats); a suggestion's and a
+    greeting's by the schema asked for. ``seen`` and ``asked`` record each call."""
+
+    def __init__(
+        self,
+        *answers: PlanAnswer | Exception,
+        suggest: SuggestAnswer | Exception | None = None,
+    ) -> None:
         self.answers = list(answers) or [_answer()]
+        self.suggest = suggest if suggest is not None else SuggestAnswer(product_ids=["4"])
         self.seen: list[str] = []
+        self.asked: list[str] = []
 
     async def chat_structured(self, role: Any, request: Any, schema: Any) -> Any:
         self.seen.append(request.messages[-1].content)
-        answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        self.asked.append(schema.__name__)
+        if schema is SuggestAnswer:
+            answer: Any = self.suggest
+        elif schema is GreetingAnswer:
+            answer = GREETING
+        else:
+            answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
         if isinstance(answer, Exception):
             raise answer
 
@@ -191,6 +215,8 @@ async def _make(database: Database, model: _Model, **kwargs: Any) -> Any:
         GROWING,
         llm=model,
         prompt="plan",
+        suggest_prompt="suggest",
+        greeting_prompt="greeting",
         prompt_revision="test",
         now=NOW,
         **kwargs,
@@ -202,31 +228,86 @@ async def _plans(database: Database) -> list[Any]:
         return await CalendarRepository(session).plans(GROWING, since=TODAY)
 
 
-async def test_a_plan_is_made_21_days_before_and_not_22(db: Database) -> None:
+async def _chosen(
+    database: Database, products: tuple[str, ...] = ("4", "5"), model: _Model | None = None
+) -> Any:
+    """A date 10 days away, suggested, then the owner's products chosen and written."""
+    await _own(database, 10)
+    await _make(database, _Model())
+    [plan] = await _plans(database)
+    async with database.tenant_session(GROWING) as session:
+        await CalendarRepository(session).choose_products(GROWING, plan.id, list(products), by=BY)
+    await _make(database, model or _Model(), asked_only=True)
+    [made] = await _plans(database)
+    return made
+
+
+async def test_a_suggestion_is_made_28_days_before_and_not_29_and_no_plan(db: Database) -> None:
+    """ADR-0078 §1: the AI suggests; nothing is written until the owner chooses."""
     await _shop(db)
-    due = await _own(db, 21, "In 21 days")
-    await _own(db, 22, "In 22 days")
+    due = await _own(db, 28, "In 28 days")
+    await _own(db, 29, "In 29 days")
     model = _Model()
 
     result = await _make(db, model)
 
-    assert (result.made, result.failed, result.calls) == (1, 0, 1)
+    assert (result.suggested, result.made, result.calls) == (1, 0, 1)
+    assert model.asked == ["SuggestAnswer"]
     [plan] = await _plans(db)
-    assert (plan.date_key, plan.name, plan.state) == (due, "In 21 days", PlanState.READY)
-    assert plan.answer is not None and plan.answer["products"] == ["4", "5"]
-    assert plan.prompt_revision == "test"
+    assert (plan.date_key, plan.name, plan.state) == (due, "In 28 days", PlanState.CHOOSE)
+    assert plan.answer is None
+    assert plan.suggestion == {"kind": "products", "reason": "fit", "products": ["4"]}
     again = await _make(db, model)
-    assert again.calls == 0, "a date with a plan is not planned again"
+    assert again.calls == 0, "a date with a suggestion is not asked again"
 
 
-async def test_a_date_kept_late_gets_its_plan_and_a_suggested_one_waits_for_the_save(
+async def test_no_choice_no_plan_and_a_skipped_date_makes_nothing(db: Database) -> None:
+    """D21: if the owner never chooses, nothing is written and nothing is spent."""
+    await _shop(db)
+    await _own(db, 10)
+    await _make(db, _Model())
+    assert (await _make(db, _Model())).calls == 0
+    [plan] = await _plans(db)
+    async with db.tenant_session(GROWING) as session:
+        skipped = await CalendarRepository(session).skip(GROWING, plan.id, by=BY)
+    assert skipped is not None and skipped.state is PlanState.SKIPPED
+    assert (await _make(db, _Model())).calls == 0
+
+
+async def test_nothing_fits_suggests_a_greeting(db: Database) -> None:
+    """G131: no product is forced on a date it does not fit."""
+    await _shop(db)
+    await _own(db, 10)
+    await _make(db, _Model(suggest=SuggestAnswer(product_ids=[])))
+    [plan] = await _plans(db)
+    assert plan.suggestion == {"kind": "greeting", "reason": "none_fit", "products": []}
+
+
+async def test_vesak_is_a_greeting_with_no_model_call(db: Database) -> None:
+    """ADR-0078 §1: Vesak and Poson are decided in code."""
+    day = TODAY + timedelta(days=20)
+    if day.year != TODAY.year:
+        pytest.skip("the owner's Vesak day must fall in this year's list")
+    await _shop(db)
+    async with db.tenant_session(GROWING) as session:
+        await CalendarRepository(session).save_year(
+            GROWING, TODAY.year, suggested={"vesak": (True, day)}, own={}, by=BY
+        )
+    model = _Model()
+    result = await _make(db, model)
+    assert model.asked == [] and result.suggested >= 1
+    [vesak] = [p for p in await _plans(db) if p.date_key == "s:vesak"]
+    assert vesak.suggestion == {"kind": "greeting", "reason": "religious", "products": []}
+
+
+async def test_a_date_kept_late_gets_its_suggestion_and_a_suggested_one_waits_for_the_save(
     db: Database,
 ) -> None:
     await _shop(db)
     await _own(db, 5, "In 5 days")
     model = _Model()
     first = await _make(db, model)
-    assert first.made == 1, "only the own date: the year's list was never saved"
+    assert first.suggested == 1, "only the own date: the year's list was never saved"
 
     async with db.tenant_session(GROWING) as session:
         await CalendarRepository(session).save_year(
@@ -245,18 +326,30 @@ async def test_a_date_kept_late_gets_its_plan_and_a_suggested_one_waits_for_the_
             rows,
             CalendarCountry.SRI_LANKA,
             start=TODAY + timedelta(days=1),
-            end=TODAY + timedelta(days=22),
+            end=TODAY + timedelta(days=29),
         )
         if o.key is not None and o.day is not None
     ]
-    assert second.made == len(expected)
+    assert second.suggested == len(expected)
 
 
-async def test_the_model_is_given_labels_and_counts_and_products_in_stock(
+async def test_the_suggestion_is_given_products_in_stock_and_nothing_shoppers_said(
     db: Database,
 ) -> None:
     await _shop(db)
     await _own(db, 10)
+    await _wanted(db)
+    model = _Model()
+
+    await _make(db, model)
+
+    [seen] = model.seen
+    assert "Ceylon Black Tea BOPF 400g" in seen and '"category": "Black tea"' in seen
+    assert "Draft Tea" not in seen and "Sold Out Tea" not in seen
+    assert "matcha" not in seen and "cnv_secret" not in seen
+
+
+async def _wanted(db: Database) -> None:
     async with db.tenant_session(GROWING) as session:
         for n in (1, 2):
             await WantedRepository(session).record(
@@ -269,30 +362,55 @@ async def test_the_model_is_given_labels_and_counts_and_products_in_stock(
                     asked_at=NOW - timedelta(days=1),
                 ),
             )
+
+
+async def test_the_plan_writer_is_given_labels_and_counts_and_the_chosen_products(
+    db: Database,
+) -> None:
+    await _shop(db)
+    await _wanted(db)
     model = _Model()
 
-    await _make(db, model)
+    plan = await _chosen(db, model=model)
 
     [seen] = model.seen
     assert '"label": "matcha"' in seen and '"shoppers": 2' in seen
     assert "Do you have matcha" not in seen and "0771234567" not in seen
     assert "cnv_secret" not in seen and "msg_1" not in seen
-    assert "Ceylon Black Tea BOPF 400g" in seen and '"category": "Black tea"' in seen
-    assert "Draft Tea" not in seen and "Sold Out Tea" not in seen
-    assert "Ceylon Test Tea" in seen
+    assert "Ceylon Black Tea BOPF 400g" in seen and "Ceylon Test Tea" in seen
+    assert plan.state is PlanState.READY and plan.plan_kind is PlanKind.PRODUCTS
+
+
+async def test_a_greeting_is_written_from_the_shop_and_the_date_only(db: Database) -> None:
+    """ADR-0078 §4: no products, no shoppers' labels."""
+    await _shop(db)
+    await _wanted(db)
+    await _own(db, 10)
+    await _make(db, _Model())
+    [plan] = await _plans(db)
+    async with db.tenant_session(GROWING) as session:
+        await CalendarRepository(session).choose_greeting(GROWING, plan.id, by=BY)
+    model = _Model()
+
+    result = await _make(db, model, asked_only=True)
+
+    assert (result.made, model.asked) == (1, ["GreetingAnswer"])
+    assert "matcha" not in model.seen[0] and "Ceylon Black Tea" not in model.seen[0]
+    [made] = await _plans(db)
+    assert made.plan_kind is PlanKind.GREETING and made.state is PlanState.READY
+    assert made.texts() == {"greeting": GREETING.greeting, "banner": GREETING.banner}
+    assert made.answer is not None and made.answer["products"] == []
 
 
 async def test_refused_twice_is_stored_as_could_not_be_made_and_not_asked_again(
     db: Database,
 ) -> None:
     await _shop(db)
-    await _own(db, 10)
     model = _Model(_answer(launch="20% off"), _answer(product_ids=["999", "4"]))
 
-    result = await _make(db, model)
+    plan = await _chosen(db, model=model)
 
-    assert (result.made, result.failed, result.calls) == (0, 1, 2)
-    [plan] = await _plans(db)
+    assert len(model.seen) == 2
     assert plan.state is PlanState.FAILED and plan.failure == "product"
     assert (await _make(db, _Model())).calls == 0, "only Make it again asks again"
 
@@ -300,12 +418,12 @@ async def test_refused_twice_is_stored_as_could_not_be_made_and_not_asked_again(
 async def test_an_outage_stores_nothing(db: Database) -> None:
     await _shop(db)
     await _own(db, 10)
-    result = await _make(db, _Model(TimeoutError("down")))
-    assert result.stopped == "provider" and result.made == 0
+    result = await _make(db, _Model(suggest=TimeoutError("down")))
+    assert result.stopped == "provider" and result.suggested == 0
     assert await _plans(db) == []
 
 
-async def test_a_stored_plan_books_the_retention_sweep(db: Database) -> None:
+async def test_a_stored_suggestion_books_the_retention_sweep(db: Database) -> None:
     await _shop(db)
     await _own(db, 10)
     await _make(db, _Model(), after_store=enqueue_sweep)
@@ -338,19 +456,19 @@ async def test_the_night_run_reaches_a_shop_with_no_chats_and_meters_the_calls(
     db: Database,
 ) -> None:
     await _shop(db)
-    await _own(db, 21)
+    await _own(db, 28)
     job = await _running(db)
 
     summary = await NightRunHandler(_Model())(_Context(db, GROWING, job))
 
-    assert "1 plan(s) made" in summary and "0 repl(ies) read" in summary
+    assert "1 suggestion(s)" in summary and "0 repl(ies) read" in summary
     async with db.tenant_session(GROWING) as session:
         usage = (await session.execute(select(tenant_usage.c.llm_calls))).scalars().all()
         again = await JobQueue(session).get(job.id)
         kinds = set((await session.execute(select(job_queue.c.kind))).scalars().all())
     assert sum(usage) == 1, "the call is charged to the shop"
     assert again is not None and again.status is JobStatus.PENDING
-    assert RETENTION_SWEEP in kinds, "the plan is something to expire"
+    assert RETENTION_SWEEP in kinds, "the suggestion is something to expire"
 
 
 async def test_switched_off_no_plan_is_made_and_the_night_check_still_runs(
@@ -372,9 +490,7 @@ async def test_switched_off_no_plan_is_made_and_the_night_check_still_runs(
 
 async def test_make_it_again_is_answered_at_once_and_the_edits_go(db: Database) -> None:
     await _shop(db)
-    await _own(db, 10)
-    await _make(db, _Model())
-    [plan] = await _plans(db)
+    plan = await _chosen(db)
     async with db.tenant_session(GROWING) as session:
         repository = CalendarRepository(session)
         await repository.save_texts(GROWING, plan.id, {"banner": "My banner"})
@@ -397,9 +513,7 @@ async def test_the_owners_products_are_written_around_and_kept_for_make_it_again
 ) -> None:
     """D20 (R124 to R126): exactly the owner's products, a sold-out one included."""
     await _shop(db)
-    await _own(db, 10)
-    await _make(db, _Model())
-    [plan] = await _plans(db)
+    plan = await _chosen(db)
     async with db.tenant_session(GROWING) as session:
         await CalendarRepository(session).choose_products(GROWING, plan.id, ["7", "4"], by=BY)
     model = _Model(_answer(product_ids=["4", "5"]), _answer(product_ids=["7", "4"]))
@@ -426,9 +540,7 @@ async def test_the_owners_products_are_written_around_and_kept_for_make_it_again
 
 async def test_an_owners_product_gone_from_the_catalogue_is_left_out(db: Database) -> None:
     await _shop(db)
-    await _own(db, 10)
-    await _make(db, _Model())
-    [plan] = await _plans(db)
+    plan = await _chosen(db)
     async with db.tenant_session(GROWING) as session:
         await CalendarRepository(session).choose_products(GROWING, plan.id, ["gone", "5"], by=BY)
     model = _Model(_answer(product_ids=["5"]))
@@ -442,9 +554,7 @@ async def test_an_owners_product_gone_from_the_catalogue_is_left_out(db: Databas
 
 async def test_make_it_again_with_an_outage_makes_the_queue_retry(db: Database) -> None:
     await _shop(db)
-    await _own(db, 10)
-    await _make(db, _Model())
-    [plan] = await _plans(db)
+    plan = await _chosen(db)
     async with db.tenant_session(GROWING) as session:
         await CalendarRepository(session).ask_again(GROWING, plan.id, by=BY)
     job = await _running(db, CALENDAR_PLANS)

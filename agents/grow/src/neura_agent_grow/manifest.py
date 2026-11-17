@@ -65,8 +65,8 @@ MANIFEST = AgentManifest(
     description=(
         "The marketing agent. Three pages: Missing from your pages and "
         "Shoppers asked for, found once a night in the shop's chats, and the "
-        "Marketing calendar, a campaign plan 21 days before each date the shop "
-        "keeps. Read-only; writes nothing to the shop and sends nothing to "
+        "Marketing calendar: 4 weeks before each date the shop keeps, AI suggests "
+        "what its plan is about, and writes it once the owner chooses. Read-only; writes nothing to the shop and sends nothing to "
         "anyone."
     ),
     # None: GROW reads NEURA's own record of the shop's chats and synced
@@ -87,8 +87,9 @@ MANIFEST = AgentManifest(
         ),
         "grow.calendar": (
             "The calendar's AI plans",
-            "21 days before each date the shop keeps on its Marketing calendar, AI "
-            "writes a campaign plan. Make it again asks for another.",
+            "4 weeks before each date the shop keeps on its Marketing calendar, AI "
+            "suggests what its plan is about, and writes the plan the owner chooses. "
+            "Make it again asks for another.",
         ),
     },
     # The night check's words are the approved ones (board 61); the calendar's
@@ -106,7 +107,7 @@ MANIFEST = AgentManifest(
             "While it is off, no plan is made and no AI is used, and the shop can't press "
             "Make it again. Its dates and the plans already made stay on its Marketing "
             "calendar, marked Paused. The shop can't turn it back on.",
-            "Plans that are due are made again from the next night.",
+            "Suggestions that are due are made again from the next night.",
         ),
     },
     # One night check finds both pages' rows (ADR-0068 §8); the calendar's own

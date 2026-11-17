@@ -182,7 +182,7 @@ export function YearDatesForm({ tenantId, initial }: { tenantId: string; initial
       {saved ? (
         <p role="status" data-dates-saved className="flex items-center gap-2 text-sm font-medium">
           <Check className="size-4" aria-hidden />
-          Saved. Your assistant writes a plan 21 days before each ticked date.
+          Saved. Your assistant suggests a plan 4 weeks before each ticked date.
         </p>
       ) : null}
       {error ? (

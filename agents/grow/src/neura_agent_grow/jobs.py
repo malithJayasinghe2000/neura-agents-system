@@ -6,8 +6,8 @@ GROW. It has two steps, each with its own switch (ADR-0065):
 
 1. **the night check** (``grow.gaps``): reads the shop's new chats, for *Missing
    from your pages* and *Shoppers asked for*;
-2. **the calendar's plans** (``grow.calendar``, ADR-0072 §5): a campaign plan
-   21 days before each kept date.
+2. **the calendar's plans** (``grow.calendar``, ADR-0072 §5, ADR-0078): a
+   suggestion 28 days before each kept date, and the plans the owner chose.
 
 It is booked at a shop's first chat and, since the calendar, also when FiveNeurals
 approves a shop and when its calendar is saved, so it reaches a shop with no
@@ -16,7 +16,7 @@ model**, and never while a shopper waits.
 
 **Make it again** (``grow.calendar.plans``): booked by the console to run at once
 (the manifest's ``on_demand``, so the API names no agent). It answers the plans
-asked for again, and nothing else.
+asked for (the owner's choice, *Make it again*, *Change products*), and nothing else.
 
 Before anything is spent, three checks, read in one short transaction:
 
@@ -58,6 +58,8 @@ GAPS_SWITCH = "grow.gaps"
 CALENDAR_SWITCH = "grow.calendar"
 PROMPT_NAME = "find_gap"
 PLAN_PROMPT = "plan_campaign"
+SUGGEST_PROMPT = "suggest_products"
+GREETING_PROMPT = "write_greeting"
 INTERVAL = timedelta(days=1)
 #: How soon a *Make it again* run looks again for requests made while it ran.
 AGAIN = timedelta(seconds=5)
@@ -196,6 +198,8 @@ async def _plans(context: Any, metered: Any, now: datetime, *, asked_only: bool)
         context.tenant_id,
         llm=metered,
         prompt=load_prompts()[PLAN_PROMPT],
+        suggest_prompt=load_prompts()[SUGGEST_PROMPT],
+        greeting_prompt=load_prompts()[GREETING_PROMPT],
         prompt_revision=REVISION,
         now=now,
         asked_only=asked_only,

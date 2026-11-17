@@ -17,8 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-/** Which draft: four are one text, the email is a subject and a body. */
-export type DraftKind = "teaser" | "launch" | "last_chance" | "email" | "banner";
+/** Which draft: each is one text, but the email is a subject and a body. */
+export type DraftKind = "teaser" | "launch" | "last_chance" | "email" | "banner" | "greeting";
 
 export function DraftCard({
   tenantId,

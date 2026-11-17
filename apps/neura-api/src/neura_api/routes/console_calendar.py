@@ -9,6 +9,7 @@
     PUT    /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}/texts   Save an edit
     POST   /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}/again   Make it again
     PUT    /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}/products   Change products
+    POST   /v1/console/shops/{tenant_id}/calendar/plans/{plan_id}/choose     The owner's choice
     GET    /v1/console/shops/{tenant_id}/calendar/products              Change products' chooser
 
 **The console's own route, not GROW's** (as the other GROW pages, G88): the dates
@@ -30,13 +31,18 @@ once (R95), and is refused while FiveNeurals has paused the plans. *Change
 products* (D20, R124 to R126, ADR-0076) is the same request with the owner's 1 to
 3 products, any the shop sells, sold out or not: they are kept on the plan, so a
 later *Make it again* keeps them.
+
+**Ask the owner first** (ADR-0078, D21): 28 days before a date the night run
+stores a *suggestion*, never a plan. *Choose* answers it: products (the AI's or
+the owner's, 1 to 3), *a greeting only*, or *skip this date*; only a choice of
+products or a greeting books the plan, at once.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -44,12 +50,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from neura_agent_core.calendar import (
+    ASK_DAYS_BEFORE,
     CALENDAR_PLANS,
     COMING_UP_MONTHS,
     MAX_EDIT_CHARS,
     MAX_NAME_CHARS,
     MAX_OWNER_PRODUCTS,
-    PLAN_DAYS_BEFORE,
     QUIET_MONTHS,
     SUGGESTED_BY_KEY,
     TEXT_FIELDS,
@@ -59,6 +65,7 @@ from neura_agent_core.calendar import (
     Group,
     Occurrence,
     Plan,
+    PlanKind,
     PlanState,
     add_months,
     in_stock,
@@ -137,6 +144,21 @@ class Products(BaseModel):
     product_ids: list[str] = Field(min_length=1, max_length=MAX_OWNER_PRODUCTS)
 
 
+class Choice(BaseModel):
+    """The owner's answer to a suggestion (ADR-0078 §2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    choice: Literal["products", "greeting", "skip"]
+    #: With ``products``: the AI's suggested ones or the owner's own, 1 to 3.
+    product_ids: list[str] = Field(default_factory=list, max_length=MAX_OWNER_PRODUCTS)
+
+
+#: The states a choice answers: a suggestion, a skipped date, and a chosen plan
+#: that could not be made (the owner may choose again).
+_CHOOSABLE = (PlanState.CHOOSE, PlanState.SKIPPED, PlanState.FAILED)
+
+
 # ── The page: Coming up ──────────────────────────────────────────────────────
 
 
@@ -160,7 +182,7 @@ async def calendar(request: Request, actor: Writer) -> dict[str, Any]:
             "time_zone": TIME_ZONES[country],
             "year": today.year,
             "saved": year_saved(rows, today.year),
-            "plan_days_before": PLAN_DAYS_BEFORE,
+            "ask_days_before": ASK_DAYS_BEFORE,
             "paused_since": paused_since.isoformat() if paused_since else None,
             "coming_up": [
                 _occurrence(o, by_date, today=today, paused=paused_since is not None)
@@ -382,6 +404,7 @@ async def plan(
         facts = list(answer.get("act_on") or [])
         ids = [str(i) for i in answer.get("products") or []]
         ids += [str(f["product_id"]) for f in facts if f.get("product_id")]
+        ids += [str(i) for i in (found.suggestion or {}).get("products") or []]
         catalogue = await _catalogue(session, actor.tenant_id, ids)
         paused_since = await paused(request, session, actor.tenant_id, CALENDAR_PLANS)
         # Each post's link chooser and clicks (ADR-0074 §6, board 80).
@@ -426,7 +449,23 @@ def _plan(
     made_on = found.made_at.astimezone(ZoneInfo(zone)).date() if found.made_at is not None else None
     posts = post_days(found.day)
     facts = list(answer.get("act_on") or [])
-    edited = sorted(name for name in TEXT_FIELDS if found.edits.get(name))
+    edited = sorted(name for name in found.fields if found.edits.get(name))
+    suggestion = dict(found.suggestion or {})
+    open_date = paused_since is None and found.day >= today
+    if found.greeting:
+        # A greeting (ADR-0078 §4): a post on the day, a banner the day before.
+        schedule = [
+            {"step": "ready", "day": (made_on or found.day).isoformat()},
+            {"step": "greeting", "day": found.day.isoformat()},
+        ]
+    else:
+        schedule = [
+            {"step": "ready", "day": (made_on or found.day).isoformat()},
+            {"step": "teaser", "day": posts["teaser"].isoformat()},
+            {"step": "launch", "day": posts["launch"].isoformat()},
+            {"step": "last_chance", "day": posts["last_chance"].isoformat()},
+            {"step": "day", "day": found.day.isoformat()},
+        ]
     return {
         "id": found.id,
         "date_key": found.date_key,
@@ -440,6 +479,23 @@ def _plan(
         "made_at": found.made_at.isoformat() if found.made_at else None,
         "made_on": made_on.isoformat() if made_on else None,
         "failed": found.failed_at is not None,
+        # ``products`` or ``greeting`` (ADR-0078 §2); ``null`` while not chosen.
+        "kind": (found.plan_kind.value if found.plan_kind else None)
+        or (PlanKind.PRODUCTS.value if found.answer is not None else None),
+        # What the AI suggested, 28 days before; ``null`` for a plan from before.
+        "suggestion": None
+        if not suggestion
+        else {
+            "kind": suggestion.get("kind"),
+            "reason": suggestion.get("reason"),
+            "products": [
+                {"product_id": product_id, **(catalogue.get(product_id) or {"title": None})}
+                for product_id in (str(i) for i in suggestion.get("products") or [])
+            ],
+        },
+        "skipped": found.skipped_at is not None,
+        # The owner may answer the suggestion: products, a greeting or skip.
+        "can_choose": open_date and found.suggestion is not None and found.state in _CHOOSABLE,
         "theme": answer.get("theme"),
         "idea": answer.get("idea"),
         "act_on": [
@@ -458,19 +514,11 @@ def _plan(
         ],
         "catalogue_cut": bool(answer.get("catalogue_cut")),
         # When to post, worked out here and never by the model (ADR-0072 §5).
-        "schedule": [
-            {"step": "ready", "day": (made_on or found.day).isoformat()},
-            {"step": "teaser", "day": posts["teaser"].isoformat()},
-            {"step": "launch", "day": posts["launch"].isoformat()},
-            {"step": "last_chance", "day": posts["last_chance"].isoformat()},
-            {"step": "day", "day": found.day.isoformat()},
-        ],
+        "schedule": schedule,
         "texts": found.texts() if found.answer is not None else {},
         "edited": edited,
         "paused_since": paused_since.isoformat() if paused_since else None,
-        "can_make_again": paused_since is None
-        and found.day >= today
-        and found.state is not PlanState.MAKING,
+        "can_make_again": open_date and found.state in (PlanState.READY, PlanState.FAILED),
         "links": dict(links),
         # The owner chose the products (D20): *Chosen by you*, kept by *Make it again*.
         "owner_products": found.owner_products is not None,
@@ -497,9 +545,6 @@ async def save_texts(
     actor: Writer,
     plan_id: Annotated[str, Path(min_length=1, max_length=64)],
 ) -> dict[str, Any]:
-    unknown = sorted(set(body.texts) - set(TEXT_FIELDS))
-    if unknown:
-        raise ValidationError("No such text.", code="UNKNOWN_TEXT", details={"fields": unknown})
     texts = {name: text.strip() for name, text in body.texts.items()}
     if any(not text or len(text) > MAX_EDIT_CHARS for text in texts.values()):
         raise ValidationError(
@@ -510,6 +555,10 @@ async def save_texts(
         found = await repository.plan(actor.tenant_id, plan_id)
         if found is None:
             raise NotFoundError("No such plan.", details={"id": plan_id})
+        # A greeting has its own texts (ADR-0078 §4).
+        unknown = sorted(set(body.texts) - set(found.fields))
+        if unknown:
+            raise ValidationError("No such text.", code="UNKNOWN_TEXT", details={"fields": unknown})
         if found.answer is None:
             raise ConflictError("This plan has no texts to edit.", code="NO_PLAN_YET")
         saved = await repository.save_texts(actor.tenant_id, plan_id, texts)
@@ -517,7 +566,9 @@ async def save_texts(
     return envelope(
         {
             "texts": saved.texts() if saved else {},
-            "edited": sorted(n for n in TEXT_FIELDS if saved and saved.edits.get(n)),
+            "edited": sorted(
+                n for n in (saved.fields if saved else ()) if saved and saved.edits.get(n)
+            ),
         },
         request_id=getattr(request.state, "request_id", None),
     )
@@ -539,6 +590,9 @@ async def make_it_again(
             raise ConflictError("FiveNeurals has paused the plans for this shop.", code="PAUSED")
         if found.day < shop_today(await repository.country(actor.tenant_id), now):
             raise ConflictError("This date has passed.", code="DATE_PASSED")
+        if found.state in (PlanState.CHOOSE, PlanState.SKIPPED):
+            # Nothing chosen yet: the owner chooses first (ADR-0078 §2).
+            raise ConflictError("Choose what this plan is about first.", code="NOT_CHOSEN")
         await repository.ask_again(actor.tenant_id, plan_id, by=actor.user_id)
         booked = await _book_now(request, session, actor.tenant_id, now=now)
     log.info("console_calendar_again", tenant_id=actor.tenant_id, by=actor.user_id, booked=booked)
@@ -592,6 +646,75 @@ async def change_products(
     )
     return envelope(
         {"state": PlanState.MAKING.value, "booked": booked, "product_ids": ids},
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
+@router.post(
+    "/calendar/plans/{plan_id}/choose",
+    summary="The owner's choice: products, a greeting only, or skip this date",
+)
+async def choose(
+    body: Choice,
+    request: Request,
+    actor: Writer,
+    plan_id: Annotated[str, Path(min_length=1, max_length=64)],
+) -> dict[str, Any]:
+    ids = [product_id.strip() for product_id in body.product_ids]
+    if body.choice == "products" and (
+        not ids or any(not i or len(i) > 255 for i in ids) or len(set(ids)) != len(ids)
+    ):
+        raise ValidationError(
+            f"Choose 1 to {MAX_OWNER_PRODUCTS} different products.", code="PRODUCTS"
+        )
+    if body.choice != "products" and ids:
+        raise ValidationError("Products go with a choice of products.", code="PRODUCTS")
+    now = datetime.now(UTC)
+    booked = False
+    async with request.app.state.database.tenant_session(actor.tenant_id) as session:
+        repository = CalendarRepository(session)
+        found = await repository.plan(actor.tenant_id, plan_id)
+        if found is None:
+            raise NotFoundError("No such plan.", details={"id": plan_id})
+        if found.suggestion is None or found.state not in _CHOOSABLE:
+            raise ConflictError("This plan is already chosen.", code="ALREADY_CHOSEN")
+        if found.day < shop_today(await repository.country(actor.tenant_id), now):
+            raise ConflictError("This date has passed.", code="DATE_PASSED")
+        if body.choice == "skip":
+            if found.state is PlanState.FAILED:
+                raise ConflictError("This plan is already chosen.", code="ALREADY_CHOSEN")
+            await repository.skip(actor.tenant_id, plan_id, by=actor.user_id)
+        else:
+            if await paused(request, session, actor.tenant_id, CALENDAR_PLANS) is not None:
+                raise ConflictError(
+                    "FiveNeurals has paused the plans for this shop.", code="PAUSED"
+                )
+            if body.choice == "greeting":
+                await repository.choose_greeting(actor.tenant_id, plan_id, by=actor.user_id)
+            else:
+                catalogue = await _catalogue(session, actor.tenant_id, ids)
+                missing = [i for i in ids if not (catalogue.get(i) or {}).get("title")]
+                if missing:
+                    raise ValidationError(
+                        "No such product in your shop.",
+                        code="PRODUCT_NOT_FOUND",
+                        details={"product_ids": missing},
+                    )
+                await repository.choose_products(actor.tenant_id, plan_id, ids, by=actor.user_id)
+            booked = await _book_now(request, session, actor.tenant_id, now=now)
+    log.info(
+        "console_calendar_choice",
+        tenant_id=actor.tenant_id,
+        by=actor.user_id,
+        choice=body.choice,
+        products=len(ids),
+        booked=booked,
+    )
+    return envelope(
+        {
+            "state": (PlanState.SKIPPED if body.choice == "skip" else PlanState.MAKING).value,
+            "booked": booked,
+        },
         request_id=getattr(request.state, "request_id", None),
     )
 
@@ -667,8 +790,10 @@ async def _catalogue(session: Any, tenant_id: str, ids: Sequence[str]) -> dict[s
 
 
 async def home_lines(session: Any, tenant_id: str, *, now: datetime) -> dict[str, Any]:
-    """Home's calendar lines (ADR-0072 §7): *Add this year's special dates*, and
-    one *[Name] is in [n] days. Your plan is ready.* per ready plan."""
+    """Home's calendar lines (ADR-0072 §7): *Add this year's special dates*, one
+    *[Name] is in [n] days. Your plan is ready.* per ready plan, and one *[Name]
+    is in [n] days. Choose what its plan is about.* per suggestion waiting
+    (ADR-0078 §2): it stays until the owner chooses or the date passes."""
     repository = CalendarRepository(session)
     country = await repository.country(tenant_id)
     today = shop_today(country, now)
@@ -676,24 +801,28 @@ async def home_lines(session: Any, tenant_id: str, *, now: datetime) -> dict[str
     plans = {(p.date_key, p.day): p for p in await repository.plans(tenant_id, since=today)}
     soon = kept_occurrences(rows, country, start=today, end=add_months(today, QUIET_MONTHS))
     ahead = kept_occurrences(
-        rows, country, start=today, end=today + timedelta(days=PLAN_DAYS_BEFORE + 1)
+        rows, country, start=today, end=today + timedelta(days=ASK_DAYS_BEFORE + 1)
     )
-    ready = []
+    ready: list[dict[str, Any]] = []
+    choose: list[dict[str, Any]] = []
     for occurrence in ahead:
         found = plans.get((occurrence.date_key, occurrence.day)) if occurrence.day else None
-        if found is None or found.answer is None or occurrence.day is None:
+        if found is None or occurrence.day is None:
             continue
-        ready.append(
-            {
-                "plan_id": found.id,
-                "name": occurrence.name,
-                "day": occurrence.day.isoformat(),
-                "days_left": (occurrence.day - today).days,
-            }
-        )
+        line = {
+            "plan_id": found.id,
+            "name": occurrence.name,
+            "day": occurrence.day.isoformat(),
+            "days_left": (occurrence.day - today).days,
+        }
+        if found.answer is not None:
+            ready.append(line)
+        elif found.state is PlanState.CHOOSE:
+            choose.append(line)
     return {
         "add_dates": not year_saved(rows, today.year) or not any(o.day for o in soon),
         "ready": ready,
+        "choose": choose,
     }
 
 

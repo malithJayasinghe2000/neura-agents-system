@@ -49,7 +49,7 @@ export default async function ThisYearsDates({
             </h1>
             <p className="max-w-3xl leading-relaxed text-muted-foreground">
               Untick the dates that don&apos;t fit your shop, and add your own. Your assistant
-              writes a plan 21 days before each ticked date.
+              suggests a plan 4 weeks before each ticked date.
             </p>
           </div>
           <YearDatesForm tenantId={tenantId} initial={result.data} />

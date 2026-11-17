@@ -7,17 +7,30 @@
  * photos, prices and links from the synced catalogue; the days under *When to
  * post* are worked out in code. Nothing here is posted or sent: the owner edits,
  * copies and posts it themselves.
+ *
+ * **Before the plan, the choice** (ADR-0078, D21): 28 days before the date the
+ * AI suggests what the plan is about (products that fit, or a greeting only)
+ * and this page asks the owner to choose. A **greeting** plan is a post for the
+ * day and a banner, with no products, no offer and no counted link.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, ExternalLink, ImageIcon, Link as LinkIcon, LoaderCircle } from "lucide-react";
 import { ChangeProducts, SoldOutNow } from "@/components/calendar/change-products";
+import { ChoosePlan } from "@/components/calendar/choose-plan";
 import { DraftCard } from "@/components/calendar/draft-card";
 import { PostLinks } from "@/components/links/post-links";
 import { MakeAgain, WhileMaking } from "@/components/calendar/make-again";
 import { CouldNotLoad, NotThisShopsPlan, PausedNote, TITLE } from "@/components/calendar/notes";
 import { NotAllowed } from "@/components/not-allowed";
-import { longDay, shortDay, type Plan, type PlanFact, type PlanProduct } from "@/lib/calendar";
+import {
+  longDay,
+  shortDay,
+  suggestionWords,
+  type Plan,
+  type PlanFact,
+  type PlanProduct,
+} from "@/lib/calendar";
 import { PERMISSION, refusal } from "@/lib/roles";
 import { fromApi, hasSession } from "@/lib/server-api";
 import { hasGrow, shopAssistants } from "@/lib/shop-assistants";
@@ -85,6 +98,9 @@ export default async function PlanPage({
     }));
   const dayBefore = new Date(`${plan.day}T00:00:00Z`);
   dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
+  const greeting = plan.kind === "greeting";
+  const choosing = plan.state === "choose" || plan.state === "skipped";
+  const suggestion = plan.suggestion;
 
   return (
     <>
@@ -96,7 +112,13 @@ export default async function PlanPage({
           </h1>
           {made ? (
             <p className="max-w-3xl leading-relaxed text-muted-foreground">
-              Your plan, made {made} by your assistant from your shop&apos;s own data.
+              {greeting
+                ? `Your greeting, made ${made} by your assistant.`
+                : `Your plan, made ${made} by your assistant from your shop's own data.`}
+            </p>
+          ) : choosing ? (
+            <p className="max-w-3xl leading-relaxed text-muted-foreground">
+              Choose what this plan is about. Your assistant writes it when you choose.
             </p>
           ) : null}
         </div>
@@ -131,6 +153,60 @@ export default async function PlanPage({
           </div>
           <WhileMaking />
         </div>
+      ) : null}
+
+      {suggestion && (choosing || (plan.state === "failed" && plan.can_choose)) ? (
+        <section
+          data-choose
+          data-reason={suggestion.reason}
+          className="max-w-3xl space-y-4 rounded-xl border px-4 py-4 sm:px-5"
+          aria-labelledby="choose"
+        >
+          <div className="space-y-1">
+            <h2 id="choose" className="text-[17px] font-semibold">
+              {plan.state === "skipped"
+                ? "You skipped this date"
+                : "What should this plan be about?"}
+            </h2>
+            <p className="text-sm leading-relaxed text-foreground/80">
+              {plan.state === "skipped"
+                ? "Nothing will be made. You can still choose until the date."
+                : suggestionWords(suggestion, plan.name)}
+            </p>
+          </div>
+          {suggestion.products.length ? (
+            <ul className="grid gap-3 sm:grid-cols-3">
+              {suggestion.products.map((product) => (
+                <ProductCard key={product.product_id} product={product} />
+              ))}
+            </ul>
+          ) : null}
+          {plan.can_choose ? (
+            <ChoosePlan
+              tenantId={tenantId}
+              planId={plan.id}
+              suggested={suggestion.products.map((product) => ({
+                product_id: product.product_id,
+                title: product.title,
+                in_stock: product.in_stock !== false,
+              }))}
+              greetingFirst={suggestion.kind === "greeting"}
+              canSkip={plan.state === "choose"}
+            />
+          ) : null}
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            {plan.state === "skipped"
+              ? null
+              : `If you don't choose, no plan is made. ${
+                  plan.days_left > 14
+                    ? `The first post is on ${shortDay(
+                        plan.schedule.find((s) => s.step === "teaser")?.day ?? plan.day,
+                        year,
+                      )}.`
+                    : ""
+                }`}
+          </p>
+        </section>
       ) : null}
 
       {!plan.has_plan && plan.state === "failed" ? (
@@ -168,38 +244,40 @@ export default async function PlanPage({
             </div>
           </section>
 
-          <section className="space-y-3" aria-labelledby="act-on">
-            <h2 id="act-on" className="text-[17px] font-semibold">
-              Act on this first
-            </h2>
-            {plan.act_on.length ? (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  From what your shoppers asked in the last 30 days.
+          {greeting ? null : (
+            <section className="space-y-3" aria-labelledby="act-on">
+              <h2 id="act-on" className="text-[17px] font-semibold">
+                Act on this first
+              </h2>
+              {plan.act_on.length ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    From what your shoppers asked in the last 30 days.
+                  </p>
+                  <ul className="divide-y overflow-hidden rounded-xl border">
+                    {plan.act_on.map((fact) => (
+                      <ActOn
+                        key={`${fact.kind}:${fact.label}`}
+                        tenantId={tenantId}
+                        fact={fact}
+                        launch={shortDay(day("launch"), year)}
+                        links={plan.links}
+                      />
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p data-products-alone className="text-sm text-muted-foreground">
+                  {/* G125: say why there is nothing, not that shoppers asked nothing. */}
+                  {plan.facts_given === 0
+                    ? "Your shoppers haven't asked about anything for this yet, so this plan is from your products alone."
+                    : "Nothing your shoppers asked fits this date, so this plan is from your products alone."}
                 </p>
-                <ul className="divide-y overflow-hidden rounded-xl border">
-                  {plan.act_on.map((fact) => (
-                    <ActOn
-                      key={`${fact.kind}:${fact.label}`}
-                      tenantId={tenantId}
-                      fact={fact}
-                      launch={shortDay(day("launch"), year)}
-                      links={plan.links}
-                    />
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <p data-products-alone className="text-sm text-muted-foreground">
-                {/* G125: say why there is nothing, not that shoppers asked nothing. */}
-                {plan.facts_given === 0
-                  ? "Your shoppers haven't asked about anything for this yet, so this plan is from your products alone."
-                  : "Nothing your shoppers asked fits this date, so this plan is from your products alone."}
-              </p>
-            )}
-          </section>
+              )}
+            </section>
+          )}
 
-          {plan.products.length ? (
+          {plan.products.length && !greeting ? (
             <section className="space-y-3" aria-labelledby="products">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-0.5">
@@ -273,11 +351,12 @@ export default async function PlanPage({
                 Draft texts
               </h2>
               <p className="text-sm text-muted-foreground">
-                Fill in [your offer] yourself. Edit any word, then copy it into your own Facebook,
-                Instagram or email tool.
+                {greeting
+                  ? "Edit any word, then copy it into your own Facebook or Instagram."
+                  : "Fill in [your offer] yourself. Edit any word, then copy it into your own Facebook, Instagram or email tool."}
               </p>
             </div>
-            {plan.post_links ? (
+            {plan.post_links && !greeting ? (
               <div
                 data-links-intro
                 className="flex items-start gap-3 rounded-xl border bg-muted/40 px-4 py-3.5 sm:px-5"
@@ -294,63 +373,96 @@ export default async function PlanPage({
                 </div>
               </div>
             ) : null}
-            <div className="space-y-3">
-              {(
-                [
-                  ["teaser", "Teaser post", `For ${shortDay(day("teaser"), year)}`],
-                  ["launch", "Launch post", `For ${shortDay(day("launch"), year)}`],
-                  ["last_chance", "Last chance post", `For ${shortDay(day("last_chance"), year)}`],
+            {greeting ? (
+              <div className="space-y-3">
+                {(
                   [
-                    "email",
-                    "Email",
-                    `For ${shortDay(day("launch"), year)}, from your own email tool`,
-                  ],
+                    ["greeting", "Greeting post", `For ${shortDay(plan.day, year)}`],
+                    [
+                      "banner",
+                      "Banner",
+                      `For your home page, ${shortDay(
+                        dayBefore.toISOString().slice(0, 10),
+                        year,
+                      )} and ${shortDay(plan.day, year)}`,
+                    ],
+                  ] as const
+                ).map(([kind, title, when]) => (
+                  <DraftCard
+                    key={kind}
+                    tenantId={tenantId}
+                    planId={plan.id}
+                    kind={kind}
+                    title={title}
+                    when={when}
+                    text={plan.texts[kind] ?? ""}
+                    editable={plan.state !== "making"}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(
                   [
-                    "banner",
-                    "Banner",
-                    `For your home page, ${shortDay(day("launch"), year)} to ${shortDay(
-                      dayBefore.toISOString().slice(0, 10),
-                      year,
-                    )}`,
-                  ],
-                ] as const
-              ).map(([kind, title, when]) => (
-                <DraftCard
-                  key={kind}
-                  tenantId={tenantId}
-                  planId={plan.id}
-                  kind={kind}
-                  title={title}
-                  when={when}
-                  text={(kind === "email" ? plan.texts.email_body : plan.texts[kind]) ?? ""}
-                  subject={kind === "email" ? (plan.texts.email_subject ?? "") : undefined}
-                  editable={plan.state !== "making"}
-                >
-                  {plan.post_links === null ? null : kind === "banner" ? (
-                    <div data-banner-no-link className="border-t pt-3">
-                      <p className="text-[13px] leading-relaxed text-muted-foreground">
-                        No counted link here: whoever sees your banner is already in your shop. Link
-                        it to your product as you usually do.
-                      </p>
-                    </div>
-                  ) : (
-                    <PostLinks
-                      tenantId={tenantId}
-                      planId={plan.id}
-                      post={kind}
-                      products={linkable}
-                      current={plan.post_links[kind]}
-                    />
-                  )}
-                </DraftCard>
-              ))}
-            </div>
+                    ["teaser", "Teaser post", `For ${shortDay(day("teaser"), year)}`],
+                    ["launch", "Launch post", `For ${shortDay(day("launch"), year)}`],
+                    [
+                      "last_chance",
+                      "Last chance post",
+                      `For ${shortDay(day("last_chance"), year)}`,
+                    ],
+                    [
+                      "email",
+                      "Email",
+                      `For ${shortDay(day("launch"), year)}, from your own email tool`,
+                    ],
+                    [
+                      "banner",
+                      "Banner",
+                      `For your home page, ${shortDay(day("launch"), year)} to ${shortDay(
+                        dayBefore.toISOString().slice(0, 10),
+                        year,
+                      )}`,
+                    ],
+                  ] as const
+                ).map(([kind, title, when]) => (
+                  <DraftCard
+                    key={kind}
+                    tenantId={tenantId}
+                    planId={plan.id}
+                    kind={kind}
+                    title={title}
+                    when={when}
+                    text={(kind === "email" ? plan.texts.email_body : plan.texts[kind]) ?? ""}
+                    subject={kind === "email" ? (plan.texts.email_subject ?? "") : undefined}
+                    editable={plan.state !== "making"}
+                  >
+                    {plan.post_links === null ? null : kind === "banner" ? (
+                      <div data-banner-no-link className="border-t pt-3">
+                        <p className="text-[13px] leading-relaxed text-muted-foreground">
+                          No counted link here: whoever sees your banner is already in your shop.
+                          Link it to your product as you usually do.
+                        </p>
+                      </div>
+                    ) : (
+                      <PostLinks
+                        tenantId={tenantId}
+                        planId={plan.id}
+                        post={kind}
+                        products={linkable}
+                        current={plan.post_links[kind]}
+                      />
+                    )}
+                  </DraftCard>
+                ))}
+              </div>
+            )}
           </section>
 
           <p className="max-w-3xl text-[13px] leading-relaxed text-muted-foreground">
             Written by AI from your shop&apos;s data. Check every word before you post it: your shop
             publishes it under its own name. We never post or send anything.
-            {plan.post_links
+            {plan.post_links && !greeting
               ? " The links are made by your dashboard, not by AI, and count clicks only, never who clicked."
               : null}
           </p>
@@ -366,6 +478,7 @@ function stepWords(step: Plan["schedule"][number]["step"], name: string): string
     teaser: "Post the teaser",
     launch: "Post the launch and send the email",
     last_chance: "Post the last chance",
+    greeting: `Post the greeting · ${name}`,
     day: name,
   }[step];
 }
@@ -383,6 +496,7 @@ function stepLabel(step: Plan["schedule"][number], today: string, ready: string)
     teaser: "2 weeks before",
     launch: "1 week before",
     last_chance: "2 days before",
+    greeting: "",
     day: "",
   }[step.step];
 }

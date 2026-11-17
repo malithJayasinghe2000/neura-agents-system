@@ -9,11 +9,14 @@
  * **When a draft was edited it asks first**, as *Make it again* does: the
  * owner's own words go with the old plan (R102). The page then reads itself
  * again and shows the plan being made.
+ *
+ * **With `choose`** it answers the AI's suggestion instead (ADR-0078 §2,
+ * *Choose other products*): there is no plan yet, so nothing is replaced.
  */
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
-import { changePlanProducts, findPlanProducts } from "@/lib/api";
+import { changePlanProducts, choosePlan, findPlanProducts } from "@/lib/api";
 import type { PlanChoice } from "@/lib/calendar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +29,7 @@ export function ChangeProducts({
   planId,
   current,
   edited,
+  choose = false,
 }: {
   tenantId: string;
   planId: string;
@@ -33,6 +37,8 @@ export function ChangeProducts({
   current: PlanChoice[];
   /** Whether the owner saved their own words over a draft. */
   edited: boolean;
+  /** Answer the AI's suggestion: no plan is written yet (ADR-0078 §2). */
+  choose?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -76,6 +82,7 @@ export function ChangeProducts({
     ? adding
     : (choices[0]?.product_id ?? "");
   const same =
+    !choose &&
     chosen.length === current.length &&
     chosen.every((product, index) => product.product_id === current[index]?.product_id);
 
@@ -83,11 +90,9 @@ export function ChangeProducts({
     setBusy(true);
     setError("");
     try {
-      await changePlanProducts(
-        tenantId,
-        planId,
-        chosen.map((product) => product.product_id),
-      );
+      const ids = chosen.map((product) => product.product_id);
+      if (choose) await choosePlan(tenantId, planId, { choice: "products", product_ids: ids });
+      else await changePlanProducts(tenantId, planId, ids);
       setOpen(false);
       setAsking(false);
       router.refresh();
@@ -109,7 +114,7 @@ export function ChangeProducts({
           setOpen(true);
         }}
       >
-        Change products
+        {choose ? "Choose other products" : "Change products"}
       </Button>
     );
   }
@@ -122,8 +127,10 @@ export function ChangeProducts({
       <div className="space-y-1">
         <p className="font-semibold">Products for this plan</p>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Choose 1 to 3. Your assistant writes the plan again around them. To swap one, remove it
-          and add another.
+          {choose
+            ? "Choose 1 to 3. Your assistant writes the plan around them."
+            : "Choose 1 to 3. Your assistant writes the plan again around them."}{" "}
+          To swap one, remove it and add another.
         </p>
       </div>
 
@@ -253,9 +260,9 @@ export function ChangeProducts({
             className="h-11 px-4 sm:h-10"
             disabled={busy || same || !chosen.length}
             data-write-again
-            onClick={() => (edited ? setAsking(true) : write())}
+            onClick={() => (edited && !choose ? setAsking(true) : write())}
           >
-            {busy ? "Asking…" : "Write the plan again"}
+            {busy ? "Asking…" : choose ? "Write the plan" : "Write the plan again"}
           </Button>
           <Button
             variant="outline"

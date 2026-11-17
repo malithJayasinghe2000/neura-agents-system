@@ -3,8 +3,8 @@
 A shop with NEURA-GROW keeps a list of special dates for each year: **a
 suggested list in code** (§2, R85: Sri Lanka's festivals and payday, and the
 worldwide shopping days), which the owner trims once a year, **and their own**
-(R82: the shop's birthday, a sale). 21 days before each kept date, GROW's night
-run writes a campaign plan (R87); the console shows the dates, the plans, and
+(R82: the shop's birthday, a sale). 28 days before each kept date, GROW's night
+run suggests what its plan is about, and writes it once the owner chooses (ADR-0078); the console shows the dates, the plans, and
 Home's lines.
 
 **Here, in the shared core, beside** :mod:`neura_agent_core.wanted`, for the
@@ -72,8 +72,9 @@ CALENDAR_DATES = "calendar_dates"
 #: by this name, so the console can say *Paused* without naming an agent.
 CALENDAR_PLANS = "calendar_plans"
 
-#: A plan is written this many days before its date (R87).
-PLAN_DAYS_BEFORE = 21
+#: The AI suggests what a date's plan is about this many days before it, and the
+#: owner chooses; only then is the plan written (D21, ADR-0078 §1: *4 weeks*).
+ASK_DAYS_BEFORE = 28
 #: A plan is deleted this many days after its date (ADR-0072 §8).
 PLANS_KEPT_DAYS = 30
 #: *Coming up* lists the kept dates in the next 12 months (console.md §3.14).
@@ -94,6 +95,8 @@ MAX_OWNER_PRODUCTS = 3
 MAX_EDIT_CHARS = 3000
 #: The draft texts of a plan, in the order the page shows them.
 TEXT_FIELDS = ("teaser", "launch", "last_chance", "email_subject", "email_body", "banner")
+#: A greeting plan's texts (ADR-0078 §4): a post for the day, and a banner.
+GREETING_FIELDS = ("greeting", "banner")
 
 
 class Country(StrEnum):
@@ -190,6 +193,9 @@ class Suggested:
     rule: Callable[[int], tuple[date, ...]] | None = None
     #: Only for a shop in Sri Lanka (R85: the festivals and payday are its own).
     sri_lanka: bool = False
+    #: A religious day the AI never sells on: it suggests a greeting only, with
+    #: no model call (ADR-0078 §1, the owner's Vesak and Poson).
+    greeting_only: bool = False
 
     @property
     def moving(self) -> bool:
@@ -212,8 +218,8 @@ SUGGESTED: tuple[Suggested, ...] = (
         usually=(4,),
         sri_lanka=True,
     ),
-    Suggested("vesak", "Vesak", Group.FESTIVALS, usually=(5,), sri_lanka=True),
-    Suggested("poson", "Poson", Group.FESTIVALS, usually=(6,), sri_lanka=True),
+    Suggested("vesak", "Vesak", Group.FESTIVALS, usually=(5,), sri_lanka=True, greeting_only=True),
+    Suggested("poson", "Poson", Group.FESTIVALS, usually=(6,), sri_lanka=True, greeting_only=True),
     Suggested("deepavali", "Deepavali", Group.FESTIVALS, usually=(10, 11), sri_lanka=True),
     # Its day is Eid al-Fitr's, the end of Ramadan; it moves through the year.
     Suggested("eid_al_fitr", "Ramadan and Eid al-Fitr", Group.FESTIVALS, sri_lanka=True),
@@ -316,6 +322,16 @@ calendar_plans = Table(
     #: around exactly these, and *Make it again* keeps them. ``NULL``: the AI
     #: chooses from the products in stock (ADR-0072 §5).
     Column("owner_products", JSONB, nullable=True),
+    #: What the AI suggested the plan is about, 28 days before (ADR-0078 §1):
+    #: ``{"kind": "products" | "greeting" | "none", "products": [ids], "reason": …}``.
+    Column("suggestion", JSONB, nullable=True),
+    Column("suggested_at", DateTime(timezone=True), nullable=True),
+    #: What the owner chose the plan to be (ADR-0078 §2): ``products`` or
+    #: ``greeting``. ``NULL``: a plan from before ADR-0078 (products), or not chosen.
+    Column("plan_kind", String(16), nullable=True),
+    #: *Skip this date* (ADR-0078 §2): nothing is made; the owner may choose again.
+    Column("skipped_at", DateTime(timezone=True), nullable=True),
+    Column("skipped_by", String(64), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Index("uq_calendar_plans_date", "tenant_id", "date_key", "day", unique=True),
     Index("ix_calendar_plans_day", "tenant_id", "day"),
@@ -378,7 +394,14 @@ class Occurrence:
 
     @property
     def plan_day(self) -> date | None:
-        return None if self.day is None else self.day - timedelta(days=PLAN_DAYS_BEFORE)
+        """The day the AI suggests what the plan is about (ADR-0078 §1)."""
+        return None if self.day is None else self.day - timedelta(days=ASK_DAYS_BEFORE)
+
+    @property
+    def greeting_only(self) -> bool:
+        """Vesak or Poson: a greeting, never a sales plan (ADR-0078 §1)."""
+        found = SUGGESTED_BY_KEY.get(self.key or "")
+        return found is not None and found.greeting_only
 
     def sort_key(self) -> tuple[date, str]:
         if self.day is not None:
@@ -522,6 +545,24 @@ class PlanState(StrEnum):
     MAKING = "making"
     #: It failed the checks twice, and there is no earlier plan (ADR-0072 §5).
     FAILED = "failed"
+    #: The AI suggested what it is about; the owner has not chosen (ADR-0078 §2).
+    CHOOSE = "choose"
+    #: The owner chose *Skip this date* (ADR-0078 §2).
+    SKIPPED = "skipped"
+
+
+class PlanKind(StrEnum):
+    """What the owner chose a plan to be (ADR-0078 §2)."""
+
+    PRODUCTS = "products"
+    GREETING = "greeting"
+
+
+#: What the AI's suggestion is (ADR-0078 §1). ``none``: its answer was refused
+#: twice, so it suggests nothing and the owner chooses.
+SUGGEST_KINDS = ("products", "greeting", "none")
+#: Why it suggests what it does: the page says it in code's words.
+SUGGEST_REASONS = ("fit", "none_fit", "religious", "no_products", "could_not")
 
 
 @dataclass(frozen=True, slots=True)
@@ -541,17 +582,37 @@ class Plan:
     requested_at: datetime | None = None
     #: The owner's products (D20), or ``None`` when the AI chooses.
     owner_products: tuple[str, ...] | None = None
+    #: The AI's suggestion (ADR-0078 §1), or ``None`` for a plan from before it.
+    suggestion: Mapping[str, Any] | None = None
+    #: ``products`` or ``greeting``; ``None``: not chosen, or a plan from before.
+    plan_kind: PlanKind | None = None
+    skipped_at: datetime | None = None
 
     @property
     def state(self) -> PlanState:
         if self.requested_at is not None:
             return PlanState.MAKING
-        return PlanState.READY if self.answer is not None else PlanState.FAILED
+        if self.answer is not None:
+            return PlanState.READY
+        if self.skipped_at is not None:
+            return PlanState.SKIPPED
+        if self.failed_at is not None or self.suggestion is None:
+            return PlanState.FAILED
+        return PlanState.CHOOSE
+
+    @property
+    def greeting(self) -> bool:
+        return self.plan_kind is PlanKind.GREETING
+
+    @property
+    def fields(self) -> tuple[str, ...]:
+        """The texts this plan has, by its kind."""
+        return GREETING_FIELDS if self.greeting else TEXT_FIELDS
 
     def texts(self) -> dict[str, str]:
         """The drafts as the page shows them: the owner's words where they edited."""
         written = dict((self.answer or {}).get("texts") or {})
-        return {name: self.edits.get(name) or str(written.get(name) or "") for name in TEXT_FIELDS}
+        return {name: self.edits.get(name) or str(written.get(name) or "") for name in self.fields}
 
 
 def _row(row: Any) -> DateRow:
@@ -580,6 +641,9 @@ def _plan(row: Any) -> Plan:
         failure=row.failure,
         requested_at=row.requested_at,
         owner_products=(tuple(str(i) for i in row.owner_products) if row.owner_products else None),
+        suggestion=dict(row.suggestion) if row.suggestion else None,
+        plan_kind=PlanKind(row.plan_kind) if row.plan_kind else None,
+        skipped_at=row.skipped_at,
     )
 
 
@@ -810,7 +874,7 @@ class CalendarRepository:
         plan = await self.plan(tenant_id, plan_id)
         if plan is None:
             return None
-        edits = {**plan.edits, **{k: v for k, v in texts.items() if k in TEXT_FIELDS}}
+        edits = {**plan.edits, **{k: v for k, v in texts.items() if k in plan.fields}}
         await self._session.execute(
             update(calendar_plans)
             .where(calendar_plans.c.tenant_id == tenant_id, calendar_plans.c.id == plan_id)
@@ -835,9 +899,55 @@ class CalendarRepository:
         await self._session.execute(
             update(calendar_plans)
             .where(calendar_plans.c.tenant_id == tenant_id, calendar_plans.c.id == plan_id)
-            .values(owner_products=list(product_ids), requested_at=func.now(), requested_by=by)
+            .values(
+                owner_products=list(product_ids),
+                plan_kind=PlanKind.PRODUCTS.value,
+                skipped_at=None,
+                skipped_by=None,
+                requested_at=func.now(),
+                requested_by=by,
+            )
         )
         return await self.plan(tenant_id, plan_id)
+
+    async def choose_greeting(self, tenant_id: str, plan_id: str, *, by: str) -> Plan | None:
+        """*A greeting only* (ADR-0078 §2): written at once, with no products."""
+        await self._session.execute(
+            update(calendar_plans)
+            .where(calendar_plans.c.tenant_id == tenant_id, calendar_plans.c.id == plan_id)
+            .values(
+                owner_products=None,
+                plan_kind=PlanKind.GREETING.value,
+                skipped_at=None,
+                skipped_by=None,
+                requested_at=func.now(),
+                requested_by=by,
+            )
+        )
+        return await self.plan(tenant_id, plan_id)
+
+    async def skip(self, tenant_id: str, plan_id: str, *, by: str) -> Plan | None:
+        """*Skip this date* (ADR-0078 §2): nothing is made."""
+        await self._session.execute(
+            update(calendar_plans)
+            .where(calendar_plans.c.tenant_id == tenant_id, calendar_plans.c.id == plan_id)
+            .values(skipped_at=func.now(), skipped_by=by)
+        )
+        return await self.plan(tenant_id, plan_id)
+
+    async def store_suggestion(
+        self,
+        tenant_id: str,
+        *,
+        date_key: str,
+        day: date,
+        name: str,
+        suggestion: Mapping[str, Any],
+        at: datetime,
+    ) -> Plan:
+        """The AI's suggestion for a date with nothing yet (ADR-0078 §1)."""
+        values = {"name": name, "suggestion": dict(suggestion), "suggested_at": at}
+        return await self._upsert(tenant_id, date_key=date_key, day=day, values=values)
 
     async def asked_again(self, tenant_id: str) -> list[Plan]:
         """The plans waiting for *Make it again*, oldest request first."""
@@ -878,10 +988,12 @@ class CalendarRepository:
 
 
 __all__ = [
+    "ASK_DAYS_BEFORE",
     "CALENDAR_DATES",
     "CALENDAR_PLANS",
     "CALENDAR_SETTINGS",
     "COMING_UP_MONTHS",
+    "GREETING_FIELDS",
     "LAST_CHANCE_DAYS",
     "LAUNCH_DAYS",
     "MAX_EDIT_CHARS",
@@ -889,10 +1001,11 @@ __all__ = [
     "MAX_OWNER_PRODUCTS",
     "MOVING_DAYS",
     "PLANS_KEPT_DAYS",
-    "PLAN_DAYS_BEFORE",
     "QUIET_MONTHS",
     "SUGGESTED",
     "SUGGESTED_BY_KEY",
+    "SUGGEST_KINDS",
+    "SUGGEST_REASONS",
     "TEASER_DAYS",
     "TEXT_FIELDS",
     "TIME_ZONES",
@@ -903,6 +1016,7 @@ __all__ = [
     "Group",
     "Occurrence",
     "Plan",
+    "PlanKind",
     "PlanState",
     "Suggested",
     "add_months",

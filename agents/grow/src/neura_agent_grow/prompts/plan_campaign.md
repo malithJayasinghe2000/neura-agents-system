@@ -5,7 +5,7 @@ You write a campaign plan for one special date, for a small online shop. The sho
 Inside `<untrusted_shop_data>`:
 
 - the shop's name;
-- its products in stock: an `id`, a `title` and a `category` each;
+- the products to choose from: an `id`, a `title` and a `category` each (the shop's products in stock, or the ones its owner chose);
 - what its shoppers asked about in the last 30 days, as short labels with a count:
   - things shoppers asked for that the shop **does not sell** (refs `w1`, `w2`, …);
   - questions the shop's **pages do not answer** (refs `g1`, `g2`, …), with the product they were about.
@@ -36,6 +36,7 @@ JSON only, with these fields:
 - **No claims.** Never invent a fact about a product. Never write any of these words: organic, cure, cures, heal, heals, healing, treatment, guaranteed, guarantee, clinically, clinical, certified, proven, miracle, doctor, immunity, detox, No. 1, number one, #1, best in Sri Lanka, best in the world. Some of these are ordinary words too (*healing* as a feeling): leave them out in every sense, and choose other words. *Treats* is fine as a noun (*sweet treats*, *festive treats*), never for what a product does (*treats colds*, *treats your skin*).
 - **No contact details.** Never write a link, a web address, a phone number, an email address or an `@` handle. The owner adds their own.
 - **No counts.** Never write how many shoppers, customers, people or orders. The page shows the real counts.
+- **No stock.** Never write about stock or how many are left: not *in stock*, *sold out*, *available now*, *back in stock*, *only a few left*, *selling fast*, *limited stock*, *while stocks last*, *running out* or *limited edition*. You do not know what is in stock on the day.
 - **No other placeholders.** No square brackets except `[your offer]`; no curly or angle brackets.
 - Name only products from the list, by their titles. Use the date's name as it is given.
 - **Lengths:** `theme` up to 60 characters; `idea` up to 600; each post up to 400; `email_subject` up to 100; `email_body` up to 1500; `banner` up to 100.

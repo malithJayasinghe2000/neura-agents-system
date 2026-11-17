@@ -3447,7 +3447,7 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
             _check(
                 "a shop with GROW: the calendar's AI plans, a switch of its own",
                 "The calendar's AI plans" in shown
-                and "AI writes a campaign plan" in shown
+                and "AI suggests what its plan is about" in shown
                 and bool(
                     await page.evaluate(
                         "!!document.querySelector('[data-switch=\"grow.calendar\"] [data-switch-off]')"
@@ -3477,7 +3477,7 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
             shown = await click(page, '[data-switch="grow.calendar"] [data-switch-on]', wait=3)
             _check(
                 "on again, in its own words",
-                "Plans that are due are made again from the next night." in shown,
+                "Suggestions that are due are made again from the next night." in shown,
                 failures,
             )
             shown = await opened(page, f"{console}/admin/shops/{approve_id}")
@@ -4173,6 +4173,9 @@ async def _check_calendar(
         await own("Console-check sale", 20)
         await own("Console-check birthday", 45, every_year=True)
         fair = await own("Console-check fair", 8)
+        # ADR-0078: one date waits for the owner's choice, one is a greeting.
+        picking = await own("Console-check picking", 15)
+        greeting_date = await own("Console-check greeting", 25)
         async with db.tenant_session(tenant) as session:
             repository = CalendarRepository(session)
             plan = await repository.store_plan(
@@ -4192,6 +4195,41 @@ async def _check_calendar(
                 failure="price",
                 at=datetime.now(UTC),
             )
+            choosing = await repository.store_suggestion(
+                tenant,
+                date_key=picking.date_key,
+                day=picking.day,
+                name="Console-check picking",
+                suggestion={"kind": "products", "reason": "fit", "products": ["cc-tea"]},
+                at=datetime.now(UTC),
+            )
+            greeted = await repository.store_suggestion(
+                tenant,
+                date_key=greeting_date.date_key,
+                day=greeting_date.day,
+                name="Console-check greeting",
+                suggestion={"kind": "greeting", "reason": "none_fit", "products": []},
+                at=datetime.now(UTC),
+            )
+            await repository.choose_greeting(tenant, greeted.id, by=user_id)
+            await repository.store_plan(
+                tenant,
+                date_key=greeting_date.date_key,
+                day=greeting_date.day,
+                name="Console-check greeting",
+                answer={
+                    "theme": "A console-check greeting",
+                    "idea": "",
+                    "products": [],
+                    "act_on": [],
+                    "texts": {
+                        "greeting": "Warm wishes to you and your family from our shop.",
+                        "banner": "Warm wishes from our shop",
+                    },
+                },
+                prompt_revision="console-check",
+                at=datetime.now(UTC),
+            )
         plan_url = f"{base}/calendar/{plan.id}"
 
         for on in (False, True):
@@ -4201,21 +4239,25 @@ async def _check_calendar(
             _check(
                 f"the page: heading, its line, This year's dates ({size})",
                 "Marketing calendar" in page
-                and "21 days before each one, your assistant writes a campaign plan" in page
+                and "4 weeks before each one, your assistant suggests what" in page
                 and "This year's dates" in page,
                 failures,
             )
             _check(
-                f"Coming up: a ready plan, one tonight, one later, one that failed ({size})",
+                f"Coming up: ready, to choose, tonight, later, failed ({size})",
                 "Plan ready" in page
                 and "See the plan" in page
-                and "Plan tonight" in page
-                and "Plan on " in page
+                and "Choose your plan" in page
+                and bool(await browser.evaluate("!!document.querySelector('[data-choose-plan]')"))
+                and "Suggestion tonight" in page
+                and "Suggestion on " in page
                 and "Plan could not be made" in page
                 and "Make it again" in page
                 and page.index("Console-check fair")
                 < page.index("Console-check launch")
+                < page.index("Console-check picking")
                 < page.index("Console-check sale")
+                < page.index("Console-check greeting")
                 < page.index("Console-check birthday"),
                 failures,
             )
@@ -4243,15 +4285,18 @@ async def _check_calendar(
 
         home = await shown(browser, base)
         _check(
-            "Home: the ready plan's line and Add this year's special dates, each a calendar",
-            "Console-check launch is in 12 days. Your plan is ready." in home
+            "Home: choose, the ready plans and Add this year's special dates, each a calendar",
+            "Console-check picking is in 15 days. Choose what its plan is about." in home
+            and "Nothing is made until you choose." in home
+            and "Console-check launch is in 12 days. Your plan is ready." in home
             and "Read it, fill in your offer, and post it yourself." in home
             and "Add this year's special dates" in home
             and bool(
                 await browser.evaluate(
                     f"!!document.querySelector('a[href=\"/console/{tenant}/calendar/{plan.id}\"]')"
+                    f" && !!document.querySelector('a[href=\"/console/{tenant}/calendar/{choosing.id}\"]')"
                     f" && !!document.querySelector('a[href=\"/console/{tenant}/calendar/dates\"]')"
-                    " && document.querySelectorAll('[data-calendar-line]').length === 2"
+                    " && document.querySelectorAll('[data-calendar-line]').length === 4"
                 )
             ),
             failures,
@@ -4405,6 +4450,60 @@ async def _check_calendar(
         async with db.tenant_session(tenant) as session:
             await CalendarRepository(session).forget_request(tenant, plan.id)
 
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(browser, on)
+            page = await shown(browser, f"{base}/calendar/{choosing.id}")
+            _check(
+                f"to choose: the question, the AI's product, the four choices ({size})",
+                "What should this plan be about?" in page
+                and "Your assistant suggests this product for Console-check picking." in page
+                and "Console-check Breakfast Tea" in page
+                and "Use this product" in page
+                and "Choose other products" in page
+                and "A greeting only" in page
+                and "Skip this date" in page
+                and "If you don't choose, no plan is made." in page
+                and not await browser.evaluate("!!document.querySelector('[data-make-again]')")
+                and await fits(browser),
+                failures,
+            )
+        await phone(browser, False)
+        # Skip only: products or a greeting would book GROW's job and call the AI.
+        skipped = await click("[data-choose-skip]", wait=3)
+        _check(
+            "Skip this date: nothing will be made, and the owner can still choose",
+            "You skipped this date" in skipped
+            and "Nothing will be made. You can still choose until the date." in skipped
+            and "A greeting only" in skipped
+            and "Skip this date" not in skipped,
+            failures,
+        )
+
+        for on in (False, True):
+            size = "phone" if on else "desktop"
+            await phone(browser, on)
+            page = await shown(browser, f"{base}/calendar/{greeted.id}")
+            _check(
+                f"a greeting: a post for the day and a banner, nothing to buy ({size})",
+                "Your greeting, made today by your assistant." in page
+                and "Greeting post" in page
+                and "Warm wishes to you and your family from our shop." in page
+                and "Act on this first" not in page
+                and "Products to promote" not in page
+                and "Fill in [your offer]" not in page
+                and bool(
+                    await browser.evaluate(
+                        "document.querySelectorAll('[data-draft]').length === 2"
+                        " && document.querySelectorAll('[data-schedule] li').length === 2"
+                        " && !document.querySelector('[data-links-intro]')"
+                    )
+                )
+                and await fits(browser),
+                failures,
+            )
+        await phone(browser, False)
+
         broken = await shown(browser, f"{base}/calendar/{failed.id}")
         _check(
             "a plan that failed the checks twice says so, with Make it again",
@@ -4463,7 +4562,7 @@ async def _check_calendar(
         saved = await click("[data-save-dates]", wait=3)
         _check(
             "Save this year's dates: saved",
-            "Saved. Your assistant writes a plan 21 days before each ticked date." in saved,
+            "Saved. Your assistant suggests a plan 4 weeks before each ticked date." in saved,
             failures,
         )
         await shown(browser, f"{base}/calendar/dates")

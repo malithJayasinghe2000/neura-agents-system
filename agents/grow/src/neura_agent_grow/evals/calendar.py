@@ -12,6 +12,10 @@ run gives the model for one date, in a few labelled lines::
     Gaps:
     - ceylon cinnamon | 7 | 3          (label | product id, or shop | shoppers)
 
+A **greeting** case (ADR-0078 §4) has the line ``Kind: greeting`` and no
+products or facts: the model is given the shop's name and the date only, and
+the reply is ``theme:``, ``greeting:`` and ``banner:``.
+
 The case declares itself with the ``calendar`` tag, never by its file's name
 (SELL's pairing precedent). It runs the real prompt, model and checks, with the
 one retry, exactly as :func:`neura_agent_grow.plans.make_plans` does.
@@ -37,7 +41,7 @@ from typing import Any
 from neura_evals.dataset import EvalCase
 from neura_evals.target import AgentResponse, ToolInvocation
 
-from neura_agent_core.calendar import TEXT_FIELDS
+from neura_agent_core.calendar import GREETING_FIELDS, TEXT_FIELDS
 from neura_agent_grow.campaign import (
     CatalogueItem,
     CheckedPlan,
@@ -59,6 +63,7 @@ def is_calendar_case(case: EvalCase) -> bool:
 def plan_input_from(case: EvalCase) -> PlanInput:
     """The input a case describes. Raises ``ValueError`` on a malformed case."""
     shop, name, day = "", "", None
+    greeting = False
     products: list[CatalogueItem] = []
     chosen: list[CatalogueItem] = []
     facts: list[Fact] = []
@@ -69,6 +74,8 @@ def plan_input_from(case: EvalCase) -> PlanInput:
             continue
         if line.startswith("Shop:"):
             shop = line.split(":", 1)[1].strip()
+        elif line.startswith("Kind:"):
+            greeting = line.split(":", 1)[1].strip().lower() == "greeting"
         elif line.startswith("Date:"):
             name, _, when = line.split(":", 1)[1].rpartition(",")
             name, day = name.strip(), date.fromisoformat(when.strip())
@@ -104,12 +111,20 @@ def plan_input_from(case: EvalCase) -> PlanInput:
                 raise ValueError(f"{case.id}: cannot read {line!r} under {section!r}")
     if not shop or not name or day is None:
         raise ValueError(f"{case.id}: a calendar case needs 'Shop:' and 'Date: <name>, <day>'")
+    if greeting:
+        if products or chosen or facts:
+            raise ValueError(f"{case.id}: a greeting case has no products and no facts")
+        return PlanInput(shop=shop, name=name, day=day, greeting=True)
     if chosen:
         return PlanInput(shop=shop, name=name, day=day, products=chosen, facts=facts, chosen=True)
     return PlanInput(shop=shop, name=name, day=day, products=products, facts=facts)
 
 
-def _reply(plan: CheckedPlan) -> str:
+def _reply(plan: CheckedPlan, *, greeting: bool = False) -> str:
+    if greeting:
+        return "\n".join(
+            [f"theme: {plan.theme}", *(f"{name}: {plan.texts[name]}" for name in GREETING_FIELDS)]
+        )
     lines = [
         f"products ({len(plan.products)}): {', '.join(plan.products) or 'none'}",
         f"act_on: {', '.join(f.ref for f in plan.act_on) or 'none'}",
@@ -123,7 +138,8 @@ def _reply(plan: CheckedPlan) -> str:
 async def run_case(case: EvalCase, *, llm: Any) -> AgentResponse:
     given = plan_input_from(case)
     started = time.monotonic()
-    found = await write_plan(given, llm=llm, prompt=load_prompts()["plan_campaign"])
+    prompt = load_prompts()["write_greeting" if given.greeting else "plan_campaign"]
+    found = await write_plan(given, llm=llm, prompt=prompt)
     latency_ms = int((time.monotonic() - started) * 1000)
     if not found.reachable:
         return AgentResponse(
@@ -135,7 +151,7 @@ async def run_case(case: EvalCase, *, llm: Any) -> AgentResponse:
     suspicious: list[ToolInvocation] = []
     given_ids = {item.id for item in given.products}
     for answer in found.raw:
-        for product_id in answer.product_ids:
+        for product_id in getattr(answer, "product_ids", ()):
             if str(product_id).strip() not in given_ids:
                 suspicious.append(
                     ToolInvocation(
@@ -158,7 +174,7 @@ async def run_case(case: EvalCase, *, llm: Any) -> AgentResponse:
             )
 
     return AgentResponse(
-        reply=_reply(plan) if plan is not None else "",
+        reply=_reply(plan, greeting=given.greeting) if plan is not None else "",
         intent="plan" if plan is not None else "no_plan",
         tools_called=suspicious,
         latency_ms=latency_ms,

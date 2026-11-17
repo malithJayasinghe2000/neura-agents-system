@@ -3,9 +3,10 @@
  * 2026-11-01).
  *
  * The shop's kept dates in the next 12 months, soonest first, each with what its
- * plan is: ready, made 21 days before, or a moving date whose day is not set.
- * GROW writes a plan 21 days before each kept date; the owner reads it, edits
- * it, copies it and posts it themselves. **The Owner and Support** (R86).
+ * plan is: waiting for the owner's choice, ready, skipped, suggested 28 days
+ * before, or a moving date whose day is not set. 28 days before each kept date
+ * GROW suggests what its plan is about; the owner chooses, and only then is it
+ * written (ADR-0078). **The Owner and Support** (R86).
  *
  * A suggested date counts once this year's list is saved (R91), so until then
  * the page says so and only the shop's own dates are listed.
@@ -48,8 +49,9 @@ export default async function CalendarPage({ params }: { params: Promise<{ tenan
         <div className="space-y-1.5">
           <h1 className="text-2xl font-semibold tracking-tight">{TITLE}</h1>
           <p className="max-w-3xl leading-relaxed text-muted-foreground">
-            Your special dates for the year. 21 days before each one, your assistant writes a
-            campaign plan from your shop&apos;s own data. You edit it, copy it and post it yourself.
+            Your special dates for the year. 4 weeks before each one, your assistant suggests what
+            its plan is about. You choose, it writes the plan, and you edit it, copy it and post it
+            yourself.
           </p>
         </div>
         <Button
@@ -207,14 +209,22 @@ function Pill({ date, year }: { date: ComingDate; year: number }) {
           Date not set yet
         </span>
       );
+    case "choose":
+      return (
+        <span className={cn(PILL, "border-foreground bg-foreground text-background")}>
+          Choose your plan
+        </span>
+      );
+    case "skipped":
+      return <span className={cn(PILL, "border-dashed text-muted-foreground")}>Skipped</span>;
     case "tonight":
-      return <span className={cn(PILL, "text-foreground/80")}>Plan tonight</span>;
+      return <span className={cn(PILL, "text-foreground/80")}>Suggestion tonight</span>;
     case "paused":
       return <span className={cn(PILL, "text-foreground/80")}>No plan while paused</span>;
     default:
       return (
         <span className={cn(PILL, "text-foreground/80")}>
-          Plan on {date.plan_day ? shortDay(date.plan_day, year) : ""}
+          Suggestion on {date.plan_day ? shortDay(date.plan_day, year) : ""}
         </span>
       );
   }
@@ -239,6 +249,19 @@ function Action({
         render={<Link href={planHref(tenantId, date.plan_id)} />}
       >
         See the plan
+      </Button>
+    );
+  }
+  if ((date.status === "choose" || date.status === "skipped") && date.plan_id) {
+    return (
+      <Button
+        variant={date.status === "choose" ? "default" : "outline"}
+        className="h-11 px-4 sm:h-10"
+        nativeButton={false}
+        data-choose-plan
+        render={<Link href={planHref(tenantId, date.plan_id)} />}
+      >
+        {date.status === "choose" ? "Choose" : "See"}
       </Button>
     );
   }

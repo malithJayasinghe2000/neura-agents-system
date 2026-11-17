@@ -21,9 +21,15 @@ that:
   *sweet treats*, it passes, G120), **in English only** (R88);
 * holds a link, a phone number, an email address or an ``@`` handle;
 * states a count of shoppers, customers or orders (the page shows the real one);
+* says anything about stock or how many are left (*available now*, *only a few
+  left*, *selling fast*: G130, ADR-0078 §5; the page says *Sold out now* itself);
 * holds a bracket other than **[your offer]**, or anything the injection
   guard's rules match;
 * has a field empty or too long.
+
+**A greeting plan** (ADR-0078 §4) is a post for the day and a banner, with no
+product and no offer: every check above, and no selling words and no bracket at
+all (:func:`check_greeting`).
 
 A refused answer is asked for **once more**, told which rule it broke; refused
 again, the plan *could not be made* (ADR-0072 §5). An unreachable model is not
@@ -46,7 +52,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from neura_agent_core.calendar import TEXT_FIELDS, post_days
+from neura_agent_core.calendar import GREETING_FIELDS, TEXT_FIELDS, post_days
 from neura_agent_core.guard.injection import scan
 from neura_core import get_logger
 from neura_llm import ChatRequest, Message, ModelRole
@@ -74,6 +80,7 @@ LIMITS: dict[str, int] = {
     "email_subject": 100,
     "email_body": 1500,
     "banner": 100,
+    "greeting": 400,
 }
 
 #: Claims a small shop cannot stand behind without proof (ADR-0072 §6). Read in
@@ -134,6 +141,24 @@ _CONTACT = re.compile(
 #: A count the model must not state: the page shows the real one.
 _COUNT = re.compile(r"\b\d[\d,]*\s+(?:shoppers?|customers?|people|persons|buyers?|orders?)\b")
 _BRACKETS = re.compile(r"\[[^\]]*\]")
+#: Stock, or how many are left (G130, ADR-0078 §5): a sold-out product posted as
+#: available, or manufactured urgency. Advice to the shopper passes (*stock up
+#: on*, *restock your pantry*), and so does time (*just two days left until
+#: payday*): both were refused by the first version, found in the Gemini eval.
+_STOCK = re.compile(
+    r"\b(?:in|out of|back in) stock\b|\bsold[ -]out\b|\b(?:available|in store) now\b"
+    r"|\bnow (?:available|in store)\b|\b(?:just |now |freshly )?restocked\b"
+    r"|\b(?:only|just)\s+(?:a\s+)?(?:few|handful|\d+|one|two|three|four|five)\s+"
+    r"(?!(?:more\s+)?(?:days?|hours?|weeks?|nights?|sleeps?)\b)(?:\w+\s+)?left\b"
+    r"|\bfew left\b|\b(?:selling|going) (?:fast|out)\b"
+    r"|\blimited (?:stocks?|quantit(?:y|ies)|editions?|supply|supplies)\b"
+    r"|\bwhile (?:stocks?|supplies) lasts?\b|\brunning out\b|\balmost gone\b"
+)
+#: Selling, in a greeting (ADR-0078 §4): a religious day is not a sale.
+_SELLING = re.compile(
+    r"\b(?:sales?|buy(?:ing)?|shop now|order (?:now|today)|discounts?|deals?|promos?"
+    r"|promotions?|offers?|bargains?)\b"
+)
 
 
 #: What the model is told on its second try, by refusal: fixed words from code.
@@ -148,6 +173,11 @@ RETRY_REASONS: dict[str, str] = {
     "claim": "a text held a word from the list of claims you must never write",
     "contact": "a text held a link, a web address, a phone number, an email address or an @",
     "count": "a text held a number of shoppers, customers, people or orders",
+    "stock": (
+        "a text said something about stock or how many are left, such as available now, "
+        "sold out or only a few left"
+    ),
+    "selling": "the greeting held selling words; write a greeting only, with nothing to buy",
     "placeholder": f"a text held brackets other than {OFFER}",
     "guard": "a text held words that read as instructions to a computer",
     "length": "a field was empty or too long",
@@ -191,6 +221,8 @@ class PlanInput:
     #: ``products`` are the owner's own choice (D20, R124): the plan uses every
     #: one of them, sold out or not, and no other.
     chosen: bool = False
+    #: A greeting plan (ADR-0078 §4): no products, no facts, no offer.
+    greeting: bool = False
 
     @property
     def shown(self) -> tuple[int, int]:
@@ -216,6 +248,16 @@ class PlanAnswer(BaseModel):
     email_subject: str
     email_body: str
     banner: str
+
+
+class GreetingAnswer(BaseModel):
+    """What the model returns for a greeting plan (ADR-0078 §4)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    theme: str = Field(description="A short name for the greeting.")
+    greeting: str = Field(description="The post for the day itself.")
+    banner: str = Field(description="One line for the shop's home page.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,7 +306,7 @@ class PlanResult:
     #: Set when the model could not be reached: a retry, not a result.
     error: str = ""
     #: What the model said before the checks, for the eval only.
-    raw: tuple[PlanAnswer, ...] = field(default_factory=tuple)
+    raw: tuple[PlanAnswer | GreetingAnswer, ...] = field(default_factory=tuple)
 
     @property
     def reachable(self) -> bool:
@@ -289,6 +331,8 @@ def text_refusal(text: str) -> str | None:
         return "claim"
     if _COUNT.search(lowered):
         return "count"
+    if _STOCK.search(lowered):
+        return "stock"
     if any(found.lower() != OFFER for found in _BRACKETS.findall(text)) or any(
         mark in text for mark in "<>{}"
     ):
@@ -298,19 +342,29 @@ def text_refusal(text: str) -> str | None:
     return None
 
 
-def claim_in(answer: PlanAnswer) -> str:
+def claim_in(answer: PlanAnswer | GreetingAnswer) -> str:
     """The first claim word an answer holds, from :data:`CLAIM_WORDS`, or ``""``.
 
     Named on the retry, so the model knows which word to leave out. It is a word
     of our own list, never the model's or a shopper's text.
     """
-    for name in ("theme", "idea", *TEXT_FIELDS):
-        text = str(getattr(answer, name) or "").lower()
+    for name in ("theme", "idea", *TEXT_FIELDS, *GREETING_FIELDS):
+        text = str(getattr(answer, name, "") or "").lower()
         found = _CLAIM.search(text)
         if found:
             return found.group(0)
         if _TREATS_AS_A_CLAIM.search(text):
             return "treats"
+    return ""
+
+
+def stock_in(answer: PlanAnswer | GreetingAnswer) -> str:
+    """The first stock words an answer holds, or ``""``: named on the retry, as a
+    claim word is. Words matched by our own pattern, from the model's text."""
+    for name in ("theme", "idea", *TEXT_FIELDS, *GREETING_FIELDS):
+        found = _STOCK.search(str(getattr(answer, name, "") or "").lower())
+        if found:
+            return found.group(0)
     return ""
 
 
@@ -344,6 +398,43 @@ def check(answer: PlanAnswer, given: PlanInput) -> CheckedPlan | str:
         texts={name: cleaned[name] for name in TEXT_FIELDS},
         cut=given.cut,
         facts_given=len(given.facts),
+    )
+
+
+def check_greeting(answer: GreetingAnswer) -> CheckedPlan | str:
+    """A greeting as it may be stored, or the refusal's code. Never raises."""
+    cleaned = {
+        "theme": _plain(answer.theme or ""),
+        **{name: _plain(getattr(answer, name) or "") for name in GREETING_FIELDS},
+    }
+    for name, value in cleaned.items():
+        if not value or len(value) > LIMITS[name]:
+            return "length"
+    for value in cleaned.values():
+        if (refusal := text_refusal(value)) is not None:
+            return refusal
+        if OFFER in value.lower() or _SELLING.search(value.lower()):
+            return "selling"
+        if _BRACKETS.search(value):
+            return "placeholder"
+    return CheckedPlan(
+        theme=cleaned["theme"],
+        idea="",
+        products=(),
+        act_on=(),
+        texts={name: cleaned[name] for name in GREETING_FIELDS},
+    )
+
+
+def render_greeting(given: PlanInput) -> str:
+    """What the model reads for a greeting: the shop's name, then the date."""
+    data = {"shop": given.shop}
+    return (
+        f"<untrusted_shop_data>\n{json.dumps(data, ensure_ascii=False, indent=1)}\n"
+        f"</untrusted_shop_data>\n\n"
+        f"The date: {given.name}, {_long(given.day)}.\n"
+        f"The greeting post goes out on {_long(given.day)}; the banner runs the day before "
+        f"and on the day."
     )
 
 
@@ -399,11 +490,15 @@ async def write_plan(given: PlanInput, *, llm: object, prompt: str) -> PlanResul
     """Ask the model, check the answer, and ask once more if it was refused.
 
     ``llm`` is typed loosely as the night check types it: the job passes a
-    metered wrapper and a test passes a stub. Raises nothing.
+    metered wrapper and a test passes a stub. ``prompt`` is the greeting's for a
+    greeting plan (``given.greeting``). Raises nothing.
     """
-    question = render(given)
+    question = render_greeting(given) if given.greeting else render(given)
+    schema: type[PlanAnswer] | type[GreetingAnswer] = (
+        GreetingAnswer if given.greeting else PlanAnswer
+    )
     refusals: list[str] = []
-    raw: list[PlanAnswer] = []
+    raw: list[PlanAnswer | GreetingAnswer] = []
     for attempt in range(2):
         user = question
         if refusals:
@@ -415,6 +510,9 @@ async def write_plan(given: PlanInput, *, llm: object, prompt: str) -> PlanResul
                     if word == "treats"
                     else f' ("{word}"; leave it out in every form, also as an ordinary word)'
                 )
+            if refusals[-1] == "stock" and (words := stock_in(raw[-1])):
+                reason += f' ("{words}")'
+
             user += (
                 f"\n\nYour last answer was refused by a check: {reason}. "
                 "Write the whole answer again and follow every rule."
@@ -423,7 +521,7 @@ async def write_plan(given: PlanInput, *, llm: object, prompt: str) -> PlanResul
             result = await llm.chat_structured(  # type: ignore[attr-defined]
                 ModelRole.REASONER,
                 ChatRequest(messages=[Message.system(prompt), Message.user(user)]),
-                PlanAnswer,
+                schema,
             )
         except Exception as exc:
             log.warning("grow_plan_failed", error=type(exc).__name__, attempt=attempt)
@@ -434,7 +532,10 @@ async def write_plan(given: PlanInput, *, llm: object, prompt: str) -> PlanResul
                 raw=tuple(raw),
             )
         raw.append(result.value)
-        checked = check(result.value, given)
+        answer = result.value
+        checked = (
+            check_greeting(answer) if isinstance(answer, GreetingAnswer) else check(answer, given)
+        )
         if isinstance(checked, CheckedPlan):
             return PlanResult(
                 plan=checked, refusals=tuple(refusals), calls=attempt + 1, raw=tuple(raw)
@@ -455,12 +556,16 @@ __all__ = [
     "CatalogueItem",
     "CheckedPlan",
     "Fact",
+    "GreetingAnswer",
     "PlanAnswer",
     "PlanInput",
     "PlanResult",
     "check",
+    "check_greeting",
     "claim_in",
     "render",
+    "render_greeting",
+    "stock_in",
     "text_refusal",
     "write_plan",
 ]

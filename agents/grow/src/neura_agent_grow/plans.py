@@ -1,10 +1,15 @@
-"""The calendar step of GROW's night run: a plan for each kept date. ADR-0072 §5.
+"""The calendar step of GROW's night run: suggest, then plan. ADR-0072 §5, ADR-0078.
 
-Once a night, for one shop: every kept date **21 days away or closer** that has
-no plan yet gets one (R87). A date added or kept late, already closer than 21
-days, gets its plan on the next run rather than never (ADR-0073). *Make it
-again* is answered here too, by the same step, run at once on its own job
-(:mod:`neura_agent_grow.jobs`).
+Once a night, for one shop, two things:
+
+1. **Suggest** (ADR-0078 §1): every kept date **28 days away or closer** with
+   nothing yet gets a suggestion of what its plan is about, products that fit
+   or a greeting only (:mod:`neura_agent_grow.suggest`). **No plan is written**:
+   the owner chooses first (D21). A date added late gets its suggestion on the
+   next run.
+2. **Write what was asked**: a plan the owner chose (products or a greeting),
+   *Make it again* and *Change products*. These are also answered at once, by
+   the same step on its own job (:mod:`neura_agent_grow.jobs`).
 
 **One call per plan, two when the first answer is refused**
 (:func:`neura_agent_grow.campaign.write_plan`). A plan refused twice is stored
@@ -15,7 +20,8 @@ it again*, so a date never costs more than two calls a night unasked.
 synced catalogue (up to 100 products in stock; **or exactly the products the
 owner chose for the plan**, sold out or not, D20), and the labels and counts on
 *Shoppers asked for* and *Missing from your pages*, with the same 30 days and
-2-shopper rule as those pages (a thing the owner hid stays out).
+2-shopper rule as those pages (a thing the owner hid stays out). A greeting is
+given the shop's name and the date only.
 
 A provider outage **stops the step** where it is (the queue retries the run);
 every plan made before it is already stored.
@@ -31,8 +37,9 @@ from typing import Any
 from sqlalchemy import select
 
 from neura_agent_core.calendar import (
-    PLAN_DAYS_BEFORE,
+    ASK_DAYS_BEFORE,
     CalendarRepository,
+    PlanKind,
     in_stock,
     kept_occurrences,
     shop_today,
@@ -47,13 +54,15 @@ from neura_agent_grow.campaign import (
     PlanInput,
     write_plan,
 )
+from neura_agent_grow.suggest import SuggestInput, suggest
 from neura_commerce.sync.schema import synced_entities
 from neura_core import get_logger
 from neura_core.tenancy import TenantRepository
 
 log = get_logger(__name__)
 
-#: The most plans one run makes. A shop with more due is finished the next night.
+#: The most plans (and, apart, suggestions) one run makes. A shop with more due
+#: is finished the next night.
 MAX_PLANS_PER_RUN = 20
 #: How many synced products are read to find the 100 in stock.
 _READ_PRODUCTS = 5000
@@ -66,12 +75,17 @@ AfterStore = Callable[[Any, str], Awaitable[Any]]
 class PlansResult:
     made: int = 0
     failed: int = 0
+    #: Suggestions stored for the owner to choose from (ADR-0078 §1).
+    suggested: int = 0
     calls: int = 0
     #: Why the step stopped early, if it did: ``"provider"`` (unreachable).
     stopped: str = ""
 
     def summary(self) -> str:
-        line = f"{self.made} plan(s) made · {self.failed} could not be made"
+        line = (
+            f"{self.suggested} suggestion(s) · {self.made} plan(s) made · "
+            f"{self.failed} could not be made"
+        )
         return line + (f" · stopped: {self.stopped}" if self.stopped else "")
 
 
@@ -82,6 +96,19 @@ class _Work:
     name: str
     #: The owner's products for this plan (D20), or ``None``: the AI chooses.
     chosen: tuple[str, ...] | None = None
+    #: The owner chose *A greeting only* (ADR-0078 §2).
+    greeting: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _Due:
+    """A kept date with nothing yet: it gets a suggestion (ADR-0078 §1)."""
+
+    date_key: str
+    day: date
+    name: str
+    own: bool
+    greeting_only: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +198,8 @@ async def make_plans(
     prompt: str,
     prompt_revision: str,
     now: datetime,
+    suggest_prompt: str = "",
+    greeting_prompt: str = "",
     asked_only: bool = False,
     after_store: AfterStore | None = None,
 ) -> PlansResult:
@@ -188,22 +217,36 @@ async def make_plans(
             if plan.day < today:
                 await repository.forget_request(tenant_id, plan.id)
             else:
-                work.append(_Work(plan.date_key, plan.day, plan.name, plan.owner_products))
+                work.append(
+                    _Work(
+                        plan.date_key,
+                        plan.day,
+                        plan.name,
+                        plan.owner_products,
+                        greeting=plan.plan_kind is PlanKind.GREETING,
+                    )
+                )
+        due: list[_Due] = []
         if not asked_only:
-            made = {(p.date_key, p.day) for p in await repository.plans(tenant_id, since=today)}
-            due = kept_occurrences(
-                await repository.rows(tenant_id),
-                country,
-                start=today + timedelta(days=1),
-                end=today + timedelta(days=PLAN_DAYS_BEFORE + 1),
-            )
-            work += [
-                _Work(o.date_key, o.day, o.name)
-                for o in due
-                if o.day is not None and (o.date_key, o.day) not in made
-            ]
+            held = {(p.date_key, p.day) for p in await repository.plans(tenant_id, since=today)}
+            due = [
+                _Due(
+                    o.date_key,
+                    o.day,
+                    o.name,
+                    own=o.own_id is not None,
+                    greeting_only=o.greeting_only,
+                )
+                for o in kept_occurrences(
+                    await repository.rows(tenant_id),
+                    country,
+                    start=today + timedelta(days=1),
+                    end=today + timedelta(days=ASK_DAYS_BEFORE + 1),
+                )
+                if o.day is not None and (o.date_key, o.day) not in held
+            ][:MAX_PLANS_PER_RUN]
         work = work[:MAX_PLANS_PER_RUN]
-        if not work:
+        if not work and not due:
             return result
         tenant = await TenantRepository(session).get(tenant_id)
         found_catalogue = await catalogue(session, tenant_id)
@@ -212,7 +255,9 @@ async def make_plans(
     shop = (tenant.name if tenant is not None else None) or "the shop"
     for item in work:
         given = _given(item, shop=shop, found=found_catalogue, known=known)
-        found = await write_plan(given, llm=llm, prompt=prompt)
+        found = await write_plan(
+            given, llm=llm, prompt=greeting_prompt if item.greeting else prompt
+        )
         result.calls += found.calls
         if not found.reachable:
             result.stopped = "provider"
@@ -242,9 +287,40 @@ async def make_plans(
                 result.failed += 1
             if after_store is not None:
                 await after_store(session, tenant_id)
+
+    for upcoming in [] if result.stopped else due:
+        asked = await suggest(
+            SuggestInput(
+                shop=shop,
+                name=upcoming.name,
+                day=upcoming.day,
+                products=found_catalogue.stocked,
+                own=upcoming.own,
+                greeting_only=upcoming.greeting_only,
+            ),
+            llm=llm,
+            prompt=suggest_prompt,
+        )
+        result.calls += asked.calls
+        if not asked.reachable or asked.suggestion is None:
+            result.stopped = "provider"
+            break
+        async with db.tenant_session(tenant_id) as session:
+            await CalendarRepository(session).store_suggestion(
+                tenant_id,
+                date_key=upcoming.date_key,
+                day=upcoming.day,
+                name=upcoming.name,
+                suggestion=asked.suggestion.stored(),
+                at=now,
+            )
+            result.suggested += 1
+            if after_store is not None:
+                await after_store(session, tenant_id)
     log.info(
         "grow_plans",
         tenant_id=tenant_id,
+        suggested=result.suggested,
         made=result.made,
         failed=result.failed,
         calls=result.calls,
@@ -254,8 +330,11 @@ async def make_plans(
 
 
 def _given(item: _Work, *, shop: str, found: Catalogue, known: list[Fact]) -> PlanInput:
-    """What the model is given for one date: the owner's products when they chose
-    (those still in the catalogue), else the products in stock for it to choose."""
+    """What the model is given for one date: the shop's name alone for a
+    greeting; the owner's products when they chose (those still in the
+    catalogue), else the products in stock for it to choose."""
+    if item.greeting:
+        return PlanInput(shop=shop, name=item.name, day=item.day, greeting=True)
     chosen = [found.every[i] for i in item.chosen or () if i in found.every]
     if chosen:
         return PlanInput(

@@ -12,7 +12,15 @@ import type { Price } from "@/lib/suggestions";
 
 /** What a kept date's plan is, on *Coming up*. */
 export type ComingStatus =
-  "ready" | "making" | "failed" | "planned" | "tonight" | "paused" | "not_set";
+  | "ready"
+  | "making"
+  | "failed"
+  | "choose"
+  | "skipped"
+  | "planned"
+  | "tonight"
+  | "paused"
+  | "not_set";
 
 export type ComingDate = {
   date_key: string;
@@ -28,7 +36,7 @@ export type ComingDate = {
   /** A moving date's usual months, 1 to 12. */
   usually: number[];
   days_left: number | null;
-  /** The day its plan is written, 21 days before. */
+  /** The day the AI suggests what its plan is about, 28 days before (ADR-0078). */
   plan_day: string | null;
   status: ComingStatus;
   plan_id: string | null;
@@ -41,7 +49,8 @@ export type Calendar = {
   year: number;
   /** Whether this year's list was saved: only then do suggested dates count. */
   saved: boolean;
-  plan_days_before: number;
+  /** The AI suggests a plan this many days before a date (ADR-0078). */
+  ask_days_before: number;
   /** When FiveNeurals paused the plans (ADR-0065), or `null`. */
   paused_since: string | null;
   coming_up: ComingDate[];
@@ -110,7 +119,18 @@ export const TEXT_FIELDS = [
   "email_body",
   "banner",
 ] as const;
-export type TextField = (typeof TEXT_FIELDS)[number];
+/** A greeting's texts (ADR-0078 §4): a post for the day, and a banner. */
+export type TextField = (typeof TEXT_FIELDS)[number] | "greeting";
+
+/** Why the AI suggests what it does; the page says it in its own words (ADR-0078 §1). */
+export type SuggestReason = "fit" | "none_fit" | "religious" | "no_products" | "could_not";
+
+/** What the AI suggested, 28 days before the date (ADR-0078 §1). */
+export type PlanSuggestion = {
+  kind: "products" | "greeting" | "none";
+  reason: SuggestReason;
+  products: PlanProduct[];
+};
 
 export type Plan = {
   id: string;
@@ -120,7 +140,15 @@ export type Plan = {
   day: string;
   today: string;
   days_left: number;
-  state: "ready" | "making" | "failed";
+  state: "ready" | "making" | "failed" | "choose" | "skipped";
+  /** `products` or `greeting` (ADR-0078 §2); `null` while not chosen. */
+  kind: "products" | "greeting" | null;
+  /** What the AI suggested; `null` for a plan made before ADR-0078. */
+  suggestion: PlanSuggestion | null;
+  /** The owner chose *Skip this date*. */
+  skipped: boolean;
+  /** The owner may choose: products, a greeting only, or skip. */
+  can_choose: boolean;
   /** Whether a plan was ever made (a first try may fail the checks twice). */
   has_plan: boolean;
   made_at: string | null;
@@ -133,7 +161,10 @@ export type Plan = {
   act_on: PlanFact[];
   products: PlanProduct[];
   catalogue_cut: boolean;
-  schedule: { step: "ready" | "teaser" | "launch" | "last_chance" | "day"; day: string }[];
+  schedule: {
+    step: "ready" | "teaser" | "launch" | "last_chance" | "day" | "greeting";
+    day: string;
+  }[];
   texts: Partial<Record<TextField, string>>;
   edited: TextField[];
   paused_since: string | null;
@@ -152,6 +183,8 @@ export type Plan = {
 export type CalendarHome = {
   add_dates: boolean;
   ready: { plan_id: string; name: string; day: string; days_left: number }[];
+  /** A suggestion waiting for the owner's choice (ADR-0078 §2). */
+  choose?: { plan_id: string; name: string; day: string; days_left: number }[];
 };
 
 const MONTHS = [
@@ -208,17 +241,43 @@ export function usuallyIn(months: number[]): string {
   return `usually in ${months.map((m) => MONTHS[m - 1]).join(" or ")}`;
 }
 
-/** *in 21 days*, *tomorrow*, *today*. */
+/** *in 28 days*, *tomorrow*, *today*. */
 export function inDays(days: number): string {
   if (days <= 0) return "today";
   if (days === 1) return "tomorrow";
   return `in ${days} days`;
 }
 
+function isIn(days: number): string {
+  return days <= 0 ? "is today" : days === 1 ? "is tomorrow" : `is in ${days} days`;
+}
+
 /** Home's line: *Avurudu is in 21 days. Your plan is ready.* */
 export function readyLine(name: string, days: number): string {
-  const when = days <= 0 ? "is today" : days === 1 ? "is tomorrow" : `is in ${days} days`;
-  return `${name} ${when}. Your plan is ready.`;
+  return `${name} ${isIn(days)}. Your plan is ready.`;
+}
+
+/** Home's line: *Vesak is in 28 days. Choose what its plan is about.* (ADR-0078 §2) */
+export function chooseLine(name: string, days: number): string {
+  return `${name} ${isIn(days)}. Choose what its plan is about.`;
+}
+
+/** Why the AI suggests what it does, in code's words (ADR-0078 §1). */
+export function suggestionWords(suggestion: PlanSuggestion, name: string): string {
+  switch (suggestion.reason) {
+    case "fit":
+      return suggestion.products.length === 1
+        ? `Your assistant suggests this product for ${name}.`
+        : `Your assistant suggests these products for ${name}.`;
+    case "none_fit":
+      return `None of your products fits ${name}, so your assistant suggests a greeting only.`;
+    case "religious":
+      return `${name} is a religious day, so your assistant suggests a respectful greeting, not a sale.`;
+    case "no_products":
+      return "Your shop has no product in stock, so your assistant suggests a greeting only.";
+    default:
+      return "Your assistant could not suggest anything this time. Choose what the plan is about.";
+  }
 }
 
 /** The line under a date on *Coming up* (board 75). */
@@ -229,7 +288,7 @@ export function comingLine(date: ComingDate): string {
   if (date.day === null) {
     const usually = usuallyIn(date.usually);
     if (usually) parts.push(usually.charAt(0).toUpperCase() + usually.slice(1));
-  } else if (date.days_left !== null && date.days_left <= 21) {
+  } else if (date.days_left !== null && date.days_left <= 28) {
     parts.push(inDays(date.days_left));
   }
   return parts.join(" · ");
@@ -250,7 +309,7 @@ export const OFFER = /\[your offer\]/gi;
 
 /** A draft as one text to copy: the email's subject on its own first line. */
 export function copyText(
-  field: "teaser" | "launch" | "last_chance" | "email" | "banner",
+  field: "teaser" | "launch" | "last_chance" | "email" | "banner" | "greeting",
   texts: Plan["texts"],
 ): string {
   if (field === "email") {
