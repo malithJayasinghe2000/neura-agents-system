@@ -162,5 +162,8 @@ jobs:
       - run: uv sync --frozen
         name: Install dependencies
 
-      - run: uv run neura-eval --no-judge --no-agent
+      # One agent at a time, as `make eval-fast` does: since a second agent was
+      # installed, `neura-eval` with no --agent refuses to choose (G133), and this
+      # step had been red on every push since then.
+      - run: make eval-fast
         name: Evals (datasets + harness only)
