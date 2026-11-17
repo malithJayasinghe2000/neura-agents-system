@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "apps" / "neura-web"
 OUT = APP / "out"
 
-PAGES = ("/", "/sell/", "/docs/", "/docs/owners/", "/docs/developers/")
+PAGES = ("/", "/sell/", "/grow/", "/docs/", "/docs/owners/", "/docs/developers/")
 
 GREEN, RED, DIM, BOLD, OFF = "\033[32m", "\033[31m", "\033[2m", "\033[1m", "\033[0m"
 

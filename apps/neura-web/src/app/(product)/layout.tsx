@@ -7,6 +7,7 @@ import { CONTACT_HREF, SIGN_IN_HREF } from "@/lib/site";
 const ITEMS = [
   { href: "/", label: "NEURA-CARE" },
   { href: "/sell/", label: "NEURA-SELL" },
+  { href: "/grow/", label: "NEURA-GROW" },
   { href: "/docs/", label: "Docs" },
 ];
 
@@ -34,6 +35,9 @@ export default function ProductLayout({ children }: { children: React.ReactNode 
         </Link>
         <Link href="/sell/" className="text-sm text-body">
           NEURA-SELL
+        </Link>
+        <Link href="/grow/" className="text-sm text-body">
+          NEURA-GROW
         </Link>
         <Link href="/docs/" className="text-sm text-body">
           Docs

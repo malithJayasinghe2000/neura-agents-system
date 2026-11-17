@@ -59,6 +59,15 @@ export default function OwnerGuide() {
               can pick those suggestions yourself.
             </span>
           </div>
+          <div className="flex flex-col gap-2 rounded-[14px] border border-line p-[22px]">
+            <span className="text-xl font-semibold">
+              NEURA-GROW <span className="text-[15px] font-normal text-quiet">· Marketing</span>
+            </span>
+            <span className="text-[15px] leading-[1.55] text-body">
+              Shows what shoppers asked that your pages don&apos;t say, plans a campaign or a
+              greeting for your special dates, and gives you links that count their clicks.
+            </span>
+          </div>
         </div>
       </section>
 
