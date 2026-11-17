@@ -1,7 +1,7 @@
 # The dashboard (ADR-0026, ADR-0079): Next.js, built standalone.
 #
 #   docker build -f infra/docker/console.Dockerfile \
-#     --build-arg API_BASE_URL=https://api.fiveneurals.com -t neura-console .
+#     --build-arg API_BASE_URL=http://neura-api -t neura-console .
 #
 # API_BASE_URL is needed at BUILD time: Next bakes the `/api/*` rewrite into the
 # build (next.config.ts). The server pages read it again at run time.

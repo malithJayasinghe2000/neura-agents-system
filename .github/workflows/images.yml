@@ -31,7 +31,10 @@ permissions:
 
 env:
   # The dashboard's API address is baked into its build (console.Dockerfile).
-  API_BASE_URL: https://api.fiveneurals.com
+  # Inside Azure's Container Apps environment the API is reachable by its app
+  # name, so the dashboard never leaves Azure to reach it, and it works before
+  # the public addresses exist (ADR-0079).
+  API_BASE_URL: http://neura-api
 
 jobs:
   build:
