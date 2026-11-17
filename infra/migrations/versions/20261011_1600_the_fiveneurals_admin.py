@@ -165,7 +165,11 @@ def upgrade() -> None:
         """  # noqa: S608 (built from this module's constants, never input)
     )
     for signature in ("neura_admin_shops()", "neura_admin_usage(date, date)"):
+        # Lent for the handover and taken back: a managed database's admin is not a
+        # superuser (ADR-0079; see the job queue migration).
+        op.execute(f"GRANT CREATE ON SCHEMA public TO {READER}")
         op.execute(f"ALTER FUNCTION {signature} OWNER TO {READER}")
+        op.execute(f"REVOKE CREATE ON SCHEMA public FROM {READER}")
         # Revoked from PUBLIC first, then granted to exactly one role.
         op.execute(f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC")
         op.execute(

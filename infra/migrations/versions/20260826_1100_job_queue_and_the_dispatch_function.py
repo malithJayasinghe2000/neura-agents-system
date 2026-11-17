@@ -198,7 +198,14 @@ def upgrade() -> None:
         $$
         """
     )
+    # PostgreSQL 15+ lets a non-superuser hand an object to a role only if that
+    # role may CREATE in the schema. A managed database's admin is not a
+    # superuser (Azure, ADR-0079), so the right is lent for the handover and
+    # taken back: the end state is what it always was, and a superuser (local,
+    # CI) is unaffected.
+    op.execute(f"GRANT CREATE ON SCHEMA public TO {SCHEDULER_ROLE}")
     op.execute(f"ALTER FUNCTION {DUE_TENANTS}(timestamptz) OWNER TO {SCHEDULER_ROLE}")
+    op.execute(f"REVOKE CREATE ON SCHEMA public FROM {SCHEDULER_ROLE}")
     # PUBLIC gets EXECUTE on a new function by default. Revoked first, then
     # granted to exactly one role — the order matters, and getting it backwards
     # is how a "restricted" function ends up callable by everyone.
