@@ -369,6 +369,8 @@ class TestShops:
         one = client.get(f"/v1/admin/shops/{waiting}", cookies=cookie(admin))
         assert one.status_code == 200
         assert one.json()["data"]["shop"]["tenant_id"] == waiting
+        # G136: every discovered assistant is offered, GROW among them.
+        assert {"care", "sell", "grow"} <= set(one.json()["data"]["shop"]["assistants_offered"])
         missing = client.get(f"/v1/admin/shops/{MADE_UP}", cookies=cookie(admin))
         assert missing.status_code == 404
         assert missing.json()["error"]["message"] == "No such shop."
@@ -504,6 +506,87 @@ class TestApproveAndRefuse:
         async with db.tenant_session(populated.tenant) as session:
             assert await TenantRepository(session).get(populated.tenant) is not None
         assert mail == []
+
+
+class TestChangeAssistants:
+    """ADR-0080: an approved shop's assistants, changed by FiveNeurals."""
+
+    async def _approved(
+        self, client: TestClient, db: Database, made: Made, agents: list[str]
+    ) -> tuple[str, str, str]:
+        admin = await _admin(db, made)
+        shop, owner = await _waiting_shop(db, made)
+        response = client.post(
+            f"/v1/admin/shops/{shop}/approve", json={"agents": agents}, cookies=cookie(admin)
+        )
+        assert response.status_code == 200
+        return admin, shop, owner
+
+    async def test_adding_grow_starts_it_tells_the_owner_and_is_recorded(
+        self, client: TestClient, db: Database, made: Made, mail: list[dict[str, str]]
+    ) -> None:
+        admin, shop, owner = await self._approved(client, db, made, ["care"])
+        async with db.tenant_session(shop) as session:
+            assert (await session.execute(select(job_queue.c.kind))).scalars().all() == []
+        response = client.put(
+            f"/v1/admin/shops/{shop}/assistants",
+            json={"agents": ["grow", "care"]},
+            cookies=cookie(admin),
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == {
+            "changed": True,
+            "assistants": ["care", "grow"],
+            "emailed": True,
+        }
+        async with db.tenant_session(shop) as session:
+            tenant = await TenantRepository(session).require(shop)
+            kinds = (await session.execute(select(job_queue.c.kind))).scalars().all()
+        assert tenant.enabled_agents == frozenset({"care", "grow"})
+        assert kinds == ["grow.gaps.scan"]
+        assert mail[-1]["to"] == owner
+        assert "now: NEURA-CARE and NEURA-GROW." in mail[-1]["body"]
+        assert ("config.change", admin, "shop.assistants_changed") in await _audit(shop)
+
+    async def test_removing_one_keeps_the_shop_and_the_same_list_does_nothing(
+        self, client: TestClient, db: Database, made: Made, mail: list[dict[str, str]]
+    ) -> None:
+        admin, shop, _ = await self._approved(client, db, made, ["care", "sell"])
+        sent = len(mail)
+        removed = client.put(
+            f"/v1/admin/shops/{shop}/assistants", json={"agents": ["care"]}, cookies=cookie(admin)
+        )
+        assert removed.status_code == 200 and removed.json()["data"]["changed"] is True
+        async with db.tenant_session(shop) as session:
+            tenant = await TenantRepository(session).require(shop)
+        assert tenant.enabled_agents == frozenset({"care"})
+        assert tenant.status is TenantStatus.ACTIVE
+        same = client.put(
+            f"/v1/admin/shops/{shop}/assistants", json={"agents": ["care"]}, cookies=cookie(admin)
+        )
+        assert same.json()["data"] == {"changed": False, "assistants": ["care"], "emailed": False}
+        assert len(mail) == sent + 1
+
+    async def test_none_a_typo_and_a_waiting_shop_are_refused(
+        self, client: TestClient, db: Database, made: Made, mail: list[dict[str, str]]
+    ) -> None:
+        admin, shop, _ = await self._approved(client, db, made, ["care"])
+        sent = len(mail)
+        for agents, code in (([], "NO_ASSISTANT"), (["cre"], "UNKNOWN_ASSISTANT")):
+            response = client.put(
+                f"/v1/admin/shops/{shop}/assistants", json={"agents": agents}, cookies=cookie(admin)
+            )
+            assert response.status_code == 400 and response.json()["error"]["code"] == code
+        waiting, _ = await _waiting_shop(db, made, name="Still Waiting Shop")
+        response = client.put(
+            f"/v1/admin/shops/{waiting}/assistants",
+            json={"agents": ["care"]},
+            cookies=cookie(admin),
+        )
+        assert response.status_code == 409 and response.json()["error"]["code"] == "WAITING"
+        async with db.tenant_session(shop) as session:
+            assert (await TenantRepository(session).require(shop)).enabled_agents == {"care"}
+        assert len(mail) == sent
 
 
 class TestUsage:

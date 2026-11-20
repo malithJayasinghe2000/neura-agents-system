@@ -3322,13 +3322,17 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
 
             shown = await opened(page, f"{console}/admin/shops/{approve_id}")
             _check(
-                "a waiting shop: its facts, CARE ticked, SELL not",
+                "a waiting shop: its facts, CARE ticked, SELL and GROW offered, not ticked (R46)",
                 "Look at the website before you decide" in shown
+                and "NEURA-GROW" in shown
                 and bool(
                     await page.evaluate("document.querySelector('[data-assistant=care]').checked")
                 )
                 and not await page.evaluate(
                     "document.querySelector('[data-assistant=sell]').checked"
+                )
+                and await page.evaluate(
+                    "document.querySelector('[data-assistant=grow]')?.checked === false"
                 ),
                 failures,
             )
@@ -3342,16 +3346,17 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                 "[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Keep waiting').click(), true"
             )
             await asyncio.sleep(1)
+            await click(page, "[data-assistant=grow]", wait=0.5)
             shown = await click(page, "[data-approve]", wait=4)
             async with db.tenant_session(approve_id) as session:
                 approved = await TenantRepository(session).get(approve_id)
             _check(
-                "Approve: the shop is approved with NEURA-CARE, in practice mode",
+                "Approve: the shop is approved with NEURA-CARE and NEURA-GROW, in practice mode",
                 f"{approve_name} is approved" in shown
-                and "With NEURA-CARE, in practice mode" in shown
+                and "With NEURA-CARE and NEURA-GROW, in practice mode" in shown
                 and approved is not None
                 and approved.status is TenantStatus.ACTIVE
-                and approved.enabled_agents == frozenset({"care"}),
+                and approved.enabled_agents == frozenset({"care", "grow"}),
                 failures,
             )
 
@@ -3362,6 +3367,44 @@ async def _check_admin(console: str, email: str, failures: list[str]) -> None:
                 and not await page.evaluate(
                     f"!!document.querySelector('[data-waiting-shop=\"{approve_id}\"]')"
                 ),
+                failures,
+            )
+
+            # G137: an approved shop opens from the list too.
+            _check(
+                "Shops: an approved shop's name links to its page (G137)",
+                bool(
+                    await page.evaluate(
+                        f'!!document.querySelector(\'[data-shop="{approve_id}"] '
+                        f'a[href="/admin/shops/{approve_id}"]\')'
+                    )
+                ),
+                failures,
+            )
+            # ADR-0080: its assistants, changed after approval.
+            shown = await opened(page, f"{console}/admin/shops/{approve_id}")
+            _check(
+                "an approved shop: Assistants shows its own ticked, Save off until a change",
+                "Add or remove this shop's assistants" in shown
+                and await page.evaluate(
+                    "document.querySelector('[data-assistant=care]').checked"
+                    " && document.querySelector('[data-assistant=grow]').checked"
+                    " && !document.querySelector('[data-assistant=sell]').checked"
+                    " && document.querySelector('[data-save-assistants]').disabled"
+                ),
+                failures,
+            )
+            await click(page, "[data-assistant=grow]", wait=0.3)
+            await click(page, "[data-assistant=sell]", wait=0.3)
+            shown = await click(page, "[data-save-assistants]", wait=4)
+            async with db.tenant_session(approve_id) as session:
+                changed = await TenantRepository(session).get(approve_id)
+            _check(
+                "Save: GROW removed and SELL added, said on the page, no email claimed",
+                "Saved. It now has NEURA-CARE and NEURA-SELL." in shown
+                and "couldn't email" in shown
+                and changed is not None
+                and changed.enabled_agents == frozenset({"care", "sell"}),
                 failures,
             )
 

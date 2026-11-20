@@ -27,6 +27,8 @@ export type AdminShop = {
   cost_7d: Money;
   /** One shop's page only: the features FiveNeurals may switch off (ADR-0065). */
   switches?: AdminSwitch[];
+  /** One shop's page only: every assistant the API discovered, as keys (G136). */
+  assistants_offered?: string[];
 };
 
 /** One feature of one shop that FiveNeurals may switch off (ADR-0065). */

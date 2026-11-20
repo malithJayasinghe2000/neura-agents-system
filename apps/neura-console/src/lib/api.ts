@@ -129,6 +129,18 @@ export function approveShop(
   );
 }
 
+/** Change an approved shop's assistants (ADR-0080). `changed` is false for the same list. */
+export function setAssistants(
+  tenantId: string,
+  agents: string[],
+): Promise<{ changed: boolean; assistants: string[]; emailed: boolean }> {
+  return call(
+    `/shops/${encodeURIComponent(tenantId)}/assistants`,
+    { method: "PUT", body: JSON.stringify({ agents }) },
+    "/v1/admin",
+  );
+}
+
 /** Switch one feature of a shop on or off (ADR-0065). `changed` is false for a no-op. */
 export function setSwitch(
   tenantId: string,

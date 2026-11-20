@@ -2,12 +2,14 @@
  * One shop, as an admin sees it (ADR-0061, board 47): its facts, and for a shop
  * waiting for approval, **Approve** with its assistants or **Refuse**.
  *
- * A shop that is not waiting shows its facts, and the features FiveNeurals may
- * switch off for it (ADR-0065, board 61): only those of assistants it has.
+ * A shop that is not waiting shows its facts, its assistants to add or remove
+ * (ADR-0080), and the features FiveNeurals may switch off for it (ADR-0065,
+ * board 61): only those of assistants it has.
  */
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { AdminStateBadge } from "@/components/admin/admin-parts";
+import { ChangeAssistants } from "@/components/admin/change-assistants";
 import { DecideShop } from "@/components/admin/decide-shop";
 import { FeatureSwitches } from "@/components/admin/feature-switches";
 import { assistantsShort, day, type AdminShop } from "@/lib/admin";
@@ -84,13 +86,21 @@ function Shop({ shop }: { shop: AdminShop }) {
           <p className="text-sm text-foreground/80">
             Look at the website before you decide: is it a real shop that sells things?
           </p>
-          <DecideShop tenantId={shop.tenant_id} name={shop.name} owners={shop.owners} />
+          <DecideShop
+            tenantId={shop.tenant_id}
+            name={shop.name}
+            owners={shop.owners}
+            offered={shop.assistants_offered ?? []}
+          />
         </>
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">
-            This shop is not waiting for approval, so there is nothing to decide here.
-          </p>
+          <ChangeAssistants
+            tenantId={shop.tenant_id}
+            owners={shop.owners}
+            current={shop.assistants}
+            offered={shop.assistants_offered ?? []}
+          />
           {shop.switches?.length ? (
             <FeatureSwitches tenantId={shop.tenant_id} name={shop.name} switches={shop.switches} />
           ) : null}

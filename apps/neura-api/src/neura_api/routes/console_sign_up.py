@@ -96,6 +96,18 @@ def approved_email(*, shop: str, dashboard: str) -> tuple[str, str]:
     )
 
 
+def assistants_email(*, shop: str, names: list[str]) -> tuple[str, str]:
+    """A shop's assistants changed (ADR-0080 §5): subject and body."""
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return (
+        f"{shop}'s assistants on FiveNeurals have changed",
+        "Hello,\n\n"
+        f"Your assistants on FiveNeurals are now: {listed}.\n\n"
+        "An assistant you no longer have keeps what it made, so nothing is lost if it "
+        "comes back.\n",
+    )
+
+
 def refused_email(*, shop: str) -> tuple[str, str]:
     """The refusal email: subject and body (R16, R17, the owner: A)."""
     return (

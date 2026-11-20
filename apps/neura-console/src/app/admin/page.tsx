@@ -121,16 +121,13 @@ function ShopRow({ shop }: { shop: AdminShop }) {
   return (
     <tr className="border-b last:border-b-0 hover:bg-muted/40" data-shop={shop.tenant_id}>
       <td className="px-3.5 py-3 align-middle">
-        {waiting ? (
-          <Link
-            href={`/admin/shops/${encodeURIComponent(shop.tenant_id)}`}
-            className="font-semibold underline underline-offset-3"
-          >
-            {shop.name}
-          </Link>
-        ) : (
-          <span className="font-medium">{shop.name}</span>
-        )}
+        {/* Every shop opens: an approved one has its assistants and switches (G137). */}
+        <Link
+          href={`/admin/shops/${encodeURIComponent(shop.tenant_id)}`}
+          className={`${waiting ? "font-semibold" : "font-medium"} underline underline-offset-3`}
+        >
+          {shop.name}
+        </Link>
         {waiting && shop.website ? (
           <span className="mt-0.5 block text-[13px] text-muted-foreground">
             {bareWebsite(shop.website)}

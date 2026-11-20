@@ -188,7 +188,9 @@ export default async function HelpPage({ params }: { params: Promise<{ tenantId:
               className="grid gap-1 px-4 py-3 text-sm sm:grid-cols-[18rem_1fr] sm:gap-4 sm:px-5"
             >
               <dt className="font-medium">{row.seen}</dt>
-              <dd className="leading-relaxed text-foreground/80">{row.fix}</dd>
+              <dd className="leading-relaxed text-foreground/80">
+                {sell ? row.fix : (row.fixWithoutSell ?? row.fix)}
+              </dd>
             </div>
           ))}
         </dl>

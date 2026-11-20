@@ -3,8 +3,10 @@
 /**
  * Approve or refuse a waiting shop (ADR-0061 §7, board 47).
  *
- * **CARE is ticked, SELL is not** (R14: CARE is the usual start); at least one
- * must be ticked, and the API refuses none. **Refuse asks first**, because it
+ * **The choices are every assistant the API discovered** (G136), so one added
+ * later is never missing; their words are `lib/assistants.ts`'s. **CARE is
+ * ticked, the others are not** (R14: CARE is the usual start; R46: GROW is chosen
+ * per shop, like SELL); at least one must be ticked, and the API refuses none. **Refuse asks first**, because it
  * cannot be undone. When an email could not be sent, the screen says so rather
  * than claiming it was.
  *
@@ -16,23 +18,13 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { approveShop, refuseShop } from "@/lib/api";
-import { assistantName } from "@/lib/assistants";
+import { AssistantChoices } from "@/components/admin/assistant-choices";
+import { assistantName, inReadingOrder } from "@/lib/assistants";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/** What each assistant does, in the words of the approved design. */
-const CHOICES: { key: string; text: string; ticked: boolean }[] = [
-  {
-    key: "care",
-    text: "Answers shoppers' questions: orders, delivery, returns, the shop's policies.",
-    ticked: true,
-  },
-  {
-    key: "sell",
-    text: "Helps shoppers choose, and suggests what goes together. Uses some AI in the background for each product.",
-    ticked: false,
-  },
-];
+/** R14: CARE is the usual start, so it alone is ticked at first. */
+const USUAL_START: string = "care";
 
 type Step =
   | { kind: "deciding" }
@@ -44,14 +36,16 @@ export function DecideShop({
   tenantId,
   name,
   owners,
+  offered,
 }: {
   tenantId: string;
   name: string;
   owners: string[];
+  /** Every assistant the API discovered, as keys. */
+  offered: string[];
 }) {
-  const [picked, setPicked] = useState(
-    () => new Set(CHOICES.filter((c) => c.ticked).map((c) => c.key)),
-  );
+  const choices = inReadingOrder(offered);
+  const [picked, setPicked] = useState(() => new Set(choices.filter((key) => key === USUAL_START)));
   const [step, setStep] = useState<Step>({ kind: "deciding" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -134,33 +128,7 @@ export function DecideShop({
           <p className="text-sm text-foreground/80">
             Choose its assistants. CARE is the usual start.
           </p>
-          <div className="space-y-3">
-            {CHOICES.map((choice) => (
-              <label
-                key={choice.key}
-                className="flex cursor-pointer gap-3 rounded-xl border px-4 py-3.5 has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/50"
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5 size-[18px] shrink-0 accent-foreground"
-                  checked={picked.has(choice.key)}
-                  data-assistant={choice.key}
-                  onChange={(event) => {
-                    const next = new Set(picked);
-                    if (event.target.checked) next.add(choice.key);
-                    else next.delete(choice.key);
-                    setPicked(next);
-                  }}
-                />
-                <span className="space-y-0.5">
-                  <span className="block text-sm font-semibold">{assistantName(choice.key)}</span>
-                  <span className="block text-[13px] leading-snug text-muted-foreground">
-                    {choice.text}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
+          <AssistantChoices choices={choices} picked={picked} onChange={setPicked} />
           <p className="text-sm leading-relaxed text-foreground/80">
             It starts in practice mode, with the daily spending limit every shop has. We email{" "}
             {owner}.
@@ -174,7 +142,7 @@ export function DecideShop({
                 run(async () => {
                   const done = await approveShop(
                     tenantId,
-                    CHOICES.map((c) => c.key).filter((key) => picked.has(key)),
+                    choices.filter((key) => picked.has(key)),
                   );
                   return { kind: "approved", assistants: done.assistants, emailed: done.emailed };
                 })

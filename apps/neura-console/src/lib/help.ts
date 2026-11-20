@@ -52,7 +52,11 @@ export const STEPS: HelpStep[] = [
 ];
 
 /** `sell`: a problem only a shop with NEURA-SELL can have — not listed for one without it. */
-export const TROUBLE: { seen: string; fix: string; sell?: true }[] = [
+/**
+ * `sell`: only for a shop with NEURA-SELL. `fixWithoutSell`: the same row's
+ * words for a shop without it, which has no Suggestions or Product views (G138).
+ */
+export const TROUBLE: { seen: string; fix: string; fixWithoutSell?: string; sell?: true }[] = [
   {
     seen: "The check says your shop refused the token",
     fix: "The token in the bridge's settings is not the one you made. Your developer puts it in again. Lost it? Make a new one on Shop connection.",
@@ -72,6 +76,8 @@ export const TROUBLE: { seen: string; fix: string; sell?: true }[] = [
   {
     seen: "A new product is missing from your dashboard's lists",
     fix: "Suggestions, Product views and Review use NEURA's copy of your catalogue, which doesn't update by itself. Press Sync now on Shop connection. Your assistant asks your shop live, so it can already find the product.",
+    fixWithoutSell:
+      "Review uses NEURA's copy of your catalogue, which doesn't update by itself. Press Sync now on Shop connection. Your assistant asks your shop live, so it can already find the product.",
   },
   {
     seen: "Your assistant doesn't know a new product",

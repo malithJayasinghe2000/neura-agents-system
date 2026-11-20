@@ -4,9 +4,11 @@ Five routes under ``/v1/admin``, each behind ``AdminOnly`` (a live admin,
 signed in within 12 hours; anyone else gets *No such page*):
 
 * ``GET /shops``: every shop's facts, waiting shops first, with its last 7 days;
-* ``GET /shops/{tenant_id}``: one shop's facts;
+* ``GET /shops/{tenant_id}``: one shop's facts, and every assistant it may be given;
 * ``POST /shops/{tenant_id}/approve``: a waiting shop becomes an ordinary one,
   with the assistants chosen (R14); its Owners get the approval email;
+* ``PUT /shops/{tenant_id}/assistants``: an approved shop's assistants, changed
+  (ADR-0080); its Owners get an email naming the new list;
 * ``POST /shops/{tenant_id}/refuse``: a waiting shop is removed; its Owners get
   the refusal email and keep their accounts;
 * ``GET /usage``: AI use across every shop, per shop and per assistant;
@@ -39,12 +41,12 @@ from neura_agent_core.audit import AuditEntry, AuditEvent, PostgresAuditLog
 from neura_api.dependencies import AdminActor, AdminOnly, DatabaseDep
 from neura_api.envelopes import envelope
 from neura_api.jobs.daily import book_daily_jobs
-from neura_api.routes.console_sign_up import approved_email, refused_email
+from neura_api.routes.console_sign_up import approved_email, assistants_email, refused_email
 from neura_core import ConflictError, NotFoundError, ValidationError, get_logger, get_settings
 from neura_core.email import Mailer
 from neura_core.identity.admins import ShopFacts, UsageFacts, admin_shops, admin_usage
 from neura_core.identity.sign_up import approve_shop, waiting_shop
-from neura_core.tenancy import TenantConfig, TenantRepository, TurnMode
+from neura_core.tenancy import TenantConfig, TenantRepository, TenantStatus, TurnMode
 from neura_core.tenancy.removal import remove_tenant
 from neura_core.tenancy.switches import Switch, SwitchRepository
 from neura_core.tenancy.usage import today
@@ -107,7 +109,18 @@ async def shop(
         for key in sorted(declared)
         if declared[key][0] in found.assistants
     ]
-    return envelope({"shop": {**_shop(found, week.get(tenant_id)), "switches": switches}})
+    # Every assistant this API discovered, as keys (G136): the Approve screen
+    # offers these, so an agent added later cannot be missing from it.
+    offered = sorted(getattr(request.app.state, "agents", {}) or {})
+    return envelope(
+        {
+            "shop": {
+                **_shop(found, week.get(tenant_id)),
+                "switches": switches,
+                "assistants_offered": offered,
+            }
+        }
+    )
 
 
 @router.put("/shops/{tenant_id}/switches/{key}", summary="Switch one feature of a shop on or off")
@@ -154,19 +167,64 @@ async def set_switch(
     )
 
 
+@router.put("/shops/{tenant_id}/assistants", summary="Change an approved shop's assistants")
+async def set_assistants(
+    tenant_id: str, body: Approve, actor: AdminDep, request: Request, db: DatabaseDep
+) -> dict[str, object]:
+    """ADR-0080: add or remove assistants of a shop that is not waiting.
+
+    An added one starts at once (its daily job is booked, as at approval); a
+    removed one stops and **keeps its data**. The same list changes nothing,
+    records nothing and sends nothing. The Owners are emailed the new list, by
+    each agent's own manifest name, so this module still names no agent.
+    """
+    chosen = _known_assistants(body.agents, request)
+    async with db.tenant_session(tenant_id) as session:
+        repo = TenantRepository(session)
+        tenant = await repo.get(tenant_id)
+        if tenant is None:
+            raise NotFoundError("No such shop.", details={"tenant_id": tenant_id})
+        if tenant.status is TenantStatus.WAITING:
+            raise ConflictError(
+                "This shop is waiting for approval: choose its assistants when you approve it.",
+                code="WAITING",
+            )
+        before = sorted(tenant.enabled_agents)
+        if before == chosen:
+            return envelope({"changed": False, "assistants": chosen, "emailed": False})
+        await repo.set_enabled_agents(tenant_id, chosen)
+        await book_daily_jobs(session, tenant_id)
+        await PostgresAuditLog(session).record(
+            AuditEntry(
+                tenant_id=tenant_id,
+                event_type=AuditEvent.CONFIG_CHANGE,
+                actor=actor.user_id,
+                outcome="shop.assistants_changed",
+                payload={"before": before, "after": chosen},
+            )
+        )
+    async with db.identity_session(actor.user_id) as session:
+        found = next((s for s in await admin_shops(session) if s.tenant_id == tenant_id), None)
+    owners = found.owners if found is not None else ()
+    subject, text = assistants_email(
+        shop=tenant.name, names=[_agent_name(key, request) for key in chosen]
+    )
+    emailed = _mail(owners, subject, text, event="shop_assistants_mail_not_delivered")
+    log.info(
+        "admin_shop_assistants_changed",
+        tenant_id=tenant_id,
+        before=before,
+        after=chosen,
+        by=actor.user_id,
+    )
+    return envelope({"changed": True, "assistants": chosen, "emailed": emailed})
+
+
 @router.post("/shops/{tenant_id}/approve", summary="Approve a waiting shop")
 async def approve(
     tenant_id: str, body: Approve, actor: AdminDep, request: Request, db: DatabaseDep
 ) -> dict[str, object]:
-    chosen = sorted(set(body.agents))
-    if not chosen:
-        raise ValidationError("Choose at least one assistant.", code="NO_ASSISTANT")
-    known = set(getattr(request.app.state, "agents", {}) or {})
-    unknown = sorted(set(chosen) - known)
-    if unknown:
-        raise ValidationError(
-            "No such assistant.", code="UNKNOWN_ASSISTANT", details={"unknown": unknown}
-        )
+    chosen = _known_assistants(body.agents, request)
 
     async with db.tenant_session(tenant_id) as session:
         await _exists(session, tenant_id)
@@ -360,6 +418,26 @@ def _switch(
         "changed_at": record.changed_at.isoformat() if record else None,
         "changed_by_you": bool(record and record.changed_by == actor.user_id),
     }
+
+
+def _known_assistants(agents: list[str], request: Request) -> list[str]:
+    """At least one, each one an agent this API discovered (R14, ADR-0080 §4)."""
+    chosen = sorted(set(agents))
+    if not chosen:
+        raise ValidationError("Choose at least one assistant.", code="NO_ASSISTANT")
+    known = set(getattr(request.app.state, "agents", {}) or {})
+    unknown = sorted(set(chosen) - known)
+    if unknown:
+        raise ValidationError(
+            "No such assistant.", code="UNKNOWN_ASSISTANT", details={"unknown": unknown}
+        )
+    return chosen
+
+
+def _agent_name(key: str, request: Request) -> str:
+    """An agent's name from its own manifest; its key when it has none."""
+    discovered = (getattr(request.app.state, "agents", {}) or {}).get(key)
+    return str(getattr(getattr(discovered, "manifest", None), "name", "") or key)
 
 
 async def _exists(session: Any, tenant_id: str) -> None:
