@@ -13,11 +13,11 @@
  */
 export const CONTACT_EMAIL: string | null = "malith2jayasinghe@gmail.com";
 
-/** The dashboard's public address, behind "Sign in". Not decided. */
-export const DASHBOARD_URL: string | null = null;
+/** The dashboard's public address, behind "Sign in" (R131, live 2026-11-20). */
+export const DASHBOARD_URL: string | null = "https://app.fiveneurals.com";
 
-/** The API's public address, in the chat box line and the product-views example. Not decided. */
-export const NEURA_ADDRESS: string | null = null;
+/** The API's public host, in the chat box line and the product-views example (R131, live 2026-11-20). */
+export const NEURA_ADDRESS: string | null = "api.fiveneurals.com";
 
 export const CONTACT_LABEL = CONTACT_EMAIL ?? "[CONTACT ADDRESS]";
 export const NEURA_HOST = NEURA_ADDRESS ?? "[NEURA ADDRESS]";
